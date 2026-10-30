@@ -8,6 +8,7 @@ import {
   checksRun,
   cloneState,
   createCheckRecorder,
+  lockedCheck,
 } from "../src/guard/check-runs.ts";
 
 const LINT = "pnpm -s lint";
@@ -51,6 +52,33 @@ describe("checksRun", () => {
 
   it("matches nothing when the repo configures no checks", () => {
     expect(checksRun(LINT, [])).toEqual([]);
+  });
+});
+
+describe("lockedCheck", () => {
+  it("names a configured check the command runs, alone or in a chain", () => {
+    expect(lockedCheck(TYPES, CHECKS)).toBe(TYPES);
+    expect(lockedCheck(`  ${LINT}  `, CHECKS)).toBe(LINT);
+    expect(lockedCheck(`cd x && ${TYPES}`, CHECKS)).toBe(TYPES);
+    expect(lockedCheck(`${LINT} | tail`, CHECKS)).toBe(LINT);
+    expect(lockedCheck(`${LINT}; true`, CHECKS)).toBe(LINT);
+  });
+
+  it.each([
+    ["an output redirection", `${TYPES} > /tmp/typecheck.log`],
+    ["a 2>&1 redirection", `${TYPES} 2>&1`],
+    ["the command builtin", `command ${TYPES}`],
+    ["env", `env FOO=1 ${TYPES}`],
+    ["extra spaces", "pnpm  -s   typecheck"],
+  ])("names the check behind %s", (_n, command) => {
+    expect(lockedCheck(command, CHECKS)).toBe(TYPES);
+  });
+
+  it("names nothing for a command that only mentions or extends a check", () => {
+    expect(lockedCheck("echo pnpm -s lint", CHECKS)).toBeNull();
+    expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
+    expect(lockedCheck("ls", CHECKS)).toBeNull();
+    expect(lockedCheck(LINT, [])).toBeNull();
   });
 });
 
@@ -179,6 +207,29 @@ describe("the check recorder", () => {
       log: (l) => void lines.push(l),
     });
     await r.begin(KEY, LINT);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("names the check a call must take the test lock for, and records nothing for a call that waited", async () => {
+    const r = recorder();
+    expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
+    expect(await r.lockedBy("r1", "ls")).toBeNull();
+    // refused while another seat held the lock: it began but never ended, so no failed row
+    await r.begin(KEY, TYPES);
+    expect(rows).toEqual([]);
+  });
+
+  it("takes no lock when the repo's rules cannot be read", async () => {
+    const lines: string[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: () => {} },
+      checks: async () => {
+        throw new Error("no rules");
+      },
+      state: async () => state,
+      log: (l) => void lines.push(l),
+    });
+    expect(await r.lockedBy("r1", TYPES)).toBeNull();
     expect(lines).toHaveLength(1);
   });
 });

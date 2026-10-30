@@ -433,8 +433,9 @@ What each seat's process starts with:
   - the keychains as a service: the rule blocks only the keychain *file*. Security-framework
     queries go through `securityd`, and a probe showed that the data-protection keychain answers
     sandboxed code (#31; typed `security` is refused by name);
-  - the per-seat pnpm stores (`/tmp/claude-<uid>/mc-pnpm-store/<seat>`). They sit in the sandbox
-    temp root, which every seat can read and write, so they keep pnpm's store out of the worktree
+  - the hub-owned pnpm store (`<crew.worktrees>/.mc-pnpm-store/shared`). The hub installs from it;
+    every Claude and Codex seat can read it but its sandbox explicitly denies writes, so one seat
+    cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
   The sandbox has no network, and the secret scan at push time is the backstop for anything a seat
@@ -546,6 +547,34 @@ machine's hub also works. Do them in this order; the sections they name have the
    The branch check in 3 above sees a run the other hub started only once that run has pushed. If it
    could have started the ticket in the minute before you moved the card, ask whoever runs it.
 
+8. **The controller session.** The Claude Code session you run the crew from (the controller).
+   `REPO` below is the folder you open Claude Code in (here, `~/Dev/mission-control`); start the
+   session at the repo root.
+   - **From the repo, nothing to do:** `.claude/settings.json` allows `Edit(/CLAUDE.md)`, so the
+     controller can fix or revert its own crew-block changes without being refused as
+     self-modification (operator-approved 2026-10-29; the rule itself is in `CLAUDE.md`). The
+     leading `/` means the repo root on any machine. Claude Code applies a committed allow rule
+     only after you accept the workspace trust prompt for `REPO`.
+   - **Copy across by hand:** the rest lives on the machine.
+   - **Your auto-mode allowances**, the `autoMode` block in `~/.claude/settings.json`. Claude Code
+     reads `autoMode` only from user or managed settings, never from a repo's `.claude/` files,
+     so copy that block from the other Mac's `~/.claude/settings.json`.
+   - **`REPO/CLAUDE.local.md`** (git-ignored): this machine's live loops, the hub's launchd job
+     and port, and the preview port. Copy the other machine's and edit the names; never list the
+     other machine's loops as this one's.
+   - **The controller's memory**, `~/.claude/projects/<REPO with / as ->/memory/`: the operator's
+     standing preferences and lessons (desktop only, no phone, machine headroom first, FLIGHT
+     unrestricted, the delegated change set, the design system, and the rest). Copy the folder
+     across once, then keep the two in step by hand or by a sync folder:
+
+     ```sh
+     SRC=~/.claude/projects/-Users-<you>-Dev-mission-control/memory
+     rsync -a "$SRC/" work-mac:"$SRC/"   # or copy the folder by any means; adjust both paths if REPO differs
+     ```
+
+     `~/.claude/CLAUDE.md` (your global engineering standards) is per-machine too; copy it the
+     same way.
+
 ## Crew pushes and PRs
 
 The seat-tool path (a seat calling push and draft PR) was checked end to end on the real CLI on
@@ -574,7 +603,7 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
-- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time.
+- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time. So do the repo's `mc.checks` commands (lint, typecheck): a check waits its turn like the suite, so the push gate never puts more than one heavy check on the Mac at once. A check that waited is not recorded as failed.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 

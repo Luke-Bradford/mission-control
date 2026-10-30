@@ -1270,6 +1270,38 @@ describe("start_seat", () => {
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
 
+  it.each([
+    ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
+    [
+      "percentage disk",
+      { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
+      "disk free is 4.0%",
+    ],
+    ["swap", { swapUsedBytes: 86, swapTotalBytes: 100 }, "swap is 86.0% used"],
+    ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
+  ])("refuses a start while %s capacity is constrained", async (_name, over, reason) => {
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 20 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      swapUsedBytes: 1,
+      swapTotalBytes: 100,
+      memoryPressureFreePct: 20,
+      agents: null,
+      ...over,
+    });
+    expect(await start()).toEqual(
+      refused(
+        `the machine has insufficient headroom: ${reason}${reason.startsWith("disk free is 4") ? " (below 5%)" : reason.startsWith("swap") ? " (above 85%)" : reason.startsWith("memory") ? " (below 10%)" : " (below 15 GB)"}`,
+      ),
+    );
+    expect(startCalls).toEqual([]);
+  });
+
   it("FLIGHT explicitly starts otherwise excluded work as a draft while away", async () => {
     store.setSetting(
       AWAY_SETTING,

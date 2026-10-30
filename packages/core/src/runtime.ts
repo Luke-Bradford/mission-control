@@ -768,8 +768,10 @@ export const CREW_PNPM_ENV = {
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
-/** The folder beside a worktrees folder's worktrees holding each one's private pnpm store. */
+/** The hub-owned pnpm store folder below `crew.worktrees`. */
 export const CODEX_PNPM_STORES_DIR = ".mc-pnpm-store";
+/** The one pnpm store all crew checkouts and review scratch copies share. */
+export const SHARED_PNPM_STORE_NAME = "shared";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
@@ -830,6 +832,8 @@ export interface CrewSandboxInput {
    * `crew.deny_read`, in that order (`seatDenyRead`). Repeats are dropped.
    */
   denyRead: string[];
+  /** The hub-owned pnpm store seats may read but never write. */
+  pnpmStoreDir: string;
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
 }
@@ -949,6 +953,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
+  if (!i.pnpmStoreDir.startsWith("/"))
+    throw new Error("crew sandbox: pnpmStoreDir must be absolute");
   // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
   // same-uid seats cannot read sibling runs without blocking unrelated temp tools.
   // Core also runs in the browser bundle, so no node:path: the root is absolute, so its parent is the text before its last "/".
@@ -975,6 +981,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           : {
               allowRead: [
                 i.tempRoot,
+                i.pnpmStoreDir,
                 ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
                   tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
                 ),
@@ -992,6 +999,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           i.gitCommonDir,
           i.worktreeGitDir,
           i.dataDir,
+          i.pnpmStoreDir,
           ...tempDenies,
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not

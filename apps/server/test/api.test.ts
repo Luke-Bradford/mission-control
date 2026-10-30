@@ -2046,6 +2046,7 @@ describe("GET /api/machine", () => {
   it("answers { latest: null } before the first sample, then the scheduler's latest", async () => {
     expect((await get("/api/machine")).json()).toEqual({
       latest: null,
+      warning: null,
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
@@ -2063,7 +2064,13 @@ describe("GET /api/machine", () => {
     const a = buildApp({ config, store, bus, machine: () => latest });
     const r = await a.inject({ method: "GET", url: "/api/machine" });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ latest, maxSeats: 8, seats: 0, perSessionMax: 0 });
+    expect(r.json()).toEqual({
+      latest,
+      warning: "disk free is 0.0 GB (below 15 GB)",
+      maxSeats: 8,
+      seats: 0,
+      perSessionMax: 0,
+    });
     await a.close();
   });
 

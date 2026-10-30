@@ -253,7 +253,11 @@ export function FlightChat({
                 <span className="min0 ellip" title={i.text}>
                   {i.text}
                 </span>
-                {agent ? <AgentTag bare sm id={agent.id} index={agent.index} /> : i.agentId}
+                {agent ? (
+                  <AgentTag bare sm id={agent.id} index={agent.index} />
+                ) : (
+                  <span>{i.agentId}</span>
+                )}
                 <span className="spacer" />
                 <button
                   type="button"

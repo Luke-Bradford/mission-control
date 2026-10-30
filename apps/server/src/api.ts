@@ -223,6 +223,11 @@ import {
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -1666,7 +1671,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             await checks?.end(key, !failed);
             return answer();
           }
-          const verdict = crewGuardDecision(
+          let verdict = crewGuardDecision(
             config,
             seat.repoId,
             seatMode(who.seatId),
@@ -1677,6 +1682,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           );
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          if (
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const check = await checks?.lockedBy(who.runId, command);
+            if (check) verdict = { kind: "lock", command: check };
+          }
           if (
             verdict.kind !== "deny" &&
             body.data.tool_name === "Bash" &&
@@ -2461,8 +2475,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/machine", async (): Promise<MachineView> => {
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
+        const latest = machine();
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          latest === null
+            ? store.machineSamples(machineCapacitySince(now(), capacityConfig))
+            : [...store.machineSamples(machineCapacitySince(now(), capacityConfig)), latest],
+          now(),
+          capacityConfig,
+        );
         return {
-          latest: machine(),
+          latest,
+          warning: capacity.reason,
           maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),

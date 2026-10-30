@@ -134,6 +134,11 @@ import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import type { Move, MoveResult } from "../github-board.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
@@ -338,8 +343,9 @@ const REVIEWS_CHAIN = "\0reviews";
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
  * that is not retiring; null when there is none (the operator reviews). With a `role` (the run's
  * profile names one), the first such seat of that role is preferred. With `avail`, the first of those
- * whose account is not at its stop is preferred; when every one is at its stop, the first stands, so
- * its reviews wait rather than vanish.
+ * whose account is not at its stop and has no review starting or running is preferred. When every
+ * available reviewer is busy, the first non-stopped seat keeps the queued review; when every account
+ * is at its stop, the first stands, so its reviews wait rather than vanish.
  */
 export function reviewerOf(
   config: CcConfig,
@@ -352,11 +358,14 @@ export function reviewerOf(
   const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
-  const open =
-    avail === undefined
-      ? undefined
-      : pool.find((x) => !accountAtStop(config, avail.store, x.accountId, avail.now));
-  return open ?? pool[0] ?? null;
+  if (avail === undefined) return pool[0] ?? null;
+  const notStopped = pool.filter(
+    (x) => !accountAtStop(config, avail.store, x.accountId, avail.now),
+  );
+  const busy = new Set(
+    avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
+  );
+  return notStopped.find((x) => !busy.has(x.id)) ?? notStopped[0] ?? pool[0] ?? null;
 }
 
 /** The review seat's role the run's profile asks for, if it has a profile. */
@@ -2180,7 +2189,16 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(author.id);
       }
     }
-    // 4. each free scratch seat starts its oldest wanted review
+    // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
+    const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+    if (
+      machineCapacity(
+        store.machineSamples(machineCapacitySince(now(), capacityConfig)),
+        now(),
+        capacityConfig,
+      ).blocked
+    )
+      return;
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");

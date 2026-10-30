@@ -1,10 +1,19 @@
 import type { LoopTry, RunLoopView, RunView } from "@mc/core";
+import { Expandable } from "../components/Expandable.tsx";
 import { LOOP_PATH, LOOP_PHASE_LABEL } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink } from "../router.ts";
-import { runLimits, stepTokens, tokenText, tryClass, tryMinutes, tryText } from "./loopView.ts";
+import {
+  type ReasonLine,
+  reasonLine,
+  runLimits,
+  stepTokens,
+  tokenText,
+  tryClass,
+  tryMinutes,
+} from "./loopView.ts";
 
 type LoopStep = (typeof LOOP_PATH)[number];
 const stepLabel = (step: LoopStep): string => (step === "ci" ? "Checks" : LOOP_PHASE_LABEL[step]);
@@ -34,6 +43,33 @@ const edgeCounts = (tries: readonly LoopTry[]): readonly [string, number][] => {
   return [...counts];
 };
 
+/** A visit's outcome and its reason as one line; the whole text opens on a click. */
+function VisitNote({ visit }: { visit: LoopTry }) {
+  if (!visit.reason) return <div className="run-checklist-note">{visit.outcome}</div>;
+  const { line, full } = reasonLine(visit.reason);
+  const text = `${visit.outcome}: ${line}`;
+  if (full === null) return <div className="run-checklist-note">{text}</div>;
+  return (
+    <div className="run-checklist-note">
+      <Expandable summary={text}>
+        <span className="run-checklist-full">{full}</span>
+      </Expandable>
+    </div>
+  );
+}
+
+/**
+ * A run event as one line. Each recorded reason inside it is cut to its line (its visit holds the
+ * whole); any other long text keeps its whole in `full`, for a disclosure.
+ */
+const eventLine = (text: string, tries: readonly LoopTry[]): ReasonLine => {
+  let shown = text;
+  for (const { reason } of tries) {
+    if (reason) shown = shown.split(reason).join(reasonLine(reason).line);
+  }
+  return reasonLine(shown);
+};
+
 /** A compact history: every recorded try is a visit, so a return is never hidden in an aggregate. */
 export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) {
   const tries = Array.isArray(view.tries) ? view.tries : [];
@@ -48,10 +84,10 @@ export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) 
       {visits(tries).map((visit) => (
         <li key={`${visit.step}:${visit.fix ? "fix" : "try"}:${visit.n}:${visit.startedAt}`}>
           <span className={tryClass(visit)}>{visit.outcome === "pass" ? "✓" : "●"}</span>
-          <span>
+          <div>
             <b>{stepLabel(visit.step)}</b>
-            <span className="run-checklist-note">{tryText(visit)}</span>
-          </span>
+            <VisitNote visit={visit} />
+          </div>
           <span className="num muted">
             {tokenText(visit.tokens)} · {tryMinutes(visit, now)}m
             {visit.next && (
@@ -107,7 +143,7 @@ function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
       <h2>Next</h2>
       <p>
         {held
-          ? `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${current.reason}` : ""}.`
+          ? `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${reasonLine(current.reason).line}` : ""}.`
           : conditional
             ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? (limits ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : " (CI cap unavailable)") : ""}.`
             : next
@@ -153,7 +189,7 @@ export function RunTrace({
         </div>
       </div>
       <div className="trace-grid">
-        <main>
+        <div className="trace-main">
           <section className="trace-section">
             <h2>Loop edges</h2>
             {edgeCounts(view.tries).length ? (
@@ -174,12 +210,23 @@ export function RunTrace({
           {view.events.length > 0 && (
             <section className="trace-section">
               <h2>Run events</h2>
-              {view.events.map((event) => (
-                <p key={event.key}>{event.text}</p>
-              ))}
+              {view.events.map((event) => {
+                const { line, full } = eventLine(event.text, view.tries);
+                return (
+                  <div className="trace-event" key={event.key}>
+                    {full === null ? (
+                      line
+                    ) : (
+                      <Expandable summary={line}>
+                        <span className="run-checklist-full">{full}</span>
+                      </Expandable>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
-        </main>
+        </div>
         <aside>
           <section className="trace-section">
             <h2>Where the tokens go</h2>
@@ -215,6 +262,7 @@ export function RunTracePanel({ agentId, runId }: { agentId: string; runId: stri
   const to = agentPath(agentId);
   return (
     <Panel
+      className="trace-panel"
       title="Run Trace"
       actions={
         <a href={to} onClick={(e) => followLink(e, to)}>
@@ -222,14 +270,16 @@ export function RunTracePanel({ agentId, runId }: { agentId: string; runId: stri
         </a>
       }
     >
-      <RunTrace
-        runId={runId}
-        view={loop.data}
-        startedAt={startedAt}
-        endedAt={endedAt}
-        now={Date.now()}
-        run={run}
-      />
+      <div className="pb scroll">
+        <RunTrace
+          runId={runId}
+          view={loop.data}
+          startedAt={startedAt}
+          endedAt={endedAt}
+          now={Date.now()}
+          run={run}
+        />
+      </div>
     </Panel>
   );
 }

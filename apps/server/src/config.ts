@@ -56,6 +56,7 @@ import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { seatFocus } from "./focus.ts";
 import { areaGlob, protectedGlob } from "./globs.ts";
+import { MACHINE_CAPACITY_DEFAULTS, type MachineCapacityConfig } from "./machine-capacity.ts";
 import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 
@@ -139,6 +140,8 @@ export interface CrewSessionConfig {
 export interface CrewConfig {
   worktrees: string;
   maxSeats: number;
+  /** Machine headroom required before the hub starts new crew work. */
+  machineCapacity?: MachineCapacityConfig;
   /** The node the guard hook runs under: a stable path to an executable file. Loaded: always set. */
   node?: string;
   /**
@@ -532,6 +535,45 @@ const fileSchema = z
       .strictObject({
         worktrees: nonEmpty,
         max_seats: z.number().int().min(1).max(32).default(DEFAULT_MAX_SEATS),
+        machine_capacity: z
+          .strictObject({
+            disk_free_gb: z.number().positive().default(MACHINE_CAPACITY_DEFAULTS.diskFreeGb),
+            disk_free_pct: z
+              .number()
+              .positive()
+              .max(100)
+              .default(MACHINE_CAPACITY_DEFAULTS.diskFreePct),
+            swap_used_pct: z
+              .number()
+              .positive()
+              .max(100)
+              .default(MACHINE_CAPACITY_DEFAULTS.swapUsedPct),
+            memory_free_pct: z
+              .number()
+              .positive()
+              .max(100)
+              .default(MACHINE_CAPACITY_DEFAULTS.memoryFreePct),
+            load_per_core: z.number().positive().default(MACHINE_CAPACITY_DEFAULTS.loadPerCore),
+            load_window_min: z
+              .number()
+              .int()
+              .positive()
+              .default(MACHINE_CAPACITY_DEFAULTS.loadWindowMin),
+            clear_after_min: z
+              .number()
+              .int()
+              .positive()
+              .default(MACHINE_CAPACITY_DEFAULTS.clearAfterMin),
+          })
+          .default({
+            disk_free_gb: MACHINE_CAPACITY_DEFAULTS.diskFreeGb,
+            disk_free_pct: MACHINE_CAPACITY_DEFAULTS.diskFreePct,
+            swap_used_pct: MACHINE_CAPACITY_DEFAULTS.swapUsedPct,
+            memory_free_pct: MACHINE_CAPACITY_DEFAULTS.memoryFreePct,
+            load_per_core: MACHINE_CAPACITY_DEFAULTS.loadPerCore,
+            load_window_min: MACHINE_CAPACITY_DEFAULTS.loadWindowMin,
+            clear_after_min: MACHINE_CAPACITY_DEFAULTS.clearAfterMin,
+          }),
         node: nonEmpty.default(DEFAULT_CREW_NODE),
         deny_read: z.array(nonEmpty).default([]),
         run_token_budget: z.number().int().positive().default(DEFAULT_RUN_TOKEN_BUDGET),
@@ -637,6 +679,15 @@ const fileSchema = z
             crew: {
               worktrees: expandHome(f.crew.worktrees),
               maxSeats: f.crew.max_seats,
+              machineCapacity: {
+                diskFreeGb: f.crew.machine_capacity.disk_free_gb,
+                diskFreePct: f.crew.machine_capacity.disk_free_pct,
+                swapUsedPct: f.crew.machine_capacity.swap_used_pct,
+                memoryFreePct: f.crew.machine_capacity.memory_free_pct,
+                loadPerCore: f.crew.machine_capacity.load_per_core,
+                loadWindowMin: f.crew.machine_capacity.load_window_min,
+                clearAfterMin: f.crew.machine_capacity.clear_after_min,
+              },
               node: expandHome(f.crew.node),
               denyRead: f.crew.deny_read.map(expandHome),
               runTokenBudget: f.crew.run_token_budget,

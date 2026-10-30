@@ -125,8 +125,8 @@ const machineSample = (over: Partial<MachineSample> = {}): MachineSample => ({
   cores: 8,
   memUsedBytes: 1,
   memTotalBytes: 2,
-  diskFreeBytes: 3,
-  diskTotalBytes: 4,
+  diskFreeBytes: 20 * 1024 ** 3,
+  diskTotalBytes: 100 * 1024 ** 3,
   agents: null,
   ...over,
 });
@@ -1007,6 +1007,123 @@ describe("scheduler", () => {
       await s.tick("machine"); // +61 s: next minute
       expect(add).toHaveBeenCalledTimes(2);
       expect(store.machineSamples(0).map((m) => m.at)).toEqual([minute + 1000, minute + 61_000]);
+    });
+
+    it("raises one machine-capacity item and closes it after five minutes of headroom", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let tight = true;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: tight ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              swapUsedBytes: (tight ? 18 : 1) * 1024 ** 3,
+              swapTotalBytes: 20 * 1024 ** 3,
+              memoryPressureFreePct: tight ? 8 : 20,
+              load1: tight ? 15 : 1,
+              topConsumers: [{ pid: 42, command: "Docker", rssBytes: 4 * 1024 ** 3, cpuPct: 90 }],
+              agents: { count: 2, rssBytes: 3 * 1024 ** 3, cpuPct: 10 },
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
+        "Disk: 14.0 GB free (14.0%). Swap: 18.0 GB / 20.0 GB used (90.0%). Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
+      );
+      tight = false;
+      t += 5 * 60_000 + 1;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+    });
+
+    it.each([
+      ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
+      [
+        "percentage disk",
+        { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
+        "disk free is 4.0%",
+      ],
+      ["swap", { swapUsedBytes: 86, swapTotalBytes: 100 }, "swap is 86.0% used"],
+      ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
+    ])("raises exactly one capacity item for %s", async (_name, over, reason) => {
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: 20 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              swapUsedBytes: 1,
+              swapTotalBytes: 100,
+              memoryPressureFreePct: 20,
+              load1: 1,
+              ...over,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      const notes = store.notes().filter((n) => n.key === "machine-capacity");
+      expect(notes).toHaveLength(1);
+      expect(notes[0]?.text).toContain(reason);
+    });
+
+    it("refreshes one capacity item when the active threshold and consumers change", async () => {
+      let t = NOW;
+      let disk = true;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: disk ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              swapUsedBytes: disk ? 1 : 18,
+              swapTotalBytes: 20,
+              memoryPressureFreePct: 20,
+              load1: 1,
+              topConsumers: [
+                {
+                  pid: disk ? 1 : 2,
+                  command: disk ? "Docker" : "node",
+                  rssBytes: 4 * 1024 ** 3,
+                  cpuPct: 90,
+                },
+              ],
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      disk = false;
+      t += 60_000;
+      await s.tick("machine");
+      const notes = store.notes().filter((n) => n.key === "machine-capacity");
+      expect(notes).toHaveLength(1);
+      expect(notes[0]?.text).toContain("swap is 90.0% used");
+      expect(notes[0]?.text).toContain("node (pid 2");
     });
 
     it("writes collector status when ok/error changes and otherwise once a minute", async () => {

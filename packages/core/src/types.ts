@@ -749,6 +749,15 @@ export interface MachineSample {
   memTotalBytes: number;
   diskFreeBytes: number | null;
   diskTotalBytes: number | null;
+  /** macOS `sysctl vm.swapusage`; null when not measured. */
+  swapUsedBytes?: number | null;
+  swapTotalBytes?: number | null;
+  /** macOS `memory_pressure` system-wide free percentage; null when not measured. */
+  memoryPressureFreePct?: number | null;
+  /** One-minute load average; null when not measured. */
+  load1?: number | null;
+  /** Bounded highest-RSS process rows, sampled for a machine-capacity alert. */
+  topConsumers?: { pid: number; command: string; rssBytes: number; cpuPct: number }[];
   /** The `claude` and `codex` processes on this machine (editor sessions included). */
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
   /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */
@@ -758,6 +767,8 @@ export interface MachineSample {
 /** `/api/machine`: the latest sample, with the crew's seat capacity for the Machine panel's agents row. */
 export interface MachineView {
   latest: MachineSample | null;
+  /** Null when starts are permitted; otherwise the machine-capacity admission reason. */
+  warning: string | null;
   /** `crew.max_seats`. */
   maxSeats: number;
   /** Configured crew seats, over all sessions. */

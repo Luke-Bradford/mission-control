@@ -34,7 +34,7 @@ const pipeline: PipelineStage[] = stages.map((stage, i) => ({
 const summary = (p = pipeline) => ({ pipeline: p }) as OverviewSummary;
 
 describe("Pipeline", () => {
-  it("shows populated board lanes as compact ticket chips with assignees, overflow and Board links", async () => {
+  it("opens cards in their ticket panel while lane links keep their Board stage filter", async () => {
     const ready = pipeline[0] as PipelineStage;
     const building = pipeline[1] as PipelineStage;
     const checks = pipeline[2] as PipelineStage;
@@ -65,6 +65,9 @@ describe("Pipeline", () => {
     expect(within(readyLane).getByRole("link", { name: "+2" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
+    expect(within(readyLane).getByRole("link", { name: "Ready" }).getAttribute("href")).toBe(
+      "/board?stage=ready",
+    );
     expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--s4)",
@@ -73,7 +76,7 @@ describe("Pipeline", () => {
       within(readyLane)
         .getByRole("link", { name: /Ready ticket 1/ })
         .getAttribute("href"),
-    ).toBe("/board?stage=ready");
+    ).toBe("/board/sample-app/1");
 
     const progressLane = screen.getByRole("region", { name: "Building · checks" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
