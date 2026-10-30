@@ -33,7 +33,7 @@
 
 .palette-row {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: baseline;
   padding: 6px 10px;

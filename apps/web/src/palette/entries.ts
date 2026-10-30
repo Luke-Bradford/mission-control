@@ -1,22 +1,36 @@
 import {
   type AttentionItem,
   type BoardItem,
+  COMMS_CAPCOM,
+  type CommsAgentResponse,
   type CrewRow,
   HUD_PAGE_PATHS,
   type PullRequestView,
 } from "@mc/core";
 import { seatError } from "../agent/seat.ts";
 import { ApiError, apiPost } from "../api.ts";
-import { callSign } from "../crew.ts";
+import { ticketForRef } from "../comms/model.ts";
+import { callSign, seatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
-import { agentPath, itemPath, navigate, type Page, ticketPath } from "../router.ts";
+import {
+  agentPath,
+  commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
+  commsFlightPath,
+  commsTicketPath,
+  itemPath,
+  navigate,
+  type Page,
+  ticketPath,
+} from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** How many recent picks the palette lists first. */
 export const RECENT_LIMIT = 5;
 
 /** The order groups sort in when two entries score the same. */
-export const GROUPS = ["Page", "Action", "Seat", "Ticket", "PR", "Thread"] as const;
+export const GROUPS = ["Page", "Action", "Seat", "Ticket", "PR", "Thread", "Needs you"] as const;
 export type Group = (typeof GROUPS)[number];
 
 export interface PaletteEntry {
@@ -48,7 +62,10 @@ export interface PaletteSources {
   rows?: readonly CrewRow[];
   tickets?: readonly BoardItem[];
   prs?: readonly PullRequestView[];
+  /** Needs-you items (attention), which open the Item panel. */
   threads?: readonly AttentionItem[];
+  /** Each crew seat's stored Comms (`/api/comms/agents/:id`), for conversations and ticket threads. */
+  comms?: readonly { agentId: string; data: CommsAgentResponse }[];
   /** A seat in this repo that is free to start a ticket; null when there is none. */
   freeSeatFor?: (repoId: string) => string | null;
 }
@@ -88,6 +105,69 @@ function openPr(pr: PullRequestView): void {
   const m = pr.ticket ? /^(.+)#([1-9]\d*)$/.exec(pr.ticket) : null;
   if (m?.[1] && m[2]) navigate(ticketPath(m[1], Number(m[2])));
   else window.open(pr.url, "_blank", "noopener,noreferrer");
+}
+
+const TICKET_REF = /^(?:PR \d+|#\d+)$/;
+
+/** The Comms conversations: FLIGHT's, the crew channel, each seat's, its contacts' and ticket threads. */
+function commsEntries(src: PaletteSources): PaletteEntry[] {
+  const out: PaletteEntry[] = [
+    {
+      id: "comms:flight",
+      group: "Thread",
+      title: "Comms · FLIGHT",
+      hint: "with CAPCOM",
+      run: () => navigate(commsFlightPath()),
+    },
+    {
+      id: "comms:crew",
+      group: "Thread",
+      title: "Comms · Crew channel",
+      run: () => navigate(commsCrewPath()),
+    },
+  ];
+  const seenPairs = new Set<string>();
+  const seenTickets = new Set<string>();
+  const name = (id: string) => (id === COMMS_CAPCOM ? "CAPCOM" : seatName(id, src.rows));
+  for (const { agentId, data } of src.comms ?? []) {
+    out.push({
+      id: `comms:agent:${agentId}`,
+      group: "Thread",
+      title: `Comms · ${name(agentId)}`,
+      hint: "all messages",
+      haystack: `comms ${name(agentId)} ${agentId}`,
+      run: () => navigate(commsAgentPath(agentId)),
+    });
+    for (const c of data.contacts) {
+      const pair = [agentId, c.id].sort().join("|");
+      if (seenPairs.has(pair)) continue;
+      seenPairs.add(pair);
+      out.push({
+        id: `comms:contact:${agentId}:${c.id}`,
+        group: "Thread",
+        title: `${name(agentId)} ↔ ${name(c.id)}`,
+        hint: c.lastMessage?.text,
+        haystack: `${name(agentId)} ${agentId} ${name(c.id)} ${c.id} ${c.lastMessage?.text ?? ""}`,
+        run: () => navigate(commsContactPath(agentId, c.id)),
+      });
+    }
+    for (const m of data.messages) {
+      if (!m.ref || !TICKET_REF.test(m.ref)) continue;
+      const ticket = ticketForRef(m.ref, m.ticket);
+      const key = `${m.ref}|${ticket ?? ""}`;
+      if (seenTickets.has(key)) continue;
+      seenTickets.add(key);
+      out.push({
+        id: `comms:ticket:${key}`,
+        group: "Thread",
+        title: `Comms · ${ticket ?? m.ref}`,
+        hint: m.text,
+        haystack: `comms ${m.ref} ${ticket ?? ""} ${m.text}`,
+        run: () => navigate(commsTicketPath(m.ref as string, ticket)),
+      });
+    }
+  }
+  return out;
 }
 
 /** Every thing the palette can reach or do right now, from what the HUD has already loaded. */
@@ -153,10 +233,11 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
       run: () => openPr(pr),
     });
   }
+  out.push(...commsEntries(src));
   for (const th of src.threads ?? []) {
     out.push({
-      id: `thread:${th.key}`,
-      group: "Thread",
+      id: `need:${th.key}`,
+      group: "Needs you",
       title: th.text,
       hint: th.key,
       haystack: `${th.key} ${th.text}`,

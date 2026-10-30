@@ -1,14 +1,15 @@
 import type {
   AttentionItem,
   BoardItem,
+  CommsAgentResponse,
   ConfigView,
   Crew,
   PullRequestView,
   RepoView,
 } from "@mc/core";
 import { useEffect, useId, useRef, useState } from "react";
-import { freeSeats } from "../crew.ts";
-import { RESOURCES, useResource, useResources } from "../data.ts";
+import { callSign, freeSeats } from "../crew.ts";
+import { RESOURCES, type Resource, useResource, useResources } from "../data.ts";
 import { buildEntries, filterEntries, type PaletteEntry } from "../palette/entries.ts";
 import { readRecent, rememberPick } from "../palette/recent.ts";
 import { closePalette, trapTab, useOverlay, usePaletteOpen, useReturnFocus } from "./overlays.ts";
@@ -27,21 +28,67 @@ export function CommandPalette() {
   return open ? <Palette /> : null;
 }
 
+/** What one source (crew, a repo's board…) is doing; the palette names the ones not yet in. */
+interface Source {
+  label: string;
+  res: Resource<unknown>;
+}
+
 function Palette() {
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const config = useResource<ConfigView>(RESOURCES.config).data;
-  const threads = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const reposRes = useResource<RepoView[]>(RESOURCES.repos);
+  const repos = reposRes.data ?? NO_REPOS;
+  const crewRes = useResource<Crew>(RESOURCES.crew);
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const threadsRes = useResource<AttentionItem[]>(RESOURCES.attention);
+  const crew = crewRes.data;
+  const config = configRes.data;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
-  const prs = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
+  const prs = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.allPrs(r.id)));
+  // Stored Comms has no page for an observed loop or FLIGHT's own seat (the server rejects them).
+  const watch = new Set(
+    config?.crew?.sessions.flatMap((s) =>
+      s.seats.filter((x) => x.loop === "watch").map((x) => x.id),
+    ),
+  );
+  const commsSeats = config
+    ? (crew?.rows ?? []).filter((r) => r.kind === "crew" && !watch.has(r.id))
+    : [];
+  const commsRes = useResources<CommsAgentResponse>(
+    commsSeats.map((r) => RESOURCES.commsAgent(r.id)),
+  );
   const tickets = boards.flatMap((b) => b.data ?? []);
   const openPrs = prs.flatMap((p) => p.data ?? []);
+
+  const sources: Source[] = [
+    { label: "repos", res: reposRes },
+    { label: "crew", res: crewRes },
+    { label: "config", res: configRes },
+    { label: "Needs you", res: threadsRes },
+    ...repos.flatMap((r, i): Source[] => [
+      { label: `tickets of ${r.id}`, res: boards[i] as Resource<unknown> },
+      { label: `PRs of ${r.id}`, res: prs[i] as Resource<unknown> },
+    ]),
+    ...commsSeats.map(
+      (r, i): Source => ({
+        label: `Comms of ${callSign(r)}`,
+        res: commsRes[i] as Resource<unknown>,
+      }),
+    ),
+  ];
+  const loading = sources
+    .filter((x) => x.res.loading && x.res.data === undefined)
+    .map((x) => x.label);
+  const failed = sources.filter((x) => x.res.error !== null).map((x) => x.label);
 
   const entries = buildEntries({
     rows: crew?.rows,
     tickets,
     prs: openPrs,
-    threads,
+    threads: threadsRes.data,
+    comms: commsSeats.flatMap((r, i) => {
+      const data = commsRes[i]?.data;
+      return data ? [{ agentId: r.id, data }] : [];
+    }),
     freeSeatFor:
       config && crew ? (repoId) => freeSeats(config, crew, repoId)[0]?.id ?? null : undefined,
   });
@@ -133,7 +180,19 @@ function Palette() {
             </div>
           ))}
         </div>
-        {shown.length === 0 && <p className="palette-empty muted">Nothing matches “{query}”.</p>}
+        {loading.length > 0 && (
+          <p className="palette-empty muted" role="status">
+            {`Still loading: ${loading.join(", ")}.`}
+          </p>
+        )}
+        {failed.length > 0 && (
+          <p className="palette-empty crit-t" role="alert">
+            {`Could not load: ${failed.join(", ")}. Results from there may be missing.`}
+          </p>
+        )}
+        {shown.length === 0 && loading.length === 0 && failed.length === 0 && (
+          <p className="palette-empty muted">Nothing matches “{query}”.</p>
+        )}
         <p className="palette-keys keys">
           <kbd>↑</kbd>
           <kbd>↓</kbd> move · <kbd>Enter</kbd> go · <kbd>Esc</kbd> close

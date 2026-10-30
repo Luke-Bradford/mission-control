@@ -55,6 +55,31 @@ const sources = {
       state: "merged",
     },
   ],
+  comms: [
+    {
+      agentId: "shop-app-dev",
+      data: {
+        messages: [
+          {
+            id: "m1",
+            at: 1,
+            from: "shop-app-dev",
+            to: "shop-app-rev",
+            text: "Pushed the quote cache fix",
+            ticket: "shop-app#3349",
+            label: null,
+            ref: "#3349",
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+        ],
+        inbox: [],
+        contacts: [{ id: "shop-app-rev", lastMessage: null, count: 1, unread: 0 }],
+      },
+    },
+  ],
   threads: [item({ key: "esc:shop-app#4001", text: "Choose a cache eviction policy" })],
   freeSeatFor: (repoId: string) => (repoId === "shop-app" ? "shop-app-dev" : null),
 } as const;
@@ -69,8 +94,33 @@ describe("buildEntries", () => {
     expect(find("ticket:shop-app#12")).toBeUndefined();
     expect(find("pr:shop-app#77")).toBeTruthy();
     expect(find("pr:shop-app#70")).toBeUndefined();
-    expect(find("thread:esc:shop-app#4001")).toBeTruthy();
+    expect(find("need:esc:shop-app#4001")).toBeTruthy();
     expect(find("seat:api-ta")).toBeTruthy();
+  });
+
+  it("lists Comms conversations that have no attention item: the channels, a seat, a contact pair, a ticket thread", () => {
+    expect(find("comms:flight")).toBeTruthy();
+    expect(find("comms:crew")).toBeTruthy();
+    expect(find("comms:agent:shop-app-dev")).toBeTruthy();
+    expect(find("comms:contact:shop-app-dev:shop-app-rev")?.title).toContain("↔");
+    expect(find("comms:ticket:#3349|shop-app#3349")).toBeTruthy();
+  });
+
+  it("an unlinked open PR is found by its number and its title", () => {
+    const unlinked = buildEntries({
+      prs: [
+        {
+          repoId: "shop-app",
+          number: 88,
+          title: "Tidy the footer",
+          url: "https://github.com/octo-org/shop-app/pull/88",
+          ticket: null,
+          state: "open",
+        },
+      ],
+    } as never);
+    expect(filterEntries(unlinked, "88", [])[0]?.id).toBe("pr:shop-app#88");
+    expect(filterEntries(unlinked, "footer", [])[0]?.id).toBe("pr:shop-app#88");
   });
 
   it("offers pause for a running loop, resume for a paused one, and nothing for a studio loop", () => {

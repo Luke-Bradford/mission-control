@@ -18,11 +18,37 @@ afterEach(() => {
 const api = () =>
   stubFetch({
     "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
-    "/api/crew": { rows: [crewRow()], firstRunToday: null },
-    "/api/config": { crew: null },
+    "/api/crew": {
+      rows: [
+        crewRow(),
+        crewRow({ id: "shop-app-dev", kind: "crew", loopKind: "crew", role: "dev" }),
+      ],
+      firstRunToday: null,
+    },
+    "/api/config": {
+      crew: {
+        sessions: [{ id: "s1", repoId: "shop-app", seats: [{ id: "shop-app-dev", role: "dev" }] }],
+      },
+    },
+    "/api/comms/agents/shop-app-dev": {
+      messages: [],
+      inbox: [],
+      contacts: [
+        { id: "CAPCOM", lastMessage: { text: "Ship the quote cache" }, count: 1, unread: 0 },
+      ],
+    },
     "/api/attention": [item()],
     "/api/boards/shop-app": [boardItem()],
-    "/api/repos/shop-app/prs?linked=1": [],
+    "/api/repos/shop-app/prs": [
+      {
+        repoId: "shop-app",
+        number: 88,
+        title: "Tidy the footer",
+        url: "https://github.com/octo-org/shop-app/pull/88",
+        ticket: null,
+        state: "open",
+      },
+    ],
     "POST /api/agents/shop-app-ta/pause": { ok: true },
   });
 
@@ -114,11 +140,71 @@ describe("CommandPalette", () => {
     );
   });
 
-  it("says when nothing matches", () => {
+  it("finds an unlinked open PR by number, and a Comms conversation with no attention item", async () => {
+    api();
+    render(<CommandPalette />);
+    act(() => openPalette());
+    fireEvent.change(box(), { target: { value: "88" } });
+    await waitFor(() =>
+      expect(screen.getAllByRole("option")[0]?.textContent).toContain("Tidy the footer"),
+    );
+    fireEvent.change(box(), { target: { value: "quote cache" } });
+    await waitFor(() =>
+      expect(screen.getAllByRole("option").some((o) => o.textContent?.includes("↔"))).toBe(true),
+    );
+    key("Enter");
+    expect(window.location.pathname).toMatch(
+      /^\/comms\/agents\/shop-app-dev\/contacts\/CAPCOM$|^\/board\//,
+    );
+  });
+
+  it("names what is still loading, and does not say nothing matches", async () => {
+    const fetch_ = stubFetch({
+      "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
+      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/config": { crew: null },
+      "/api/attention": [],
+      "/api/repos/shop-app/prs": [],
+    });
+    // the board request never answers
+    const answered = fetch_.getMockImplementation();
+    fetch_.mockImplementation((input: string, init?: RequestInit) =>
+      input === "/api/boards/shop-app" ? new Promise(() => {}) : (answered?.(input, init) as never),
+    );
+    render(<CommandPalette />);
+    act(() => openPalette());
+    fireEvent.change(box(), { target: { value: "zzzqq" } });
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(
+        /^Still loading: tickets of shop-app\.$/,
+      ),
+    );
+    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+  });
+
+  it("names a source that failed, and does not say nothing matches", async () => {
+    stubFetch({
+      "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
+      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/config": { crew: null },
+      "/api/attention": [],
+      "/api/boards/shop-app": () => ({ status: 500, body: { error: "boom" } }),
+      "/api/repos/shop-app/prs": () => ({ status: 500, body: { error: "boom" } }),
+    });
+    render(<CommandPalette />);
+    act(() => openPalette());
+    fireEvent.change(box(), { target: { value: "zzzqq" } });
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("tickets of shop-app");
+    expect(alert.textContent).toContain("PRs of shop-app");
+    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+  });
+
+  it("says when nothing matches", async () => {
     api();
     render(<CommandPalette />);
     act(() => openPalette());
     fireEvent.change(box(), { target: { value: "zzzqq" } });
-    expect(screen.getByText(/Nothing matches/)).toBeTruthy();
+    expect(await screen.findByText(/Nothing matches/)).toBeTruthy();
   });
 });
