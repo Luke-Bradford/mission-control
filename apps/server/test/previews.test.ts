@@ -43,6 +43,7 @@ describe("PreviewManager", () => {
   it("refuses while machine capacity is held and tears down idle previews", async () => {
     let clock = NOW;
     let held = true;
+    let activityToken = "";
     const process: PreviewProcess & { dbPath: string } = {
       stop: vi.fn(),
       dbPath: "/tmp/preview.sqlite",
@@ -52,7 +53,10 @@ describe("PreviewManager", () => {
       now: () => clock,
       capacity: () => ({ blocked: held, reason: "memory free is 8.0%" }),
       exists: () => false,
-      start: async () => process,
+      start: async ({ token }) => {
+        activityToken = token;
+        return process;
+      },
       remove,
     });
 
@@ -64,7 +68,8 @@ describe("PreviewManager", () => {
     held = false;
     await manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
     clock += PREVIEW_IDLE_MS - 1;
-    manager.touch(41);
+    expect(manager.activity(41, "wrong")).toBe(false);
+    expect(manager.activity(41, activityToken)).toBe(true);
     clock += PREVIEW_IDLE_MS - 1;
     await manager.expire();
     expect(manager.list()).toHaveLength(1);
