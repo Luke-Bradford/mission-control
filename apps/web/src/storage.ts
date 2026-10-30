@@ -19,6 +19,9 @@ export const BOARD_LAYOUT_KEY = "mc-board-layout";
 /** The away period whose digest this viewer acknowledged. */
 export const AWAY_DIGEST_KEY = "mc-away-digest";
 
+/** The command palette's last picks, newest first (a JSON list of entry ids). */
+export const PALETTE_RECENT_KEY = "mc-palette-recent";
+
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
 /** PR heads the operator checked locally in this browser. */
