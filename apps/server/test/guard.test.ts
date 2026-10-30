@@ -531,6 +531,19 @@ describe("POST /api/guard/check", () => {
       expect(reason((await read("r3")).body)).toContain("r2");
     });
 
+    it("forgets a read that failed, so its retry is not refused", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      expect((await check(tokA, post("r1", "PostToolUseFailure"))).body).toBe("{}");
+      expect((await read("r2")).body).toBe("{}");
+      expect(reason((await read("r3")).body)).toContain("r2");
+    });
+
+    it("keeps a read that succeeded", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      expect((await check(tokA, post("r1"))).body).toBe("{}");
+      expect(reason((await read("r2")).body)).toContain("r1");
+    });
+
     it("passes a Read of another page range of the same file", async () => {
       expect((await read("p1", { file_path: big, pages: "1-5" })).body).toBe("{}");
       expect((await read("p2", { file_path: big, pages: "6-10" })).body).toBe("{}");

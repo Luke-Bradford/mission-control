@@ -1703,6 +1703,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
+            // a read that failed gave the seat nothing to scroll back to
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
             return answer();

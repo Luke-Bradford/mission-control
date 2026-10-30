@@ -1998,6 +1998,13 @@ export class Store {
       .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
   }
 
+  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
+  forgetRunRead(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
   /** Counts one refused re-read that saved about `tokens`. */
   addReread(runId: string, tokens: number): void {
     this.db
