@@ -43,11 +43,8 @@ it("sums measured retries once and shows each attempt and timeline tokens, inclu
     "try 5pass—1m",
   ]);
   expect(container.textContent).toContain(RETRY_NOTE);
-  const header = container.querySelector<HTMLButtonElement>("button.vhead") as HTMLButtonElement;
-  expect(header.tabIndex).toBe(0);
-  fireEvent.click(header);
-  expect(header.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(header);
+  // every step is open: there is no header to fold
+  expect(container.querySelector("button.vhead")).toBeNull();
   expect(container.querySelectorAll(".att")).toHaveLength(5);
   expect(stepTokens([attempt(null, 1), attempt(undefined, 2)])).toBeNull();
   expect(stepTokens([attempt(0, 1)])).toBe(0);

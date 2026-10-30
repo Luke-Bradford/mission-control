@@ -54,7 +54,9 @@ oldest first within a Priority, matching their area labels; FLIGHT may promote c
 tickets to Ready. Hard-rule files (the ones that confine or drive the crew, plus this file,
 `.github/**` and `config.example.yaml`) need FLIGHT clearance on superuser repos before the engine merges;
 standard repos keep their operator/controller merge path. CI workflows and this Mission Control block
-still need the operator. Hard-rule changes never auto-Update; the operator or controller runs Update.
+still need the operator, with one exception: the controller may narrow or revert a change to this
+block that it made itself when that change breaks the crew, and tells the operator after.
+Hard-rule changes never auto-Update; the operator or controller runs Update.
 The hub reads the block below at `origin/HEAD`, so a change here takes effect once merged and fetched.
 
 ```yaml
