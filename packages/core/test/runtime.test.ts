@@ -95,7 +95,9 @@ describe("crewCliArgs", () => {
     expect(args).not.toContain("--tools");
     expect(args).not.toContain("--allowedTools");
     expect(args).not.toContain("--disallowedTools");
-    const settings = JSON.parse(crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"));
+    const settings = JSON.parse(
+      crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"),
+    );
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.sandbox).toEqual({ enabled: false });
   });

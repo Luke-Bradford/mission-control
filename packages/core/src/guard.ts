@@ -19,7 +19,8 @@ export const GUARD_RULES = {
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
-  "repo-rules": "FLIGHT must keep this repository's protected paths and Mission Control rules; ask a controller to approve an override",
+  "repo-rules":
+    "FLIGHT must keep this repository's protected paths and Mission Control rules; ask a controller to approve an override",
   unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;
@@ -2122,10 +2123,18 @@ export function guardDecision(
       return deny("read-only", e.tool);
     }
   }
-  if (!ctx.fullAccess && ctx.mode === "scratch" && (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
+  if (
+    !ctx.fullAccess &&
+    ctx.mode === "scratch" &&
+    (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)
+  ) {
     return deny("read-only", `${e.tool} (a scratch copy is never committed)`);
   }
-  if (!ctx.fullAccess && ctx.mode === "scratch" && (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)) {
+  if (
+    !ctx.fullAccess &&
+    ctx.mode === "scratch" &&
+    (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)
+  ) {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") {
@@ -2219,7 +2228,11 @@ export function guardDecision(
       if (ctx.fullAccess && g?.sub === "commit") return deny("merge-push", "git commit on main");
       if (ctx.fullAccess && g?.sub === "push") {
         const push = g.rest.join(" ");
-        if (/(?:^|\s)(?:--force(?:-with-lease)?|-f|--mirror)(?:\s|$)|\+[^\s:]*:|(?:^|\s)main(?::|\s|$)/.test(push))
+        if (
+          /(?:^|\s)(?:--force(?:-with-lease)?|-f|--mirror)(?:\s|$)|\+[^\s:]*:|(?:^|\s)main(?::|\s|$)/.test(
+            push,
+          )
+        )
           return deny("merge-push", "git push to main or with rewritten history");
       }
       if (g?.sub === "difftool" && g.rest.includes("--no-index"))
