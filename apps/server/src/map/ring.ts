@@ -143,7 +143,10 @@ export class CallRing {
     if (first) this.wake?.();
     return () => {
       listeners.delete(fn);
-      if (!listeners.size) this.listeners.delete(repoId);
+      if (!listeners.size) {
+        this.listeners.delete(repoId);
+        this.wake?.();
+      }
     };
   }
 
