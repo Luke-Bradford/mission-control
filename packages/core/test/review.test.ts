@@ -4,8 +4,10 @@ import {
   CODEX_REVIEW_TOKEN_BUDGET,
   carriedFrom,
   currentReview,
+  FIX_TEXT_MAX,
   failedAttempts,
   findingFileOk,
+  fixCommsText,
   fixesSent,
   fixText,
   isReviewBudgetFailure,
@@ -52,7 +54,7 @@ const fin = (over: Partial<ReviewFinding>): ReviewFinding => ({
 });
 
 describe("fixText", () => {
-  it("counts severities and points to the structured findings", () => {
+  it("lists actionable findings for the author", () => {
     const t = fixText({
       retro: "RETRO",
       sha: "abcdef1234",
@@ -62,16 +64,16 @@ describe("fixText", () => {
         fin({ summary: "c" }),
       ],
     });
-    expect(t).toBe(
-      "RETRO reviewed abcdef1: 1 Critical, 2 Important.\nFindings are in RETRO's report_findings record; address them, then report_evidence.",
-    );
+    expect(t).toContain("1. [Critical] a.ts — b");
+    expect(t).toContain("2. [Important] a.ts:3 — a");
+    expect(t).toContain("3. [Important] a.ts:3 — c");
   });
 
-  it("stays short for many findings", () => {
+  it("bounds a long author fix list", () => {
     const findings = Array.from({ length: 50 }, () => fin({ fix: "x".repeat(1900) }));
     const t = fixText({ retro: "RETRO", sha: "abcdef1", findings });
-    expect(t.length).toBeLessThanOrEqual(1200);
-    expect(t).toContain("50 Important");
+    expect(t.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
+    expect(t).toContain("…and");
   });
 
   it("skips Minor; singular", () => {
@@ -80,8 +82,22 @@ describe("fixText", () => {
       sha: "abcdef1",
       findings: [fin({ severity: "Minor" }), fin({ severity: "Critical" })],
     });
-    expect(t).toContain("1 Critical");
+    expect(t).toContain("[Critical]");
     expect(t).not.toContain("Minor");
+  });
+});
+
+describe("fixCommsText", () => {
+  it("counts severities and points to the structured findings", () => {
+    expect(
+      fixCommsText({
+        retro: "RETRO",
+        sha: "abcdef1234",
+        findings: [fin({ summary: "a" }), fin({ severity: "Critical", summary: "b" })],
+      }),
+    ).toBe(
+      "RETRO reviewed abcdef1: 1 Critical, 1 Important.\nFindings are in RETRO's report_findings record; address them, then report_evidence.",
+    );
   });
 });
 

@@ -42,6 +42,8 @@ import {
   ciVerdict,
   cleanupBranchNoteKey,
   closedIssueText,
+  commsMirror,
+  conflictCommsText,
   conflictKey,
   conflictText,
   controllerCheckFailText,
@@ -59,6 +61,7 @@ import {
   FLIGHT_REWORKS_PER_HEAD,
   FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
+  fixCommsText,
   fixSentText,
   fixText,
   gateView,
@@ -1201,18 +1204,26 @@ export function createEngine(deps: EngineDeps): Engine {
         const sent = await send(run.id, a.key, a.text);
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
-          const rv = store.review(id);
-          if (rv !== null) {
+          const review = store.review(id);
+          if (review !== null) {
             store.addLoopEvent(
               reviewEventKey(run.id, id, "fix"),
               run.id,
-              fixSentText(rv.blocking, seatCallSign(run.agentId)),
+              fixSentText(review.blocking, seatCallSign(run.agentId)),
               at,
             );
-            handOff(rv.seatId, a.text);
+            handOff(
+              review.seatId,
+              fixCommsText({
+                retro: seatCallSign(review.seatId),
+                sha: review.sha,
+                findings: store.findingsOf(review.id),
+              }),
+            );
           }
         }
-        if (sent === "sent" && a.key.startsWith("conflict:")) handOff(COMMS_MC, a.text);
+        if (sent === "sent" && a.key.startsWith("conflict:"))
+          handOff(COMMS_MC, commsMirror(a.text, conflictCommsText(cur.mainMerge?.files ?? [])));
         return;
       }
       case "ci-excerpt": {
@@ -2641,7 +2652,10 @@ export function createEngine(deps: EngineDeps): Engine {
                 ticket: run.ticket ?? null,
                 ref: run.ticket ?? null,
                 targetRunId: run.id,
-                text: message,
+                text: commsMirror(
+                  message,
+                  "FLIGHT requested rework; the full request was sent to the seat.",
+                ),
               });
               if (stored === null) return refuse("rework-undelivered");
               store.markCommsInboxRead(run.agentId, [stored.id]);
@@ -2729,7 +2743,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ticket: run.ticket ?? null,
             ref: run.ticket ?? null,
             targetRunId: run.id,
-            text,
+            text: commsMirror(text, "Controller check failed; the full note was sent to the seat."),
           };
           if (loop.aside) {
             // off its seat (the seat may hold another run now): the note waits in Comms for the

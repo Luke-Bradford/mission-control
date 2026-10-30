@@ -31,6 +31,7 @@ import {
   EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
+  FIX_TEXT_MAX,
   FLIGHT_REWORKS_PER_HEAD,
   FLIGHT_REWORKS_PER_RUN,
   fixSentText,
@@ -3881,7 +3882,7 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       expect(h.resumes).toEqual([RUN]);
       expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
-      expect(h.sent[0]?.text).toContain("1 Important");
+      expect(h.sent[0]?.text).toContain("a Important thing");
       await h.engine.tick();
       expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
     },
@@ -3952,9 +3953,10 @@ describe("the engine runs reviews", () => {
     reported(first().id, findings);
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     const text = need(h.sent[0]).text;
-    expect(text.length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
-    expect(text).toContain("6 Important");
-    expect(store.comms(0)[0]?.text).toBe(text);
+    expect(text.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
+    expect(text).toContain("a Important thing");
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(store.comms(0)[0]?.text).toContain("6 Important");
     expect(loopOf().parked).toBeNull();
   });
 
@@ -4858,7 +4860,7 @@ describe("the engine runs reviews", () => {
         expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
         expect(h.steps).not.toContain("merge");
         await vi.waitFor(() =>
-          expect(h.sent.some((s) => s.text.includes("1 Important"))).toBe(true),
+          expect(h.sent.some((s) => s.text.includes("a Important thing"))).toBe(true),
         );
       });
 

@@ -28,6 +28,11 @@ export const COMMS_MESSAGE_MAX = 1_200;
 export const COMMS_MESSAGE_BODY_LIMIT = COMMS_MESSAGE_MAX * 6 + 1024;
 export const commsTooLongText =
   "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.";
+/** The hub's short Comms mirror of a longer seat delivery. */
+export const commsMirror = (text: string, pointer: string): string =>
+  Array.from(text).length <= COMMS_MESSAGE_MAX
+    ? text
+    : Array.from(pointer).slice(0, COMMS_MESSAGE_MAX).join("");
 export const commsCutMarker = (kept: number, total: number): string =>
   `\n[stored text cut at ${kept} of ${total} characters]`;
 
