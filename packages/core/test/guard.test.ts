@@ -102,6 +102,7 @@ const readOnly: GuardContext = {
   flightPowers: "standard",
   fullSuite: FULL,
 };
+const flightFull: GuardContext = { ...readOnly, fullAccess: true };
 const bash = (command: string, extra: Partial<GuardEvent["input"]> = {}): GuardEvent => ({
   tool: "Bash",
   input: { command, ...extra },
@@ -110,6 +111,21 @@ const ruleOf = (e: GuardEvent, ctx = writer) => {
   const v = guardDecision(e, ctx);
   return v.kind === "deny" ? v.rule : v.kind;
 };
+
+describe("FLIGHT's full profile", () => {
+  it("permits ordinary shell authority but retains repository floors", () => {
+    expect(guardDecision(bash("gh pr close 12"), flightFull)).toEqual({ kind: "allow" });
+    expect(ruleOf(bash("git push origin main"), flightFull)).toBe("merge-push");
+    expect(ruleOf(bash("git push --force origin feature/x"), flightFull)).toBe("merge-push");
+    expect(ruleOf(bash("gh pr merge 12"), flightFull)).toBe("merge-push");
+    expect(
+      ruleOf({ tool: "Write", input: { file_path: "/work/.github/workflows/ci.yml" } }, flightFull),
+    ).toBe("repo-rules");
+    expect(ruleOf({ tool: "Edit", input: { file_path: "/work/CLAUDE.md" } }, flightFull)).toBe(
+      "repo-rules",
+    );
+  });
+});
 
 describe("scratch mode", () => {
   const scratch: GuardContext = {
@@ -215,7 +231,7 @@ describe("GUARD_RULES", () => {
     );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });

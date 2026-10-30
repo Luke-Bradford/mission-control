@@ -19,6 +19,7 @@ export const GUARD_RULES = {
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
+  "repo-rules": "FLIGHT must keep this repository's protected paths and Mission Control rules; ask a controller to approve an override",
   unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;
@@ -84,6 +85,8 @@ export const needsSuperuserText = (repo: string): string =>
 
 export interface GuardContext {
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile. */
+  fullAccess?: boolean;
   /** Only "dev" for now; repo permission levels (spec §8c) slot in here. */
   repo: "dev";
   /** The repo's current `flight_powers`, read from the live config on each call. */
@@ -2101,10 +2104,14 @@ export function guardDecision(
   ctx: GuardContext,
   superuserTools: readonly McToolName[] = MC_SUPERUSER_TOOLS,
 ): GuardVerdict {
-  if (superuserTools.some((name) => mcTool(name) === e.tool) && ctx.flightPowers !== "superuser") {
+  if (
+    !ctx.fullAccess &&
+    superuserTools.some((name) => mcTool(name) === e.tool) &&
+    ctx.flightPowers !== "superuser"
+  ) {
     return deny("flight-powers", `${e.tool} (needs flight_powers: superuser)`);
   }
-  if (ctx.mode === "read-only") {
+  if (!ctx.fullAccess && ctx.mode === "read-only") {
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {
       return deny("read-only", e.tool);
     }
@@ -2115,13 +2122,28 @@ export function guardDecision(
       return deny("read-only", e.tool);
     }
   }
-  if (ctx.mode === "scratch" && (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
+  if (!ctx.fullAccess && ctx.mode === "scratch" && (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
     return deny("read-only", `${e.tool} (a scratch copy is never committed)`);
   }
-  if (ctx.mode === "scratch" && (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)) {
+  if (!ctx.fullAccess && ctx.mode === "scratch" && (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)) {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
-  if (e.tool !== "Bash") return { kind: "allow" };
+  if (e.tool !== "Bash") {
+    if (
+      ctx.fullAccess &&
+      ["Edit", "Write"].includes(e.tool) &&
+      /(?:^|\/)(?:\.github(?:\/|$)|CLAUDE\.md$)/.test(e.input.file_path ?? "")
+    ) {
+      const path = e.input.file_path ?? "";
+      return deny(
+        "repo-rules",
+        /(?:^|\/)CLAUDE\.md$/.test(path)
+          ? "the whole CLAUDE.md file is protected; ask a controller to approve an override"
+          : e.tool,
+      );
+    }
+    return { kind: "allow" };
+  }
   let lock: string | null = null;
   let backgroundSuite = false;
   const backgroundCommand = e.input.run_in_background === true;
@@ -2194,11 +2216,17 @@ export function guardDecision(
     }
     if (program === "git") {
       const g = gitSubcommand(args);
+      if (ctx.fullAccess && g?.sub === "commit") return deny("merge-push", "git commit on main");
+      if (ctx.fullAccess && g?.sub === "push") {
+        const push = g.rest.join(" ");
+        if (/(?:^|\s)(?:--force(?:-with-lease)?|-f|--mirror)(?:\s|$)|\+[^\s:]*:|(?:^|\s)main(?::|\s|$)/.test(push))
+          return deny("merge-push", "git push to main or with rewritten history");
+      }
       if (g?.sub === "difftool" && g.rest.includes("--no-index"))
         return deny("git-env", "git --no-index");
-      if (g !== null && !gitReadOnly(g.sub, g.rest))
+      if (!ctx.fullAccess && g !== null && !gitReadOnly(g.sub, g.rest))
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
-      if (indirectGit) return deny("git-env", "git inside a command wrapper");
+      if (!ctx.fullAccess && indirectGit) return deny("git-env", "git inside a command wrapper");
       const directories = [...cwdDirectories];
       if (expandedCwd || (unknownCwd && ctx.gitPathAllowed))
         return deny("git-env", "git directory outside worktree");
@@ -2273,9 +2301,13 @@ export function guardDecision(
       )
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
-      githubDenied ??= ghText(args);
+      if (ctx.fullAccess) {
+        const gh = args.join(" ");
+        if (/^pr\s+merge(?:\s|$)/.test(gh) || /^api\s+.*\/(?:merge)(?:\s|$)/.test(gh))
+          return deny("merge-push", "gh PR merge");
+      } else githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
-      return deny("network", program);
+      if (!ctx.fullAccess) return deny("network", program);
     }
     const suite =
       matchedSuite(argv, ctx.fullSuite) ??

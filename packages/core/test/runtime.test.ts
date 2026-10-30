@@ -90,6 +90,16 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
+  it("gives FLIGHT's full profile an unrestricted shell while retaining guard hooks", () => {
+    const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--allowedTools");
+    expect(args).not.toContain("--disallowedTools");
+    const settings = JSON.parse(crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"));
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.sandbox).toEqual({ enabled: false });
+  });
+
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
     const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });

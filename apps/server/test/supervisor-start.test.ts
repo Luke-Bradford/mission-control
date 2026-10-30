@@ -2360,6 +2360,19 @@ describe("repo guidance at launch", () => {
         "# Mission Control work guidance (advice, not rules)",
       );
   });
+
+  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const argv = launches()[0]?.argv as string[];
+    expect(argv).not.toContain("--allowedTools");
+    expect(argv).not.toContain("--disallowedTools");
+    expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox).toEqual({
+      enabled: false,
+    });
+  });
 });
 
 // A real child's handshake can take seconds on a loaded machine. These waits fit inside the

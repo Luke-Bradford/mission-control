@@ -1698,6 +1698,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           model,
           effort: info.seat.effort,
           mode: def.mode,
+          profile: info.seat.role === "FLIGHT" && def.loop === "watch" ? "flight-full" : "standard",
           mcTools: def.mcTools,
           runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(
             (tool) => !def.mcTools.includes(tool),

@@ -26,6 +26,9 @@ export type CrewEffort = string;
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
 export type CrewMode = (typeof CREW_MODES)[number];
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run. */
+export const CREW_PROFILES = ["standard", "flight-full"] as const;
+export type CrewProfile = (typeof CREW_PROFILES)[number];
 /** The modes a seat's config may name; every other mode comes from the role. */
 export const CONFIG_SEAT_MODES = ["scratch"] as const;
 export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
@@ -996,7 +999,15 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
  * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
-export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
+export function crewSandboxSettings(
+  i: CrewSandboxInput,
+  mode: CrewMode,
+  hook: CrewHook,
+  profile: CrewProfile = "standard",
+): string {
+  if (profile === "flight-full") {
+    return JSON.stringify({ hooks: guardHooks(hook), sandbox: { enabled: false } });
+  }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
   const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
@@ -1064,6 +1075,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
 export interface CrewCliInput {
   model: string;
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile; all other seats stay standard. */
+  profile?: CrewProfile;
   /** Absolute path of the role brief, `roles/<CALL>.md`. */
   rolePromptFile: string;
   sessionId: string;
@@ -1170,7 +1183,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
       : [t],
   );
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
-  return [
+  const profile = i.profile ?? "standard";
+  const args = [
     "-p",
     "--input-format",
     "stream-json",
@@ -1182,22 +1196,34 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...(i.effort ? ["--effort", i.effort] : []),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
-    "--tools",
-    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
     "--settings",
-    crewSandboxSettings(i.sandbox, i.mode, i.hook),
+    crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
     "--mcp-config",
     i.mcpConfigFile,
-    "--allowedTools",
-    ...allowed,
-    "--disallowedTools",
-    ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? []),
     "--append-system-prompt-file",
     i.rolePromptFile,
     i.resume ? "--resume" : "--session-id",
     i.sessionId,
   ];
+  if (profile === "flight-full") return args;
+  const settingsAt = args.indexOf("--settings");
+  args.splice(
+    settingsAt,
+    0,
+    "--tools",
+    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
+  );
+  const promptAt = args.indexOf("--append-system-prompt-file");
+  args.splice(
+    promptAt,
+    0,
+    "--allowedTools",
+    ...allowed,
+    "--disallowedTools",
+    ...DENIED_TOOLS,
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? []),
+  );
+  return args;
 }
 
 /**

@@ -1899,6 +1899,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.superuserTools,
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
+            undefined,
+            seat.kind === "crew" && seat.seat.role === "FLIGHT",
           );
           // a large file this run already read whole, unchanged, is not given again
           if (verdict.kind === "allow") {
