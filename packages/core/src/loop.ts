@@ -623,6 +623,9 @@ export interface LoopSnapshot {
   lastEngineLineAt: number | null;
   tokens: number;
   budget: number;
+  /** Claude's reported spend and its template cap; null when no dollar cap applies. */
+  costUsd?: number | null;
+  budgetUsd?: number | null;
   ended: { reason: string } | null;
   /** null or absent: no reviewer for this run's session (7a behaviour). */
   review?: LoopReviewFacts | null;
@@ -869,6 +872,23 @@ function stateStep(s: LoopSnapshot): Step {
         s.autoMerge === true
           ? afterMerge(s)
           : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
+    };
+  }
+  if (
+    s.budgetUsd !== null &&
+    s.budgetUsd !== undefined &&
+    s.costUsd !== null &&
+    s.costUsd !== undefined &&
+    s.costUsd >= s.budgetUsd
+  ) {
+    const reason = `used $${s.costUsd.toFixed(2)} of a $${s.budgetUsd.toFixed(2)} budget`;
+    return {
+      loop: {
+        ...loop,
+        phase: "parked",
+        parked: { kind: "budget", reason, ended: s.ended !== null },
+      },
+      actions: [{ kind: "event", text: parkedEventText(reason) }],
     };
   }
   if (s.ended !== null && !loop.parked?.ended) {

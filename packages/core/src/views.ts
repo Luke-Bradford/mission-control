@@ -23,6 +23,7 @@ export interface ConfigProfile {
   nodes?: ProfileStep[];
   trigger?: string;
   budget?: number | null;
+  budgetUsd?: number | null;
   orchestrationOnly?: boolean;
   planRequired: boolean;
   reviewer: { role: string; depth: ReviewDepth };

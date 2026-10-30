@@ -1056,6 +1056,8 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
+  /** Per-run Claude spend cap, passed as `--max-budget-usd`; absent: no CLI cap. */
+  maxBudgetUsd?: number | null;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
   /**
@@ -1141,6 +1143,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
+    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--tools",

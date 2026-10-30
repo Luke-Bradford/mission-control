@@ -866,6 +866,8 @@ export function createEngine(deps: EngineDeps): Engine {
       lastEngineLineAt: store.lastEngineLineAt(run.id),
       tokens: run.tokens === null ? 0 : run.tokens.input + run.tokens.output,
       budget: config.crew?.runTokenBudget ?? Number.MAX_SAFE_INTEGER,
+      costUsd: run.costUsd,
+      budgetUsd: run.vendor === "codex" ? null : (run.profile?.profile.budgetUsd ?? null),
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,

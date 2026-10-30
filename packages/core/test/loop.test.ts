@@ -633,6 +633,15 @@ describe("state step", () => {
     expect(reconcile(inCi({ tokens: 5000 })).loop.phase).toBe("ci");
   });
 
+  it("parks an ended run when Claude reaches its dollar cap", () => {
+    const r = reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } }));
+    expect(r.loop.parked).toEqual({
+      kind: "budget",
+      reason: "used $12.50 of a $12.50 budget",
+      ended: true,
+    });
+  });
+
   describe("16: silent after three carry-on resumes", () => {
     const keys = ["nudge:r1:0:0:1", "nudge:r1:0:0:2", "nudge:r1:0:0:3"];
     const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>
