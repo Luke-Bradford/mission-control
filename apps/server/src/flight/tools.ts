@@ -1000,7 +1000,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const unpauseSeat = (seat: string, call: string, at: number): string | null => {
     const pause = pausedSeat(store, seat);
     if (pause === null) return null;
-    writeCrewPause(store, pauseWithout(pause, seat), at);
+    writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at);
     bus.emit("settings");
     return `FLIGHT lifted the crew pause on ${call} (${pause.reason})`;
   };

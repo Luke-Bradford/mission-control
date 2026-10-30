@@ -7831,7 +7831,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       writeCrewPause(store, { seats: ["guido-1", "inco-1"], reason: "ci", at: NOW, by: "op" }, NOW);
       expect((await start()).isError).toBeUndefined();
       // the record stays the operator's
-      expect(readCrewPause(store)).toMatchObject({ seats: ["inco-1"], by: "op", reason: "ci" });
+      expect(readCrewPause(store)).toMatchObject({
+        seats: ["inco-1"],
+        by: "op",
+        reason: "ci",
+        liftedBy: "FLIGHT",
+      });
       writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
       startCalls.length = 0;
       store.upsertRun(run("r-done", "guido-1", { endedAt: NOW, status: "ok" }));
@@ -7840,7 +7845,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       board(sc(7), sc(8));
       expect((await start("start_seat", { issue: 8 })).isError).toBeUndefined();
       // an all-seats pause stays "all" (seats added later are held too), with this seat let out
-      expect(readCrewPause(store)).toMatchObject({ seats: "all", except: ["guido-1"], by: "op" });
+      expect(readCrewPause(store)).toMatchObject({
+        seats: "all",
+        except: ["guido-1"],
+        by: "op",
+        liftedBy: "FLIGHT",
+      });
     });
     it("needs superuser to override a stop or a pause", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
