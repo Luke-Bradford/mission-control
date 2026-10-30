@@ -42,6 +42,8 @@ export interface RenderedPage {
   reachable(selector: string, within?: string): Promise<boolean[]>;
   /** Per element matching `selector`, whether it is no taller than its own content needs. */
   hugsContent(selector: string): Promise<boolean[]>;
+  /** Per element matching `selector`, whether its content fits inside its own box sideways. */
+  unclipped(selector: string): Promise<boolean[]>;
   /** Writes a PNG of the viewport to `path`. */
   screenshot(path: string): Promise<void>;
   close(): Promise<void>;
@@ -280,9 +282,20 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
           selector,
         );
       };
+      const unclipped = async (selector: string) => {
+        await page.waitForSelector(selector);
+        return page.evaluate(
+          (css) =>
+            [...document.querySelectorAll(css)].map(
+              (element) => element.scrollWidth <= element.clientWidth + 1,
+            ),
+          selector,
+        );
+      };
       return {
         boxes,
         reachable,
+        unclipped,
         hugsContent,
         screenshot: async (path) => {
           await page.screenshot({ path });

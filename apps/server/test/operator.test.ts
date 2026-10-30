@@ -24,6 +24,7 @@ describe("operator token", () => {
       home: "/home/you",
       dataDir,
       denyRead: [],
+      pnpmStoreDir: "/w/crew/.mc-pnpm-store/shared",
     };
     for (const mode of CREW_MODES) {
       const text = crewSandboxSettings(input, mode, { command: "/hub/hook", timeoutS: 10 });

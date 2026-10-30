@@ -65,6 +65,38 @@ const git = (cwd: string, ...args: string[]) =>
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 
+/** Disk blocks added by pnpm beyond the checked-out source, measured on the host volume. */
+const installedKb = (worktree: string) =>
+  Number.parseInt(
+    execFileSync("du", ["-sk", join(worktree, "node_modules")], { encoding: "utf8" }),
+    10,
+  );
+
+/** Disk blocks for the worktrees and their shared store, not the source-only crew clone. */
+const worktreeDiskKb = () =>
+  Number.parseInt(execFileSync("du", ["-sk", root], { encoding: "utf8" }), 10);
+
+const PACKAGE_PAYLOAD_KB = 21 * 1024;
+const PAYLOAD_PKG = `${JSON.stringify({
+  name: "x",
+  version: "1.0.0",
+  private: true,
+  dependencies: { "fixture-payload": "1.0.0" },
+})}\n`;
+
+/** A deterministic fetched package: private stores add 21 MiB; a warm shared store adds none. */
+const payloadInstall: InstallRunner = async (command, _args, options) => {
+  if (command !== "pnpm") return;
+  const store = options.env.pnpm_config_store_dir;
+  if (store === undefined) throw new Error("pnpm store missing");
+  const payload = join(store, "fixture-payload", "payload.bin");
+  if (!existsSync(payload)) {
+    mkdirSync(dirname(payload), { recursive: true });
+    writeFileSync(payload, Buffer.alloc(PACKAGE_PAYLOAD_KB * 1024));
+  }
+  mkdirSync(join(options.cwd, "node_modules"), { recursive: true });
+};
+
 /** Commits `files` in `repo` (paths may be nested) and returns the new SHA. */
 function commit(repo: string, files: Record<string, string>, msg = "c"): string {
   for (const [f, body] of Object.entries(files)) {
@@ -133,9 +165,12 @@ const hasBranch = (b: string) => {
   }
 };
 
-function expectPrivateCodexPnpmStore(worktree: string): void {
-  const root = realpathSync(worktree);
-  const store = join(dirname(root), ".mc-pnpm-store", basename(root));
+function sharedPnpmStore(): string {
+  return join(root, CODEX_PNPM_STORES_DIR, "shared");
+}
+
+function expectSharedPnpmStore(): void {
+  const store = sharedPnpmStore();
   for (const [path, expected] of [
     [dirname(store), dirname(store)],
     [store, store],
@@ -500,7 +535,7 @@ describe("prepareCheckout", () => {
         const next = await prepare();
         expect((await syncReusedWorktree(clone, next, { syncMain: true }))?.kind).toBe("merged");
         rmSync(join(dir, "uv-argv"));
-        expect(await installAfterSync(clone, next, before)).toBe(
+        expect(await installAfterSync(clone, next, before, root)).toBe(
           "dependencies changed; uv reinstall is not supported in a reused worktree",
         );
         expect(uvArgv()).toBeNull();
@@ -644,7 +679,7 @@ describe("prepareCheckout", () => {
       const checkout = await syncCheckout();
       expect(checkout.synced?.kind).toBe("merged");
       if (checkout.synced?.kind !== "merged") throw new Error("expected merge");
-      const note = await installAfterSync(clone, checkout, checkout.synced.before);
+      const note = await installAfterSync(clone, checkout, checkout.synced.before, root);
       if (outcome === "installed") {
         expect(note).toBeUndefined();
         expect(existsSync(join(checkout.path, "node_modules"))).toBe(true);
@@ -825,7 +860,31 @@ describe("prepareCheckout", () => {
     git(seed, "push", "-q", "origin", "main");
     await prepareCheckout(input());
     expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
+    expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
+    expect(installedKb(wtPath())).toBeLessThan(20 * 1024);
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
+  });
+
+  it("adds under 20 MiB for a checkout after warming the shared package payload", async () => {
+    commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input(), payloadInstall);
+    const before = worktreeDiskKb();
+    await prepareCheckout({ ...input(), issue: 43 }, payloadInstall);
+    expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
+  });
+
+  it("refuses a shared-store symlink below crew.worktrees", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const outside = join(dir, "outside-store");
+    mkdirSync(outside);
+    mkdirSync(root, { recursive: true });
+    symlinkSync(outside, join(root, CODEX_PNPM_STORES_DIR));
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("install");
+    expect(e.message).toContain("shared store unavailable");
+    expect(existsSync(wtPath())).toBe(false);
   });
 
   it("relinks a reused worktree from its old pnpm store before its scripts run", async () => {
@@ -861,16 +920,19 @@ describe("prepareCheckout", () => {
 
     const reused = await prepareCheckout(input());
     expect(reused).toMatchObject({ path: first.path, created: false });
-    expectPrivateCodexPnpmStore(reused.path);
+    expectSharedPnpmStore();
     expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
-      installEnv(reused.path).pnpm_config_store_dir,
+      sharedPnpmStore(),
     );
     expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
     for (let n = 0; n < 2; n++)
-      execFileSync("pnpm", ["-s", "check"], { cwd: reused.path, env: installEnv(reused.path) });
+      execFileSync("pnpm", ["-s", "check"], {
+        cwd: reused.path,
+        env: installEnv(reused.path, sharedPnpmStore()),
+      });
 
     const fresh = await prepareCheckout({ ...input(), issue: 43 });
-    expectPrivateCodexPnpmStore(fresh.path);
+    expectSharedPnpmStore();
     expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
   });
 
@@ -1077,7 +1139,7 @@ describe("prepareCheckout", () => {
     ]);
   });
 
-  it("installs without inherited CI, npm or git settings, using Codex's stable worktree store", () => {
+  it("installs without inherited CI, npm or git settings, using the hub-owned shared store", () => {
     const keys = [
       "CI",
       "CONTINUOUS_INTEGRATION",
@@ -1089,13 +1151,13 @@ describe("prepareCheckout", () => {
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     for (const k of keys) process.env[k] = "1";
     try {
-      const env = installEnv("/w/guido-42");
+      const env = installEnv("/w/guido-42", "/w/.mc-pnpm-store/shared");
       for (const k of keys.filter((k) => k !== "CI")) expect(env[k]).toBeUndefined();
       // ci-info reads CI=false as "not CI" whatever the vendor variables say
       expect(env.CI).toBe("false");
       // pnpm never walks up to an ancestor's workspace
       expect(env.NPM_CONFIG_WORKSPACE_DIR).toBe("/w/guido-42");
-      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/guido-42");
+      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/shared");
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     } finally {
       for (const [k, v] of Object.entries(saved)) {
@@ -1715,6 +1777,18 @@ describe("review scratch checkouts", () => {
     git(seed, "push", "-q", "origin", "main");
     await prepareScratch(scratchInput(head));
     expect(existsSync(join(scratchPath(), "node_modules"))).toBe(true);
+    expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
+    expect(installedKb(scratchPath())).toBeLessThan(20 * 1024);
+  });
+
+  it("adds under 20 MiB for a review after warming the shared package payload", async () => {
+    commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input(), payloadInstall);
+    const { head } = pr({ "a.txt": "a\n" });
+    const before = worktreeDiskKb();
+    await prepareScratch(scratchInput(head), payloadInstall);
+    expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
   it("a PR head that changes an install input is refused and removed", async () => {
@@ -1873,6 +1947,7 @@ describe("a checkout's private pnpm store", () => {
   it("sweeps stores whose worktree is gone, keeps live ones and never follows a link", async () => {
     await prepareCheckout(input());
     plant(wtPath());
+    mkdirSync(sharedPnpmStore(), { recursive: true });
     const gone = join(dirname(wtPath()), "gone-7");
     plant(gone);
     const outside = join(dir, "outside");
@@ -1882,7 +1957,19 @@ describe("a checkout's private pnpm store", () => {
     await sweepPnpmStores([dirname(wtPath())]);
     expect(existsSync(storeOf(gone))).toBe(false);
     expect(existsSync(storeOf(wtPath()))).toBe(true);
+    expect(existsSync(sharedPnpmStore())).toBe(true);
     expect(existsSync(join(outside, "keep"))).toBe(true);
+  });
+
+  it("keeps the hub-owned shared store while removing an orphaned legacy store", async () => {
+    mkdirSync(sharedPnpmStore(), { recursive: true });
+    const orphan = join(root, "gone-7");
+    plant(orphan);
+
+    await sweepPnpmStores([root]);
+
+    expect(existsSync(sharedPnpmStore())).toBe(true);
+    expect(existsSync(storeOf(orphan))).toBe(false);
   });
 
   it("sweeps nothing when the store folder is itself a link", async () => {

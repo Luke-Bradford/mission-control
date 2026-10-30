@@ -433,8 +433,9 @@ What each seat's process starts with:
   - the keychains as a service: the rule blocks only the keychain *file*. Security-framework
     queries go through `securityd`, and a probe showed that the data-protection keychain answers
     sandboxed code (#31; typed `security` is refused by name);
-  - the per-seat pnpm stores (`/tmp/claude-<uid>/mc-pnpm-store/<seat>`). They sit in the sandbox
-    temp root, which every seat can read and write, so they keep pnpm's store out of the worktree
+  - the hub-owned pnpm store (`<crew.worktrees>/.mc-pnpm-store/shared`). The hub installs from it;
+    every Claude and Codex seat can read it but its sandbox explicitly denies writes, so one seat
+    cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
   The sandbox has no network, and the secret scan at push time is the backstop for anything a seat

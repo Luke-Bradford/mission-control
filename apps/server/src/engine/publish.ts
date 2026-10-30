@@ -1086,6 +1086,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               baseSha: mainSha,
             },
             before,
+            deps.config.crew?.worktrees ?? "",
           );
           return {
             ok: true,

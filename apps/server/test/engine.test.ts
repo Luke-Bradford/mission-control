@@ -641,7 +641,7 @@ function harness(): Harness {
             x.starts.push({ seat, id });
             x.duringStart?.();
             if (x.startError !== null) throw x.startError;
-            return { runId: retroRun(id) };
+            return { runId: retroRun(id, seat) };
           },
         },
         publisher,
@@ -685,12 +685,12 @@ const ticketView = (text: string): TicketView => ({
 });
 
 /** A review run for review `id`, held by the review seat (what the supervisor's start does). */
-function retroRun(id: number): string {
-  const runId = `${RETRO}:${id}`;
+function retroRun(id: number, seatId = RETRO): string {
+  const runId = `${seatId}:${id}`;
   store.upsertRun(
-    run({ id: runId, agentId: RETRO, seq: id, reviewId: id, branch: null, loop: null }),
+    run({ id: runId, agentId: seatId, seq: id, reviewId: id, branch: null, loop: null }),
   );
-  seatIdle(runId, RETRO);
+  seatIdle(runId, seatId);
   return runId;
 }
 
@@ -3586,6 +3586,17 @@ describe("the engine runs reviews", () => {
     await vi.waitFor(() => expect(h.starts).toHaveLength(2));
     expect(h.starts[1]).toEqual({ seat: RETRO, id: two.id });
     expect(h.ended).toContain(`${RETRO}:${one.id}`);
+  });
+
+  it("starts two queued reviews on free seats and routes the next one to the first seat freed", async () => {
+    const RETRO2 = "retro-2";
+    seats().push({ ...retroSeat(), id: RETRO2 });
+    await toReview();
+    await secondAuthor();
+    expect(h.starts.map((start) => start.seat)).toEqual([RETRO, RETRO2]);
+    const second = need(store.reviewsOfRun(RUN2)[0]);
+    reported(second.id, []);
+    expect(reviewerOf(config, SEAT, undefined, { store, now: clock })?.id).toBe(RETRO2);
   });
 
   it.each(["missing", "lost during send"])(

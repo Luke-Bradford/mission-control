@@ -2,6 +2,7 @@
 import {
   CI_TRIES,
   type LoopTry,
+  MC_PUSH_CHECKS,
   type PullRequestView,
   REVIEW_ROUNDS,
   REVIEW_STATUS_RUNNING,
@@ -68,6 +69,42 @@ export const tryMinutes = (t: LoopTry, now: number): number =>
   Math.round(((t.endedAt ?? now) - t.startedAt) / MINUTE);
 
 export const tryText = (t: LoopTry): string => (t.reason ? `${t.outcome}: ${t.reason}` : t.outcome);
+
+/** A reason's one line, and the whole text when there is more than the line says. */
+export interface ReasonLine {
+  line: string;
+  full: string | null;
+}
+
+/** The longest line a reason takes in a row. */
+const REASON_LINE_MAX = 120;
+/** One line of the hub's push refusal: `- not run: pnpm -s test`, `- failed: pnpm -s lint`. */
+const REFUSED_CHECK = /^- (failed|not run): (.+)$/;
+const REFUSED_COMMIT = /\bCommit (\w+):/;
+
+/**
+ * A reason for a row: the hub's checks refusal reads `push refused: \`pnpm -s test\` not run on
+ * 80001f8`; any other long or multi-line text is cut to its first line. `full` is the whole text
+ * (null when the line already says it all), for a disclosure.
+ */
+export function reasonLine(reason: string): ReasonLine {
+  if (reason.startsWith(MC_PUSH_CHECKS)) {
+    const checks = reason.split("\n").flatMap((row) => {
+      const found = REFUSED_CHECK.exec(row);
+      return found ? [{ failed: found[1] === "failed", command: found[2] }] : [];
+    });
+    const sha = REFUSED_COMMIT.exec(reason)?.[1];
+    if (checks.length > 0 && sha) {
+      const [first, ...rest] = checks;
+      const more = rest.length > 0 ? ` (+${rest.length} more)` : "";
+      const state = first.failed ? "failed" : "not run";
+      return { line: `push refused: \`${first.command}\` ${state} on ${sha}${more}`, full: reason };
+    }
+  }
+  const first = reason.split("\n")[0].trim();
+  const line = first.length > REASON_LINE_MAX ? `${first.slice(0, REASON_LINE_MAX - 1)}…` : first;
+  return { line, full: line === reason ? null : reason };
+}
 
 export function tryClass(t: LoopTry): string {
   switch (t.outcome) {

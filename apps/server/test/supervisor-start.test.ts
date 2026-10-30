@@ -24,6 +24,7 @@ import {
   AWAY_SETTING,
   type BoardItem,
   CANNOT_START,
+  CODEX_PNPM_STORES_DIR,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
   CREW_DISABLED,
@@ -55,6 +56,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
   startMissingNeedsText,
@@ -690,7 +692,10 @@ describe("startRun", () => {
       const parent = dirname(tmp);
       expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([realpathSync(tmp)]);
+      expect(settings.sandbox.filesystem.allowRead).toEqual([
+        realpathSync(tmp),
+        join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
+      ]);
       expect(settings.sandbox.filesystem.denyRead).toContain(realpathSync(parent));
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/tmp");
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/private/tmp");
@@ -704,20 +709,22 @@ describe("startRun", () => {
     for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
   });
 
-  it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
+  it("points pnpm at the hub-owned store outside the seat worktree", async () => {
+    expect(existsSync(join(clone, "pnpm-lock.yaml"))).toBe(false);
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
+    expect(store).toBe(join(root, CODEX_PNPM_STORES_DIR, "shared"));
+    expect(statSync(store).isDirectory()).toBe(true);
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
     const rel = relative(start.cwd as string, store);
     expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
-    expect(relative(realpathSync(root), store).startsWith("..")).toBe(true);
+    expect(relative(realpathSync(root), store).startsWith("..")).toBe(false);
   });
 
   it("points uv's cache and Python's tool caches at the seat's own folders in the sandbox's temp root", async () => {
@@ -835,6 +842,7 @@ describe("startRun", () => {
       `${common}/worktrees/guido-1-42`,
       // the run's token, MCP, prompt and transcript files: no seat rewrites them (R28)
       join(dir, "db"),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
     ]);
@@ -2482,7 +2490,7 @@ import(${JSON.stringify(fixture)});
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
     expect(spawn.env[PNPM_STORE_ENV]).toBe(
-      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
     );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
