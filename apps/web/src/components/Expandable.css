@@ -6,7 +6,7 @@
 }
 
 .expandable-content {
-  line-height: 1.5;
+  line-height: var(--lh);
   min-width: 0;
   overflow: hidden;
 }

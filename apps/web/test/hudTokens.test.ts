@@ -56,6 +56,7 @@ const stripTs = (ts: string) =>
     .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 const FONT_SIZE_OK = /^(var\(--fs(-title|-panel|-s|-micro)?\)|inherit)$/;
+const LINE_HEIGHT_OK = /^(var\(--lh(-title|-panel|-s|-micro)?\)|inherit)$/;
 const SPACING_PROP = /^(padding|margin|gap|row-gap|column-gap)(-[a-z]+)*$/;
 
 /** Every `prop: value` of a stylesheet, with the line it is on. */
@@ -86,7 +87,8 @@ function offences(file: string, text: string): string[] {
         !/var\(--fs(-title|-panel|-s|-micro)?\)/.test(value)
       )
         found.push(at);
-      if (prop === "line-height" && /px\b/.test(value)) found.push(at);
+      if (prop === "line-height" && !LINE_HEIGHT_OK.test(value)) found.push(at);
+      if (prop === "font" && /\/\s*(?!\s|var\(--lh)/.test(value)) found.push(at);
       if (prop === "font" && /\d\s*(px|em|rem)\b/.test(value)) found.push(at);
       if (SPACING_PROP.test(prop) && /\d(px|rem|em)\b/.test(value.replace(/\b0(px)?\b/g, "")))
         found.push(at);
@@ -142,9 +144,14 @@ describe("the web source uses only the tokens", () => {
     expect(offences("a.css", ".a { padding: 0 var(--sp-2); margin-top: 6px; }")).toHaveLength(1);
     expect(offences("a.css", ".a { color: #fff; box-shadow: 0 0 rgb(0 0 0); }")).toHaveLength(2);
     expect(offences("a.css", ".a { rgba(0, 0, 0, 0.5) }")).toHaveLength(1);
-    expect(offences("a.css", ".a { font: 600 10px / 1.2 var(--mono); }")).toHaveLength(2);
-    expect(offences("a.css", ".a { font: 600 var(--fs-s) / 1.2 var(--mono); }")).toEqual([]);
+    expect(offences("a.css", ".a { font: 600 10px / 1.2 var(--mono); }")).toHaveLength(3);
+    expect(offences("a.css", ".a { font: 600 var(--fs-s) / var(--lh-s) var(--mono); }")).toEqual(
+      [],
+    );
     expect(offences("a.css", ".a { line-height: 16px; }")).toHaveLength(1);
+    expect(offences("a.css", ".a { line-height: 1.45; }")).toHaveLength(1);
+    expect(offences("a.css", ".a { line-height: var(--lh); }")).toEqual([]);
+    expect(offences("a.css", ".a { font: var(--fs-s) / 1.4 var(--mono); }")).toHaveLength(1);
     expect(offences("a.css", ":root {\n  --a: #fff;\n  --fs: 13px;\n}")).toEqual([]);
     expect(offences("a.css", "/* font-size: 10px; #fff */ .a { font-size: var(--fs-s); }")).toEqual(
       [],
@@ -158,5 +165,30 @@ describe("the web source uses only the tokens", () => {
   it("sets no raw font size, spacing or colour", () => {
     const raw = FILES.flatMap((file) => offences(file, readFileSync(join(SRC, file), "utf8")));
     expect(raw).toEqual([]);
+  });
+});
+
+/** Text a person reads (not a label) is never below the secondary size: 11px is for mono labels. */
+describe("readable content is at least 12px", () => {
+  const CONTENT = [
+    ["hud/shared.css", "pre.diff"],
+    ["agent/agent.css", ".ev.tool .txt"],
+    ["agent/agent.css", ".ev details pre"],
+    ["flight/flight.css", ".wif-branch"],
+    ["flight/flight.css", ".wif-checkpoint"],
+    ["lenses/lenses.css", ".map-lens"],
+    ["lenses/lenses.css", ".map-conflict-detail"],
+    ["map/map.css", ".map-results"],
+    ["components/config/Glossary.css", ".gloss code"],
+  ] as const;
+
+  it.each(CONTENT)("%s %s", (file, selector) => {
+    const css = readStyle(file);
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at, `${selector} in ${file}`).toBeGreaterThanOrEqual(0);
+    const body = css.slice(at, css.indexOf("}", at));
+    expect(body).not.toContain("--fs-micro");
+    expect(body).not.toContain("--lh-micro");
+    expect(body).toMatch(/var\(--fs-s\)/);
   });
 });

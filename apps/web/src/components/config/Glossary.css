@@ -19,7 +19,7 @@
 
 .gloss code {
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   color: var(--fg);
   background: var(--surface-2);
   border-radius: 4px;

@@ -149,7 +149,7 @@
 
 .flight-strip-wake {
   color: var(--muted);
-  font: var(--fs-s) / 1.4 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -174,7 +174,7 @@
 .flight-counter {
   padding: var(--sp-1) var(--sp-2);
   color: var(--fg-2);
-  font: var(--fs-s) / 1.4 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   background: none;
   border-color: transparent;
 }
@@ -212,7 +212,7 @@
   min-height: 34px;
   padding: var(--sp-2) var(--sp-4) var(--sp-2);
   color: var(--muted);
-  font: 600 var(--fs-s) / 1 var(--mono);
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: transparent;
@@ -319,7 +319,7 @@
 .flight-source {
   margin: 0;
   color: var(--muted);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -337,7 +337,7 @@
 .flight-mono,
 .flight-count {
   color: var(--muted);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -345,7 +345,7 @@
   margin: 0;
   padding: var(--sp-3) var(--sp-3) var(--sp-1);
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -371,7 +371,7 @@
 button.flight-link {
   padding: var(--sp-1) var(--sp-1);
   color: var(--accent);
-  font: 600 var(--fs-micro) / 1.4 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -428,7 +428,7 @@ button.flight-link:hover {
 .wif-table-head {
   padding: var(--sp-2) var(--sp-3);
   color: var(--muted);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -487,7 +487,7 @@ button.flight-link:hover {
 .wif-branch {
   display: block;
   color: var(--muted);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 
 .wif-stage {
@@ -512,7 +512,7 @@ button.flight-link:hover {
   display: -webkit-box;
   overflow: hidden;
   color: var(--fg);
-  line-height: 1.4;
+  line-height: var(--lh);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -520,7 +520,7 @@ button.flight-link:hover {
 
 .wif-checkpoint {
   color: var(--fg-2);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -538,7 +538,7 @@ button.flight-link:hover {
 }
 
 .wif-stuck-reason .expandable-text {
-  line-height: 1.4;
+  line-height: var(--lh);
 }
 
 .wif-stuck-reason .sm {
@@ -563,7 +563,7 @@ button.flight-link:hover {
   color: var(--muted);
   font-size: var(--fs-s);
   font-weight: 500;
-  line-height: 1.3;
+  line-height: var(--lh-s);
   text-overflow: ellipsis;
   white-space: nowrap;
   background: none;
@@ -616,7 +616,7 @@ button.flight-link:hover {
 #wifP .wstep .titer {
   padding: 0 0 0 0;
   color: var(--accent);
-  font: 600 var(--fs-micro) / 0 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   vertical-align: super;
   background: none;
 }
@@ -663,7 +663,7 @@ button.flight-link:hover {
   flex: none;
   margin: 0;
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -682,7 +682,7 @@ button.flight-link:hover {
 .flight-plan-count {
   flex: none;
   color: var(--fg-2);
-  font: var(--fs-micro) / 1.2 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -711,7 +711,7 @@ button.flight-link:hover {
 .flight-outcome-head {
   padding: var(--sp-2) var(--sp-3);
   color: var(--muted);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -743,7 +743,7 @@ button.flight-link:hover {
 
 .flight-plan-horizon {
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.7 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -759,18 +759,18 @@ button.flight-link:hover {
 .flight-outcome-row b {
   color: var(--fg);
   font-size: var(--fs);
-  line-height: 1.35;
+  line-height: var(--lh);
 }
 
 .flight-plan-next {
   color: var(--fg);
-  line-height: 1.4;
+  line-height: var(--lh);
 }
 
 .flight-plan-checkpoint {
   color: var(--fg-2);
   font-size: var(--fs-s);
-  line-height: 1.4;
+  line-height: var(--lh-s);
 }
 
 .flight-plan-refs,
@@ -784,7 +784,7 @@ button.flight-link:hover {
 .flight-plan-age,
 .flight-outcome-at {
   color: var(--fg-2);
-  font: 500 var(--fs-micro) / 1.6 var(--mono);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -823,7 +823,7 @@ button.flight-link:hover {
 #askP .drow .row > .min0 {
   flex: 1 1 auto;
   font-size: var(--fs-s);
-  line-height: 1.45;
+  line-height: var(--lh-s);
 }
 
 #askP .drow .row > .spacer {
@@ -832,7 +832,7 @@ button.flight-link:hover {
 
 #askP .drow > .s {
   color: var(--fg-2);
-  line-height: 1.45;
+  line-height: var(--lh);
 }
 
 #page-flight .incoming-row,
@@ -867,7 +867,7 @@ button.flight-link:hover {
   margin: 0;
   padding: var(--sp-2) var(--sp-4);
   color: var(--muted);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   border-bottom: 1px solid var(--line);
 }
 
@@ -887,7 +887,7 @@ button.flight-link:hover {
   position: relative;
   padding: var(--sp-2) var(--sp-2);
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-decoration: none;
   text-transform: uppercase;
@@ -931,7 +931,7 @@ button.flight-link:hover {
 
 .flight-note-heading h3 {
   margin: 0;
-  font: 600 var(--fs-micro) / 1.3 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -948,20 +948,20 @@ button.flight-link:hover {
 
 .flight-note-heading .s {
   color: var(--muted);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 .flight-knows .briefsec .md-txt {
   max-width: 80ch;
   color: var(--fg);
   font-size: var(--fs);
-  line-height: 1.55;
+  line-height: var(--lh);
 }
 
 .flight-markdown-source summary {
   padding-top: var(--sp-1);
   color: var(--muted);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -976,7 +976,7 @@ button.flight-link:hover {
   margin: var(--sp-2) 0 0;
   padding: var(--sp-2) var(--sp-3);
   overflow: auto;
-  font: var(--fs-s) / 1.5 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   white-space: pre-wrap;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -990,7 +990,7 @@ button.flight-link:hover {
 .flight-memory .flight-knowledge-scroll > .pb > .note:first-child {
   margin: 0 0 var(--sp-2);
   color: var(--muted);
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 
 #page-flight .memory-repo {
@@ -998,7 +998,7 @@ button.flight-link:hover {
   align-items: center;
   gap: var(--sp-2);
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1012,7 +1012,7 @@ button.flight-link:hover {
 .flight-memory section > h3 {
   margin: var(--sp-3) 0 0;
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1114,7 +1114,7 @@ button.flight-link:hover {
 }
 
 #outcomesP .flight-tiles dt {
-  font: 600 var(--fs-micro) / 1.2 var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.1em;
   overflow-wrap: anywhere;
   text-transform: uppercase;
@@ -1122,7 +1122,7 @@ button.flight-link:hover {
 
 #outcomesP .flight-tiles dd {
   color: var(--fg);
-  font: 600 var(--fs-title) / 1.1 var(--mono);
+  font: 600 var(--fs-title) / var(--lh-title) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1176,7 +1176,7 @@ button.flight-link:hover {
 }
 
 .flight-log .dmsg .who {
-  font: var(--fs-micro) / 1.3 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 @media (max-width: 1439px) {
@@ -1209,7 +1209,7 @@ button.flight-link:hover {
 
 .sittext {
   font-size: var(--fs-panel);
-  line-height: 1.55;
+  line-height: var(--lh-panel);
   max-width: 110ch;
 }
 

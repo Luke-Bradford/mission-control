@@ -154,9 +154,9 @@
 .overview-axis {
   position: relative;
   height: 14px;
-  margin-left: var(--sp-7);
+  margin-left: calc(var(--lane-label) + var(--sp-2));
   border-top: 1px solid var(--line-2);
-  font: var(--fs-micro) / 1 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 .overview-axis > span {
@@ -194,6 +194,8 @@
 }
 
 .timeline-body {
+  /* the lane labels' column; the axis below the lanes starts after it and its gap */
+  --lane-label: 92px;
   display: flex;
   flex-direction: column;
 }
@@ -239,7 +241,7 @@
 
 .overview-lane {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
+  grid-template-columns: var(--lane-label) minmax(0, 1fr);
   gap: var(--sp-2);
   align-items: center;
   height: 100%;
@@ -555,7 +557,7 @@
   padding: var(--sp-1) var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
   height: 34px;
-  line-height: var(--lh-micro);
+  line-height: var(--lh);
 }
 
 #agentsList .trow > * {
@@ -568,7 +570,7 @@
 
 #agentsList .need {
   font-size: var(--fs-s);
-  line-height: var(--lh-micro);
+  line-height: var(--lh-s);
   max-width: 100%;
   gap: var(--sp-1);
 }
@@ -576,13 +578,13 @@
 #agentsList .need button {
   min-height: 24px;
   padding: 0 var(--sp-1);
-  line-height: var(--lh-micro);
+  line-height: var(--lh-s);
   font-size: var(--fs-s);
 }
 
 #agentsList .xs {
   font-size: var(--fs-s);
-  line-height: var(--lh-micro);
+  line-height: var(--lh-s);
 }
 
 .crew-skeleton .kpi-skeleton {
@@ -622,7 +624,7 @@
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   color: var(--fg);
 }
 
@@ -1219,7 +1221,7 @@
 
 .overview-kpi .lbl {
   font-size: var(--fs-s);
-  line-height: var(--lh-micro);
+  line-height: var(--lh-s);
   color: var(--muted);
   white-space: normal;
   overflow-wrap: break-word;
@@ -1232,7 +1234,7 @@
   font-family: var(--display);
   font-size: var(--fs-title);
   font-weight: 600;
-  line-height: 1.05;
+  line-height: var(--lh-title);
   letter-spacing: 0.01em;
 }
 
@@ -1284,7 +1286,7 @@
   font-size: var(--fs-s);
   color: var(--fg-2);
   align-self: end;
-  line-height: 1.4;
+  line-height: var(--lh-s);
 }
 
 .kpi-skeleton {

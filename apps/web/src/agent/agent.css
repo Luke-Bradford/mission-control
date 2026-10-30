@@ -325,7 +325,7 @@
   font-size: var(--fs-title);
   font-weight: 600;
   letter-spacing: 0.02em;
-  line-height: 1;
+  line-height: var(--lh-title);
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
@@ -389,7 +389,7 @@
   font-family: var(--display);
   font-size: var(--fs-title);
   font-weight: 600;
-  line-height: 1.1;
+  line-height: var(--lh-title);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -534,7 +534,7 @@
 
 .ev.tool .txt {
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
 }
 
 .ev.tool .tres {
@@ -576,7 +576,7 @@
   white-space: pre-wrap;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
 }
 
 .side > #loopP {

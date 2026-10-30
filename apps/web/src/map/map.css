@@ -204,7 +204,7 @@
   border-radius: 8px;
   background: var(--treemap-bg);
   color: var(--treemap-ink);
-  font: 600 var(--fs-micro) / var(--fs-s) var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   text-align: center;
   transform: translate(-50%, -50%);
 }
@@ -549,7 +549,7 @@ button.map-timeline-tick {
   overflow: auto;
   margin-bottom: var(--sp-2);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   color: var(--muted);
 }
 .map-results button {
@@ -563,7 +563,7 @@ button.map-timeline-tick {
 .map-detail {
   font-family: var(--mono);
   font-size: var(--fs-s);
-  line-height: 1.55;
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 .map-detail h3 {

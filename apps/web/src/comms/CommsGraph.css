@@ -479,7 +479,7 @@
   padding: var(--sp-2) var(--sp-2) var(--sp-2);
   color: var(--fg-2);
   font-size: var(--fs-s);
-  line-height: 1.4;
+  line-height: var(--lh-s);
   background: var(--surface-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-s);
@@ -572,7 +572,7 @@
   font-family: var(--display);
   font-size: var(--fs-panel);
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: var(--lh-panel);
 }
 .tip-last {
   margin-top: var(--sp-2);
@@ -717,7 +717,7 @@
   margin: 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   letter-spacing: 0.04em;
   text-align: center;
   pointer-events: none;
@@ -811,7 +811,7 @@
   font-size: var(--fs-title);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: var(--lh-title);
 }
 .comms-traffic-stats em {
   color: var(--muted);
@@ -839,7 +839,7 @@
   font-family: var(--mono);
   font-size: var(--fs-micro);
   letter-spacing: 0.04em;
-  line-height: 1.1;
+  line-height: var(--lh-micro);
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;

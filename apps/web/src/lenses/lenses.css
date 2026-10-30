@@ -51,7 +51,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   color: var(--fg-2);
 }
 .map-lens > header {
@@ -75,11 +75,11 @@
 }
 .map-lens-section > p {
   margin: var(--sp-1) 0 0;
-  line-height: 1.45;
+  line-height: var(--lh);
 }
 .map-lens header p {
   margin: var(--sp-1) 0 0;
-  line-height: 1.45;
+  line-height: var(--lh);
 }
 .map-lens-section {
   padding: var(--sp-2) var(--sp-3);
@@ -189,7 +189,7 @@
   margin-top: var(--sp-2);
   padding: 0;
   border-bottom: 0;
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-s) var(--mono);
   color: var(--fg-2);
 }
 .map-conflict-detail h3 {

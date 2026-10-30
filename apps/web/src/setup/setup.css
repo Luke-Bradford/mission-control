@@ -317,7 +317,7 @@
 .repo-card-title span {
   float: right;
   font-size: var(--fs-title);
-  line-height: var(--lh-micro);
+  line-height: var(--lh-title);
 }
 
 .repo-fields,
@@ -551,6 +551,9 @@
   grid-template-columns: repeat(6, 170px);
   gap: var(--sp-6);
   min-width: 1200px;
+  /* room under the steps for the routes and the FLIGHT box, drawn 320px tall from the top */
+  min-height: 320px;
+  align-content: start;
   padding: var(--sp-4) 0 var(--sp-7);
 }
 

@@ -11,7 +11,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   background: var(--bg);
-  font: var(--fs-s) / 1.6 var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 
 /* a row is transparent to the grid: every number shares one column, each beside its own line */
