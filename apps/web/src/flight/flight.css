@@ -887,7 +887,7 @@ button.flight-link:hover {
   position: relative;
   padding: 9px 10px;
   color: var(--fg-2);
-  font: 600 11px / 1.2 var(--mono);
+  font: 600 var(--fs-s) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-decoration: none;
   text-transform: uppercase;
@@ -937,6 +937,7 @@ button.flight-link:hover {
 }
 
 .flight-note-heading h3 a {
+  font-size: var(--fs-s);
   color: var(--fg);
   text-decoration: none;
 }
@@ -959,9 +960,11 @@ button.flight-link:hover {
 }
 
 .flight-markdown-source summary {
-  padding-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--muted);
-  font: 600 11px / 1.2 var(--mono);
+  font: 600 var(--fs-s) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;

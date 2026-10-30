@@ -1,8 +1,11 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-s);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
