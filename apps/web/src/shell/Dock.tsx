@@ -301,7 +301,7 @@ export function FlightChat({
         onScroll={onScroll}
       >
         {hasMore && (
-          <button type="button" className="ghost sm dolder" disabled={loading} onClick={load}>
+          <button type="button" className="sm dolder" disabled={loading} onClick={load}>
             {loading ? "Loading older…" : "Load older"}
           </button>
         )}

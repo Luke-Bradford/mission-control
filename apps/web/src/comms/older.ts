@@ -10,6 +10,17 @@ export interface CommsPage {
   inboxHasMore?: boolean;
 }
 
+interface Paging {
+  path: string | null;
+  older: CommsMessage[];
+  /** What the last older page said; null before any page was loaded. */
+  hasMore: boolean | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const NONE: Paging = { path: null, older: [], hasMore: null, loading: false, error: null };
+
 export interface OlderMessages {
   /** The older pages loaded so far, then the live newest page. */
   messages: CommsMessage[];
@@ -34,28 +45,47 @@ export function useOlderMessages(
   liveHasMore: boolean,
   field: "messages" | "inbox",
 ): OlderMessages {
-  const [older, setOlder] = useState<CommsMessage[]>([]);
-  const [olderHasMore, setOlderHasMore] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // What was loaded or failed belongs to one route; another route starts clean, and a reply for
+  // a route that is no longer shown is dropped.
+  const [state, setState] = useState<Paging>(NONE);
+  const cur = path !== null && state.path === path ? state : NONE;
   // Stable while nothing changes: effects keyed on the messages must not run on every render.
   const messages = useMemo(() => {
-    if (older.length === 0) return live;
+    if (cur.older.length === 0) return live;
     const liveIds = new Set(live.map((m) => m.id));
-    return [...older.filter((m) => !liveIds.has(m.id)), ...live];
-  }, [older, live]);
+    return [...cur.older.filter((m) => !liveIds.has(m.id)), ...live];
+  }, [cur.older, live]);
   const load = () => {
     const oldest = messages[0];
-    if (path === null || oldest === undefined || loading) return;
-    setLoading(true);
-    setError(null);
+    if (path === null || oldest === undefined || cur.loading) return;
+    setState({ ...cur, path, loading: true, error: null });
     apiGet<CommsPage>(olderPath(path, oldest.id))
-      .then((page) => {
-        setOlder((prev) => [...(page[field] ?? []), ...prev]);
-        setOlderHasMore((field === "inbox" ? page.inboxHasMore : page.hasMore) ?? false);
-      })
-      .catch(() => setError("Could not load older messages."))
-      .finally(() => setLoading(false));
+      .then((page) =>
+        setState((prev) =>
+          prev.path === path
+            ? {
+                path,
+                older: [...(page[field] ?? []), ...prev.older],
+                hasMore: (field === "inbox" ? page.inboxHasMore : page.hasMore) ?? false,
+                loading: false,
+                error: null,
+              }
+            : prev,
+        ),
+      )
+      .catch(() =>
+        setState((prev) =>
+          prev.path === path
+            ? { ...prev, loading: false, error: "Could not load older messages." }
+            : prev,
+        ),
+      );
   };
-  return { messages, hasMore: olderHasMore ?? liveHasMore, loading, error, load };
+  return {
+    messages,
+    hasMore: cur.hasMore ?? liveHasMore,
+    loading: cur.loading,
+    error: cur.error,
+    load,
+  };
 }

@@ -608,7 +608,34 @@ describe("Comms routes", () => {
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });
-    expect((await within(nav).findByTitle("7 messages")).textContent).toBe("7");
+    expect((await within(nav).findByTitle("7 messages with its contacts")).textContent).toBe("7");
+  });
+
+  it("shows no all-messages total for a long history, which the first page cannot give", async () => {
+    const page = Array.from({ length: 50 }, (_, i) => stored(`comms:${i}`, `msg ${i}`, NOW - i));
+    stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: page,
+        inbox: [],
+        hasMore: true,
+        contacts: [{ id: "beta", count: 60, unread: 0, lastMessage: page[0] }],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "agent", agentId: "alpha" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    const all = await screen.findByRole("button", { name: /^All messages/ });
+    expect(all.textContent).toBe("All messages");
+    expect(screen.getByRole("button", { name: "Load older" })).toBeTruthy();
   });
 
   it("opens on the nav summaries and fetches only the selected conversation's messages", async () => {

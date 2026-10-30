@@ -256,7 +256,7 @@ function MessagePane({
       <div className="comms-message-stack">
         {older?.hasMore && (
           <div className="comms-older">
-            <button type="button" className="ghost" disabled={older.loading} onClick={older.load}>
+            <button type="button" disabled={older.loading} onClick={older.load}>
               {older.loading ? "Loading older…" : "Load older"}
             </button>
           </div>
@@ -535,12 +535,7 @@ function StoredContacts({
         className={view.kind === "agent" ? "on" : ""}
         onClick={() => navigate(commsAgentPath(agentId))}
       >
-        All messages{" "}
-        <small>
-          {data?.messages?.length
-            ? data.messages.length
-            : (data?.contacts ?? []).reduce((n, c) => n + c.count, 0)}
-        </small>
+        All messages
       </button>
       {(data?.contacts ?? []).map((contact) => (
         <button

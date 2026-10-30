@@ -31,7 +31,8 @@ export function AgentNavRow({
   onNavigate: (path: string) => void;
 }) {
   const data = useResource<CommsAgentResponse>(RESOURCES.commsNav(row.id)).data;
-  // The nav row reads counts, not messages: the conversations' totals.
+  // The nav row reads counts, not messages: what its contact conversations hold (the crew
+  // channel is not among them).
   const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
   const unread = data?.unread ?? 0;
   const direct = data?.directUnread ?? 0;
@@ -49,7 +50,10 @@ export function AgentNavRow({
         <small>{`${commsAgentRole(row)} · ${status.label.toLowerCase()}`}</small>
       </span>
       <span className="comms-nav-counts">
-        <small className={total === 0 ? "zero" : undefined} title={plural(total, "message")}>
+        <small
+          className={total === 0 ? "zero" : undefined}
+          title={`${plural(total, "message")} with its contacts`}
+        >
           {total}
         </small>
         <CountBadges unread={unread} mentions={mentions} direct={direct} />
