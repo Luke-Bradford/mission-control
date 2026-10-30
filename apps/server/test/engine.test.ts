@@ -2451,6 +2451,53 @@ describe("boot", () => {
   });
 });
 
+describe("tick snapshots", () => {
+  it("reads pull requests once per repo and notes once per tick", async () => {
+    setPr();
+    setLoop({ phase: "review", prNumber: 12 });
+    const pullRequests = vi.spyOn(store, "pullRequests");
+    const notes = vi.spyOn(store, "notes");
+
+    await h.engine.tick();
+
+    expect(pullRequests).toHaveBeenCalledTimes(1);
+    expect(notes).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a reconcile outside a tick on fresh PR rows", async () => {
+    setPr({ ci: "pending" });
+    setLoop({ phase: "review", prNumber: 12 });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let refilling = false;
+    h.engine.stop();
+    h.engine = h.make({
+      refillQueues: async () => {
+        refilling = true;
+        await held;
+      },
+    });
+    h.engine.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const pullRequests = vi.spyOn(store, "pullRequests");
+    const tick = h.engine.tick();
+    try {
+      await vi.waitFor(() => expect(refilling).toBe(true));
+      const readsDuringTick = pullRequests.mock.calls.length;
+      setPr({ ci: "passing" });
+
+      await h.engine.reconcileRepo(REPO);
+
+      expect(pullRequests.mock.calls.length).toBeGreaterThan(readsDuringTick);
+    } finally {
+      release();
+      await tick;
+    }
+  });
+});
+
 describe("FLIGHT settles a ruling", () => {
   /** The author ruled on the CI failure on SHA: parked as `ruling`, PR 12 open with head SHA. */
   async function ruled(): Promise<void> {
@@ -3266,6 +3313,30 @@ describe("the engine runs reviews", () => {
     expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
     await vi.waitFor(() => expect(h.updates).toHaveLength(1));
     expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
+  });
+
+  it("updates before review when the merged predecessor run has ended", async () => {
+    h.touchesByRun = {
+      [RUN]: ["packages/core/src/guard.ts"],
+      [RUN2]: ["packages/core/src/guard.ts"],
+    };
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    const first = need(store.run(RUN));
+    store.upsertRun({ ...first, endedAt: clock - 1000 });
+    clock += 5000;
+    h.tip = SHA_C;
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
   });
 
   it("keeps a mergeable head queued until it includes the older merge", async () => {

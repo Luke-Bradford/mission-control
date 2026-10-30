@@ -554,9 +554,10 @@
   min-width: 0;
   grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
   gap: 0 var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
+  padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
-  height: 34px;
+  align-items: center;
+  height: calc(var(--sp-6) + var(--sp-2));
   line-height: var(--lh);
 }
 
@@ -595,25 +596,47 @@
 #agentsList .state-cell,
 #agentsList .ticket-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-}
-
-#agentsList .work-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
 }
 
+#agentsList .agent-identity > *,
 #agentsList .ticket-cell > * {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 
-#agentsList .agent-identity > :nth-child(2)::before {
-  content: none;
+#agentsList .agent-identity > :first-child,
+#agentsList .state-cell > *,
+#agentsList .ticket-cell .need,
+#agentsList .ticket-cell .needctl {
+  flex: none;
 }
 
-#agentsList .agent-identity > :nth-child(2) {
-  padding-left: var(--sp-4);
+#agentsList .ticket-cell > .ellip:first-child {
+  flex: 1 1 0;
+}
+
+/* the need text takes what the title and controls leave; its button and the controls never shrink */
+#agentsList .ticket-cell .need {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart > .ellip {
+  flex: 1 1 0;
+  min-width: 0;
+  contain: inline-size;
 }
 
 #agentsList .agent-cli {
@@ -694,7 +717,7 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
+    grid-template-columns: 100px 90px 80px 176px 64px 50px 44px 46px;
     column-gap: var(--sp-1);
   }
 }
@@ -1327,4 +1350,33 @@
     grid-column: 4;
     flex-wrap: wrap;
   }
+}
+
+/* a parked review's waiver takes the step label's line, so the cell stays within its row */
+#agentsList .loopstep .acts:empty {
+  display: none;
+}
+
+#agentsList .loopstep .acts,
+.waive-compact {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#agentsList .loopstep:has(.acts > *) > .ellip {
+  display: none;
+}
+
+.waive-compact > button {
+  flex: none;
+}
+
+.waive-compact > select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--sp-5);
 }

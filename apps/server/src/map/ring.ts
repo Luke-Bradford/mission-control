@@ -20,7 +20,6 @@ import { SeatDiff } from "./diff.ts";
 /** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
 const KEEP_MS = MAP_RECENT_MS;
 const POLL_MS = 1000;
-const IDLE_POLL_MS = 5000;
 type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
@@ -144,7 +143,10 @@ export class CallRing {
     if (first) this.wake?.();
     return () => {
       listeners.delete(fn);
-      if (!listeners.size) this.listeners.delete(repoId);
+      if (!listeners.size) {
+        this.listeners.delete(repoId);
+        this.wake?.();
+      }
     };
   }
 
@@ -234,21 +236,18 @@ export class CallRing {
     return [...seats].map((seat) => ({ seat, scope: { modified: this.modified(seat, repoId) } }));
   }
 
-  /** Polls every second while a map client is connected, every five seconds otherwise. */
+  /** Polls every second while a map client is connected. */
   start(): () => void {
-    this.poll();
     let timer: NodeJS.Timeout | undefined;
     let stopped = false;
     const schedule = () => {
       clearTimeout(timer);
       if (stopped) return;
-      timer = setTimeout(
-        () => {
-          this.poll();
-          schedule();
-        },
-        this.hasClients() ? POLL_MS : IDLE_POLL_MS,
-      );
+      if (!this.hasClients()) return;
+      timer = setTimeout(() => {
+        this.poll();
+        schedule();
+      }, POLL_MS);
       timer.unref();
     };
     this.wake = schedule;

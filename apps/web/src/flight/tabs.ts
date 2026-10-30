@@ -1,4 +1,5 @@
 import { NEEDS_YOU_PANEL } from "../router.ts";
+import { DECISION_ANCHOR_PREFIX } from "./conversation.ts";
 
 /** The FLIGHT page's tabs, each named for the question the operator brings to it. */
 export const FLIGHT_TABS = ["needs", "did", "crew", "knows"] as const;
@@ -38,5 +39,6 @@ export function tabForHash(hash: string): FlightTab {
   const id = hash.replace(/^#/, "");
   if (id.startsWith("flight-note-")) return "knows";
   if (id.startsWith("draft-")) return "needs";
+  if (id.startsWith(DECISION_ANCHOR_PREFIX)) return "did";
   return HASH_TAB[id] ?? "needs";
 }

@@ -49,8 +49,12 @@ import {
   READONLY_TOOLS,
   SCRATCH_TOOLS,
   SEAT_STATES,
+  SKILL_FILE_MAX,
+  SKILLS_DIR,
   STOP_GRACE_MS,
   seatDef,
+  skillFileProblem,
+  skillPluginManifest,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
 
@@ -120,9 +124,24 @@ describe("crewCliArgs", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
-    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash");
+    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash");
+    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill");
+  });
+
+  it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      const a = crewCliArgs({ ...base, mode, pluginDir: "/data/crew/skills-abc" });
+      expect(a[a.indexOf("--plugin-dir") + 1]).toBe("/data/crew/skills-abc");
+      expect(count(a, "--plugin-dir")).toBe(1);
+      // the flag removes the Skill tool; the plugin carries skills only, so nothing else loads
+      expect(a).not.toContain("--disable-slash-commands");
+      expect(a[a.indexOf("--tools") + 1].split(",")).toContain("Skill");
+      const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
+      expect(allowed).toContain("Skill");
+    }
+    expect(crewCliArgs(base)).not.toContain("--plugin-dir");
+    expect(CREW_ISOLATION_FLAGS).toEqual(["--restricted", "--strict-mcp-config"]);
   });
 
   it("denies git's --output file writers", () => {
@@ -783,7 +802,7 @@ describe("scratch mode", () => {
     ]) {
       expect(allowed).not.toContain(t);
     }
-    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash");
+    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
   });
 
   it("scratch allows exactly its tools, Edit and Write anchored to the worktree", () => {
@@ -796,6 +815,7 @@ describe("scratch mode", () => {
       "Write(//w/retro-1-review-3/**)",
       "TodoWrite",
       "Bash",
+      "Skill",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",
@@ -1250,5 +1270,49 @@ describe("the read-only text", () => {
   it("is one string: the guard rule and the commit tool's refusal both build on it", () => {
     expect(GUARD_RULES["read-only"]).toBe(READ_ONLY_CANNOT_WRITE);
     expect(MC_READ_ONLY_COMMIT).toBe(`${READ_ONLY_CANNOT_WRITE}: commit is for writer seats.`);
+  });
+});
+
+describe("skill files a seat's plugin may carry (#1051)", () => {
+  const ok = (path: string, text = "# Skill\n", mode = "100644") =>
+    skillFileProblem(path, mode, Buffer.from(text));
+
+  it("takes SKILL.md and plain text files under a skill's folder", () => {
+    expect(SKILLS_DIR).toBe(".claude/skills");
+    expect(ok(".claude/skills/hud-design/SKILL.md")).toBeNull();
+    expect(ok(".claude/skills/hud-design/notes/checklist.md")).toBeNull();
+    expect(ok(".claude/skills/plain-talk/examples.txt")).toBeNull();
+    expect(ok(".claude/skills/x/data.json", "{}")).toBeNull();
+  });
+
+  it.each([
+    ["a script", ".claude/skills/x/run.sh", "#!/bin/sh\n", "100644"],
+    ["an executable bit", ".claude/skills/x/notes.md", "hi", "100755"],
+    ["a symlink", ".claude/skills/x/notes.md", "../../../etc/passwd", "120000"],
+    ["a submodule", ".claude/skills/x", "", "160000"],
+    ["a binary", ".claude/skills/x/pic.md", "a\u0000b", "100644"],
+    ["bytes that are not UTF-8", ".claude/skills/x/n.txt", "\ufffd", "100644"],
+    ["a loose file", ".claude/skills/README.md", "hi", "100644"],
+    ["a hidden folder", ".claude/skills/x/.hooks/SKILL.md", "hi", "100644"],
+    ["a path outside skills", ".claude/settings.json", "{}", "100644"],
+    ["a dot-dot step", ".claude/skills/x/../y/SKILL.md", "hi", "100644"],
+  ])("refuses %s", (_what, path, text, mode) => {
+    const raw = text === "\ufffd" ? Buffer.from([0xff, 0xfe]) : Buffer.from(text);
+    expect(skillFileProblem(path, mode, raw)).toEqual(expect.any(String));
+  });
+
+  it("refuses a file over the size cap", () => {
+    const big = Buffer.alloc(SKILL_FILE_MAX + 1, "a");
+    expect(skillFileProblem(".claude/skills/x/SKILL.md", "100644", big)).toMatch(/too big/);
+  });
+
+  it("the plugin manifest names the repo and carries nothing executable", () => {
+    const m = JSON.parse(skillPluginManifest("Luke-Bradford/mission-control"));
+    expect(m).toEqual({
+      name: "mission-control",
+      description: "Skills from Luke-Bradford/mission-control's .claude/skills",
+    });
+    expect(JSON.parse(skillPluginManifest("My Repo!!")).name).toBe("my-repo");
+    expect(JSON.parse(skillPluginManifest("///")).name).toBe("repo");
   });
 });

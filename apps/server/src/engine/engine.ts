@@ -10,6 +10,7 @@
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   AWAY_BUG_VERIFIED,
@@ -457,6 +458,19 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatuses = new Map<string, string>();
   /** The last failure logged for each run's review status, so a lasting failure is logged once. */
   const reviewStatusFailures = new Map<string, string>();
+  /** Tick-local snapshots avoid repeated whole-table reads without leaking to external reconciles. */
+  const tickCache = new AsyncLocalStorage<{
+    prs: Map<RepoId, ReturnType<Store["pullRequests"]>>;
+    notes: ReturnType<Store["notes"]>;
+  }>();
+  const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
+    const cache = tickCache.getStore();
+    const cached = cache?.prs.get(repoId);
+    if (cached !== undefined) return cached;
+    const rows = store.pullRequests(repoId);
+    cache?.prs.set(repoId, rows);
+    return rows;
+  };
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -562,7 +576,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
-    const prs = store.pullRequests(run.repoId);
+    const prs = prsFor(run.repoId);
     if (loop.prNumber !== null) return prs.find((p) => p.number === loop.prNumber) ?? null;
     if (run.branch === null) return null;
     return (
@@ -601,7 +615,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** A green head without any evidence needs one prompt, then operator attention. */
-  async function watchGreenEvidence(run: Run): Promise<void> {
+  async function watchGreenEvidence(run: Run, notes = store.notes()): Promise<void> {
     const loop = run.loop;
     if (!loop || run.endedAt !== null) return;
     const prefix = `evidence-remind:${run.id}:`;
@@ -611,7 +625,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const green = pr?.state === "open" && pr.ci === "passing" && !!head;
     const evidence = store.evidenceCount(run.id);
     const currentNote = head ? evidenceNoteKey(run.id, head) : null;
-    for (const note of store.notes()) {
+    for (const note of notes) {
       if (
         note.runId === run.id &&
         note.clearedAt === null &&
@@ -627,7 +641,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const remindedAt = claimed[remindKey];
     if (remindedAt !== undefined) {
       if (now() - remindedAt < EVIDENCE_REMIND_MS) return;
-      if (store.notes().some((n) => n.key === evidenceNoteKey(run.id, head))) return;
+      if (notes.some((n) => n.key === evidenceNoteKey(run.id, head))) return;
       store.raiseNote({
         key: evidenceNoteKey(run.id, head),
         kind: "flag",
@@ -689,9 +703,12 @@ export function createEngine(deps: EngineDeps): Engine {
   function noteHardRules(repoId: RepoId, set: boolean): void {
     if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return;
     const key = hardRulesUnsetNoteKey(repoId);
-    const open = store.notes().some((n) => n.key === key);
+    const cache = tickCache.getStore();
+    const notes = cache?.notes ?? store.notes();
+    const open = notes.some((n) => n.key === key);
     if (set && open) {
       store.clearNote(key, now());
+      if (cache) cache.notes = cache.notes.filter((n) => n.key !== key);
       bus.emit("attention");
     } else if (!set && !open) {
       store.raiseNote({
@@ -702,6 +719,17 @@ export function createEngine(deps: EngineDeps): Engine {
         repoId,
         text: hardRulesUnsetText(repoId),
         at: now(),
+      });
+      cache?.notes.push({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId,
+        text: hardRulesUnsetText(repoId),
+        at: now(),
+        clearedAt: null,
+        dismissedAt: null,
       });
       bus.emit("attention");
     }
@@ -1870,9 +1898,9 @@ export function createEngine(deps: EngineDeps): Engine {
     return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
   }
 
-  async function sweepNotes(): Promise<void> {
+  async function sweepNotes(notes = store.notes()): Promise<void> {
     const at = now();
-    for (const n of store.notes()) {
+    for (const n of notes) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
       if (n.key === `${run.id}:file-minor`) continue;
@@ -1976,17 +2004,14 @@ export function createEngine(deps: EngineDeps): Engine {
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
     const author = store.run(row.authorRunId);
     if (author === null) return true;
-    const ownAuthor = store
-      .pullRequests(author.repoId)
-      .find((pr) => pr.number === row.prNumber)?.author;
-    const older = store
-      .pullRequests(author.repoId)
-      .filter(
-        (pr) =>
-          pr.state !== "closed" &&
-          pr.number < row.prNumber &&
-          !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
-      );
+    const prs = prsFor(author.repoId);
+    const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
+    const older = prs.filter(
+      (pr) =>
+        pr.state !== "closed" &&
+        pr.number < row.prNumber &&
+        !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
+    );
     if (older.length === 0) return false;
     try {
       const rules = await rulesFor(author.repoId);
@@ -2016,11 +2041,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return true;
       const snapshots = new Map<number, string>();
-      const runs = store.runsActiveSince(0);
       const candidates = older.flatMap((pr) => {
-        const run = runs.find(
-          (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
-        );
+        const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
         return run === undefined ? [] : [{ pr, run }];
       });
       const terminalKey = (number: number) => `review-merged:${author.repoId}:${number}`;
@@ -2384,20 +2406,27 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const runs = loopRuns();
-      await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-      await Promise.all(
-        store
-          .runsActiveSince(now())
-          .filter((r) => r.loop !== null && r.loop !== undefined)
-          .map(watchGreenEvidence),
-      );
-      await Promise.all(runs.map((r) => reconcileRun(r.id)));
-      await refreshRuleNotes(runs);
-      await sweepNotes();
-      untakeStale();
-      await takeForSeats();
-      await kickReviews();
+      const cache = {
+        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
+        notes: store.notes(),
+      };
+      await tickCache.run(cache, async () => {
+        const runs = loopRuns();
+        const notes = cache.notes;
+        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
+        await Promise.all(
+          store
+            .runsActiveSince(now())
+            .filter((r) => r.loop !== null && r.loop !== undefined)
+            .map((run) => watchGreenEvidence(run, notes)),
+        );
+        await Promise.all(runs.map((r) => reconcileRun(r.id)));
+        await refreshRuleNotes(runs);
+        await sweepNotes(notes);
+        untakeStale();
+        await takeForSeats();
+        await kickReviews();
+      });
     },
 
     reconcileRun,
