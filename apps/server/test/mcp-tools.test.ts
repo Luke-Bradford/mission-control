@@ -2482,6 +2482,21 @@ describe("push and draft_pr", () => {
         expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
       });
 
+      it("names a chained invocation and its numeric exit on the rejected head", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({
+          runId: RUN,
+          command: LINT,
+          invokedCommand: `${LINT} && ${TYPES}`,
+          headSha: sha,
+          ok: false,
+          exitCode: 2,
+          at: NOW,
+        });
+        const r = await push(gated());
+        expect(r.text).toContain(`recorded: ${LINT} && ${TYPES} exited 2 on ${sha.slice(0, 7)}`);
+      });
+
       it("ignores another run's records", async () => {
         const sha = await commitOk("apps/a.ts", "a2\n");
         store.addCheckRun({ runId: "other", command: LINT, headSha: sha, ok: true, at: NOW });

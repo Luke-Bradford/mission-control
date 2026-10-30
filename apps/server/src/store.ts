@@ -4793,14 +4793,29 @@ export class Store {
     runId: string,
     command: string,
     headSha: string,
-  ): { ok: boolean; at: number } | null {
+  ): {
+    headSha: string;
+    invokedCommand: string;
+    ok: boolean;
+    exitCode: number | null;
+    at: number;
+  } | null {
     const r = this.db
       .prepare(
-        `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?
+        `SELECT head_sha, invoked_command, ok, exit_code, at FROM check_runs
+         WHERE run_id = ? AND command = ? AND head_sha = ?
          ORDER BY at DESC, id DESC LIMIT 1`,
       )
       .get(runId, command, headSha) as Row | undefined;
-    return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
+    return r === undefined
+      ? null
+      : {
+          headSha: r.head_sha as string,
+          invokedCommand: (r.invoked_command as string | null) ?? command,
+          ok: r.ok === 1,
+          exitCode: (r.exit_code as number | null) ?? null,
+          at: r.at as number,
+        };
   }
 
   /** The newest result this run recorded for `command`, regardless of commit. */

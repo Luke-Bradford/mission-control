@@ -700,7 +700,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
           unmet.push({
             command,
             state: "failed",
-            recorded: { headSha: sha, invokedCommand: command, exitCode: null, ...last },
+            recorded: last,
           });
       }
       return unmet;
