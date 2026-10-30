@@ -50,6 +50,7 @@ export const FLIGHT_DECISION_KINDS = [
   "memory",
   "promote",
   "end",
+  "pause",
   "ticket",
   "comment",
   "close",

@@ -70,6 +70,7 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "rerun_ci",
   "edit_card",
   "dismiss_item",
+  MC_TOOL_NAMES.resumeSeat,
   MC_TOOL_NAMES.ghRead,
   MC_TOOL_NAMES.closeTicket,
   MC_TOOL_NAMES.addControllerCheck,

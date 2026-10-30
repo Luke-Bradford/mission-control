@@ -235,6 +235,7 @@ import {
   type ProfileOverride,
   parkNotYoursText,
   passNeedsBriefText,
+  pauseWithout,
   planAlreadyText,
   plannerStartedDecision,
   planUnclosedText,
@@ -301,6 +302,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
+import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -316,7 +318,14 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
+import {
+  type CcConfig,
+  configuredAgents,
+  crewSeatDef,
+  flightPowersOf,
+  SEAT_ID,
+} from "../config.ts";
+import { pausedSeat, writeCrewPause } from "../crew-pause.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -394,7 +403,10 @@ export interface FlightToolsDeps {
   store: Store;
   bus: ChangeBus;
   /** `endRun` ends a run on its seat; `endAsideRun` one set aside in review, which holds no seat. */
-  supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun" | "endAsideRun">;
+  supervisor: Pick<
+    Supervisor,
+    "message" | "busy" | "startRun" | "endRun" | "endAsideRun" | "resumeRun" | "sessionAlive"
+  >;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
   lockState?: () => TestLockState;
@@ -2894,6 +2906,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     labels: z.array(text(100)).max(100).optional(),
     basis: basisArg,
   });
+  const ResumeSeatArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
 
   /** Serialise the writes with accept_ruling, so all reruns share the hourly budget. */
   function superTool<S extends z.ZodType<{ basis: string }>>(
@@ -2907,6 +2920,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
+    options: { engine?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -2922,7 +2936,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (!repo) return fail(READ_NO_REPO);
           const denied = requirePowers(config, repo.id, "superuser");
           if (denied) return denied;
-          if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
+          if (options.engine !== false && deps.engine?.status().on !== true)
+            return fail(GITHUB_WRITES_OFF);
           if (activeAway(store, now(), config.operator.timezone) && !awayLocalTools.has(name))
             return fail(AWAY_WRITES_REFUSED);
           const result = await act(c.args, repo, ctx);
@@ -2967,6 +2982,72 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.resumeSeat,
+      "Resume a stopped crew seat and its unfinished run, while preserving budget, account and Away limits.",
+      ResumeSeatArgs,
+      "pause",
+      async (a) => {
+        const cfg = configuredAgents(config).find(
+          (agent) => agent.kind === "crew" && agent.id === a.seat,
+        );
+        if (cfg === undefined) return fail(`${a.seat} is not a crew seat.`);
+        const row = store.seatSession(a.seat);
+        const run = row?.runId === null || row === null ? null : store.run(row.runId);
+        const at = now();
+        if (run !== null && run.endedAt === null) {
+          const accountId = runAccountId(store, run.id, cfg.accountId);
+          if (run.loop?.parked?.kind === "budget") return fail("Run is held by its budget.");
+          if (accountAtStop(config, store, accountId, at))
+            return fail(accountStoppedText(seatCallSign(a.seat), accountId));
+          if (
+            awayQuotaUnknown(config, store, accountId, at) ||
+            awayQuotaReserve(config, store, accountId, at)
+          )
+            return fail(AWAY_QUOTA_REFUSED);
+        }
+        if (run !== null && run.endedAt === null && row !== null && row.state === "stopped")
+          store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
+        const afterStopClear = store.seatSession(a.seat);
+        if (run !== null && run.endedAt === null && held(run)) {
+          if (row?.state === "stopped") store.setSeatSession(row);
+          return fail("Run is held.");
+        }
+        if (
+          run === null ||
+          run.endedAt !== null ||
+          afterStopClear === null ||
+          deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
+          afterStopClear.state === "running"
+        )
+          return fail(`${a.seat} is neither stopped, paused nor waiting to resume.`);
+        const pause = pausedSeat(store, a.seat);
+        if (pause !== null) writeCrewPause(store, pauseWithout(pause, a.seat), at);
+        try {
+          await deps.supervisor.resumeRun(run.id);
+        } catch {
+          // The supervisor records the failure and ends the run when recovery cannot start it.
+        }
+        const after = store.seatSession(a.seat);
+        const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
+        if (!live) {
+          if (store.run(run.id)?.endedAt === null) {
+            if (pause !== null) writeCrewPause(store, pause, at);
+            if (row?.state === "stopped") store.setSeatSession(row);
+          }
+          const outcome =
+            store.run(run.id)?.endedAt !== null
+              ? "ended after the failed resume"
+              : "is not running";
+          return fail(`${seatCallSign(a.seat)}'s run ${outcome}.`);
+        }
+        bus.emit("settings");
+        bus.emit("agents");
+        return { text: `Resumed ${seatCallSign(a.seat)}'s run.` };
+      },
+      z.toJSONSchema(ResumeSeatArgs),
+      { engine: false },
+    ),
     superTool(
       MC_TOOL_NAMES.mergePr,
       "Clear an awaiting-flight run PR in your lane; the engine merges it. Workflows, repo rules and operator holds remain protected.",
@@ -3718,6 +3799,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.flightState,
     MC_TOOL_NAMES.screenshotHud,
     MC_TOOL_NAMES.endRun,
+    MC_TOOL_NAMES.resumeSeat,
     MC_TOOL_NAMES.dismissItem,
     MC_TOOL_NAMES.holdPr,
     MC_TOOL_NAMES.briefItem,

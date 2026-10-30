@@ -258,6 +258,8 @@ let screenshotCalls: string[];
 let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
+let resumeCalls: string[];
+let resumeImpl: (runId: string) => Promise<void>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -360,6 +362,8 @@ beforeEach(() => {
     shotsSaved.push(png);
     return "a".repeat(32);
   };
+  resumeCalls = [];
+  resumeImpl = async () => {};
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
@@ -406,6 +410,10 @@ beforeEach(() => {
       startRun: async (...a) => {
         startCalls.push(a);
         return startImpl();
+      },
+      resumeRun: async (runId) => {
+        resumeCalls.push(runId);
+        await resumeImpl(runId);
       },
     },
     engine: {
@@ -564,6 +572,111 @@ const named = (name: string): McTool => {
   return t;
 };
 const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
+
+describe("resume_seat", () => {
+  it("does not report a stopped seat's held run as resumed when resumeRun is a no-op", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("is not running");
+    expect(resumeCalls).toEqual(["r-guido"]);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+  });
+
+  it("clears a stopped seat before resuming, and reports success only once it is live", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      expect(store.seatSession("guido-1")?.state).toBe("idle");
+      store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    };
+
+    await expect(
+      call("resume_seat", { seat: "guido-1", basis: "continue the run" }),
+    ).resolves.toEqual({
+      text: "Resumed GUIDO-1's run.",
+    });
+  });
+
+  it("reports a failed resume that ended its run", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "error",
+        reason: "resume failed",
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.text).toContain("ended after the failed resume");
+    expect(result.text).not.toContain("nothing was changed");
+  });
+
+  it.each(["budget", "account", "away quota unknown", "away quota reserve"] as const)(
+    "refuses a %s limit before resuming",
+    async (limit) => {
+      need(cfg.repos[0]).flightPowers = "superuser";
+      live("guido-1", "r-guido");
+      store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+      if (limit === "budget")
+        store.setRunLoop("r-guido", {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "budget", ended: false },
+        });
+      if (limit === "account")
+        store.addUsage({
+          accountId: "claude-main",
+          window: "5h",
+          at: NOW,
+          pct: 96,
+          resetAt: NOW + 86_400_000,
+          source: "test",
+        });
+      if (limit.startsWith("away quota")) {
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        if (limit === "away quota reserve") {
+          store.addUsage({
+            accountId: "claude-main",
+            window: "5h",
+            at: NOW,
+            pct: 10,
+            resetAt: NOW + 86_400_000,
+            source: "test",
+          });
+          store.addUsage({
+            accountId: "claude-main",
+            window: "7d",
+            at: NOW,
+            pct: 70,
+            resetAt: NOW + 86_400_000,
+            source: "test",
+          });
+        }
+      }
+
+      const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(
+        limit === "budget" ? "budget" : limit === "account" ? "usage stop" : AWAY_QUOTA_REFUSED,
+      );
+      expect(resumeCalls).toEqual([]);
+      expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    },
+  );
+});
+
 const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   repoId: "mc",
   issueNumber: n,
@@ -625,7 +738,7 @@ const need = <T>(value: T | null | undefined): T => {
 };
 
 describe("tool list", () => {
-  it("adds the six tools, each shown only to a granted role", () => {
+  it("lists each tool and shows it only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
       "read_ticket",
@@ -649,6 +762,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "resume_seat",
       "merge_pr",
       "settle_park",
       "hold_pr",
