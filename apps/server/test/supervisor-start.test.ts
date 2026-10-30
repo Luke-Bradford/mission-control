@@ -90,6 +90,7 @@ import {
   crewMcpPath,
   crewPrBodyPath,
   crewPromptPath,
+  crewSkillsDir,
   crewTokenPath,
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
@@ -783,7 +784,15 @@ describe("startRun", () => {
     expect(allowed).toContain("Read");
     expect(readFileSync(join(cwd, ".claude/skills/gates/SKILL.md"), "utf8")).toBe(skill);
     expect(argv).toContain("--restricted");
-    expect(argv).toContain("--disable-slash-commands");
+    // the Skill tool needs the flag off; the repo's skills come as a hub-built plugin folder (#1051)
+    expect(argv).not.toContain("--disable-slash-commands");
+    expect(argv[argv.indexOf("--tools") + 1].split(",")).toContain("Skill");
+    expect(allowed).toContain("Skill");
+    const plugin = argv[argv.indexOf("--plugin-dir") + 1];
+    expect(plugin).toBe(crewSkillsDir(dbPath, runId));
+    expect(plugin.startsWith(cwd)).toBe(false);
+    expect(readFileSync(join(plugin, "skills/gates/SKILL.md"), "utf8")).toBe(skill);
+    expect(readdirSync(plugin).sort()).toEqual([".claude-plugin", "skills"]);
     expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
     expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
     expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
@@ -2437,6 +2446,27 @@ import(${JSON.stringify(fixture)});
       expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
         "# Mission Control work guidance (advice, not rules)",
       );
+  });
+
+  it("copies the repo's skills into the Codex seat's own skills folder (#1051)", async () => {
+    mkdirSync(join(clone, ".claude/skills/gates"), { recursive: true });
+    const skill = "---\nname: gates\ndescription: Check the work.\n---\nRun the checks.";
+    writeFileSync(join(clone, ".claude/skills/gates/SKILL.md"), skill);
+    writeFileSync(join(clone, ".claude/skills/gates/run.sh"), "#!/bin/sh\n");
+    mkdirSync(join(clone, ".claude/skills/plain"), { recursive: true });
+    writeFileSync(join(clone, ".claude/skills/plain/SKILL.md"), "Write plainly");
+    git(clone, "add", ".claude");
+    git(clone, "commit", "-qm", "Add skills");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    const { sup } = codex();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+    const spawn = recorded().find((m) => m.type === "spawn");
+    const skills = join(spawn.env.CODEX_HOME, "skills");
+    // `gates` holds a script, so the guard leaves it out whole; `plain` is plain text
+    expect(readdirSync(skills)).toEqual(["plain"]);
+    expect(readFileSync(join(skills, "plain/SKILL.md"), "utf8")).toBe("Write plainly");
   });
 
   it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
