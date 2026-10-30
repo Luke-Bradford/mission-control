@@ -23,6 +23,8 @@ import {
   lockBusyText,
   MC_TOOLS,
   MCP_PATH,
+  REREAD_MIN_BYTES,
+  type RunDigest,
   TEST_LOCK_UNAVAILABLE_TEXT,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
@@ -462,6 +464,96 @@ describe("POST /api/guard/check", () => {
     const refused = await check(tokA, bash("outside", "git -C .. log"));
     expect(reason(refused.body)).toBe(`${GUARD_RULES["git-env"]}: git directory outside worktree`);
     expect((await check(tokA, bash("inside", "git -C . log --oneline -3"))).body).toBe("{}");
+  });
+
+  describe("a second whole read of a large unchanged file", () => {
+    let big: string;
+    beforeEach(() => {
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: null,
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      big = join(dir, "big.ts");
+      writeFileSync(big, "x".repeat(REREAD_MIN_BYTES));
+    });
+    const digest = (compactions: number): RunDigest => ({
+      toolCalls: 0,
+      turns: 0,
+      lastEventAt: null,
+      model: null,
+      contextTokens: null,
+      contextWindow: null,
+      liveTool: null,
+      tools: {},
+      subagents: [],
+      minuteTokens: [],
+      turnUsage: [],
+      background: [],
+      compactions,
+    });
+    const read = (id: string, input: Record<string, unknown> = { file_path: big }) =>
+      check(tokA, pre(id, "Read", input));
+
+    it("refuses it with the earlier read, and counts the tokens saved", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      const second = await read("r2");
+      expect(reason(second.body)).toContain("r1");
+      expect(reason((await read("r3")).body)).toContain("r1");
+      store.setDigest("run-a", digest(0));
+      const saved = { count: 2, tokensSaved: 2 * (REREAD_MIN_BYTES / 4) };
+      expect(store.digest("run-a")?.rereads).toEqual(saved);
+      expect(store.digests(["run-a"]).get("run-a")?.rereads).toEqual(saved);
+      expect(store.runRead("run-a", big)?.toolUseId).toBe("r1");
+      expect(store.guardHitCount("run-a")).toBe(0);
+    });
+
+    it("refuses a whole cat or sed -n p of it too", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      expect(reason((await check(tokA, bash("c1", `cat ${big}`))).body)).toContain("r1");
+      expect(reason((await check(tokA, bash("c2", "sed -n p big.ts"))).body)).toContain("r1");
+    });
+
+    it("passes a range", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      expect((await read("r2", { file_path: big, offset: 10, limit: 20 })).body).toBe("{}");
+      expect((await check(tokA, bash("c1", "sed -n '10,20p' big.ts"))).body).toBe("{}");
+    });
+
+    it("passes a changed file, and refuses its next unchanged read", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      writeFileSync(big, "y".repeat(REREAD_MIN_BYTES + 5));
+      expect((await read("r2")).body).toBe("{}");
+      expect(reason((await read("r3")).body)).toContain("r2");
+    });
+
+    it("passes a file under the threshold and another run's read", async () => {
+      const small = join(dir, "small.ts");
+      writeFileSync(small, "x".repeat(REREAD_MIN_BYTES - 1));
+      expect((await read("s1", { file_path: small })).body).toBe("{}");
+      expect((await read("s2", { file_path: small })).body).toBe("{}");
+      expect((await read("r1")).body).toBe("{}");
+      store.setSeatSession({
+        seatId: "guido-2",
+        runId: null,
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      expect((await check(tokB, pre("b1", "Read", { file_path: big }))).body).toBe("{}");
+    });
+
+    it("passes after a compaction dropped the earlier read from context", async () => {
+      expect((await read("r1")).body).toBe("{}");
+      store.setDigest("run-a", digest(1));
+      expect((await read("r2")).body).toBe("{}");
+    });
   });
 
   it("serves the guard and MCP routes at the paths a seat is given", async () => {
@@ -979,6 +1071,22 @@ describe("hookMain", () => {
     });
   });
 
+  it("sends a Read's range as numbers", async () => {
+    await hookMain(
+      stdinFor({
+        tool_name: "Read",
+        tool_input: { file_path: "/w/a.ts", offset: 5, limit: "20" },
+      }),
+      [tokenFile, URL_OK],
+      answer(200, "{}"),
+    );
+    expect(JSON.parse(posts[0]?.body ?? "").tool_input).toEqual({
+      file_path: "/w/a.ts",
+      offset: 5,
+      limit: 20,
+    });
+  });
+
   it("turns a 1 MB Write's PreToolUse into a small request", async () => {
     const stdin = stdinFor({
       tool_name: "Write",
@@ -1171,6 +1279,10 @@ describe("hookMain", () => {
     [
       "a non-boolean run_in_background",
       stdinFor({ tool_input: { command: "x", run_in_background: "true" } }),
+    ],
+    [
+      "a non-numeric Read offset",
+      stdinFor({ tool_name: "Read", tool_input: { file_path: "/w/a", offset: "later" } }),
     ],
     ["an unknown event", stdinFor({ hook_event_name: "Stop" })],
   ])("fails closed, without posting, on stdin with %s", async (_n, stdin) => {

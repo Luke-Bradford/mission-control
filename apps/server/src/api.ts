@@ -212,6 +212,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
+import { rereadDenial } from "./guard/rereads.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -507,6 +508,8 @@ const GuardCheckBody = z.strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
     })
     .optional(),
 });
@@ -1711,6 +1714,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a large file this run already read whole, unchanged, is not given again
+          if (verdict.kind === "allow") {
+            const reread = rereadDenial(
+              store,
+              key,
+              store.seatSession(who.seatId)?.worktree ?? undefined,
+              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              now(),
+            );
+            if (reread !== null) return answer(reread);
+          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too

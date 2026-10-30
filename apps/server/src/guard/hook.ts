@@ -87,6 +87,15 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
       if (typeof raw[k] !== type) throw new Unusable();
       input[k] = raw[k];
     }
+    // a Read's range: a numeric string is a number to the CLI; anything else fails closed, since
+    // dropping it would make a range look like a whole-file read
+    for (const k of ["offset", "limit"]) {
+      const v = raw[k];
+      if (v === undefined) continue;
+      const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+      if (typeof n !== "number" || !Number.isFinite(n)) throw new Unusable();
+      input[k] = n;
+    }
     out.tool_input = input;
   }
   return { event: event as GuardHookEvent, body: JSON.stringify(out) };
