@@ -16,6 +16,7 @@ import {
 import { statNoted } from "./file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;
 export const COMMS_INBOX_PROMPT_ROWS = 40;
@@ -234,7 +235,7 @@ const transcripts = new Map<
 
 function transcript(path: string): ReturnType<typeof readStream> {
   try {
-    const { size, mtimeMs } = statNoted(path);
+    const { size, mtimeMs } = statNoted(transcriptFilePath(path));
     const cached = transcripts.get(path);
     const stream =
       cached?.size === size && cached.mtimeMs === mtimeMs

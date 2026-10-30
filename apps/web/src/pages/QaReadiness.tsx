@@ -5,14 +5,14 @@ import type {
   QaFindingView,
   RepoView,
 } from "@mc/core";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
-import { checkedHead, markChecked, undoChecked } from "../qa/checked.ts";
+import { checkedHead, markChecked, onCheckedChange, undoChecked } from "../qa/checked.ts";
 import { isOpenFinding, prVerdict } from "../qa/readiness.ts";
 import "./qa-readiness.css";
 
@@ -45,6 +45,8 @@ export function QaReadiness() {
     topic: "agents",
   });
   const [revision, setRevision] = useState(0);
+  // The command palette marks heads too; re-read when it does.
+  useEffect(() => onCheckedChange(() => setRevision((value) => value + 1)), []);
   const prs = useMemo(
     () =>
       prResources

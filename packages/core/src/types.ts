@@ -775,6 +775,13 @@ export interface MachineView {
   seats: number;
   /** The most seats in any one session. */
   perSessionMax: number;
+  transcripts: TranscriptFootprint | null;
+}
+
+export interface TranscriptFootprint {
+  totalBytes: number;
+  seats: { seatId: string; bytes: number; files: number }[];
+  oldestAt: number | null;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */

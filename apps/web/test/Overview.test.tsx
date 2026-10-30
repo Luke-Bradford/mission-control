@@ -17,6 +17,7 @@ import {
   SEAT_TURN_END_TEXT,
   SEAT_TURN_START_TEXT,
   type TestLockState,
+  type TranscriptFootprint,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
@@ -85,6 +86,7 @@ interface Data {
   /** The machine-capacity admission reason, as `/api/machine` sends it. */
   warning?: string | null;
   seats?: { maxSeats: number; seats: number; perSessionMax: number };
+  transcripts?: TranscriptFootprint | null;
   /** The activity feed, read at each fetch. */
   activityNow?: () => ActivityRow[];
   /** More routes, by "METHOD path". */
@@ -102,6 +104,7 @@ function stub(d: Data = {}) {
     "/api/machine": {
       latest: d.machine === undefined ? sample() : d.machine,
       warning: d.warning ?? null,
+      transcripts: d.transcripts,
       ...d.seats,
     },
     "/api/limits": d.limits ?? [],
@@ -1550,6 +1553,30 @@ describe("Machine panel: the test lock box", () => {
 });
 
 describe("Machine panel", () => {
+  it("shows the transcript footprint and each seat's files on hover", async () => {
+    stub({
+      transcripts: {
+        totalBytes: 12.3 * 2 ** 20,
+        oldestAt: NOW - 3 * HOUR,
+        seats: [{ seatId: "fao-1", bytes: 8 * 2 ** 20, files: 3 }],
+      },
+    });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    const row = await within(mach).findByText("Transcripts");
+    expect(row.parentElement?.textContent).toContain("12.3 MB");
+    expect(row.parentElement?.textContent).toContain("oldest 3 h ago");
+    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MB · 3 files");
+  });
+
+  it("leaves out the transcript footprint when the server has none", async () => {
+    stub({ transcripts: null });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await within(mach).findByText("37%");
+    expect(within(mach).queryByText("Transcripts")).toBeNull();
+  });
+
   it("labels CPU, memory and disk, keeping the legend on hover", async () => {
     stub();
     const { container } = render(<Overview />);

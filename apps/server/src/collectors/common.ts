@@ -4,6 +4,7 @@ import type { AdoptedLoop } from "../config.ts";
 import type { Store } from "../store.ts";
 import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
+import { transcriptFilePath } from "../transcript-file.ts";
 
 /** The collector-status name a loop's collector writes: `ta-loop:<id>` or `studio-loop:<id>`. */
 export const collectorName = (kind: AdoptedLoop["kind"], id: AdoptedLoop["id"]): string =>
@@ -58,7 +59,7 @@ export function foldPath(
 ): TranscriptFacts | null {
   let mtime: number;
   try {
-    mtime = Math.floor(statSync(path).mtimeMs);
+    mtime = Math.floor(statSync(transcriptFilePath(path)).mtimeMs);
   } catch {
     return transcripts.get(path)?.facts ?? null;
   }
