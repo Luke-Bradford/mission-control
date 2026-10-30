@@ -422,6 +422,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatuses = new Map<string, string>();
   /** The last failure logged for each run's review status, so a lasting failure is logged once. */
   const reviewStatusFailures = new Map<string, string>();
+  /** PR rows are immutable enough for one engine pass; avoid one whole-table read per run. */
+  let tickPrs: Map<RepoId, ReturnType<Store["pullRequests"]>> | null = null;
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -527,7 +529,11 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
-    const prs = store.pullRequests(run.repoId);
+    let prs = tickPrs?.get(run.repoId);
+    if (prs === undefined) {
+      prs = store.pullRequests(run.repoId);
+      tickPrs?.set(run.repoId, prs);
+    }
     if (loop.prNumber !== null) return prs.find((p) => p.number === loop.prNumber) ?? null;
     if (run.branch === null) return null;
     return (
@@ -2332,21 +2338,26 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const runs = loopRuns();
-      const notes = store.notes();
-      await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-      await Promise.all(
-        store
-          .runsActiveSince(now())
-          .filter((r) => r.loop !== null && r.loop !== undefined)
-          .map((run) => watchGreenEvidence(run, notes)),
-      );
-      await Promise.all(runs.map((r) => reconcileRun(r.id)));
-      await refreshRuleNotes(runs);
-      await sweepNotes();
-      untakeStale();
-      await takeForSeats();
-      await kickReviews();
+      tickPrs = new Map();
+      try {
+        const runs = loopRuns();
+        const notes = store.notes();
+        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
+        await Promise.all(
+          store
+            .runsActiveSince(now())
+            .filter((r) => r.loop !== null && r.loop !== undefined)
+            .map((run) => watchGreenEvidence(run, notes)),
+        );
+        await Promise.all(runs.map((r) => reconcileRun(r.id)));
+        await refreshRuleNotes(runs);
+        await sweepNotes();
+        untakeStale();
+        await takeForSeats();
+        await kickReviews();
+      } finally {
+        tickPrs = null;
+      }
     },
 
     reconcileRun,
