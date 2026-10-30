@@ -27,6 +27,7 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.flight-notebook-index a`,
       String.raw`\.flight-note-heading h3 a`,
       String.raw`\.flight-markdown-source summary`,
+      String.raw`\.comms-spider-legend \.away`,
     ]) {
       expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
     }
@@ -36,12 +37,15 @@ describe("Overview layout (hud.css)", () => {
     for (const selector of [
       String.raw`\.ph \.act \.ph-link`,
       String.raw`\.flight-markdown-source summary`,
+      String.raw`\.comms-spider-legend \.away`,
     ]) {
       const action = rule(selector);
       expect(action, selector).toContain("display: inline-flex");
       expect(action, selector).toContain("align-items: center");
       expect(action, selector).toContain("min-height: 24px");
     }
+    expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
+    expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {

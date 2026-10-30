@@ -56,15 +56,15 @@ const PILLS: readonly [TokenName, TokenName][] = [
   ["--accent", "--accent-soft"],
 ];
 const LAMPS: readonly TokenName[] = ["--warn-mark", "--ok", "--crit"];
-const SEATS: readonly TokenName[] = [
-  "--seat-1",
-  "--seat-2",
-  "--seat-3",
-  "--seat-4",
-  "--seat-5",
-  "--seat-6",
-  "--seat-7",
-];
+
+/** Seat tokens are defined in hud.css so additions to the visual-system palette cannot evade checks. */
+function seatTokens(): TokenName[] {
+  return [
+    ...new Set(
+      [...read("../src/hud.css").matchAll(/^\s*(--seat-\d+):/gm)].map((match) => match[1] ?? ""),
+    ),
+  ] as TokenName[];
+}
 
 /** The text from the line `header` opens to the `}` that closes it (no nested braces inside). */
 function blockBody(css: string, header: string): string {
@@ -131,7 +131,9 @@ describe("theme tokens", () => {
 
   it.each(THEMES)("seat-coloured text meets AA on a panel: %s", (name) => {
     const t = THEME_TOKENS[name];
-    for (const seat of SEATS) {
+    const seats = seatTokens();
+    expect(seats).toEqual(TOKEN_NAMES.filter((token) => /^--seat-\d+$/.test(token)));
+    for (const seat of seats) {
       expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(4.5);
     }
   });
@@ -491,15 +493,7 @@ describe("setTheme / getTheme", () => {
 });
 
 describe("repo palette", () => {
-  const AGENTS: readonly TokenName[] = [
-    "--seat-1",
-    "--seat-2",
-    "--seat-3",
-    "--seat-4",
-    "--seat-5",
-    "--seat-6",
-    "--seat-7",
-  ];
+  const AGENTS = seatTokens();
   /** CIE76 ΔE between two `#rrggbb` colours (sRGB, D65): ~2 is a just-noticeable difference. */
   function deltaE(a: string, b: string): number {
     const lab = (hex: string): [number, number, number] => {
