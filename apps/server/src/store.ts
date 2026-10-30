@@ -107,11 +107,8 @@ export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
-export const LIVE_BOARD_LIMIT = 500;
 export const LIVE_COMMS_LIMIT = 5_000;
 export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
-export const LIVE_NOTES_LIMIT = 500;
-export const LIVE_PULL_REQUESTS_LIMIT = 200;
 export const LIVE_REVIEWS_LIMIT = 200;
 export const LIVE_ASIDE_RUNS_LIMIT = 200;
 export const OPERATIONAL_RETENTION_DAYS = 90;
@@ -1267,6 +1264,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
       CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
+      CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
+      CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -1625,9 +1624,11 @@ export class Store {
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
     const rows = this.db
-      .prepare(
-        "SELECT * FROM runs WHERE ended_at IS NULL OR ended_at >= ? ORDER BY started_at, seq",
-      )
+      .prepare(`SELECT * FROM (
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
+        UNION ALL
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= ?
+      ) ORDER BY started_at, seq`)
       .all(since) as Row[];
     return rows.map(toRun);
   }
@@ -2089,11 +2090,7 @@ export class Store {
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
-      [
-        "briefs",
-        "at < ? AND id NOT IN (SELECT MAX(id) FROM briefs GROUP BY key)",
-        OPERATIONAL_RETENTION_DAYS,
-      ],
+      ["briefs", "at < ?", OPERATIONAL_RETENTION_DAYS],
       [
         "reviews",
         "ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')",
@@ -2359,10 +2356,8 @@ export class Store {
 
   board(repoId: RepoId): BoardItem[] {
     const rows = this.db
-      .prepare(`SELECT * FROM (
-        SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number DESC LIMIT ?
-      ) ORDER BY issue_number ASC`)
-      .all(repoId, LIVE_BOARD_LIMIT) as Row[];
+      .prepare("SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number ASC")
+      .all(repoId) as Row[];
     return rows.map((r) => ({
       repoId: r.repo_id as string,
       issueNumber: r.issue_number as number,
@@ -2497,9 +2492,12 @@ export class Store {
           );
       const runs = this.db
         .prepare(
-          "SELECT id FROM runs WHERE repo_id = ? AND (json_extract(loop, '$.prNumber') = ? OR id IN (SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?))",
+          `SELECT id FROM runs INDEXED BY runs_loop_pr_number
+             WHERE json_extract(loop, '$.prNumber') = ?
+           UNION
+           SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?`,
         )
-        .all(repoId, p.number, repoId, p.number) as Row[];
+        .all(p.number, repoId, p.number) as Row[];
       for (const run of runs) {
         this.appendAttempt(run.id as string, "ci", readAt, {
           sha: p.headSha,
@@ -2835,8 +2833,8 @@ export class Store {
 
   pullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.statement(
-      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC LIMIT ?",
-    ).all(repoId, LIVE_PULL_REQUESTS_LIMIT) as Row[];
+      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
+    ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
   }
 
@@ -4810,10 +4808,8 @@ export class Store {
   /** The open notes, oldest first. */
   notes(): AttentionNote[] {
     const rows = this.db
-      .prepare(`SELECT * FROM (
-        SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at DESC, key DESC LIMIT ?
-      ) ORDER BY at, key`)
-      .all(LIVE_NOTES_LIMIT) as Row[];
+      .prepare("SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key")
+      .all() as Row[];
     return rows.map((r) => ({
       key: r.key as string,
       kind: r.kind as NoteKind,
