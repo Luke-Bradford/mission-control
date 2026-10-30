@@ -18,6 +18,7 @@ import {
   REVIEW_SINCE_FILE,
   type RunProfile,
   type StoredFinding,
+  type VerifyCheckResult,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -60,6 +61,7 @@ export interface BriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
   fullSuite: readonly string[];
+  verifyResults?: readonly VerifyCheckResult[];
   /** The run's template profile, as snapshotted; absent adds no profile lines. */
   profile?: RunProfile;
   /** This build ticket has no recorded plan, so its seat must write one before coding. */
@@ -247,6 +249,13 @@ export function reviewBrief(i: ReviewBriefInput): string {
         ]
       : []),
     `- CI: every check passed on ${sha7}.`,
+    ...(i.verifyResults?.length
+      ? [
+          `- Verify results for ${sha7}: ${i.verifyResults
+            .map((r) => `${r.command} ${r.ok ? "passed" : "failed"} in ${(r.durationMs / 1000).toFixed(1)}s`)
+            .join("; ")}.`,
+        ]
+      : []),
     ...(i.touches.length > 0
       ? [
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
