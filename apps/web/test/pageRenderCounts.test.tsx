@@ -12,7 +12,7 @@ import "../src/pages/Overview.tsx";
 import "../src/pages/Setup.tsx";
 import "../src/pages/Telemetry.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, REPOS } from "./fixtures.ts";
+import { CONFIG, REPOS, seatRow } from "./fixtures.ts";
 
 class Stream {
   static OPEN = 1;
@@ -38,7 +38,7 @@ class Stream {
 }
 
 const PAGES = [
-  ["Overview", "/", "page-overview", 72],
+  ["Overview", "/", "page-overview", 12],
   ["Flight", "/flight", "page-flight", 72],
   ["Board", "/board", "page-board", 12],
   ["Agent", "/agent", "page-agent", 0],
@@ -48,7 +48,13 @@ const PAGES = [
   ["Setup", "/setup/loops", "page-setup", 12],
 ] as const;
 
-async function commitsOverMinute(path: string, pageId: string, live: boolean): Promise<number> {
+async function commitsOverMinute(
+  path: string,
+  pageId: string,
+  live: boolean,
+  routes: Record<string, unknown> = {},
+): Promise<number> {
+  stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG, ...routes });
   window.history.replaceState(null, "", path);
   let commits = 0;
   const onRender: ProfilerOnRenderCallback = () => {
@@ -99,5 +105,16 @@ describe("page-root render counts", () => {
     // This companion measurement is deliberately not bounded: live updates should be allowed to render.
     const commits = await commitsOverMinute(path, pageId, true);
     expect(commits).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps the Agent page with an idle seat open within its idle render budget", async () => {
+    const crew = {
+      rows: [seatRow({ id: "dev-1", hudState: "idle", run: null })],
+      firstRunToday: null,
+    };
+    const commits = await commitsOverMinute("/agent/dev-1", "page-agent", false, {
+      "/api/crew": crew,
+    });
+    expect(commits).toBeLessThanOrEqual(12);
   });
 });
