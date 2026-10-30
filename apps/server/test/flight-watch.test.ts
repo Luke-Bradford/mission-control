@@ -528,6 +528,45 @@ describe("FLIGHT's evidence", () => {
 });
 
 describe("FLIGHT's flow queues", () => {
+  it("waits for review when the reported review is from an older PR head", () => {
+    store.upsertPullRequests("mc", [stored(7, { headSha: "old-sha", ci: "passing" })], T0);
+    const oldReview = store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "old-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    if (oldReview === null) throw new Error("review not queued");
+    store.setReviewState(oldReview, ["queued"], "running", { runId: "r-retro", at: T0 });
+    store.recordFindings(oldReview, "r-retro", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: T0,
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "new-sha", ci: "passing" })], T0 + MIN);
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "new-sha",
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: T0 + MIN,
+    });
+
+    expect(flightState({ config, store, busy: [], now: T0 + MIN }).mergeQueue).toEqual([
+      { pr: 7, waitsOn: ["review"] },
+    ]);
+  });
+
   it("keeps another repository's reviews out of this session's queue", () => {
     store.requestReview({
       authorRunId: "r-other-author",
@@ -576,6 +615,31 @@ describe("FLIGHT's flow queues", () => {
         at: T0,
       });
     }
+    store.replaceBoard("mc", [
+      {
+        repoId: "mc",
+        issueNumber: 6,
+        title: "Ready ticket",
+        status: "Ready",
+        state: "planned",
+        labels: [],
+        priority: null,
+        updatedAt: T0,
+        url: "u",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: T0,
+        itemId: "I6",
+        projectId: "P1",
+      },
+    ]);
     store.addMachineSample({
       at: T0,
       cpuPct: null,
@@ -603,7 +667,7 @@ describe("FLIGHT's flow queues", () => {
     expect(result.flowHolds).toContainEqual({
       kind: "machine",
       reason: "disk free is 10.0 GB (below 15 GB)",
-      blocks: "5 queued reviews for 2 idle review seats",
+      blocks: "5 queued reviews for 2 idle review seats; 1 eligible ticket for 2 idle build seats",
       feedbackLoop: "the hold blocks reviews; held reviews cannot merge",
       blocking: true,
     });

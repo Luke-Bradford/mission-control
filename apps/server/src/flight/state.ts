@@ -738,7 +738,7 @@ export function flightState(i: {
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
         review:
-          reviewed?.verdict == null
+          reviewed?.verdict == null || reviewed.sha !== p.headSha
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
@@ -830,16 +830,25 @@ export function flightState(i: {
   const idleReviewers = reviewQueue.seats.filter((seat) => seat.idle).length;
   const eligibleBuilds = tickets.filter((ticket) => ticket.ready).length;
   const idleBuilds = seats.filter((seat) => seat.loop === "build" && seat.free).length;
+  const machineBlocks = [
+    ...(queuedReviews > 0
+      ? [
+          `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`,
+        ]
+      : []),
+    ...(eligibleBuilds > 0
+      ? [
+          `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+        ]
+      : []),
+  ].join("; ");
   const flowHolds: NonNullable<FlightState["flowHolds"]> = [
     ...(capacity.blocked && capacity.reason !== null
       ? [
           {
             kind: "machine" as const,
             reason: capacity.reason,
-            blocks:
-              queuedReviews > 0
-                ? `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`
-                : `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+            blocks: machineBlocks,
             ...(queuedReviews > 0
               ? { feedbackLoop: "the hold blocks reviews; held reviews cannot merge" }
               : {}),
