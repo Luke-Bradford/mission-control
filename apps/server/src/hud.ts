@@ -994,8 +994,16 @@ function buildAttentionItems(
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
+    const flight = flightSeat(config);
+    const senderRepoId =
+      message.from === flight?.seat.id
+        ? flight.session.repoId
+        : config.crew?.sessions.find((session) =>
+            session.seats.some((seat) => seat.id === message.from),
+          )?.repoId;
     const repoId =
       ticket?.[1] ??
+      senderRepoId ??
       (prNumber === undefined
         ? undefined
         : (store.commsForTicket(message.ref ?? "", message.ticket ?? undefined).repoId ??

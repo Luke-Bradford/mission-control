@@ -2913,6 +2913,29 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       ],
       current,
     );
+    store.replacePullRequests(
+      "site-builder",
+      [
+        {
+          repoId: "site-builder",
+          number: 1063,
+          title: "Open elsewhere",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "site-builder#909",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
     expect(all(current).some((item) => item.key === key)).toBe(true);
     expect(needsYouItems(all(current))).toHaveLength(1);
 
