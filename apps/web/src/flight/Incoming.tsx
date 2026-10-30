@@ -5,6 +5,7 @@ import { rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const NO_INCOMING = "Nothing has arrived yet.";
@@ -21,7 +22,7 @@ export function Incoming() {
         {error.message}
       </p>
     );
-  if (!data) return <p className="pb note">{DASH}</p>;
+  if (!data) return <Pending what="arrivals" error={null} resource={RESOURCES.flightIncoming} />;
   const rows = data.entries
     .map((entry) => {
       const { repoId, sourceRef } = entry;

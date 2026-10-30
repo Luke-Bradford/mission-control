@@ -28,6 +28,10 @@ export interface RenderedPage {
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
   boxes(selector: string): Promise<Box[]>;
+  /** Runs `fn` in the page and returns its result. */
+  evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  /** Clicks the first element matching `selector`. */
+  click(selector: string): Promise<void>;
   /**
    * Per element matching `selector`, whether a person can bring all of its box into view: no
    * ancestor clips it (`overflow: hidden`) without a scroller between them, and when the viewport
@@ -68,6 +72,7 @@ interface Page {
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   waitForSelector(selector: string): Promise<unknown>;
   evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  click(selector: string): Promise<void>;
   emulateMedia(options: { colorScheme: "light" | "dark" }): Promise<void>;
   screenshot(options: { path: string }): Promise<unknown>;
   close(): Promise<void>;
@@ -298,6 +303,8 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         async box(selector) {
           return (await boxes(selector))[0];
         },
+        evaluate: (fn, arg) => page.evaluate(fn, arg),
+        click: (selector) => page.click(selector),
         close: () => browser.close(),
       };
     },

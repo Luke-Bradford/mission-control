@@ -182,9 +182,8 @@ describe("one Needs-you count", () => {
       const banner = container.querySelector("#nbanner .num")?.textContent;
       const kpi = container.querySelector('.overview-kpi[href="/flight#askP"] .v')?.textContent;
       const pulse = screen
-        .getByRole("button", { name: /^\d+ Needs you decisions or replies/ })
-        .querySelector(".flight-pulse-value")?.textContent;
-      const clearNow = container.querySelector("#flight-clear-now + span > span")?.textContent;
+        .getByRole("button", { name: /^Needs you: \d+$/ })
+        .querySelector("b")?.textContent;
       const asks = container.querySelectorAll('#askP [data-testid="ask-row"]');
       return {
         header: header.querySelector("b")?.textContent,
@@ -195,7 +194,6 @@ describe("one Needs-you count", () => {
         kpi,
         onCards,
         pulse,
-        clearNow,
         asks: asks.length,
       };
     };
@@ -208,7 +206,6 @@ describe("one Needs-you count", () => {
       kpi: String(N),
       onCards: N,
       pulse: String(N),
-      clearNow: `${N} need you`,
       asks: N,
     };
     await waitFor(() => expect(counts()).toEqual(expected));

@@ -20,6 +20,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const SUMMARY_EMPTY = "FLIGHT has not written a commander's intent yet.";
@@ -226,21 +227,16 @@ export function Summary({
   const plans = schedule.data?.session === view?.session ? (schedule.data?.entries ?? []) : [];
   const repoId = config?.crew?.sessions.find((s) => s.id === view?.session)?.repoId;
   const listed = FLIGHT_SUMMARY_LISTED;
-  const row = (item: FlightSummaryItem | FlightLedgerEntry) =>
-    !ledger.data && !ledger.error ? (
-      <tr key={`${item.kind}:${item.key}`} className="flight-plan-row">
-        <td colSpan={7}>{DASH}</td>
-      </tr>
-    ) : (
-      <PlanRow
-        key={`${item.kind}:${item.key}`}
-        item={item}
-        entry={entries.find((e) => e.kind === item.kind && e.key === item.key)}
-        plan={item.kind === "plan" ? plans.find((p) => p.id === item.key) : undefined}
-        repoId={repoId}
-        now={now}
-      />
-    );
+  const row = (item: FlightSummaryItem | FlightLedgerEntry) => (
+    <PlanRow
+      key={`${item.kind}:${item.key}`}
+      item={item}
+      entry={entries.find((e) => e.kind === item.kind && e.key === item.key)}
+      plan={item.kind === "plan" ? plans.find((p) => p.id === item.key) : undefined}
+      repoId={repoId}
+      now={now}
+    />
+  );
   const queueEntries = entries.filter(
     (entry) =>
       entry.kind === "watch" ||
@@ -266,23 +262,27 @@ export function Summary({
   });
   return (
     <div className={`flight-summary ${mode}`}>
-      {summary.error && (
-        <p role="alert" className="note err">
-          {summary.error.message}
-        </p>
-      )}
       {!view ? (
-        <p className="sittext note">{DASH}</p>
+        <Pending
+          what={mode === "queue" ? "the queue" : "outcomes"}
+          error={summary.error}
+          resource={RESOURCES.flightSummary}
+        />
       ) : view.session === null ? (
         <p className="sittext note">{FLIGHT_NO_SEAT}</p>
       ) : (
         <>
-          {mode === "queue" && ledger.error && (
-            <p role="alert" className="note err">
-              Ledger: {ledger.error.message}
-            </p>
+          {mode === "queue" && !ledger.data && (
+            <Pending what="the ledger" error={ledger.error} resource={RESOURCES.flightLedgerOpen} />
           )}
-          {mode === "queue" && (
+          {mode === "queue" && ledger.data && !schedule.data && (
+            <Pending
+              what="the schedule"
+              error={schedule.error}
+              resource={RESOURCES.flightSchedule}
+            />
+          )}
+          {mode === "queue" && ledger.data && schedule.data && (
             <section aria-labelledby="flight-plan-title">
               <div className="flight-plan-intro">
                 <h3 id="flight-plan-title">FLIGHT's forward plan</h3>
@@ -300,11 +300,6 @@ export function Summary({
                   waiting
                 </span>
               </div>
-              {schedule.error && (
-                <p role="alert" className="note err">
-                  Schedule: {schedule.error.message}
-                </p>
-              )}
               {queueItems.length ? (
                 <Table label="FLIGHT forward plan">{queueItems.map((item) => row(item))}</Table>
               ) : (

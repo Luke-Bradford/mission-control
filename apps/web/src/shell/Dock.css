@@ -93,3 +93,14 @@
     background: var(--scrim);
   }
 }
+
+.dockbody {
+  display: contents;
+}
+
+/* Folded: the title row and the waiting count only; the conversation stays mounted so unread
+   replies still count. */
+.dock.collapsed .dockbody,
+.dock.collapsed .dh .meta {
+  display: none;
+}

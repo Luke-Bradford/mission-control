@@ -7,6 +7,8 @@
 export const THEME_KEY = "mc-theme";
 /** FLIGHT's dock shown or hidden on wide screens. */
 export const DOCK_KEY = "mc-dock";
+/** FLIGHT's dock folded to its title row; folded unless the operator expanded it. */
+export const DOCK_COLLAPSED_KEY = "mc-dock-collapsed";
 /** The Crew Activity Map's last manually picked repo. */
 export const MAP_REPO_KEY = "mc-map-repo";
 

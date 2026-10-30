@@ -43,20 +43,9 @@ export const decidedToday = (
   return decisions.filter((d) => DECIDED_KINDS.includes(d.kind) && d.at >= from);
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** The asks FLIGHT addressed to the controller in the last 24 hours, newest first: what `metrics.forTheController` counts. */
-export const forTheController = (
-  decisions: readonly FlightDecision[],
-  now: number,
-): FlightDecision[] =>
-  decisions
-    .filter(
-      (d) =>
-        d.at >= now - DAY_MS &&
-        (d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER)),
-    )
-    .sort((a, b) => b.at - a.at);
+/** Whether FLIGHT addressed this decision to the controller: what `metrics.forTheController` counts. */
+export const isForTheController = (d: Pick<FlightDecision, "about" | "decision">): boolean =>
+  d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER);
 
 /** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>
