@@ -1,4 +1,4 @@
-import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
@@ -1282,13 +1282,16 @@ it("says 1 file for a one-file repository and N files otherwise", () => {
   expect(screen.getAllByText(`${mapSnapshotFixture.tree.length} files`).length).toBeGreaterThan(0);
 });
 
+/** A second seat that changed src/util.ts, so the first seat's main.ts depends on its changes. */
+const utilChanger = (snapshot: MapSnapshot): MapSeat => ({
+  ...structuredClone(snapshot.seats[0] as MapSeat),
+  seat: "INCO-1",
+  scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
+});
+
 it("says 1 step for a direct import and N steps for a longer chain in the Impact overlap", () => {
-  const direct = structuredClone(mapSnapshotFixture);
-  direct.seats.push({
-    ...structuredClone(direct.seats[0]),
-    seat: "INCO-1",
-    scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
-  });
+  const direct: MapSnapshot = structuredClone(mapSnapshotFixture);
+  direct.seats.push(utilChanger(direct));
   const { unmount } = render(<CrewMapView snapshot={direct} />);
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
@@ -1296,7 +1299,7 @@ it("says 1 step for a direct import and N steps for a longer chain in the Impact
   );
   unmount();
 
-  const chained = structuredClone(mapSnapshotFixture);
+  const chained: MapSnapshot = structuredClone(mapSnapshotFixture);
   chained.tree = [
     { path: "src/main.ts", lines: 10 },
     { path: "src/mid.ts", lines: 10 },
@@ -1306,11 +1309,7 @@ it("says 1 step for a direct import and N steps for a longer chain in the Impact
     { from: "src/main.ts", to: "src/mid.ts" },
     { from: "src/mid.ts", to: "src/util.ts" },
   ];
-  chained.seats.push({
-    ...structuredClone(chained.seats[0]),
-    seat: "INCO-1",
-    scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
-  });
+  chained.seats.push(utilChanger(chained));
   render(<CrewMapView snapshot={chained} />);
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
