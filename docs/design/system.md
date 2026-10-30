@@ -35,4 +35,4 @@ rendering is available.
 ## 10. Change control
 
 Change a rule with a PR and screenshot. The catalogue says what a page shows; this document says
-how it behaves. A violation of these rules is an Important review finding, never a taste call.
+how it behaves. A no on an [I] item of the hud-design checklist is an Important finding; any other no is Minor. Neither is a taste call.
