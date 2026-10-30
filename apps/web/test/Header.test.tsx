@@ -307,7 +307,7 @@ describe("Header", () => {
     expect(btn.className).toContain("hot");
     const tooltip = within(btn).getByRole("tooltip");
     expect(tooltip.textContent).toContain("swap 21.5 of 22.5 GB used");
-    expect(tooltip.textContent).toContain("Swap 21.5 of 22.5 GB");
+    expect(tooltip.textContent).toContain("Swap 21.5 GB (36% of RAM)");
     expect(tooltip.textContent).toContain("Disk 5 GB free");
   });
 

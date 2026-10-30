@@ -201,9 +201,6 @@ export function LineChart({
                 >
                   <title>{b.label}</title>
                 </rect>
-                <text className="ct" x={left + 3} y={yTop + 12}>
-                  {b.label}
-                </text>
               </g>
             );
           })}

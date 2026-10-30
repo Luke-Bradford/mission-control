@@ -1629,7 +1629,7 @@ describe("Machine panel", () => {
     await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toContain("Swap");
-    expect(swap.textContent).toContain("3.5 of 8 GB");
+    expect(swap.textContent).toContain("3.5 GB (5% of RAM)");
     expect(mach.querySelector(".capwarn")).toBeNull();
   });
 
@@ -1639,7 +1639,7 @@ describe("Machine panel", () => {
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
-    expect(swap.textContent).toBe("Swap— of — GB");
+    expect(swap.textContent).toBe("Swap—");
   });
 
   it("names the reason while the hub is holding new work", async () => {
