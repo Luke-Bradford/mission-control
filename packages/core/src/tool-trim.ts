@@ -43,17 +43,23 @@ function cutText(text: string, tool: string, fullPath: string): string {
   if (tool === COMMAND_TOOL) {
     // the last failing line and what follows it, rather than whatever the output ended on
     let failAt = -1;
+    let failLine = "";
     let lineAt = 0;
     for (const l of text.split("\n")) {
-      if (FAILING_LINE.test(l)) failAt = lineAt;
+      if (FAILING_LINE.test(l)) {
+        failAt = lineAt;
+        failLine = l;
+      }
       lineAt += l.length + 1;
     }
     if (failAt >= 0) {
       const failStart = enc.encode(text.slice(0, failAt)).length;
-      // one inside the head is already shown: the tail stays the output's real end
-      if (failStart >= headEnd && failStart < tailStart) {
-        tailStart = failStart;
-        tailEnd = failStart + TOOL_TRIM_TAIL;
+      const failEnd = failStart + enc.encode(failLine).length;
+      // a line the head shows whole needs no tail of its own (the tail stays the output's real
+      // end); one that runs past the head is read from where the head stops
+      if (failEnd > headEnd && failStart < tailStart) {
+        tailStart = Math.max(failStart, headEnd);
+        tailEnd = tailStart + TOOL_TRIM_TAIL;
       }
     }
   }

@@ -137,4 +137,11 @@ describe("trimToolResponse", () => {
     const at7000 = `${"x".repeat(6_990)}\nerror: here\n${"ok line\n".repeat(10_000)}Tests 5 passed END\n`;
     expect(stdoutOf(at7000)).toContain("Tests 5 passed END");
   });
+
+  it("keeps the text of an error line that crosses the head boundary", () => {
+    const text = `${"x".repeat(8_180)} error ${"DETAIL".repeat(2_000)}\n${"z".repeat(50_000)}`;
+    const out = stdoutOf(text);
+    expect(out).toContain("DETAIL".repeat(500));
+    expect(out.startsWith("x".repeat(100))).toBe(true);
+  });
 });
