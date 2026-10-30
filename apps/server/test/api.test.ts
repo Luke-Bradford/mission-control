@@ -8705,6 +8705,32 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     ],
     NOW,
   );
+  const heldPreviews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
+    start: async () => ({ stop: () => {} }),
+    remove: async () => {},
+  });
+  const heldApp = buildApp({
+    config,
+    store,
+    bus,
+    previews: heldPreviews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
+  try {
+    const held = await heldApp.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers: { [OPERATOR_HEADER]: "preview-token", ...json },
+      payload: { pr: 41 },
+    });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toMatchObject({ code: "capacity" });
+  } finally {
+    await heldApp.close();
+  }
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
