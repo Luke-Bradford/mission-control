@@ -47,8 +47,21 @@ describeRendered("Overview v2 mockup in a browser", () => {
               [...document.querySelectorAll<HTMLElement>(".guardLabel")].every(
                 (label) =>
                   getComputedStyle(label).fontSize === "12px" &&
-                  label.textContent?.includes("guard"),
+                  label.textContent?.toLowerCase().includes("guard"),
               ),
+            null,
+          ),
+        ).toBe(true);
+        expect(
+          await page.evaluate(
+            () =>
+              [...document.querySelectorAll<HTMLElement>(".guardLabel")].every((label) => {
+                const chart = label.closest(".chart");
+                return Boolean(
+                  chart &&
+                    label.getBoundingClientRect().right <= chart.getBoundingClientRect().right + 1,
+                );
+              }),
             null,
           ),
         ).toBe(true);
