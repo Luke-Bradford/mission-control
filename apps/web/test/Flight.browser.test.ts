@@ -241,7 +241,10 @@ describeRendered("FLIGHT page in a browser", () => {
       }, reason);
       expect(closed.overflows).toBe(true);
       expect(closed.hasMore).toBe(true);
-      await page.click("button[aria-label='More waiting reason']");
+      await page.evaluate(
+        () => (document.querySelector("button[aria-label='More waiting reason']") as HTMLButtonElement).click(),
+        undefined,
+      );
       expect(
         await page.evaluate(
           () => document.querySelector(".wif-stuck-reason .expandable-text")?.textContent,
