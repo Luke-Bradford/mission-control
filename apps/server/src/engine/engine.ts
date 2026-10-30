@@ -566,7 +566,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** A green head without any evidence needs one prompt, then operator attention. */
-  async function watchGreenEvidence(run: Run): Promise<void> {
+  async function watchGreenEvidence(run: Run, notes = store.notes()): Promise<void> {
     const loop = run.loop;
     if (!loop || run.endedAt !== null) return;
     const prefix = `evidence-remind:${run.id}:`;
@@ -576,7 +576,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const green = pr?.state === "open" && pr.ci === "passing" && !!head;
     const evidence = store.evidenceCount(run.id);
     const currentNote = head ? evidenceNoteKey(run.id, head) : null;
-    for (const note of store.notes()) {
+    for (const note of notes) {
       if (
         note.runId === run.id &&
         note.clearedAt === null &&
@@ -592,7 +592,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const remindedAt = claimed[remindKey];
     if (remindedAt !== undefined) {
       if (now() - remindedAt < EVIDENCE_REMIND_MS) return;
-      if (store.notes().some((n) => n.key === evidenceNoteKey(run.id, head))) return;
+      if (notes.some((n) => n.key === evidenceNoteKey(run.id, head))) return;
       store.raiseNote({
         key: evidenceNoteKey(run.id, head),
         kind: "flag",
@@ -2331,12 +2331,13 @@ export function createEngine(deps: EngineDeps): Engine {
     async tick() {
       if (!live()) return;
       const runs = loopRuns();
+      const notes = store.notes();
       await Promise.all(runs.map((r) => wakePendingWork(r.id)));
       await Promise.all(
         store
           .runsActiveSince(now())
           .filter((r) => r.loop !== null && r.loop !== undefined)
-          .map(watchGreenEvidence),
+          .map((run) => watchGreenEvidence(run, notes)),
       );
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
       await refreshRuleNotes(runs);

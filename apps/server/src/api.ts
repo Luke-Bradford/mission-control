@@ -1064,25 +1064,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     scheduleNotifications();
   });
   app.addHook("onReady", async () => {
-    stopMapRing = mapRing.start();
-  });
-  // Warm each repo's map in the background so the first viewer after a start finds it built or
-  // being built (the same promise a request shares), not a cold rebuild.
-  app.addHook("onReady", async () => {
-    if (!deps.warmMap) return;
-    for (const repo of config.repos) {
-      const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-      if (!checkout) continue;
-      void (async () => {
-        if (!(await stat(checkout).catch(() => null))?.isDirectory()) return;
-        await mapPayloadFor(repo, checkout, app.log);
-      })().catch((e) =>
-        app.log.warn(
-          { reason: e instanceof Error ? e.message : String(e) },
-          "map warm-up unavailable",
-        ),
-      );
-    }
+    // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
@@ -4118,12 +4100,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }, 10_000);
         });
         // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        const unsubscribeMap =
-          repoId === undefined
-            ? undefined
-            : mapRing.subscribe(repoId, (delta) => {
-                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-              });
+        let unsubscribeMap: (() => void) | undefined;
+        if (repoId !== undefined) {
+          stopMapRing ??= mapRing.start();
+          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
+            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+          });
+        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);

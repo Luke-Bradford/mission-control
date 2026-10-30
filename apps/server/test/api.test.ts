@@ -4034,7 +4034,7 @@ describe("boards, escalations, health", () => {
     }
   });
 
-  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+  it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
@@ -4062,11 +4062,10 @@ describe("boards, escalations, health", () => {
         supervisor: stubSupervisor(),
         warmMap: true,
       });
-    // built before anyone asks
     const warmed = start();
     try {
       await warmed.ready();
-      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(builds()).toBe(0);
       expect(
         (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
       ).toBe(200);
@@ -4074,11 +4073,12 @@ describe("boards, escalations, health", () => {
     } finally {
       await warmed.close();
     }
-    // asked for while the warm-up is still building: the same build, not a second
+    // A new hub also leaves the map cold until its first map request.
     supervisorCalls = [];
     const racing = start();
     try {
       await racing.ready();
+      expect(builds()).toBe(0);
       const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
       expect(response.statusCode).toBe(200);
       expect(builds()).toBe(1);
