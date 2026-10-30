@@ -36,7 +36,7 @@ export function QuotaPanel() {
     const row = rows.find((r) => r.accountId === account && r.window === window);
     return row ? (
       <span title={title(row, now, tz)}>
-        <QuotaMeter row={row} now={now} showAge />
+        <QuotaMeter row={row} now={now} />
       </span>
     ) : (
       <QuotaMeter row={null} accountId={account} window={window} now={now} />

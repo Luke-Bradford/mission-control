@@ -4,7 +4,7 @@ import { readStyles } from "./styles.ts";
 const css = readStyles();
 it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(
-    /\.overview-grid \{[^}]*grid-template-rows: auto fit-content\(45%\) fit-content\(18%\) minmax\(0, 1fr\)/,
+    /\.overview-grid \{[^}]*grid-template-rows: auto minmax\(160px, 1fr\) auto 280px/,
   );
   expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow-y: auto/);
   // Machine and Quota are the Live log's neighbours, each in a column of its own.

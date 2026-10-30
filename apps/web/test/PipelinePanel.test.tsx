@@ -2,7 +2,7 @@ import type { OverviewSummary, PipelineStage } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
-import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
+import { cardTitle, PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 
@@ -61,10 +61,10 @@ describe("Pipeline", () => {
     render(<PipelinePanel />);
 
     const readyLane = await screen.findByRole("region", { name: "Ready" });
-    // Three cards show and the Board link counts every other ticket; expanding shows the loaded ones in place.
-    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(3);
+    // Two whole cards show and the Board link counts every other ticket; expanding shows the loaded ones in place.
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(2);
     expect(
-      within(readyLane).getByRole("link", { name: "+7 · open Board ›" }).getAttribute("href"),
+      within(readyLane).getByRole("link", { name: "+8 · open Board ›" }).getAttribute("href"),
     ).toBe("/board?stage=ready");
     fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
     expect(within(readyLane).getAllByRole("link")).toHaveLength(10);
@@ -76,7 +76,7 @@ describe("Pipeline", () => {
     );
     expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
     fireEvent.click(within(readyLane).getByRole("button", { name: "Show less, Ready" }));
-    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(3);
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(2);
     fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--seat-4)",
@@ -115,5 +115,16 @@ describe("Pipeline", () => {
       hub.refetchTopic("boards");
     });
     expect(await screen.findByText(/Ticket 1/)).toBeTruthy();
+  });
+});
+
+describe("cardTitle", () => {
+  it("drops the ticket or PR number a title repeats", () => {
+    expect(cardTitle({ ticket: 1047, pr: 1050, title: "feat(web): Board lanes (#1050)" })).toBe(
+      "feat(web): Board lanes",
+    );
+    expect(cardTitle({ ticket: 1047, pr: null, title: "#1047 Board lanes" })).toBe("Board lanes");
+    expect(cardTitle({ ticket: 12, pr: 20, title: "Fix #12 and (#99)" })).toBe("Fix #12 and (#99)");
+    expect(cardTitle({ ticket: 7, pr: null, title: "(#7)" })).toBe("(#7)");
   });
 });

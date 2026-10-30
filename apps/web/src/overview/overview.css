@@ -32,8 +32,10 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto fit-content(45%) fit-content(18%) minmax(0, 1fr);
+  /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
+  grid-template-rows: auto minmax(160px, 1fr) auto 280px;
   gap: var(--sp-3);
+  overflow-y: auto;
 }
 
 .overview-grid > *,
@@ -50,7 +52,26 @@
 
 .overview-grid .ph {
   flex-shrink: 0;
+  flex-wrap: nowrap;
   padding: var(--sp-2) var(--sp-3) var(--sp-2);
+}
+
+/* A header is one line: the title and controls keep their size and the subtitle gives way. */
+.overview-grid .ph h2 {
+  flex: none;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .act {
+  flex: none;
+  flex-wrap: nowrap;
 }
 
 .overview-grid .ph h2 {
@@ -142,7 +163,7 @@
 .ov {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr);
   grid-template-rows: minmax(0, 1fr);
   gap: var(--sp-3);
 }
@@ -839,7 +860,7 @@
 }
 
 #machP .resrow {
-  grid-template-columns: 42px minmax(24px, 1fr) 128px;
+  grid-template-columns: 56px minmax(24px, 1fr) 128px;
   gap: var(--sp-1);
   align-items: center;
 }
@@ -907,19 +928,24 @@
   border-radius: 2px;
 }
 
+/* One line per meter (its text), then a full-width bar. */
 #quotaP .quotarow {
-  grid-template-columns: minmax(65px, 1fr) repeat(2, minmax(0, 1fr));
-  gap: var(--sp-2);
-}
-
-#quotaP .quotarow[data-windows="1"] {
-  grid-template-columns: minmax(65px, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  align-items: stretch;
 }
 
 #quotaP .quotarow .meter {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: stretch;
+  gap: var(--sp-1);
+}
+
+#quotaP .quotarow .meter .num {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #quotaP .quotarow .track {
@@ -927,7 +953,7 @@
 }
 
 #quotaP .quotarow + .quotarow {
-  margin-top: var(--sp-1);
+  margin-top: var(--sp-2);
 }
 
 .arow {
@@ -1089,11 +1115,9 @@
   gap: var(--sp-3);
 }
 
-/* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
+/* Lanes show whole cards only (three, then Show more), so the panel is as tall as they are. */
 #pipelineP > .pipeline-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
 }
 
 .pipeline-stage {
@@ -1203,6 +1227,14 @@
   height: 7px;
   border-radius: 50%;
   background: var(--c);
+}
+
+.pipeline-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: var(--sp-1);
 }
 
 .pipeline-more {

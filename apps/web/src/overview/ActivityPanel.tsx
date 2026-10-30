@@ -322,19 +322,14 @@ export function ActivityPanel() {
     <Panel
       id="actP"
       title="Live log"
-      sub={SUB[filter]}
+      sub={<span className="sr-only">{SUB[filter]}</span>}
       actions={
         <>
-          <button
-            type="button"
-            className="sm ghost"
-            disabled={newCount === 0}
-            aria-hidden={newCount === 0}
-            style={{ visibility: newCount > 0 ? "visible" : "hidden", width: "9ch" }}
-            onClick={() => setReading(null)}
-          >
-            {newCount} new
-          </button>
+          {newCount > 0 && (
+            <button type="button" className="sm ghost" onClick={() => setReading(null)}>
+              {newCount} new
+            </button>
+          )}
           <Seg
             label="Activity filter"
             options={FILTERS}

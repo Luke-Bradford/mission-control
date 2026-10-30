@@ -32,9 +32,24 @@ export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["
 
 /** The hub sends this many cards per stage; the lane shows the first few and expands in place. */
 const VISIBLE_CARDS = 8;
-const COLLAPSED_CARDS = 3;
+const COLLAPSED_CARDS = 2;
 
 /** Where a pipeline card leads: the ticket's panel on the Board. One place to change it. */
+/**
+ * A card's title without its own number: a merged card carries its pull request's title, which often
+ * ends in `(#n)` or starts with `#n`, and the card already shows the ticket number beside it.
+ */
+export function cardTitle(card: { ticket: number; pr: number | null; title: string }): string {
+  const numbers = [card.ticket, card.pr].filter((n): n is number => n !== null);
+  let title = card.title;
+  for (const n of numbers) {
+    title = title
+      .replace(new RegExp(`\\s*\\(#${n}\\)\\s*$`), "")
+      .replace(new RegExp(`^#${n}\\s+`), "");
+  }
+  return title.trim() || card.title;
+}
+
 export const pipelineCardPath = (card: { repoId: string; ticket: number }): string =>
   ticketPath(card.repoId, card.ticket);
 
@@ -108,7 +123,7 @@ export function PipelinePanel() {
                   >
                     <span className="pipeline-ticket num">#{card.ticket}</span>
                     <span className="pipeline-title" title={card.title}>
-                      {card.title}
+                      {cardTitle(card)}
                     </span>
                     {owner && (
                       <span className="pipeline-assignee" title={owner.name}>
@@ -122,27 +137,31 @@ export function PipelinePanel() {
                   </a>
                 );
               })}
-              {loaded.length > COLLAPSED_CARDS && (
-                <Toggle
-                  on={open}
-                  of={label}
-                  onClick={() =>
-                    setExpanded((prev) => {
-                      const next = new Set(prev);
-                      if (!next.delete(key)) next.add(key);
-                      return next;
-                    })
-                  }
-                />
-              )}
-              {more > 0 && (
-                <a
-                  className="pipeline-more mono xs"
-                  href={stageHref}
-                  onClick={(e) => followLink(e, stageHref)}
-                >
-                  +{more} · open Board ›
-                </a>
+              {(loaded.length > COLLAPSED_CARDS || more > 0) && (
+                <div className="pipeline-foot">
+                  {loaded.length > COLLAPSED_CARDS && (
+                    <Toggle
+                      on={open}
+                      of={label}
+                      onClick={() =>
+                        setExpanded((prev) => {
+                          const next = new Set(prev);
+                          if (!next.delete(key)) next.add(key);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
+                  {more > 0 && (
+                    <a
+                      className="pipeline-more mono xs"
+                      href={stageHref}
+                      onClick={(e) => followLink(e, stageHref)}
+                    >
+                      +{more} · open Board ›
+                    </a>
+                  )}
+                </div>
               )}
             </section>
           );
