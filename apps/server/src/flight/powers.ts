@@ -11,21 +11,22 @@ import {
   FLIGHT_MOVE_COLUMNS,
   FLIGHT_SILENT_TICKS,
   type FlightDecisionKind,
+  LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
   MOVE_COLUMNS,
   PRIORITIES,
+  pauseWithout,
   type RepoRules,
   TICKET_SIZES,
-  UPDATED_HUB_PREFIX,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
 import { type CcConfig, configuredAgents } from "../config.ts";
-import { readCrewPause, writeCrewPause } from "../crew-pause.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
 import { crewDir } from "../store.ts";
-import type { Updater } from "../update.ts";
+import { flightSeat } from "./seat.ts";
 import { loopHeartbeat } from "./signals.ts";
 import type { FlightToolsDeps } from "./tools.ts";
 
@@ -52,12 +53,13 @@ export interface PowerHelpers {
     schema: z.ZodType<{ basis: string }>,
     kind: FlightDecisionKind,
     act: (args: never, repo: CcConfig["repos"][number], ctx: McToolContext) => Promise<Result>,
-    options?: { engine?: boolean },
+    options?: { engine?: boolean; queue?: boolean },
   ) => McTool;
 }
 
 const RESTARTED_ENGINE_TEXT = "Restarted the loop engine.";
 const RESTART_ENGINE_GAP_MS = 10 * 60_000;
+const RESTART_ENGINE_TIMEOUT_MS = 90_000;
 const basis = z.string().min(1).max(500);
 const issueNumber = z.number().int().min(1).max(9_999_999);
 const PauseSeats = z.union([z.literal("all"), z.array(z.string().min(1).max(40)).min(1).max(50)]);
@@ -67,7 +69,6 @@ export const POWER_LOCAL_TOOLS: readonly string[] = [
   MC_TOOL_NAMES.setCrewPause,
   MC_TOOL_NAMES.liftCrewPause,
   MC_TOOL_NAMES.resumeSeat,
-  MC_TOOL_NAMES.withdrawDecision,
   MC_TOOL_NAMES.restartEngine,
 ];
 
@@ -88,7 +89,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     schema: z.ZodType<{ basis: string }>,
     kind: FlightDecisionKind,
     act: (a: never, repo: CcConfig["repos"][number], ctx: McToolContext) => Promise<Result>,
-    options?: { engine?: boolean },
+    options?: { engine?: boolean; queue?: boolean },
   ) => tools.push(h.superTool(name, description, schema, kind, act, options));
 
   // ---- the crew pause and seats ----
@@ -100,13 +101,27 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     "pause",
     async (a: z.output<typeof SetPauseArgs>) => {
       const known = crewIds();
+      const flightId = flightSeat(config)?.seat.id;
       if (Array.isArray(a.seats) && a.seats.some((id) => !known.includes(id)))
         return fail("Unknown seat in the pause.");
-      writeCrewPause(store, { seats: a.seats, reason: a.reason, at: now(), by: "FLIGHT" }, now());
+      // FLIGHT never pauses itself: it could not lift the pause it set
+      if (Array.isArray(a.seats) && flightId !== undefined && a.seats.includes(flightId))
+        return fail("You cannot pause your own seat.");
+      writeCrewPause(
+        store,
+        {
+          seats: a.seats,
+          reason: a.reason,
+          at: now(),
+          by: "FLIGHT",
+          ...(a.seats === "all" && flightId !== undefined ? { except: [flightId] } : {}),
+        },
+        now(),
+      );
       bus.emit("settings");
       bus.emit("agents");
       return {
-        text: `Paused ${a.seats === "all" ? "the crew" : a.seats.join(", ")}: ${a.reason}.`,
+        text: `Paused ${a.seats === "all" ? "the crew, except you" : a.seats.join(", ")}: ${a.reason}.`,
       };
     },
     { engine: false },
@@ -139,16 +154,10 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       if (cfg === undefined) return fail(`${a.seat} is not a crew seat.`);
       const at = now();
       const done: string[] = [];
-      const pause = readCrewPause(store);
-      if (pause !== null && (pause.seats === "all" || pause.seats.includes(a.seat))) {
-        const rest = (pause.seats === "all" ? crewIds() : pause.seats).filter(
-          (id) => id !== a.seat,
-        );
-        writeCrewPause(
-          store,
-          rest.length === 0 ? null : { seats: rest, reason: pause.reason, at, by: "FLIGHT" },
-          at,
-        );
+      const pause = pausedSeat(store, a.seat);
+      if (pause !== null) {
+        // the record stays the setter's (operator or FLIGHT); only this seat is let out of it
+        writeCrewPause(store, pauseWithout(pause, a.seat), at);
         done.push("lifted its pause");
       }
       const row = store.seatSession(a.seat);
@@ -165,20 +174,34 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         row.state !== "running" &&
         deps.supervisor.resumeRun !== undefined
       ) {
-        try {
-          await deps.supervisor.resumeRun(run.id);
-          done.push("resumed its run");
-        } catch (e) {
-          // nothing was resumed: the operator's pause and stop stand as they were
+        // nothing was resumed: the operator's pause and stop stand as they were
+        const putBack = (): void => {
           if (done.includes("lifted its pause")) writeCrewPause(store, pause, at);
-          if (row !== null && done.includes("took it off the operator's stop"))
-            store.setSeatSession({ ...row });
+          if (done.includes("took it off the operator's stop")) store.setSeatSession({ ...row });
           bus.emit("settings");
           bus.emit("agents");
+        };
+        try {
+          await deps.supervisor.resumeRun(run.id);
+        } catch (e) {
+          putBack();
           return fail(
             `Could not resume ${a.seat}'s run: ${e instanceof Error ? e.message : "failed"}`,
           );
         }
+        // resumeRun can answer and still leave the seat in error: only a live seat counts
+        const after = store.seatSession(a.seat);
+        if (
+          after?.runId !== run.id ||
+          after.state === "error" ||
+          store.run(run.id)?.endedAt !== null
+        ) {
+          putBack();
+          return fail(
+            `${a.seat}'s run did not resume (${after?.state ?? "no seat row"}${after?.reason ? `: ${after.reason}` : ""}); nothing was changed.`,
+          );
+        }
+        done.push("resumed its run");
       }
       if (done.length === 0)
         return fail(`${a.seat} is neither stopped, paused nor waiting to resume.`);
@@ -189,36 +212,21 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     { engine: false },
   );
 
-  // ---- the decision log ----
-  const WithdrawArgs = z.strictObject({ id: z.number().int().min(1), basis });
-  add(
-    MC_TOOL_NAMES.withdrawDecision,
-    "Withdraw one of your own logged decisions that was a mistake (by its id from flight_state's recent list); the log keeps a line saying so.",
-    WithdrawArgs,
-    "withdraw",
-    async (a: z.output<typeof WithdrawArgs>) => {
-      const gone = store.withdrawFlightDecision(a.id);
-      if (gone === null) return fail("No such decision.");
-      bus.emit("flight");
-      return { text: `Withdrew decision ${a.id} (${gone.kind}: ${gone.about}).` };
-    },
-    { engine: false },
-  );
-
   // ---- issues and board fields ----
   /** The card as the project holds it now; never the cache, which may predate a protective label. */
   const liveCard = async (repoId: string, issue: number): Promise<BoardItem | undefined> =>
     (await deps.board.read?.(repoId, issue).catch(() => null)) ?? undefined;
   /** The card's floor refusals (always_ask, another lane), or null. */
-  const floor = async (repoId: string, issue: number): Promise<string | Result> => {
+  const floor = async (repoId: string, issue: number): Promise<BoardItem | Result> => {
     const card = await liveCard(repoId, issue);
     if (!card)
       return fail("Refused: the card could not be read live, so its labels are unchecked.");
     const rules = await deps.rules(repoId);
     if (rules instanceof Error) return fail("Cannot read repo rules.");
     const problem = h.cardProblem(card, rules);
-    return problem === null ? card.title : fail(`Refused: ${problem}.`);
+    return problem === null ? card : fail(`Refused: ${problem}.`);
   };
+  const isRefusal = (x: BoardItem | Result): x is Result => "text" in x;
   const ghWrite = async (
     args: string[],
     input?: string,
@@ -250,8 +258,9 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     "issue",
     async (a: z.output<typeof CloseIssueArgs>, repo, ctx) => {
       const ref = `${repo.id}#${a.issue}`;
-      const title = await floor(repo.id, a.issue);
-      if (typeof title !== "string") return title;
+      const found = await floor(repo.id, a.issue);
+      if (isRefusal(found)) return found;
+      const title = found.title;
       if (store.activeTickets().has(ref)) return fail(`${ref} has a live run: end it first.`);
       const known = await readKnown(deps, "close_issue");
       const unfit = await h.textProblem(
@@ -294,8 +303,9 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     "issue",
     async (a: z.output<typeof ReopenIssueArgs>, repo, ctx) => {
       const ref = `${repo.id}#${a.issue}`;
-      const title = await floor(repo.id, a.issue);
-      if (typeof title !== "string") return title;
+      const found = await floor(repo.id, a.issue);
+      if (isRefusal(found)) return found;
+      const title = found.title;
       const known = await readKnown(deps, "reopen_issue");
       const unfit = await h.textProblem(
         ctx,
@@ -340,8 +350,8 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     async (a: z.output<typeof EditIssueArgs>, repo, ctx) => {
       if (a.body === undefined && a.title === undefined) return fail("Give a body or a title.");
       const ref = `${repo.id}#${a.issue}`;
-      const title = await floor(repo.id, a.issue);
-      if (typeof title !== "string") return title;
+      const found = await floor(repo.id, a.issue);
+      if (isRefusal(found)) return found;
       const known = await readKnown(deps, "edit_issue");
       const unfit = await h.textProblem(
         ctx,
@@ -388,17 +398,30 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     SetFieldsArgs,
     "card",
     async (a: z.output<typeof SetFieldsArgs>, repo) => {
-      const title = await floor(repo.id, a.issue);
-      if (typeof title !== "string") return title;
+      const found = await floor(repo.id, a.issue);
+      if (isRefusal(found)) return found;
+      const ref = `${repo.id}#${a.issue}`;
+      if (store.activeTickets().has(ref)) return fail(`${ref} has a live run: end it first.`);
+      // a lane label moves with edit_card's lane, which checks the crew's lane; not here
+      const lanes = (labels: readonly string[]) =>
+        labels
+          .filter((l) => l.startsWith(LANE_LABEL_PREFIX))
+          .sort()
+          .join(",");
+      if (a.labels !== undefined && lanes(a.labels) !== lanes(found.labels))
+        return fail("Lane labels change with edit_card's lane, not set_fields.");
       if (away()) return fail(AWAY_WRITES_REFUSED);
       const done: string[] = [];
+      // a field that fails after others landed says which landed
+      const stop = (why: string): Result =>
+        fail(done.length === 0 ? why : `Set ${done.join(", ")} on ${ref}, then stopped: ${why}`);
       if (a.size !== undefined || a.priority !== undefined) {
         if (!deps.board.edit) return fail("Board edits unavailable.");
         const r = await deps.board.edit(repo.id, a.issue, {
           ...(a.size === undefined ? {} : { size: a.size }),
           ...(a.priority === undefined ? {} : { priority: a.priority }),
         });
-        if (!r.ok) return fail(r.reason);
+        if (!r.ok) return stop(r.reason);
         done.push("size/priority");
       }
       if (a.status !== undefined) {
@@ -408,7 +431,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           issue: a.issue,
           column: a.status,
         });
-        if (!r.ok) return fail(r.reason);
+        if (!r.ok) return stop(r.reason);
         done.push("status");
       }
       if (a.labels !== undefined || a.milestone !== undefined) {
@@ -420,14 +443,13 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
             `repos/${repo.github}/milestones?state=all&per_page=100`,
           ]);
           try {
-            const found = (JSON.parse(list.stdout) as { number: number; title: string }[]).find(
-              (m) => m.title === a.milestone,
-            );
-            if (!list.ok || found === undefined)
-              return fail(`No milestone titled "${a.milestone}".`);
-            milestone = found.number;
+            const milestones = JSON.parse(list.stdout) as { number: number; title: string }[];
+            const match = milestones.find((m) => m.title === a.milestone);
+            if (!list.ok || match === undefined)
+              return stop(`No milestone titled "${a.milestone}".`);
+            milestone = match.number;
           } catch {
-            return fail("Could not read the repo's milestones.");
+            return stop("Could not read the repo's milestones.");
           }
         }
         const r = await ghWrite(
@@ -437,12 +459,12 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
             ...(milestone === undefined ? {} : { milestone }),
           }),
         );
-        if (!r.ok) return fail("GitHub refused the label or milestone edit.");
+        if (!r.ok) return stop("GitHub refused the label or milestone edit.");
         done.push(a.labels !== undefined ? "labels" : "milestone");
       }
       if (done.length === 0) return fail("Give at least one field to set.");
       bus.emit("boards");
-      return { text: `Set ${done.join(", ")} on ${repo.id}#${a.issue}.` };
+      return { text: `Set ${done.join(", ")} on ${ref}.` };
     },
   );
 
@@ -471,71 +493,21 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
             d.decision === RESTARTED_ENGINE_TEXT,
         );
       if (recent.length > 0) return fail("The engine was restarted in the last ten minutes.");
-      await deps.restartEngine();
+      // a stuck restart must not hold the tool: the engine's tick may be what is hung
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), RESTART_ENGINE_TIMEOUT_MS);
+      });
+      try {
+        await Promise.race([deps.restartEngine(), timeout]);
+      } catch (e) {
+        return fail(`The engine restart failed: ${e instanceof Error ? e.message : "error"}.`);
+      } finally {
+        clearTimeout(timer);
+      }
       return { text: RESTARTED_ENGINE_TEXT };
     },
-    { engine: false },
-  );
-
-  const UpdateHubArgs = z.strictObject({ basis });
-  add(
-    MC_TOOL_NAMES.updateHub,
-    "Run Update after merges you cleared: every commit between the running code and main must be a PR you cleared with merge_pr. The existing Update checks (on main, clean checkout, no seat starting, build) apply, and the hub restarts when it succeeds.",
-    UpdateHubArgs,
-    "hub",
-    async (_a: unknown, repo) => {
-      const updater: Pick<Updater, "changes" | "update" | "restart"> | undefined = deps.updater?.();
-      if (updater === undefined) return fail("Update is unavailable on this hub.");
-      const range = await updater.changes();
-      if (range === null) return fail("Could not read what Update would apply.");
-      if (range.commits.length === 0) return fail("Nothing to update: the hub runs main.");
-      const cleared = new Set<number>();
-      for (const d of store.flightDecisions(0, 100_000))
-        if (d.kind === "merge")
-          for (const m of d.decision.matchAll(/Cleared PR #(\d+)/g)) cleared.add(Number(m[1]));
-      // each commit must belong to exactly one merged PR that GitHub names, and FLIGHT cleared
-      // that PR: a number in the commit's text proves nothing
-      const foreign: string[] = [];
-      for (const line of range.commits) {
-        const sha = line.split(" ")[0] ?? "";
-        let pulls: { number?: unknown; merged_at?: unknown }[] | null = null;
-        if (/^[0-9a-f]{7,40}$/.test(sha)) {
-          const r = await ghWrite(["api", `repos/${repo.github}/commits/${sha}/pulls`]);
-          try {
-            const parsed: unknown = JSON.parse(r.stdout);
-            if (r.ok && Array.isArray(parsed)) pulls = parsed;
-          } catch {
-            pulls = null;
-          }
-        }
-        const only = pulls?.length === 1 ? pulls[0] : undefined;
-        if (
-          only === undefined ||
-          typeof only.number !== "number" ||
-          typeof only.merged_at !== "string" ||
-          !cleared.has(only.number)
-        )
-          foreign.push(line);
-      }
-      if (foreign.length > 0)
-        return fail(
-          `Update waits for the operator: ${foreign.length} commit(s) are not from a merged PR you cleared (${foreign.slice(0, 3).join("; ")}).`,
-        );
-      let out: Awaited<ReturnType<Updater["update"]>>;
-      try {
-        out = await updater.update();
-      } catch (e) {
-        return fail(`Update refused: ${e instanceof Error ? e.message : "failed"}.`);
-      }
-      if ("upToDate" in out) return { text: "The hub already runs main." };
-      store.addHubEvent("Updated by FLIGHT", now());
-      const shas = range.commits.map((l) => l.split(" ")[0]).join(", ");
-      if ("restarting" in out) setImmediate(() => updater.restart());
-      return {
-        text: `${UPDATED_HUB_PREFIX}${shas}${"restarting" in out ? "; it restarts now" : ""}.`,
-      };
-    },
-    { engine: false },
+    { engine: false, queue: false },
   );
 
   return tools;

@@ -65,7 +65,6 @@ export const FLIGHT_DECISION_KINDS = [
   "hold",
   "pause",
   "restart",
-  "withdraw",
   "issue",
   "hub",
 ] as const;
@@ -1264,29 +1263,5 @@ export interface FlightArrivalOperation {
   detail: string;
 }
 
-/**
- * The check a FLIGHT pass can rest on without evidence: every item is marked as wholly about what
- * the screen shows, by starting `Screen:`, `Screenshot:` or `HUD:`, and says nothing else (no
- * "and", "then" or second clause). Anything unmarked or mixed needs evidence.
- */
-export const screenOnlyCheck = (check: string): boolean => {
-  const items = check
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith("-"))
-    .map((l) => l.slice(1).trim());
-  return (
-    items.length > 0 &&
-    items.every(
-      (l) =>
-        /^(screen|screenshot|hud):\s*\S/i.test(l) && !/(\band\b|\bthen\b|\balso\b|[;,])/i.test(l),
-    )
-  );
-};
-export const CHECK_NEEDS_CONTROLLER_TEXT =
-  "This controller check needs evidence you cannot produce, or your note cites none: cite hud-shot:<id>, update:<sha> or ci:<run id>, or leave it to the controller.";
 export const reworkCapText = (byHead: number, total: number): string =>
   `FLIGHT's rework rounds are used up here (${byHead}/${FLIGHT_REWORKS_PER_HEAD} on this head, ${total}/${FLIGHT_REWORKS_PER_RUN} on this run); accept the findings, end the run or log why.`;
-
-/** How a successful update_hub decision begins; only such a decision is evidence of an Update. */
-export const UPDATED_HUB_PREFIX = "Updated the hub to ";

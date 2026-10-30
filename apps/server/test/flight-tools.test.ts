@@ -135,7 +135,7 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { flightLoopHeartbeat, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
@@ -260,15 +260,10 @@ let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
 let shotsKnown: string[];
-let checkCalls: unknown[][];
 let resumeCalls: string[];
-const cfgResume = { fail: false };
+const cfgResume = { fail: false, stayError: false };
 let restartEngineCalls: number;
-let updaterImpl: {
-  changes: () => Promise<{ commits: string[]; paths: string[] } | null>;
-  update: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
-};
-let updaterRestarts: number;
+let restartEngineImpl: () => Promise<void>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -328,7 +323,8 @@ beforeEach(() => {
   clearanceOk = true;
   rerunOk = true;
   editCalls = [];
-  readImpl = () => null;
+  // the live read answers with the stored card unless a test says otherwise
+  readImpl = (n) => store.board("mc").find((c) => c.issueNumber === n) ?? null;
   readCalls = [];
   failEdit = false;
   optionsImpl = () => ({ ok: true });
@@ -367,14 +363,9 @@ beforeEach(() => {
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
   shotsKnown = [];
-  checkCalls = [];
   resumeCalls = [];
   restartEngineCalls = 0;
-  updaterRestarts = 0;
-  updaterImpl = {
-    changes: async () => ({ commits: [], paths: [] }),
-    update: async () => ({ upToDate: true }),
-  };
+  restartEngineImpl = async () => {};
   shotsSaved = [];
   shotsSaveImpl = (png) => {
     shotsSaved.push(png);
@@ -389,14 +380,8 @@ beforeEach(() => {
     },
     restartEngine: async () => {
       restartEngineCalls += 1;
+      await restartEngineImpl();
     },
-    updater: () => ({
-      changes: () => updaterImpl.changes(),
-      update: () => updaterImpl.update(),
-      restart: () => {
-        updaterRestarts += 1;
-      },
-    }),
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
@@ -443,6 +428,11 @@ beforeEach(() => {
       resumeRun: async (runId) => {
         resumeCalls.push(runId);
         if (cfgResume.fail) throw new Error("cannot resume");
+        // a resume that takes leaves the seat idle on its run
+        const seatId = store.run(runId)?.agentId;
+        const seatRow = seatId === undefined ? null : store.seatSession(seatId);
+        if (seatRow !== null && !cfgResume.stayError)
+          store.setSeatSession({ ...seatRow, state: "idle", reason: null });
       },
     },
     engine: {
@@ -465,10 +455,6 @@ beforeEach(() => {
         return syncImpl();
       },
       uncommitted: async () => dirty,
-      controllerCheck: async (...a) => {
-        checkCalls.push(a);
-        return lifts ? { lifted: true } : { lifted: false, reason: refuseWith ?? "not-parked" };
-      },
       holdMerge: async (...a) => {
         holdCalls.push(["hold", ...a]);
         return { ok: true };
@@ -644,6 +630,7 @@ const ticket = (n: number, over: Partial<TicketView> = {}): TicketView => ({
   pullRequests: [],
   ...over,
 });
+const pausedSeatFor = (seat: string): boolean => pausedSeat(store, seat) !== null;
 const decisions = () => store.flightDecisions(0, 200);
 const addDecision = (over: Partial<FlightDecision>) =>
   store.addFlightDecision({
@@ -672,7 +659,6 @@ describe("tool list", () => {
       "read_ticket",
       "answer_question",
       "start_seat",
-      "restart_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -691,6 +677,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "restart_ticket",
       "merge_pr",
       "settle_park",
       "hold_pr",
@@ -700,13 +687,11 @@ describe("tool list", () => {
       "set_crew_pause",
       "lift_crew_pause",
       "resume_seat",
-      "withdraw_decision",
       "close_issue",
       "reopen_issue",
       "edit_issue",
       "set_fields",
       "restart_engine",
-      "update_hub",
       "draft_reply",
       "track",
       "untrack",
@@ -2196,7 +2181,8 @@ describe("end_run", () => {
     expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
   });
 
-  it("ends a working run with its reason, and refuses a run that has ended", async () => {
+  it("ends a working run with its reason on a superuser repo, and refuses a run that has ended", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
     expect((await call("end_run", E())).isError).toBeUndefined();
@@ -2207,7 +2193,29 @@ describe("end_run", () => {
     expect(endCalls).toEqual(["guido-1"]);
   });
 
-  it("ends a working run with uncommitted changes only when told to discard them", async () => {
+  it("does not end a working run on a standard repo", async () => {
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    expect(await call("end_run", E())).toEqual(refused(needsSuperuserText("o/mc")));
+    expect(endCalls).toEqual([]);
+  });
+
+  it("does not end a working run that is held (a stopped seat, an overdue question)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-g",
+      text: "Approve?",
+      at: NOW - 20 * 60_000,
+    });
+    expect((await call("end_run", E())).isError).toBe(true);
+    expect(endCalls).toEqual([]);
+  });
+
+  it("ends a working run with uncommitted changes only when told to discard them, and names them", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
     dirty = ["apps/a.ts"];
@@ -2215,6 +2223,7 @@ describe("end_run", () => {
     expect(endCalls).toEqual([]);
     expect((await call("end_run", E({ discard: true }))).isError).toBeUndefined();
     expect(endCalls).toEqual(["guido-1"]);
+    expect(decisions()[0]?.decision).toContain("discarded uncommitted changes in apps/a.ts");
   });
 
   it("refuses FLIGHT's own run, a run outside the session and a non-developer seat's run", async () => {
@@ -3181,10 +3190,14 @@ describe("promote", () => {
     expect(store.board("mc").find((c) => c.issueNumber === 7)?.size).toBe("S");
   });
 
-  it("falls back to the cached card when the live read gives nothing", async () => {
-    await call("promote", P());
-    expect(readCalls).toEqual([7]);
-    expect(moveCalls).toHaveLength(1);
+  it("fails closed when the live read gives nothing or throws, whatever the cache holds", async () => {
+    readImpl = () => null;
+    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    readImpl = () => {
+      throw new Error("down");
+    };
+    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    expect(moveCalls).toEqual([]);
   });
 
   it("refuses a card whose re-read fails", async () => {
@@ -5624,13 +5637,6 @@ describe("superuser housekeeping", () => {
     expect(moveCalls).toEqual([]);
   });
 
-  const parkOnCheck = () =>
-    store.setRunLoop("r-pr", {
-      ...need(store.run("r-pr")?.loop),
-      phase: "parked",
-      parked: { kind: "controller-check", reason: "held", ended: false },
-      controllerCheck: { sha: SHA, from: "review", pass: false },
-    });
   const runPr = () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
@@ -5740,12 +5746,15 @@ describe("superuser housekeeping", () => {
     async (action) => {
       elevated();
       runPr();
-      parkOnCheck();
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind: "controller-check", reason: "held", ended: false },
+      });
       const refused = await call("settle_park", { runId: "r-pr", action });
       expect(refused).toHaveProperty("isError", true);
-      expect(JSON.stringify(refused)).toContain("settle it with pass-check or fail-check");
+      expect(JSON.stringify(refused)).toContain("This action cannot settle this park.");
       expect(engineCalls).toEqual([]);
-      expect(checkCalls).toEqual([]);
     },
   );
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
@@ -7706,154 +7715,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     liveLabels = [];
   });
   const DONE = "## Done when\n\n- it works\n";
-  const CHECK = (item: string) => `${DONE}\n## Controller check\n\n- ${item}\n`;
-  const parkOnCheck = (body: string) => {
-    live("guido-1", "r-pr", {
-      branch: "mc/7",
-      ticket: "mc#7",
-      loop: {
-        ...NEW_LOOP,
-        phase: "parked",
-        prNumber: 12,
-        parked: { kind: "controller-check", reason: "held", ended: false },
-        controllerCheck: { sha: SHA, from: "review", pass: false },
-      },
-    });
-    fetchImpl = async (n) => ticket(n, { body });
-  };
-
-  describe("controller checks", () => {
-    const SHOT = "c".repeat(32);
-    beforeEach(elevated);
-    it("passes a check on a hud-shot FLIGHT stored, as FLIGHT", async () => {
-      parkOnCheck(CHECK("the rate table renders in the HUD with a red row"));
-      shotsKnown = [SHOT];
-      // not screen-only on its own words? a shot is evidence either way
-      expect(
-        await call("settle_park", {
-          runId: "r-pr",
-          action: "pass-check",
-          note: `hud-shot:${SHOT} shows it`,
-        }),
-      ).toEqual({ text: "Settled r-pr: pass-check." });
-      expect(checkCalls).toEqual([["r-pr", "pass", SHA, `hud-shot:${SHOT} shows it`, "FLIGHT"]]);
-      expect(decisions().filter((d) => d.kind === "settle")).toHaveLength(1);
-    });
-    it("refuses evidence FLIGHT did not produce and leaves the park to the controller", async () => {
-      parkOnCheck(CHECK("run the migration on the live database and watch the log"));
-      for (const note of [undefined, `hud-shot:${SHOT}`, "update:abcdef1", "ci:999"]) {
-        const r = await call("settle_park", {
-          runId: "r-pr",
-          action: "pass-check",
-          ...(note === undefined ? {} : { note }),
-        });
-        expect(r).toHaveProperty("isError", true);
-      }
-      expect(checkCalls).toEqual([]);
-    });
-    it("passes a screen-only check without evidence", async () => {
-      parkOnCheck(CHECK("Screen: the HUD looks right"));
-      expect((await call("settle_park", { runId: "r-pr", action: "pass-check" })).isError).toBe(
-        undefined,
-      );
-      expect(checkCalls).toHaveLength(1);
-    });
-    it("does not take a mixed or unmarked check as screen-only", async () => {
-      for (const item of [
-        "the layout looks right and the migration preserved every row",
-        "Screen: the layout looks right and the migration preserved every row",
-        "the HUD renders",
-      ]) {
-        parkOnCheck(CHECK(item));
-        expect(await call("settle_park", { runId: "r-pr", action: "pass-check" })).toHaveProperty(
-          "isError",
-          true,
-        );
-      }
-      expect(checkCalls).toEqual([]);
-    });
-    it("never takes a refused update_hub decision as an Update", async () => {
-      parkOnCheck(CHECK("the new hub restarts and serves the page"));
-      addDecision({
-        kind: "hub",
-        decision: "Update waits for the operator: 1 commit(s) are not from a merged PR abcdef1",
-      });
-      expect(
-        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }),
-      ).toHaveProperty("isError", true);
-      expect(checkCalls).toEqual([]);
-    });
-    it("accepts an Update sha only when FLIGHT's log has that Update", async () => {
-      parkOnCheck(CHECK("the new hub restarts and serves the page"));
-      expect(
-        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }),
-      ).toHaveProperty("isError", true);
-      addDecision({ kind: "hub", decision: "Updated the hub to abcdef1, 1234567" });
-      expect(
-        (await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }))
-          .isError,
-      ).toBeUndefined();
-      expect(checkCalls).toHaveLength(1);
-    });
-    it("accepts a CI run only when it passed on the checked head", async () => {
-      parkOnCheck(CHECK("CI is green on the final head"));
-      ghImpl = async () => ({
-        code: 0,
-        stdout: JSON.stringify({ conclusion: "success", headSha: SHA_B }),
-        stderr: "",
-      });
-      expect(
-        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "ci:42" }),
-      ).toHaveProperty("isError", true);
-      ghImpl = async () => ({
-        code: 0,
-        stdout: JSON.stringify({ conclusion: "success", headSha: SHA }),
-        stderr: "",
-      });
-      expect(
-        (await call("settle_park", { runId: "r-pr", action: "pass-check", note: "ci:42" })).isError,
-      ).toBeUndefined();
-      expect(ghCalls.at(-1)).toEqual([
-        "run",
-        "view",
-        "42",
-        "--repo=o/mc",
-        "--json=conclusion,headSha",
-      ]);
-    });
-    it("fails a check with a note, and needs the note", async () => {
-      parkOnCheck(CHECK("Screen: the screenshot looks right"));
-      expect(await call("settle_park", { runId: "r-pr", action: "fail-check" })).toHaveProperty(
-        "isError",
-        true,
-      );
-      expect(
-        (
-          await call("settle_park", {
-            runId: "r-pr",
-            action: "fail-check",
-            note: "the row is blue",
-          })
-        ).isError,
-      ).toBeUndefined();
-      expect(checkCalls).toEqual([["r-pr", "fail", SHA, "the row is blue", "FLIGHT"]]);
-    });
-    it("keeps check actions off other parks", async () => {
-      live("guido-1", "r-pr", {
-        loop: {
-          ...NEW_LOOP,
-          phase: "parked",
-          parked: { kind: "review", reason: "r", ended: false },
-        },
-      });
-      expect(await call("settle_park", { runId: "r-pr", action: "pass-check" })).toHaveProperty(
-        "isError",
-        true,
-      );
-      expect(checkCalls).toEqual([]);
-    });
-  });
-
   describe("seats", () => {
     const sc = (n: number, over: Partial<BoardItem> = {}) => card(n, { size: "S", ...over });
     const start = (name = "start_seat", over: Record<string, unknown> = {}) =>
@@ -7878,7 +7739,8 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     it("starts a paused seat by letting it out of the pause, naming FLIGHT", async () => {
       writeCrewPause(store, { seats: ["guido-1", "inco-1"], reason: "ci", at: NOW, by: "op" }, NOW);
       expect((await start()).isError).toBeUndefined();
-      expect(readCrewPause(store)).toMatchObject({ seats: ["inco-1"], by: "FLIGHT" });
+      // the record stays the operator's
+      expect(readCrewPause(store)).toMatchObject({ seats: ["inco-1"], by: "op", reason: "ci" });
       writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
       startCalls.length = 0;
       store.upsertRun(run("r-done", "guido-1", { endedAt: NOW, status: "ok" }));
@@ -7886,8 +7748,8 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect((await start("start_seat", { issue: 8 })).isError).toBeDefined();
       board(sc(7), sc(8));
       expect((await start("start_seat", { issue: 8 })).isError).toBeUndefined();
-      expect(readCrewPause(store)?.seats).not.toContain("guido-1");
-      expect(readCrewPause(store)?.by).toBe("FLIGHT");
+      // an all-seats pause stays "all" (seats added later are held too), with this seat let out
+      expect(readCrewPause(store)).toMatchObject({ seats: "all", except: ["guido-1"], by: "op" });
     });
     it("needs superuser to override a stop or a pause", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
@@ -7944,6 +7806,18 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(r.isError).toBe(true);
       expect(r.text).toContain("could not be put back in Ready for QA");
     });
+    it("does not report a resume that left the seat in error, and puts the pause back", async () => {
+      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
+      live("guido-1", "r-g", { ticket: "mc#7" });
+      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
+      cfgResume.stayError = true;
+      const r = await call("resume_seat", { seat: "guido-1" });
+      cfgResume.stayError = false;
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("did not resume");
+      expect(readCrewPause(store)).toMatchObject({ seats: "all", by: "op" });
+      expect(readCrewPause(store)?.except ?? []).not.toContain("guido-1");
+    });
     it("leaves the operator's pause and the seat's state when resume_seat's resume fails", async () => {
       writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
       live("guido-1", "r-g", { ticket: "mc#7" });
@@ -7990,7 +7864,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
       expect((await call("resume_seat", { seat: "guido-1" })).isError).toBeUndefined();
       expect(resumeCalls).toEqual(["r-g"]);
-      expect(readCrewPause(store)?.seats).not.toContain("guido-1");
+      expect(readCrewPause(store)).toMatchObject({ seats: "all", except: ["guido-1"], by: "op" });
       store.setSeatSession({ ...row("inco-1", ""), runId: null, state: "stopped" });
       expect((await call("resume_seat", { seat: "inco-1" })).isError).toBeUndefined();
       expect(store.seatSession("inco-1")?.state).toBe("idle");
@@ -8034,13 +7908,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       for (const key of [`${GUARD_ACK_PREFIX}1`, HUB_UPDATE_HELD_KEY, "approval:1"])
         expect(await call("dismiss_item", { key: `note:${key}` })).toHaveProperty("isError", true);
       expect(store.notes().filter((n) => n.dismissedAt !== null)).toHaveLength(1);
-    });
-    it("withdraws a logged decision and keeps a line saying so", async () => {
-      const id = addDecision({ kind: "note", about: "wrong call", decision: "d" });
-      expect((await call("withdraw_decision", { id })).isError).toBeUndefined();
-      expect(decisions().some((d) => d.id === id)).toBe(false);
-      expect(decisions().find((d) => d.kind === "withdraw")?.decision).toContain(`decision ${id}`);
-      expect(await call("withdraw_decision", { id })).toHaveProperty("isError", true);
     });
     it("closes and reopens an issue, confirming against GitHub", async () => {
       board(card(7));
@@ -8091,6 +7958,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7 })).toHaveProperty("isError", true);
     });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
+      liveLabels = ["lane:home"];
       board(card(7));
       ghImpl = async (a) => ({
         code: 0,
@@ -8146,6 +8014,91 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     });
   });
 
+  describe("what each new write refuses", () => {
+    beforeEach(() => {
+      elevated();
+      readImpl = (n) => card(n, { labels: liveLabels });
+      fetchImpl = async (n) => ticket(n, { body: DONE });
+      board(card(7));
+    });
+    const writes: [string, object][] = [
+      ["close_issue", { issue: 7 }],
+      ["reopen_issue", { issue: 7 }],
+      ["edit_issue", { issue: 7, body: "new" }],
+      ["set_fields", { issue: 7, size: "S" }],
+      ["restart_ticket", { seat: "guido-1", issue: 7 }],
+    ];
+    it.each(writes)(
+      "%s refuses while the operator is away, and writes nothing",
+      async (name, a) => {
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        expect(await call(name, a)).toEqual(refused(AWAY_WRITES_REFUSED));
+        expect(ghCalls).toEqual([]);
+        expect(editCalls).toEqual([]);
+        expect(moveCalls).toEqual([]);
+        expect(startCalls).toEqual([]);
+      },
+    );
+    it.each(writes.slice(0, 4))("%s refuses another lane's ticket", async (name, a) => {
+      need(cfg.crew).lane = "home";
+      liveLabels = ["lane:work"];
+      expect(await call(name, a)).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+      expect(editCalls).toEqual([]);
+      expect(moveCalls).toEqual([]);
+    });
+    it("set_fields refuses a ticket with a live run, and any lane label change", async () => {
+      live("guido-1", "r-live", { ticket: "mc#7" });
+      expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
+      store.upsertRun(run("r-live", "guido-1", { ticket: "mc#7", endedAt: NOW, status: "ok" }));
+      liveLabels = ["lane:home"];
+      expect(await call("set_fields", { issue: 7, labels: ["lane:work"] })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(await call("set_fields", { issue: 7, labels: [] })).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields says which fields landed when a later one fails", async () => {
+      moveImpl = async () => ({ ok: false, reason: "no Status option" });
+      const r = await call("set_fields", { issue: 7, size: "M", status: "Blocked" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("Set size/priority on mc#7, then stopped: no Status option");
+      expect(editCalls).toEqual([["mc", 7, { size: "M" }]]);
+    });
+    it("restart_ticket still wants a ready ticket from Backlog, and logs a refusal", async () => {
+      board(card(7, { size: "S", status: "Backlog" }));
+      readImpl = (n) => card(n, { size: "S", status: "Backlog" });
+      const r = await call("restart_ticket", { seat: "guido-1", issue: 7 });
+      expect(r.isError).toBe(true);
+      expect(startCalls).toEqual([]);
+      expect(decisions().some((d) => d.kind === "restart")).toBe(true);
+    });
+    it("set_crew_pause never pauses FLIGHT itself, and an all-seats pause leaves it out", async () => {
+      expect(await call("set_crew_pause", { seats: ["flight-1"], reason: "x" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(
+        (await call("set_crew_pause", { seats: "all", reason: "CI red" })).isError,
+      ).toBeUndefined();
+      expect(readCrewPause(store)).toMatchObject({
+        seats: "all",
+        except: ["flight-1"],
+        by: "FLIGHT",
+      });
+      expect(pausedSeatFor("guido-1")).toBe(true);
+      expect(pausedSeatFor("flight-1")).toBe(false);
+    });
+    it("dismiss_item refuses an item it cannot find", async () => {
+      expect(await call("dismiss_item", { key: "pr:mc#99:missing" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(await call("dismiss_item", { key: "note:missing" })).toHaveProperty("isError", true);
+    });
+  });
+
   describe("the hub", () => {
     beforeEach(elevated);
     it("restarts the engine only once it has been silent past its tick twice", async () => {
@@ -8163,78 +8116,23 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         1,
       );
     });
-    // GitHub's answer for which PRs a commit belongs to
-    const pullsOf = (map: Record<string, { number: number; merged_at: string | null }[]>) => {
-      ghImpl = async (a) => {
-        const sha = /commits\/([0-9a-f]+)\/pulls/.exec(a[1] ?? "")?.[1] ?? "";
-        return { code: 0, stdout: JSON.stringify(map[sha] ?? []), stderr: "" };
+    it("says so when the restart throws, and counts no restart", async () => {
+      flightLoopHeartbeat(store, "engine", nowMs - 5 * 60_000, 60_000);
+      restartEngineImpl = async () => {
+        throw new Error("engine would not start");
       };
-    };
-    it("refuses a direct commit whose subject names a PR FLIGHT cleared", async () => {
-      updaterImpl = {
-        changes: async () => ({ commits: ["3333333 change hard rules (#50)"], paths: [] }),
-        update: async () => ({ restarting: true }),
-      };
-      addDecision({ kind: "merge", decision: "Cleared PR #50; the engine handles the merge." });
-      pullsOf({}); // GitHub knows no PR for this commit
-      expect(await call("update_hub", {})).toHaveProperty("isError", true);
-      // nor one that belongs to a different, uncleared PR, or to two
-      pullsOf({ "3333333": [{ number: 77, merged_at: "2026-10-22T00:00:00Z" }] });
-      expect(await call("update_hub", {})).toHaveProperty("isError", true);
-      pullsOf({
-        "3333333": [
-          { number: 50, merged_at: "2026-10-22T00:00:00Z" },
-          { number: 77, merged_at: "2026-10-22T00:00:00Z" },
-        ],
-      });
-      expect(await call("update_hub", {})).toHaveProperty("isError", true);
-      expect(updaterRestarts).toBe(0);
-    });
-    it("runs Update after merges FLIGHT cleared, and nothing else", async () => {
-      pullsOf({
-        "1111111": [{ number: 50, merged_at: "2026-10-22T00:00:00Z" }],
-        "2222222": [{ number: 51, merged_at: "2026-10-22T00:00:00Z" }],
-      });
-      updaterImpl = {
-        changes: async () => ({
-          commits: ["1111111 Merge pull request #50 from o/b", "2222222 fix thing (#51)"],
-          paths: ["apps/server/src/x.ts"],
-        }),
-        update: async () => ({ restarting: true }),
-      };
-      addDecision({ kind: "merge", decision: "Cleared PR #50; the engine handles the merge." });
-      const refusal = await call("update_hub", {});
-      expect(refusal).toHaveProperty("isError", true);
-      expect(refusal.text).toContain("#51");
-      expect(updaterRestarts).toBe(0);
-      addDecision({ kind: "merge", decision: "Cleared PR #51; the engine handles the merge." });
-      expect((await call("update_hub", {})).isError).toBeUndefined();
-      await new Promise((r) => setImmediate(r));
-      expect(updaterRestarts).toBe(1);
-      expect(decisions().find((d) => d.kind === "hub")?.decision).toContain("1111111, 2222222");
-    });
-    it("surfaces an Update refusal and an empty range", async () => {
-      updaterImpl.changes = async () => ({ commits: [], paths: [] });
-      expect(await call("update_hub", {})).toHaveProperty("isError", true);
-      pullsOf({ "1111111": [{ number: 50, merged_at: "2026-10-22T00:00:00Z" }] });
-      updaterImpl = {
-        changes: async () => ({ commits: ["1111111 x (#50)"], paths: [] }),
-        update: async () => {
-          throw new Error("the checkout has uncommitted changes");
-        },
-      };
-      addDecision({ kind: "merge", decision: "Cleared PR #50; x" });
-      const r = await call("update_hub", {});
-      expect(r.text).toContain("uncommitted");
-      expect(updaterRestarts).toBe(0);
+      const r = await call("restart_engine", {});
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("engine would not start");
+      // not a restart: the next attempt is allowed at once
+      restartEngineImpl = async () => {};
+      expect((await call("restart_engine", {})).isError).toBeUndefined();
     });
     it("needs superuser", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
       for (const [name, a] of [
         ["restart_engine", {}],
-        ["update_hub", {}],
         ["set_crew_pause", { seats: "all", reason: "x" }],
-        ["withdraw_decision", { id: 1 }],
       ] as const)
         expect(await call(name, a)).toMatchObject({
           isError: true,

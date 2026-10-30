@@ -271,6 +271,11 @@ export interface Scheduler {
    * after-poll hook do nothing.
    */
   setEngine(engine: EngineHooks | null): void;
+  /**
+   * Forgets an engine tick that never finished, so the next one runs (a stuck tick otherwise makes
+   * every later one skip). The abandoned tick is not cancelled; it can only finish and be ignored.
+   */
+  abandonEngineTick(): void;
   /** Runs every job now, then each on its interval. Reads the GitHub token once. */
   start(): void;
   /** Clears the timers, waits for in-flight runs, then sends any topics still queued. */
@@ -1098,7 +1103,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     if (SIGNAL_LOOPS.includes(job)) {
       flightLoopHeartbeat(store, job, now(), intervals[job]);
     }
-    inFlight.delete(job);
+    // a run abandoned by `abandonEngineTick` has been replaced: it must not clear its successor
+    if (inFlight.get(job) === p) inFlight.delete(job);
     return "ran";
   };
 
@@ -1159,6 +1165,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   return {
+    abandonEngineTick() {
+      inFlight.delete("engine");
+    },
     setEngine(e) {
       engine = e;
     },

@@ -297,13 +297,11 @@ describe("the allowlist in phase 2b", () => {
       liftCrewPause: "mcp__mc__lift_crew_pause",
       resumeSeat: "mcp__mc__resume_seat",
       restartTicket: "mcp__mc__restart_ticket",
-      withdrawDecision: "mcp__mc__withdraw_decision",
       closeIssue: "mcp__mc__close_issue",
       reopenIssue: "mcp__mc__reopen_issue",
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
       restartEngine: "mcp__mc__restart_engine",
-      updateHub: "mcp__mc__update_hub",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -620,13 +618,11 @@ describe("crew constants", () => {
           "lift_crew_pause",
           "resume_seat",
           "restart_ticket",
-          "withdraw_decision",
           "close_issue",
           "reopen_issue",
           "edit_issue",
           "set_fields",
           "restart_engine",
-          "update_hub",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -750,13 +746,11 @@ describe("mc tool grants", () => {
       "lift_crew_pause",
       "resume_seat",
       "restart_ticket",
-      "withdraw_decision",
       "close_issue",
       "reopen_issue",
       "edit_issue",
       "set_fields",
       "restart_engine",
-      "update_hub",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

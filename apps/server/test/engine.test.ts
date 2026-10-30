@@ -3900,15 +3900,6 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(h.steps).toContain("merge"));
       });
 
-      it("a pass by FLIGHT merges and the loop event names FLIGHT", async () => {
-        await parkedOnCheck();
-        expect(
-          await h.engine.controllerCheck(RUN, "pass", SHA.slice(0, 7), "hud-shot", "FLIGHT"),
-        ).toEqual({ lifted: true });
-        await vi.waitFor(() => expect(h.steps).toContain("merge"));
-        expect(loopTexts()).toContain(`controller check passed on ${SHA.slice(0, 7)} by FLIGHT`);
-      });
-
       it("a pass on a moved head or another sha is refused", async () => {
         await parkedOnCheck();
         expect(await h.engine.controllerCheck(RUN, "pass", SHA_B.slice(0, 7))).toEqual({

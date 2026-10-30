@@ -481,13 +481,11 @@ describe("startWatch", () => {
       "mcp__mc__lift_crew_pause",
       "mcp__mc__resume_seat",
       "mcp__mc__restart_ticket",
-      "mcp__mc__withdraw_decision",
       "mcp__mc__close_issue",
       "mcp__mc__reopen_issue",
       "mcp__mc__edit_issue",
       "mcp__mc__set_fields",
       "mcp__mc__restart_engine",
-      "mcp__mc__update_hub",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

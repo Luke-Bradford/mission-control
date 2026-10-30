@@ -292,7 +292,6 @@ export interface Engine {
     verdict: "pass" | "fail",
     sha: string,
     note?: string,
-    by?: "CAPCOM" | "FLIGHT",
   ): Promise<OperatorResult>;
   /**
    * Holds the run's merge: the engine does not merge it, even after a clean review and green CI,
@@ -932,12 +931,6 @@ export function createEngine(deps: EngineDeps): Engine {
     "update-branch",
   ]);
 
-  /**
-   * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
-   * the reason to park with, or undefined when the ticket could not be read yet (tried next pass).
-   * Fails closed: a ticket that is missing or unreadable parks after REFUSAL_TRIES, so the
-   * operator can pass it. Once a run's ticket has listed a check, a pass is needed whatever it says later.
-   */
   /** RETRO's latest reported findings as the author's fix list, else FLIGHT's own request. */
   function reworkFindings(runId: string, reason: string): string {
     const review = store
@@ -953,6 +946,12 @@ export function createEngine(deps: EngineDeps): Engine {
       : `FLIGHT requests rework: ${reason}`;
   }
 
+  /**
+   * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
+   * the reason to park with, or undefined when the ticket could not be read yet (tried next pass).
+   * Fails closed: a ticket that is missing or unreadable parks after REFUSAL_TRIES, so the
+   * operator can pass it. Once a run's ticket has listed a check, a pass is needed whatever it says later.
+   */
   async function controllerCheckHold(
     run: Run,
     cur: RunLoop,
@@ -2553,7 +2552,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }).then(() => result);
     },
 
-    controllerCheck(runId, verdict, sha, note, by = "CAPCOM") {
+    controllerCheck(runId, verdict, sha, note) {
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
         result = { lifted: false, reason };
@@ -2590,9 +2589,7 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:pass`,
             run.id,
-            by === "FLIGHT"
-              ? `controller check passed on ${short} by FLIGHT`
-              : `controller check passed on ${short}`,
+            `controller check passed on ${short}`,
             at,
           );
         } else {
@@ -2649,9 +2646,7 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
             run.id,
-            by === "FLIGHT"
-              ? `controller check failed on ${short} by FLIGHT: sent back for rework`
-              : `controller check failed on ${short}: sent back for rework`,
+            `controller check failed on ${short}: sent back for rework`,
             at,
           );
         }

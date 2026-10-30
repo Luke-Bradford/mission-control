@@ -889,16 +889,11 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park. FLIGHT settles it with `settle_park` `pass-check` or
-`fail-check` (below); a paused seat's verdict is
+A plain resume or message does not lift this park. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
-FLIGHT passes a check only on evidence it produced: its `note` cites `hud-shot:<id>` (a screenshot it
-stored), `update:<sha>` (an Update in its own log) or `ci:<run id>` (a passing CI run on the checked
-head, read from GitHub), or every item of the check is marked screen-only: it starts `Screen:`, `Screenshot:` or `HUD:` and holds a single clause (no "and", "then", "," or ";"). A mixed or unmarked item needs evidence. An `update:<sha>` counts only when it names a successful `update_hub` ("Updated the hub to ..."), never a refused one. A
-check that needs evidence FLIGHT cannot produce stays with the controller. `fail-check` needs a note
-and sends it to the seat as rework. The engine logs the verdict "by FLIGHT".
+A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does.
 
 ### Hold a run from merging
 
@@ -940,27 +935,20 @@ operator.
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat), `pass-check` / `fail-check` on a controller check |
-| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and a pause record is rewritten with `by: FLIGHT`. A start that fails puts the stop, the pause and a restarted card back |
-| `restart_ticket` | Start a seat on a ticket from any open column (Blocked too): the card goes to Ready first and the once-a-day restart limit is waived |
-| `end_run` | End a working, parked or stalled run; refused with uncommitted changes unless `discard: true` |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop, the pause and a restarted card back |
+| `restart_ticket` | Start a seat on a ticket from any open column (Blocked too): the card goes to Ready first and the once-a-day restart limit is waived. From Backlog or Refinement the ticket must still be ready. Refusals are logged |
+| `end_run` | End a working, parked or stalled run (working needs a superuser repo and a run that is not held); refused with uncommitted changes unless `discard: true`, and the decision names what was discarded |
 | `sync_main` | Merge main into a run's branch |
-| `set_crew_pause`, `lift_crew_pause` | Pause the crew or named seats, or lift the pause (record: `by: FLIGHT`) |
-| `dismiss_item` | Dismiss any attention item except an operator approval, a budget or guard hold, or an Update hold |
-| `promote` | Reads the live card before refusing "no size" or "not on the board" |
-| `withdraw_decision` | Remove one of its own logged decisions; the log keeps a `withdraw` line |
-| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone. `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions |
-| `restart_engine` | Restart the loop engine once it has been silent past two of its ticks (once per ten minutes) |
-| `update_hub` | Run Update when GitHub names exactly one merged PR for every commit between the running code and main and FLIGHT cleared that PR with `merge_pr` (a PR number in a commit's text proves nothing; a direct commit refuses); Update's own checks apply (on main, clean checkout, no seat starting, build) and the hub restarts |
+| `set_crew_pause`, `lift_crew_pause` | Pause the crew or named seats, or lift the pause (record: `by: FLIGHT`). FLIGHT never pauses its own seat: an all-seats pause leaves it out |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, or a decision addressed to the operator |
+| `promote` | Reads the live card, and refuses when it cannot be read |
+| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone (a lane label changes only with `edit_card`; a ticket with a live run is refused; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions |
+| `restart_engine` | Restart the loop engine once it has been silent past two of its ticks (once per ten minutes): the stuck scheduler tick is abandoned, the restart runs outside the ticket queue with a 90 s limit, and a failed restart is reported |
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
 started before the set was recorded rotates on its wake count as before.
-
-`update_hub` makes FLIGHT the person who runs Update for the merges it cleared. The CLAUDE.md sentence
-that reserves Update to the operator or the controller is the operator's to change; until it is,
-treat the tool as the operator's clearance in advance.
-A refused or failed call to any of these tools is logged as a decision too, so the log shows what FLIGHT tried.
 
 ## What it observes
 

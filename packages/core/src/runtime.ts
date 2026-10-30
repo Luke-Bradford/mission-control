@@ -86,13 +86,11 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.liftCrewPause,
   MC_TOOL_NAMES.resumeSeat,
   MC_TOOL_NAMES.restartTicket,
-  MC_TOOL_NAMES.withdrawDecision,
   MC_TOOL_NAMES.closeIssue,
   MC_TOOL_NAMES.reopenIssue,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
   MC_TOOL_NAMES.restartEngine,
-  MC_TOOL_NAMES.updateHub,
 ];
 
 /**
