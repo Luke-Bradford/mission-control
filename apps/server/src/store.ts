@@ -8,14 +8,17 @@ import {
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
   type AuditMetrics,
+  type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditTokenOveruse,
   type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
@@ -31,6 +34,7 @@ import {
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  classifyOveruse,
   commsCutMarker,
   DECISION_DEFAULT_WAIT_MS,
   type Escalation,
@@ -64,6 +68,7 @@ import {
   GUARD_RULES,
   type GuardHit,
   type GuardRule,
+  groupOveruse,
   type HealthRow,
   type HudState,
   inferTicket,
@@ -71,6 +76,7 @@ import {
   type MachineSample,
   type MoveColumn,
   memoryTopicKey,
+  overusePrevention,
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
@@ -98,8 +104,10 @@ import {
   type StrayKind,
   type Telemetry,
   type TestLockRun,
+  TICKET_SIZES,
   TITLE_MARKERS,
   type TokenUsage,
+  tokenBaselines,
   type UsageSample,
   validateMemoryNote,
   wakeKeyPrefix,
@@ -449,6 +457,9 @@ CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER 
 type Row = Record<string, SQLInputValue>;
 
 const DAY_MS = 86_400_000;
+
+/** Most token-overuse findings one Audit range returns. */
+const AUDIT_OVERUSE_LIMIT = 100;
 
 /** The median of the values, or null when there are none. */
 function median(values: number[]): number | null {
@@ -2823,6 +2834,7 @@ export class Store {
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
+      tokenOveruse: this.auditTokenOveruse(since, until),
       surgeonProposals: [],
     };
   }
@@ -2921,6 +2933,102 @@ export class Store {
       }
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
+  }
+
+  /**
+   * Runs started in range whose input + output tokens pass their size's expected use (see
+   * `tokenBaselines`, built from build runs of the last `AUDIT_BASELINE_DAYS` days), largest first.
+   * A finding only: it reads the run, never changes it.
+   */
+  private auditTokenOveruse(since: number, until: number): AuditView["tokenOveruse"] {
+    const runRows = (sql: string, ...args: SQLInputValue[]) =>
+      this.db.prepare(sql).all(...args) as Row[];
+    // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
+    const from = `FROM runs r LEFT JOIN board_items b
+         ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
+       WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
+    const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
+    const baselines = tokenBaselines(
+      runRows(
+        `SELECT b.size AS size, r.tokens AS tokens ${from}
+           AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
+        until - AUDIT_BASELINE_DAYS * DAY_MS,
+        until,
+      ).map((r) => ({
+        size: r.size as string | null,
+        tokens: usage(r).input + usage(r).output,
+      })),
+    );
+    const blocking = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const runs: AuditTokenOveruse[] = [];
+    for (const r of runRows(
+      `SELECT r.id AS id, r.agent_id AS agentId, r.ticket AS ticket, r.started_at AS startedAt,
+         r.ended_at AS endedAt, r.tokens AS tokens, b.size AS size ${from}
+         AND r.started_at >= ? AND r.started_at <= ? ORDER BY r.started_at DESC`,
+      since,
+      until,
+    )) {
+      const tokens = usage(r);
+      const total = tokens.input + tokens.output;
+      const size = r.size as string | null;
+      const expected = baselines.expected(size);
+      if (total <= expected) continue;
+      const id = r.id as string;
+      const rounds = this.db
+        .prepare("SELECT COUNT(*) AS n FROM reviews WHERE author_run_id = ? AND state = 'reported'")
+        .get(id) as { n: number };
+      const byCategory: AuditOveruseFacts["blockingByCategory"] = {};
+      let blockingTotal = 0;
+      for (const f of this.db
+        .prepare(
+          `SELECT COALESCE(category, 'uncategorised') AS category, COUNT(*) AS n FROM review_findings
+           WHERE author_run_id = ? AND severity IN (${blocking}) GROUP BY category`,
+        )
+        .all(id, ...BLOCKING_SEVERITIES) as { category: keyof typeof byCategory; n: number }[]) {
+        byCategory[f.category] = f.n;
+        blockingTotal += f.n;
+      }
+      const digest = this.db
+        .prepare(
+          "SELECT json_extract(digest, '$.turns') AS turns FROM run_digests WHERE run_id = ?",
+        )
+        .get(id) as { turns: number | null } | undefined;
+      const facts: AuditOveruseFacts = {
+        size,
+        reviewRounds: rounds.n,
+        blocking: blockingTotal,
+        blockingByCategory: byCategory,
+        turns: digest?.turns ?? null,
+      };
+      const cause = classifyOveruse(facts);
+      runs.push({
+        runId: id,
+        agentId: r.agentId as string,
+        ticket: r.ticket as string | null,
+        startedAt: r.startedAt as number,
+        ended: r.endedAt !== null,
+        tokens: total,
+        input: tokens.input,
+        output: tokens.output,
+        cacheRead: tokens.cacheRead,
+        cacheCreate: tokens.cacheCreate,
+        expected,
+        ...facts,
+        cause,
+        prevention: overusePrevention(cause),
+      });
+    }
+    runs.sort((a, b) => b.tokens - a.tokens || a.runId.localeCompare(b.runId));
+    const top = runs.slice(0, AUDIT_OVERUSE_LIMIT);
+    return {
+      runs: top,
+      groups: groupOveruse(top),
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: baselines.expected(size),
+        measured: baselines.bySize.has(size ?? ""),
+      })),
+    };
   }
 
   /** Crew-wide metrics over one window, both ends inclusive. */

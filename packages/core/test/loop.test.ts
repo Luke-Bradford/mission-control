@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
@@ -1298,6 +1299,14 @@ describe("review round", () => {
       inCi({ pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: old + 1 }) }),
     );
     expect(fresh.loop.phase).toBe("ci");
+  });
+
+  it("15: a run past the default expected use keeps working until the ceiling", () => {
+    // the budget is the runaway ceiling; passing AUDIT_EXPECTED_TOKENS_DEFAULT is an Audit finding only
+    const past = AUDIT_EXPECTED_TOKENS_DEFAULT + 1;
+    expect(reconcile({ ...snap({ tokens: past }), budget: 1_500_000 }).loop.phase).toBe("working");
+    const over = reconcile({ ...snap({ tokens: 1_500_001 }), budget: 1_500_000 });
+    expect(over.loop.parked?.kind).toBe("budget");
   });
 
   it("15: only a working run parks over budget", () => {

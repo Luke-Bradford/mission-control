@@ -68,6 +68,7 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
+  TICKET_SIZES,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -459,6 +460,15 @@ describe("audit", () => {
     chatter: [],
     flakes: [],
     changes: [],
+    tokenOveruse: {
+      runs: [],
+      groups: [],
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: 400_000,
+        measured: false,
+      })),
+    },
     surgeonProposals: [],
   });
 
