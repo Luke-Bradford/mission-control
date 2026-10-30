@@ -1648,7 +1648,7 @@ Add a Codex seat in **Setup › Sessions**, or in `config.yaml`: choose an accou
 
 If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery or validation. The hub still boots and Claude seats continue to run. No intervention is required: the state clears itself when discovery succeeds.
 
-Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
+Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. Remote plugins are off for seats, so Codex does not download its shared plugin catalog into each isolated home. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
 

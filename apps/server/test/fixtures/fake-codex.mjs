@@ -16,6 +16,17 @@ record({ type: "spawn", args: process.argv.slice(2), env: process.env, cwd: proc
 const say = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const notify = (method, params) => say({ method, params });
 const configured = JSON.parse(process.env.FAKE_CODEX_SCENARIO ?? "{}");
+const codexHome = process.env.CODEX_HOME;
+const codexConfig = codexHome === undefined ? null : join(codexHome, "config.toml");
+if (
+  codexConfig !== null &&
+  existsSync(codexConfig) &&
+  !readFileSync(codexConfig, "utf8").includes("remote_plugin = false")
+) {
+  const catalog = join(codexHome, "cache", "remote_plugin_catalog");
+  mkdirSync(catalog, { recursive: true });
+  writeFileSync(join(catalog, "catalog.bin"), Buffer.alloc(5 * 1024 * 1024));
+}
 const threadId = "codex-thread-1";
 let turn = 0;
 let handshakes = 0;

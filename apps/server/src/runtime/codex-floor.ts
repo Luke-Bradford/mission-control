@@ -58,6 +58,9 @@ export function codexSeatConfig(
     `web_search = ${tomlString("disabled")}`,
     `default_permissions = ${tomlString(CODEX_SEAT_PROFILE)}`,
     "[features]",
+    // Seats cannot install plugins. Avoid downloading the shared remote catalog into every
+    // isolated CODEX_HOME when Codex starts.
+    "remote_plugin = false",
     "unified_exec = false",
     "shell_snapshot = false",
     // the zsh fork's exec bridge sends several approvals per item and has its own escalation path
