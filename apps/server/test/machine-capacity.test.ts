@@ -27,12 +27,44 @@ describe("machineCapacity", () => {
       { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
       "disk free",
     ],
-    ["swap", { swapUsedBytes: 86 }, "swap"],
     ["memory", { memoryPressureFreePct: 9 }, "memory free"],
   ])("blocks on %s", (_name, over, reason) => {
     expect(machineCapacity([sample(over)], NOW)).toMatchObject({
       blocked: true,
       reason: expect.stringContaining(reason),
+    });
+  });
+
+  it("uses physical RAM and memory pressure, not the shrinking macOS swap file", () => {
+    const gb = 1024 ** 3;
+    const recovered = sample({
+      memTotalBytes: 24 * gb,
+      swapUsedBytes: 6.2 * gb,
+      swapTotalBytes: 7.2 * gb,
+      memoryPressureFreePct: 46,
+    });
+    expect(machineCapacity([recovered], NOW)).toEqual({ blocked: false, reason: null });
+
+    const criticallySwapped = sample({
+      memTotalBytes: 24 * gb,
+      swapUsedBytes: 17.5 * gb,
+      swapTotalBytes: 18.4 * gb,
+      memoryPressureFreePct: 50,
+    });
+    expect(machineCapacity([criticallySwapped], NOW)).toMatchObject({
+      blocked: true,
+      reason: "swap used is 17.5 GB of 24.0 GB RAM (above 60%)",
+    });
+
+    expect(
+      machineCapacity(
+        [sample({ memTotalBytes: 24 * gb, swapUsedBytes: 22 * gb, memoryPressureFreePct: 50 })],
+        NOW,
+        { ...MACHINE_CAPACITY_DEFAULTS, swapUsedPct: 97 },
+      ),
+    ).toMatchObject({
+      blocked: true,
+      reason: "swap used is 22.0 GB of 24.0 GB RAM (above 90%)",
     });
   });
 

@@ -8,7 +8,9 @@ condition and the tracked agent consumers. It closes after five minutes of headr
 Configure the limits below `crew.machine_capacity` in `config.yaml` (all values have defaults):
 
 - `disk_free_gb: 15` and `disk_free_pct: 5` block when either free-space floor is crossed.
-- `swap_used_pct: 85`, `memory_free_pct: 10`, and `load_per_core: 1.5` set the other floors.
+- `swap_used_pct: 60` is measured against physical RAM, never the macOS swap-file size.
+  `memory_free_pct: 10` independently detects pressure; swap alone always blocks above 90% of
+  RAM. `load_per_core: 1.5` sets the other floor.
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a

@@ -1024,6 +1024,7 @@ describe("scheduler", () => {
               at,
               diskFreeBytes: tight ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
               diskTotalBytes: 100 * 1024 ** 3,
+              memTotalBytes: 24 * 1024 ** 3,
               swapUsedBytes: (tight ? 18 : 1) * 1024 ** 3,
               swapTotalBytes: 20 * 1024 ** 3,
               memoryPressureFreePct: tight ? 8 : 20,
@@ -1038,7 +1039,7 @@ describe("scheduler", () => {
       });
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
-        "Disk: 14.0 GB free (14.0%). Swap: 18.0 GB / 20.0 GB used (90.0%). Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
+        "Disk: 14.0 GB free (14.0%). Swap used: 18.0 GB. RAM: 24.0 GB. Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
       );
       tight = false;
       t += 5 * 60_000 + 1;
@@ -1053,7 +1054,11 @@ describe("scheduler", () => {
         { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
         "disk free is 4.0%",
       ],
-      ["swap", { swapUsedBytes: 86, swapTotalBytes: 100 }, "swap is 86.0% used"],
+      [
+        "swap",
+        { swapUsedBytes: 18 * 1024 ** 3, memTotalBytes: 24 * 1024 ** 3 },
+        "swap used is 18.0 GB of 24.0 GB RAM (above 60%)",
+      ],
       ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
     ])("raises exactly one capacity item for %s", async (_name, over, reason) => {
       const s = createScheduler({
@@ -1100,6 +1105,7 @@ describe("scheduler", () => {
               diskTotalBytes: 100 * 1024 ** 3,
               swapUsedBytes: disk ? 1 : 18,
               swapTotalBytes: 20,
+              memTotalBytes: 20,
               memoryPressureFreePct: 20,
               load1: 1,
               topConsumers: [
@@ -1122,7 +1128,7 @@ describe("scheduler", () => {
       await s.tick("machine");
       const notes = store.notes().filter((n) => n.key === "machine-capacity");
       expect(notes).toHaveLength(1);
-      expect(notes[0]?.text).toContain("swap is 90.0% used");
+      expect(notes[0]?.text).toContain("swap used is 0.0 GB of 0.0 GB RAM (above 60%)");
       expect(notes[0]?.text).toContain("node (pid 2");
     });
 
