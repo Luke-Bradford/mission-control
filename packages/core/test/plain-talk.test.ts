@@ -18,6 +18,8 @@ describe("plainTalkProblems", () => {
     ["a heavy word", "Escalate to FLIGHT.", 'uses "Escalate"'],
     ["abort", "Abort the run and flag the issue.", 'uses "Abort"'],
     ["flag", "Abort the run and flag the issue.", 'uses "flag"'],
+    ["flagged", "The issue was flagged.", 'uses "flagged"'],
+    ["flagging", "Flagging the issue.", 'uses "Flagging"'],
     ["kill", "Kill the process.", 'uses "Kill"'],
     ["surface", "Surface the error to FLIGHT.", 'uses "Surface"'],
     ["disable", "Disable the check.", 'uses "Disable"'],

@@ -5,10 +5,12 @@
  */
 export const PLAIN_TALK_SENTENCE_MAX = 20;
 
-/** A verb and its inflected forms: `forms("terminate")` matches terminate, terminates, terminated, terminating. */
+/** A verb and its inflected forms: `forms("terminate")` matches terminate, terminates, terminated, terminating; `forms("flag")` also flagged, flagging. */
 const forms = (verb: string): RegExp => {
   const stem = verb.endsWith("e") ? verb.slice(0, -1) : verb;
-  return new RegExp(`\\b(${verb}s?|${stem}(ed|ing)|${verb}d)\\b`, "i");
+  // flag → flagged, flagging: a short verb doubles its last letter
+  const last = verb.at(-1);
+  return new RegExp(`\\b(${verb}s?|${stem}(ed|ing)|${verb}d|${verb}${last}(ed|ing))\\b`, "i");
 };
 
 /**
