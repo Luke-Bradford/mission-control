@@ -104,6 +104,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
       <Panel
         title="Templates"
         sub="loops/*.yaml"
+        className="wide"
         actions={
           <div ref={newButton}>
             <NewTemplate onNew={() => setEditing(true)} />
@@ -138,10 +139,10 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
         )}
         {crewError && (
           <p className="pb s" role="status">
-            Running counts unavailable: {crewError.message}
+            Seats on each step unavailable: {crewError.message}
           </p>
         )}
-        {crewLoading && !crew && <p className="pb s">Loading running counts…</p>}
+        {crewLoading && !crew && <p className="pb s">Loading seats on each step…</p>}
         {error !== null ? (
           <p className="pb s">{`Could not read the template profiles: ${error}`}</p>
         ) : list.length === 0 ? (
@@ -155,7 +156,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
                   aria-pressed={x.name === p?.name}
                   onClick={() => setPicked(x.name)}
                 >
-                  {`${x.name} · ${x.trigger ?? profileTrigger(x)} · ${seats?.filter((r) => r.loop?.profile === x.name && r.hudState === "running").length ?? "—"} running · ${plural(x.steps.length, "step")}`}
+                  {`${x.name} · ${x.trigger ?? profileTrigger(x)} · ${plural(x.steps.length, "step")}`}
                 </button>
               </li>
             ))}
@@ -163,7 +164,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
         )}
       </Panel>
       {p !== undefined && (
-        <Panel title={p.name} sub={`runs for: ${p.trigger ?? profileTrigger(p)}`}>
+        <Panel title={p.name} sub={`runs for: ${p.trigger ?? profileTrigger(p)}`} className="wide">
           <ol className="ptrack" aria-label="Steps">
             {p.steps.map((s, i) => (
               <li key={s.name} className={s.gate ? "gate" : undefined}>
@@ -396,7 +397,8 @@ function LoopChain({ config }: { config: ConfigView }) {
     <>
       <Panel
         title="Feature loop chain"
-        sub="fixed today; loop config API will replace this source"
+        sub="the approved feature loop: Plan to Done, with its return routes"
+        className="wide"
         actions={
           <fieldset className="loop-show" aria-label="Loop display">
             <label className="sr-only" htmlFor="loop-run-picker">
@@ -508,7 +510,7 @@ function LoopChain({ config }: { config: ConfigView }) {
           </section>
         </div>
       </Panel>
-      <div className="loop-details">
+      <div className="loop-details wide">
         <Panel title="Step inspector" sub={`${step.name} step`}>
           <dl className="loop-inspector">
             <dt>Who runs it</dt>
@@ -566,7 +568,7 @@ export function Loops({ config }: { config: ConfigView }) {
   const loops = config.loops.filter((l) => inRepo(l.repoId));
   return (
     <>
-      <Panel title="Observed loops" sub="read from config.yaml">
+      <Panel title="Observed loops" sub="read from config.yaml" className="wide">
         {loops.length === 0 ? (
           <p className="pb muted s">{NO_OBSERVED_LOOPS}</p>
         ) : (
@@ -600,7 +602,7 @@ export function Loops({ config }: { config: ConfigView }) {
       </Panel>
       <LoopChain config={config} />
       {config.profiles === undefined ? (
-        <Panel title="Templates" sub="loops/*.yaml" actions={<NewTemplate />}>
+        <Panel title="Templates" sub="loops/*.yaml" className="wide" actions={<NewTemplate />}>
           <div className="pb">
             <p className="s">{NO_PROFILES}</p>
             <p className="xs muted">{RETRY_NOTE}</p>

@@ -185,14 +185,14 @@ it("announces saving and prevents duplicate submissions while preserving the run
   await screen.findByRole("alert");
 });
 
-it("shows empty profiles and failed counts without claiming zero running", async () => {
+it("shows empty profiles and a failed seat read without claiming a running count", async () => {
   stubFetch({
     "/api/crew?shape=summary": () => ({ status: 500, body: { error: "Crew unavailable" } }),
   });
   const { rerender } = render(<Loops config={config} />);
-  expect(screen.getByText("Loading running counts…")).toBeTruthy();
-  await screen.findByText("Running counts unavailable: Crew unavailable");
-  expect(screen.getByRole("button", { name: /^feature ·/ }).textContent).toContain("— running");
+  expect(screen.getByText("Loading seats on each step…")).toBeTruthy();
+  await screen.findByText("Seats on each step unavailable: Crew unavailable");
+  expect(screen.getByRole("button", { name: /^feature ·/ }).textContent).not.toContain("running");
   rerender(<Loops config={{ ...config, profiles: { ...profiles, list: [] } }} />);
   expect(screen.getByText("No template profiles.")).toBeTruthy();
 });
