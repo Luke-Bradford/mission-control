@@ -808,6 +808,50 @@ describe("attention items", () => {
   });
 });
 
+describe("attention items: Needs you holds decisions only (#1177)", () => {
+  const escItem = () => attentionItems(config, store, NOW).find((i) => i.key === "esc:shop-app#9");
+
+  it("a recent escalation of a live loop is the operator's", () => {
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
+    expect(escItem()?.owner).toBe("operator");
+  });
+
+  it("an escalation of a paused loop is the loop's, not a Needs-you item", () => {
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
+    expect(escItem()?.owner).toBe("loop");
+  });
+
+  it("a paused loop's old draft PR waits on nobody", () => {
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    store.replaceBoard("shop-app", [boardItem({})]);
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 7,
+          title: "spec",
+          url: "https://github.com/o/shop-app/pull/7",
+          branch: "docs/42-spec",
+          ticket: "shop-app#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: NOW - 9 * DAY,
+          updatedAt: NOW - 9 * DAY,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      0,
+    );
+    expect(attentionItems(config, store, NOW).filter((i) => i.kind === "pr")).toEqual([]);
+  });
+});
+
 describe("attentionItems: PRs waiting on you", () => {
   const pr = (over: Partial<PullRequestView> = {}): PullRequestView => ({
     repoId: "shop-app",

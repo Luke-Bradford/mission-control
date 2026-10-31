@@ -1130,10 +1130,19 @@ function buildAttentionItems(
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
+    // A paused, parked or stopped loop asks nobody: its open escalations stay on its card until
+    // it runs again.
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === e.repoId);
+    const loopIdle =
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped");
     items.push({
-      // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
+      // a needs-you label asks the operator whatever the kind, unless its loop is paused, parked or
+      // stopped; a [loop-blocked] title is always the loop's
       owner:
-        e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
+        !loopIdle && (e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind))
+          ? OWNER_OPERATOR
+          : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -1199,6 +1208,13 @@ function buildAttentionItems(
   );
   for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
+    // a paused, parked or stopped loop's PRs wait on nobody: they stay on its card
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === repo.id);
+    if (
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped")
+    )
+      continue;
     // a ticket the board has seen closed clears its PR's item
     const onBoard = new Set(
       store
