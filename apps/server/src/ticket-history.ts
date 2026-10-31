@@ -124,6 +124,10 @@ export interface TicketHistoryInput {
   /** The issue as GitHub reads it now; null when it was not read. */
   issue: TicketView | null;
   githubError: string | null;
+  /** True when the hub serves one repo, so an unqualified `#n` can only mean this one. */
+  singleRepo: boolean;
+  /** The repo of the seat that sent a message, else null (CAPCOM, a seat no longer configured). */
+  repoOfSender: (from: string) => string | null;
   before: { at: number; key: string } | null;
   limit: number;
 }
@@ -145,7 +149,14 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
     runs.map((r) => r.id),
     SOURCE_LIMIT,
   );
-  const comms = store.commsOnTicket(ref, SOURCE_LIMIT);
+  const comms = store
+    .commsOnTicket(
+      ref,
+      `#${number}`,
+      prs.map((p) => `PR ${p.number}`),
+      SOURCE_LIMIT,
+    )
+    .filter((m) => m.ticket === ref || i.singleRepo || i.repoOfSender(m.from) === repoId);
   if (
     card === null &&
     i.issue === null &&

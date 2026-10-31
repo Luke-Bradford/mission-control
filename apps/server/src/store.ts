@@ -3612,13 +3612,25 @@ export class Store {
     return rows.map(toCiRun);
   }
 
-  /** The newest `limit` comms messages that name the ticket (`repo#number`), as the ticket or the ref. */
-  commsOnTicket(ticket: string, limit: number): CommsRow[] {
+  /**
+   * The newest `limit` comms messages that name the ticket: by its qualified `repo#n` (set by the
+   * hub), by the short `#n` a seat's or the operator's message carries, or by `PR n` for one of its
+   * PRs. Short forms carry no repo, so the caller keeps only those that belong to this one.
+   */
+  commsOnTicket(
+    ticket: string,
+    shortRef: string,
+    prRefs: readonly string[],
+    limit: number,
+  ): CommsRow[] {
+    const marks = prRefs.map((_, i) => `?${i + 4}`).join(", ");
     const rows = this.db
       .prepare(
-        `SELECT * FROM comms WHERE ticket = ?1 OR ref = ?1 ORDER BY at DESC, id DESC LIMIT ?2`,
+        `SELECT * FROM comms WHERE ticket = ?1 OR ticket = ?2 OR ref = ?2 OR ref = ?1
+           ${prRefs.length > 0 ? `OR ticket IN (${marks}) OR ref IN (${marks})` : ""}
+         ORDER BY at DESC, id DESC LIMIT ?3`,
       )
-      .all(ticket, limit) as Row[];
+      .all(ticket, shortRef, limit, ...prRefs) as Row[];
     return rows.map((r) => this.commsRow(r));
   }
 

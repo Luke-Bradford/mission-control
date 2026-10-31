@@ -264,7 +264,13 @@ import { type MapPersist, mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
-import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
+import {
+  evidenceProblemText,
+  type McToolsDeps,
+  prTextProblem,
+  readKnown,
+  seatPlace,
+} from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
@@ -2994,6 +3000,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           number: n,
           issue,
           githubError,
+          singleRepo: config.repos.length === 1,
+          repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
           before,
           limit,
         });

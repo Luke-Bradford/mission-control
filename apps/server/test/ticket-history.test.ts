@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { sendComms } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -368,6 +369,69 @@ describe("GET /api/tickets/:repoId/:number", () => {
     expect(new Set(keys).size).toBe(200);
   });
 
+  it("includes messages sent with the short ref a seat or the operator writes", async () => {
+    store.replaceBoard("shop-app", [card(7)]);
+    store.upsertPullRequests("shop-app", [pr(30)], NOW);
+    const send = (text: string, ref: string) =>
+      sendComms(
+        {
+          store,
+          crew: () => ["guido-1", "flight-1"],
+          knownSecrets: async () => [],
+          now: () => NOW,
+          seatSender: true,
+        },
+        "guido-1",
+        { to: "flight-1", text, ref },
+      );
+    await send("about the ticket", "#7");
+    await send("about the pr", "PR 30");
+    await send("about another ticket", "#8");
+    const t = (await read("/api/tickets/shop-app/7")).json() as TicketHistory;
+    expect(t.timeline.flatMap((e) => (e.kind === "comms" ? [e.text] : [])).sort()).toEqual([
+      "about the pr",
+      "about the ticket",
+    ]);
+  });
+
+  it("drops a short-ref message from a seat of another repo when the hub serves several", async () => {
+    const two = buildApp({
+      config: {
+        ...config,
+        repos: [
+          ...config.repos,
+          { id: "other", github: "o/other", project: 3, statusMap: {}, autonomy: "draft" },
+        ],
+      },
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      githubGql: async () => async () => ({ repository: { issue: null } }),
+    });
+    await two.ready();
+    store.replaceBoard("shop-app", [card(7)]);
+    store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "#7",
+      text: "which repo?",
+      ref: "#7",
+    });
+    store.addComms({
+      at: NOW,
+      from: "hub",
+      to: "flight-1",
+      ticket: "shop-app#7",
+      text: "qualified",
+    });
+    const t = (
+      await two.inject({ method: "GET", url: "/api/tickets/shop-app/7" })
+    ).json() as TicketHistory;
+    await two.close();
+    expect(t.timeline.flatMap((e) => (e.kind === "comms" ? [e.text] : []))).toEqual(["qualified"]);
+  });
+
   it("looks the ticket up through indexes, never a table scan", () => {
     const plan = (sql: string, ...args: unknown[]) =>
       (
@@ -384,7 +448,10 @@ describe("GET /api/tickets/:repoId/:number", () => {
       ["SELECT * FROM pull_requests WHERE ticket = ? AND repo_id = ?", ["shop-app#7", "shop-app"]],
       ["SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ?", ["shop-app", 30]],
       ["SELECT * FROM ci_runs WHERE repo_id = ? AND pr_number = ?", ["shop-app", 30]],
-      ["SELECT * FROM comms WHERE ticket = ?1 OR ref = ?1", ["shop-app#7"]],
+      [
+        "SELECT * FROM comms WHERE ticket = ?1 OR ticket = ?2 OR ref = ?2 OR ref = ?1 OR ticket IN (?4) OR ref IN (?4) ORDER BY at DESC, id DESC LIMIT ?3",
+        ["shop-app#7", "#7", 10, "PR 30"],
+      ],
       ["SELECT * FROM flight_decisions WHERE ref = ?", ["shop-app#7"]],
     ] as const) {
       expect(plan(sql, ...args), sql).not.toMatch(/\bSCAN\b/);
