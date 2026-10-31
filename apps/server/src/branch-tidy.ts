@@ -27,7 +27,7 @@ export const KEEP_PREFIX = "archive/";
 /** Ref pages read per repo (100 branches each). */
 const MAX_PAGES = 20;
 /** A branch name the hub will put in an API path: nothing a path or shell could read differently. */
-const SAFE_BRANCH = /^[A-Za-z0-9._/-]+$/;
+export const SAFE_BRANCH = /^[A-Za-z0-9._/-]+$/;
 
 export interface RemoteBranch {
   name: string;

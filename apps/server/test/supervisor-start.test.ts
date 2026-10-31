@@ -2402,10 +2402,11 @@ describe("repo guidance at launch", () => {
     const allowedAt = argv.indexOf("--allowedTools");
     const deniedAt = argv.indexOf("--disallowedTools");
     const promptAt = argv.indexOf("--append-system-prompt-file");
+    // FLIGHT's full profile (#1214) names no tools and denies none
     return {
-      tools: argv[argv.indexOf("--tools") + 1],
-      allowed: argv.slice(allowedAt + 1, deniedAt),
-      denied: argv.slice(deniedAt + 1, promptAt),
+      tools: argv.includes("--tools") ? argv[argv.indexOf("--tools") + 1] : null,
+      allowed: argv.slice(allowedAt + 1, deniedAt === -1 ? promptAt : deniedAt),
+      denied: deniedAt === -1 ? [] : argv.slice(deniedAt + 1, promptAt),
     };
   };
   const launches = () => recorded().filter((line) => Array.isArray(line.argv));
@@ -2500,6 +2501,20 @@ describe("repo guidance at launch", () => {
       expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
         "# Mission Control work guidance (advice, not rules)",
       );
+  });
+
+  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const argv = launches()[0]?.argv as string[];
+    expect(argv).not.toContain("--tools");
+    expect(argv).not.toContain("--disallowedTools");
+    expect(argv).toContain("--allowedTools");
+    expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox).toEqual({
+      enabled: false,
+    });
   });
 });
 

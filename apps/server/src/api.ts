@@ -46,6 +46,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
@@ -53,7 +54,9 @@ import {
   ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
+  FLIGHT_APPROVAL_RULES,
   fixesSent,
+  flightShellWrite,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -152,6 +155,7 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
+import { cleanText } from "./clean.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -232,6 +236,12 @@ import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
+import {
+  FLIGHT_APPROVAL_MAX_MS,
+  findApproval,
+  grantApproval,
+  useApproval,
+} from "./flight-approvals.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
@@ -560,6 +570,13 @@ const isStopEvent = (body: unknown): boolean =>
   (body as { hook_event_name?: unknown }).hook_event_name === "Stop";
 
 /** A Stop: the event alone. */
+/** `POST /api/flight/approvals`: a controller approves FLIGHT past one rule, for one scope. */
+const FlightApprovalBody = z.strictObject({
+  rule: z.enum(FLIGHT_APPROVAL_RULES),
+  scope: z.string().trim().min(1).max(500),
+  until: z.iso.datetime({ offset: true }),
+  reason: z.string().trim().min(1).max(500),
+});
 const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
 
 const GuardCheckBody = z.strictObject({
@@ -2036,6 +2053,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             await checks?.end(key, !failed);
             return answer();
           }
+          const fullAccess =
+            crewProfileOf(
+              seat.kind === "crew" ? seat.seat.role : "",
+              crewSeatDef(config, seat.id).loop,
+            ) === "flight-full";
           let verdict = crewGuardDecision(
             config,
             seat.repoId,
@@ -2044,7 +2066,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.superuserTools,
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
+            undefined,
+            fullAccess,
           );
+          // a controller's recorded approval lets the one matching call past a repo rule
+          if (
+            fullAccess &&
+            verdict.kind === "deny" &&
+            (FLIGHT_APPROVAL_RULES as readonly string[]).includes(verdict.rule)
+          ) {
+            const scope = (
+              body.data.tool_name === "Bash"
+                ? body.data.tool_input?.command
+                : body.data.tool_input?.file_path
+            )?.trim();
+            const rule = verdict.rule as (typeof FLIGHT_APPROVAL_RULES)[number];
+            const approval =
+              scope === undefined || scope === ""
+                ? undefined
+                : findApproval(store, rule, scope, now());
+            if (approval !== undefined) {
+              useApproval(store, approval.id, now());
+              store.addFlightDecision({
+                at: now(),
+                kind: "approval",
+                seatId: who.seatId,
+                targetRunId: who.runId,
+                ref: null,
+                questionId: null,
+                about: `${rule}: ${cleanText(scope ?? "", 300)}`,
+                decision: "Used a controller's approval for this one call",
+                basis: approval.reason,
+              });
+              bus.emit("flight");
+              verdict = { kind: "allow" };
+            }
+          }
           // a large file this run already read whole, unchanged, is not given again
           if (verdict.kind === "allow") {
             const reread = rereadDenial(
@@ -2058,6 +2115,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          // FLIGHT's shell is audited: every command that can change something is a decision
+          if (
+            fullAccess &&
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string" &&
+            flightShellWrite(command)
+          ) {
+            let shown = cleanText(command, 1500);
+            for (const k of await (deps.knownSecrets?.() ?? Promise.resolve([])).catch(() => [])) {
+              if (k !== "") shown = shown.split(k).join("[redacted]");
+            }
+            store.addFlightDecision({
+              at: now(),
+              kind: "shell",
+              seatId: who.seatId,
+              targetRunId: who.runId,
+              ref: null,
+              questionId: null,
+              about: shown,
+              decision: "Ran a shell command",
+              basis:
+                body.data.tool_input?.run_in_background === true
+                  ? "in the background"
+                  : "in the foreground",
+            });
+          }
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
           if (
             verdict.kind === "allow" &&
@@ -3673,6 +3757,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!config.repos.some((r) => r.id === parsed.data.repo))
           return reply.code(404).send({ error: "Unknown repo" });
         return { notes: store.flightMemory(parsed.data.repo) };
+      });
+      // A controller's approval for FLIGHT to go past one of the repo's rules, for one scope until a time.
+      // The operator token is the key: `mc operator` never reaches this route.
+      // Reader: docs/runbook.md#flight-approvals
+      api.post("/flight/approvals", async (req, reply) => {
+        const body = FlightApprovalBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const at = now();
+        const until = Date.parse(body.data.until);
+        if (until <= at || until - at > FLIGHT_APPROVAL_MAX_MS)
+          return reply.code(400).send({ error: "until must be in the future and within 7 days" });
+        const approval = grantApproval(
+          store,
+          { rule: body.data.rule, scope: body.data.scope, until, reason: body.data.reason },
+          at,
+        );
+        store.addFlightDecision({
+          at,
+          kind: "approval",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about: `${approval.rule} ${approval.scope}`,
+          decision: `A controller approved it until ${body.data.until}`,
+          basis: body.data.reason,
+        });
+        bus.emit("flight");
+        return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
       // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)

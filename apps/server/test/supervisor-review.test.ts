@@ -21,11 +21,10 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
+  FLIGHT_FULL_BUILTINS,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
-  READONLY_BUILTINS,
-  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -435,11 +434,13 @@ describe("startWatch", () => {
     expect(start.cwd).toBe(wt);
     const argv = start.argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
-    expect(argv[argv.indexOf("--tools") + 1]).toBe(READONLY_BUILTINS.join(","));
+    // FLIGHT's watch run has the full profile (#1214): every built-in tool, nothing denied by name
+    expect(argv).not.toContain("--tools");
+    expect(argv).not.toContain("--disallowedTools");
     expect(
-      argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
+      argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--append-system-prompt-file")),
     ).toEqual([
-      ...READONLY_TOOLS,
+      ...FLIGHT_FULL_BUILTINS,
       "mcp__mc__log_decision",
       "mcp__mc__wait_on",
       "mcp__mc__read_ticket",
@@ -481,6 +482,9 @@ describe("startWatch", () => {
       "mcp__mc__release_hold",
       "mcp__mc__edit_issue",
       "mcp__mc__set_fields",
+      "mcp__mc__operator",
+      "mcp__mc__gh_write",
+      "mcp__mc__crew_tidy",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

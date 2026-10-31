@@ -142,6 +142,7 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
+import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
@@ -879,6 +880,8 @@ export function createEngine(deps: EngineDeps): Engine {
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
       flightHeld: flightHeld(run),
+      floorApproved:
+        pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),

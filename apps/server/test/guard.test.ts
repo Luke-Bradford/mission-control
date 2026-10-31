@@ -33,6 +33,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { grantApproval } from "../src/flight-approvals.ts";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
@@ -450,6 +451,102 @@ describe("POST /api/guard/check", () => {
   const reason = (body: string) =>
     (JSON.parse(body) as { hookSpecificOutput: { permissionDecisionReason: string } })
       .hookSpecificOutput.permissionDecisionReason;
+
+  describe("FLIGHT's full profile (#1214)", () => {
+    let tokF: string;
+    let flight: FastifyInstance;
+    beforeEach(async () => {
+      tokF = tokens.issue("flight-1", "run-f");
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "a",
+        model: "haiku",
+        area: [],
+      });
+      flight = await build({ config: cfg });
+    });
+    afterEach(async () => {
+      await flight.close();
+    });
+    const shell = () => store.flightDecisions(0, 50).filter((d) => d.kind === "shell");
+    const grant = (rule: "merge-push" | "repo-rules", scope: string) =>
+      grantApproval(store, { rule, scope, until: NOW + 60_000, reason: "controller said so" }, NOW);
+
+    it("lets FLIGHT's shell write and records each write as a shell decision", async () => {
+      expect((await check(tokF, bash("f1", "gh pr close 12"), flight)).body).toBe("{}");
+      expect((await check(tokF, bash("f2", "gh pr view 12"), flight)).body).toBe("{}");
+      expect(shell()).toEqual([
+        expect.objectContaining({
+          about: "gh pr close 12",
+          seatId: "flight-1",
+          targetRunId: "run-f",
+        }),
+      ]);
+    });
+
+    it("redacts a secret from the recorded command", async () => {
+      const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
+      await check(
+        tokF,
+        bash("f1", `curl -X POST -H "Authorization: Bearer ${token}" http://h`),
+        flight,
+      );
+      expect(shell()).toHaveLength(1);
+      expect(JSON.stringify(shell())).not.toContain(token);
+    });
+
+    it("refuses the repo's rules, names the rule, and leaves a guard hit", async () => {
+      const r = await check(tokF, bash("f1", "git push origin main"), flight);
+      expect(reason(r.body)).toContain(GUARD_RULES["merge-push"]);
+      expect(store.guardHits(0).map((h) => h.rule)).toEqual(["merge-push"]);
+      expect(shell()).toEqual([]);
+    });
+
+    it("lets one matching call through on a recorded approval, then refuses again", async () => {
+      const command = "git push origin main";
+      grant("merge-push", command);
+      expect((await check(tokF, bash("f1", command), flight)).body).toBe("{}");
+      expect(store.flightDecisions(0, 50).find((d) => d.kind === "approval")).toMatchObject({
+        basis: "controller said so",
+        seatId: "flight-1",
+      });
+      expect(reason((await check(tokF, bash("f2", command), flight)).body)).toContain(
+        GUARD_RULES["merge-push"],
+      );
+    });
+
+    it("takes a repo-rules approval for a file path, and not for another", async () => {
+      const file = "/w/.github/workflows/ci.yml";
+      grant("repo-rules", file);
+      const other = await check(
+        tokF,
+        pre("f1", "Write", { file_path: "/w/.github/CODEOWNERS" }),
+        flight,
+      );
+      expect(reason(other.body)).toContain(GUARD_RULES["repo-rules"]);
+      expect((await check(tokF, pre("f2", "Write", { file_path: file }), flight)).body).toBe("{}");
+    });
+
+    it("never lets an approval open the operator token", async () => {
+      const command = "cat /data/operator-token";
+      grant("repo-rules", "cat /data/other");
+      expect(reason((await check(tokF, bash("f1", command), flight)).body)).toContain(
+        GUARD_RULES["repo-rules"],
+      );
+    });
+
+    it("keeps a writer seat sandboxed and its denials unchanged, approval or not", async () => {
+      grant("merge-push", "git push origin main");
+      const r = await check(tokA, bash("w1", "git push origin main"));
+      expect(reason(r.body)).toContain(GUARD_RULES["git-write"]);
+      expect(reason((await check(tokA, bash("w2", "curl http://x"))).body)).toContain(
+        GUARD_RULES.network,
+      );
+      expect(shell()).toEqual([]);
+    });
+  });
 
   describe("a Stop with the run's report missing", () => {
     const stop = { hook_event_name: "Stop" };
@@ -1101,6 +1198,7 @@ describe("POST /api/guard/check", () => {
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });

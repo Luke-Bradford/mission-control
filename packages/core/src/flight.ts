@@ -69,6 +69,11 @@ export const FLIGHT_DECISION_KINDS = [
   "issue",
   "hub",
   "wait",
+  "operator",
+  "github",
+  "tidy",
+  "approval",
+  "shell",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 

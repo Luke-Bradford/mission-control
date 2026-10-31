@@ -61,6 +61,8 @@ import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
+import { operatorCall } from "./flight/operator-call.ts";
+import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
@@ -529,8 +531,21 @@ export async function main(): Promise<void> {
   // FLIGHT's HUD screenshots are kept under the private data dir, for a week.
   const hudShots = hudShotStore(join(dirname(dbPath), "hud-screenshots"));
 
+  const branchTidy = createBranchTidy({
+    config,
+    store,
+    gh,
+    dbPath,
+    inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+    log: (line) => log(line),
+  });
+  // set once the app exists: `mc operator` calls its routes in process
+  let hubApp: ReturnType<typeof buildApp> | null = null;
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    operator: operatorCall(() => hubApp, operatorToken),
+    tidy: createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() }),
     hudShots,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
@@ -694,6 +709,7 @@ export async function main(): Promise<void> {
     mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],
   });
+  hubApp = app;
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
@@ -746,14 +762,7 @@ export async function main(): Promise<void> {
   engine.start();
   // Branch tidying writes to GitHub, so it runs wherever the engine does.
   if (engineOn) {
-    const tidy = createBranchTidy({
-      config,
-      store,
-      gh,
-      dbPath,
-      inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
-      log,
-    });
+    const tidy = branchTidy;
     const quietly = (what: string, run: () => Promise<string[]>) => () => {
       run().catch((e: unknown) => {
         log(`branch tidy: ${what} failed: ${e instanceof Error ? e.message : String(e)}`);

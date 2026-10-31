@@ -9,6 +9,7 @@ import {
   firstCommitNotifier,
   firstNamedRef,
   firstPrNotifier,
+  flightShellWrite,
   GUARD_RULES,
   GUARD_TOO_LONG_TEXT,
   GUARD_UNREADABLE_TEXT,
@@ -102,6 +103,7 @@ const readOnly: GuardContext = {
   flightPowers: "standard",
   fullSuite: FULL,
 };
+const flightFull: GuardContext = { ...readOnly, fullAccess: true };
 const bash = (command: string, extra: Partial<GuardEvent["input"]> = {}): GuardEvent => ({
   tool: "Bash",
   input: { command, ...extra },
@@ -110,6 +112,118 @@ const ruleOf = (e: GuardEvent, ctx = writer) => {
   const v = guardDecision(e, ctx);
   return v.kind === "deny" ? v.rule : v.kind;
 };
+
+describe("FLIGHT's full profile", () => {
+  it("permits ordinary shell authority but retains repository floors", () => {
+    expect(guardDecision(bash("gh pr close 12"), flightFull)).toEqual({ kind: "allow" });
+    expect(ruleOf(bash("git push origin main"), flightFull)).toBe("merge-push");
+    expect(ruleOf(bash("git push --force origin feature/x"), flightFull)).toBe("merge-push");
+    expect(ruleOf(bash("gh pr merge 12"), flightFull)).toBe("merge-push");
+    expect(
+      ruleOf({ tool: "Write", input: { file_path: "/work/.github/workflows/ci.yml" } }, flightFull),
+    ).toBe("repo-rules");
+    expect(ruleOf({ tool: "Edit", input: { file_path: "/work/CLAUDE.md" } }, flightFull)).toBe(
+      "repo-rules",
+    );
+  });
+
+  it.each([
+    "gh pr close 12",
+    "gh issue edit 3 --add-label x",
+    "git worktree remove ../wt/guido-1-7",
+    "git -C /clones/mission-control branch -D mc/7",
+    "cd /clones/other && git log --oneline",
+    "git push origin mc/7",
+    "curl -s -X POST http://127.0.0.1:7420/api/runs/r/resume",
+    "gh api repos/o/r/issues -f title=x",
+    "gh api repos/o/r/rulesets",
+    "gh api repos/o/r/branches/main/protection",
+    "cat CLAUDE.md",
+    "grep -n uses .github/workflows/ci.yml",
+    "gh pr view 3 --json files",
+  ])("allows %s", (command) => {
+    expect(guardDecision(bash(command), flightFull)).toEqual({ kind: "allow" });
+  });
+
+  it.each([
+    ["git push origin +mc/7", "merge-push"],
+    ["git push -fu origin mc/7", "merge-push"],
+    ["git push --force-with-lease origin mc/7", "merge-push"],
+    ["git push --mirror", "merge-push"],
+    ["git push origin HEAD:main", "merge-push"],
+    ["git push origin :main", "merge-push"],
+    ["git push origin HEAD:refs/heads/main", "merge-push"],
+    ["git commit -m x", "merge-push"],
+    ["gh pr merge 12 --squash", "merge-push"],
+    ["gh api -X PUT repos/o/r/pulls/12/merge", "merge-push"],
+    ["gh api -X PUT repos/o/r/branches/main/protection -f x=y", "repo-rules"],
+    ["gh api repos/o/r/rulesets -f name=x", "repo-rules"],
+    ["gh api --method PATCH repos/o/r -f private=true", "repo-rules"],
+    ["gh api -X PUT repos/o/r/collaborators/someone", "repo-rules"],
+    ["gh api -X PUT repos/o/r/actions/secrets/KEY", "repo-rules"],
+    ["echo x > .github/workflows/ci.yml", "repo-rules"],
+    ["echo x >> CLAUDE.md", "repo-rules"],
+    ["tee CLAUDE.md", "repo-rules"],
+    ["cp /tmp/x .github/CODEOWNERS", "repo-rules"],
+    ["sed -i s/a/b/ .github/workflows/ci.yml", "repo-rules"],
+    ["rm -r .github", "repo-rules"],
+    ["cat ~/.local/share/mission-control/operator-token", "repo-rules"],
+    ["curl -X POST $MC_HUB/api/flight/approvals -d {}", "repo-rules"],
+  ])("refuses %s under %s", (command, rule) => {
+    expect(ruleOf(bash(command), flightFull)).toBe(rule);
+  });
+
+  it("refuses the operator token file and approvals to any tool", () => {
+    for (const tool of ["Read", "Edit", "Write"]) {
+      expect(
+        ruleOf({ tool, input: { file_path: "/data/mission-control/operator-token" } }, flightFull),
+      ).toBe("repo-rules");
+    }
+  });
+
+  it("still holds every other seat to its sandboxed rules", () => {
+    expect(ruleOf(bash("gh pr close 12"), writer)).not.toBe("allow");
+    expect(ruleOf(bash("curl http://x"), writer)).toBe("network");
+    expect(ruleOf(bash("git push --force origin x"), writer)).not.toBe("allow");
+  });
+});
+
+describe("flightShellWrite", () => {
+  it.each([
+    "ls -la",
+    "git status --short",
+    "git log --oneline -5",
+    "gh pr view 3",
+    "gh pr list --state open",
+    "gh api repos/o/r/pulls",
+    "gh api -X GET repos/o/r/pulls",
+    "curl -s http://127.0.0.1:7420/api/flight",
+    "cat a | grep b",
+    "echo hi 2>&1",
+    "ls /nope 2>/dev/null",
+    "cd /x && git diff",
+  ])("reads: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(false);
+  });
+
+  it.each([
+    "gh pr close 3",
+    "gh issue comment 3 --body x",
+    "gh api -X POST repos/o/r/issues",
+    "gh api repos/o/r/issues -f title=x",
+    "git push origin mc/7",
+    "git worktree remove x",
+    "curl -X POST http://127.0.0.1:7420/api/runs/r/resume",
+    "curl -d x http://h",
+    "rm -rf x",
+    "echo a > f",
+    "echo a | tee f",
+    "sed -i s/a/b/ f",
+    "pnpm install",
+  ])("writes: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+  });
+});
 
 describe("scratch mode", () => {
   const scratch: GuardContext = {
@@ -215,7 +329,7 @@ describe("GUARD_RULES", () => {
     );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });

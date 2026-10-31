@@ -98,6 +98,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
+import { operatorCall } from "../src/flight/operator-call.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
@@ -1381,6 +1382,16 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/flight/ledger"],
   ["GET", "/api/flight/memory?repo=shop-app"],
   ["PUT", "/api/flight/memory/:repo/:topic", { kind: "lesson", body: "note", source: "test" }],
+  [
+    "POST",
+    "/api/flight/approvals",
+    {
+      rule: "repo-rules",
+      scope: "git push origin main",
+      until: "2026-10-17T13:00:00Z",
+      reason: "route table",
+    },
+  ],
   ["DELETE", "/api/flight/memory/:repo/:topic"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
@@ -7378,6 +7389,7 @@ describe("the first loop's engine", () => {
     seatRunId: string | null,
     knownSecrets?: () => Promise<readonly string[]>,
     lifts = false,
+    operatorToken?: string,
   ) => {
     const told: string[] = [];
     const calls: Parameters<
@@ -7402,6 +7414,7 @@ describe("the first loop's engine", () => {
       bus,
       supervisor: sup,
       knownSecrets,
+      ...(operatorToken === undefined ? {} : { operatorToken }),
       engine: {
         onOperatorMessage: async (...args) => {
           const [runId] = args;
@@ -7461,6 +7474,31 @@ describe("the first loop's engine", () => {
       (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
         .statusCode,
     ).toBe(404);
+    await a.close();
+  });
+
+  it("mc operator resumes a run through the route in process, with a token FLIGHT never holds (#1214)", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const { a, told } = engineApp(null, undefined, true, "hub-token");
+    const bare = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(bare.statusCode).toBe(401);
+    const answer = await operatorCall(
+      () => a,
+      "hub-token",
+    )({ method: "POST", path: "/api/runs/aside/resume" });
+    expect(answer).toEqual({ status: 200, body: '{"ok":true}' });
+    expect(told).toEqual(["aside"]);
+    expect(
+      await operatorCall(
+        () => null,
+        "hub-token",
+      )({ method: "POST", path: "/api/runs/aside/resume" }),
+    ).toMatchObject({ status: 503 });
     await a.close();
   });
 

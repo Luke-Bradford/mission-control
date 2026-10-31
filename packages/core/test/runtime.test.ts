@@ -91,6 +91,24 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
+  it("gives FLIGHT's full profile an unrestricted shell while retaining guard hooks", () => {
+    const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--disallowedTools");
+    // the shell, the web and subagents are allowed whole; the mc tools it holds stay allowed
+    const allowed = args.slice(
+      args.indexOf("--allowedTools") + 1,
+      args.indexOf("--append-system-prompt-file"),
+    );
+    expect(allowed).toEqual(expect.arrayContaining(["Bash", "WebFetch", "Task", "Edit"]));
+    expect(allowed.some((t) => t.startsWith("Edit("))).toBe(false);
+    const settings = JSON.parse(
+      crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"),
+    );
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.sandbox).toEqual({ enabled: false });
+  });
+
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
     const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });
@@ -321,6 +339,9 @@ describe("the allowlist in phase 2b", () => {
       updateBrief: "mcp__mc__update_brief",
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
+      operator: "mcp__mc__operator",
+      ghWrite: "mcp__mc__gh_write",
+      crewTidy: "mcp__mc__crew_tidy",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -658,6 +679,9 @@ describe("crew constants", () => {
           "release_hold",
           "edit_issue",
           "set_fields",
+          "operator",
+          "gh_write",
+          "crew_tidy",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -783,6 +807,9 @@ describe("mc tool grants", () => {
       "release_hold",
       "edit_issue",
       "set_fields",
+      "operator",
+      "gh_write",
+      "crew_tidy",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
