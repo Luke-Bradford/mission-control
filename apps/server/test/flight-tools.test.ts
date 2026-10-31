@@ -7952,7 +7952,18 @@ describe("close_ticket", () => {
       return n === 120 ? ticket(n, { body: "Depends on #7" }) : base(n);
     };
     await refusedNothingWritten(closeCall(), /depend on it \(mc#120\)/);
-    expect(searchCalls).toHaveLength(1);
+    expect(searchCalls).toEqual([
+      [
+        "search",
+        "issues",
+        "7",
+        "--repo=o/mc",
+        "--state=open",
+        "--match=body",
+        "--json=number",
+        `--limit=${String(FLIGHT_CLOSE_SEARCH_LIMIT)}`,
+      ],
+    ]);
     expect(reads.filter((n) => n >= 100)).toEqual([120]);
   });
 
