@@ -1260,6 +1260,8 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.P !== null &&
     rv.cur !== null &&
     rv.blocked &&
+    // a blocking count with no stored text is never sent: the author would have nothing to fix
+    rv.R.findings.length > 0 &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
     fixesSent(s.claimed, s.runId, loop.epoch) + 1 < reviewRoundLimit(s, loop, rv.P)
   );

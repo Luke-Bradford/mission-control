@@ -1,5 +1,6 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
@@ -584,6 +585,26 @@ export function flightSignals(i: {
         run.id,
         run.endedAt,
         `${run.agentId} run ${run.id} (${run.ticket}) ended (${run.status}) at ${new Date(run.endedAt).toISOString()} with no PR`,
+      );
+  }
+
+  // a failed review that counts blocking findings but holds none is never sent to the author
+  for (const run of store.runsOverlapping(cutoff, now + 1)) {
+    if (run.repoId !== repo || run.endedAt !== null) continue;
+    const review = store
+      .reviewsOfRun(run.id)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    if (
+      review &&
+      review.blocking > 0 &&
+      !store.findingsOf(review.id).some((f) => BLOCKING_SEVERITIES.includes(f.severity))
+    )
+      raise(
+        "hub_error",
+        `findings:${run.id}:${review.id}`,
+        review.endedAt ?? now,
+        `${run.agentId} run ${run.id} (${run.ticket ?? "no ticket"}): review ${review.id} on ${review.sha.slice(0, 7)} counts ${review.blocking} blocking, but no finding text is stored, so the author was not woken for rework`,
       );
   }
 

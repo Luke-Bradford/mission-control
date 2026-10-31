@@ -83,7 +83,15 @@ const reviewed = (blocking = 0): LoopReviewFacts => ({
   rows: [
     { id: 1, sha: SHA, epoch: 0, attempt: 1, state: "reported", blocking, minor: 0, failure: null },
   ],
-  findings: [],
+  // a blocking review holds its finding text, so a fix is due
+  findings: Array.from({ length: blocking }, () => ({
+    severity: "Critical" as const,
+    file: "a.ts",
+    line: 1,
+    summary: "x",
+    scenario: "y",
+    fix: "z",
+  })),
 });
 
 /** A merge workspace in review, behind main, its seat idle between turns. */
