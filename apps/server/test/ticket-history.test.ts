@@ -394,7 +394,7 @@ describe("GET /api/tickets/:repoId/:number", () => {
     ]);
   });
 
-  it("drops a short-ref message from a seat of another repo when the hub serves several", async () => {
+  it("keeps a short-ref message from this repo's seat and drops one from another repo's when the hub serves several", async () => {
     const two = buildApp({
       config: {
         ...config,
@@ -402,6 +402,13 @@ describe("GET /api/tickets/:repoId/:number", () => {
           ...config.repos,
           { id: "other", github: "o/other", project: 3, statusMap: {}, autonomy: "draft" },
         ],
+        // seatPlace reads only each session's repo and its seats' ids
+        crew: {
+          sessions: [
+            { id: "s1", repoId: "shop-app", seats: [{ id: "guido-1" }] },
+            { id: "s2", repoId: "other", seats: [{ id: "guido-9" }] },
+          ],
+        } as unknown as CcConfig["crew"],
       },
       store,
       bus: new ChangeBus(),
@@ -415,7 +422,15 @@ describe("GET /api/tickets/:repoId/:number", () => {
       from: "guido-1",
       to: "flight-1",
       ticket: "#7",
-      text: "which repo?",
+      text: "mine",
+      ref: "#7",
+    });
+    store.addComms({
+      at: NOW,
+      from: "guido-9",
+      to: "flight-1",
+      ticket: "#7",
+      text: "theirs",
       ref: "#7",
     });
     store.addComms({
@@ -429,7 +444,10 @@ describe("GET /api/tickets/:repoId/:number", () => {
       await two.inject({ method: "GET", url: "/api/tickets/shop-app/7" })
     ).json() as TicketHistory;
     await two.close();
-    expect(t.timeline.flatMap((e) => (e.kind === "comms" ? [e.text] : []))).toEqual(["qualified"]);
+    expect(t.timeline.flatMap((e) => (e.kind === "comms" ? [e.text] : [])).sort()).toEqual([
+      "mine",
+      "qualified",
+    ]);
   });
 
   it("looks the ticket up through indexes, never a table scan", () => {
