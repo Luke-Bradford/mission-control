@@ -274,6 +274,8 @@ beforeEach(() => {
   git(dir, "clone", "-q", origin, clone);
 });
 afterEach(() => {
+  // a test that stubs HOME for git must not leave it pointing at a deleted directory
+  vi.unstubAllEnvs();
   if (savedGitPath !== undefined) {
     process.env.PATH = savedGitPath;
     savedGitPath = undefined;
@@ -603,7 +605,6 @@ describe("prepareCheckout", () => {
       `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|${MC_FALLBACK_EMAIL}|${MC_FALLBACK_EMAIL}`,
     );
     expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
-    vi.unstubAllEnvs();
   });
 
   it("leaves a reused worktree's conflicts for the seat", async () => {
