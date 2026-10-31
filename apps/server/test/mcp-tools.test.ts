@@ -1362,6 +1362,7 @@ describe("through /mcp", () => {
         "comms_react",
         "commit",
         "sync_main",
+        "pr_body",
         "ask_flight",
         "call_flight",
         "report_evidence",
