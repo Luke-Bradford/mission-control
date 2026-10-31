@@ -40,6 +40,9 @@ import {
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
+  grantDecisionText,
+  grantRefusedText,
+  grantUngrantableText,
   guardDenyOutput,
   HOOK_RETRY_ENV,
   lockBusyText,
@@ -52,6 +55,7 @@ import {
   otherLaneText,
   PNPM_STORE_ENV,
   type Profile,
+  pathGrantProblem,
   READONLY_BUILTINS,
   READONLY_TOOLS,
   type RepoRules,
@@ -80,6 +84,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
+import { runPathGrants } from "../src/path-grants.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { textBytes, wakePieces } from "../src/prompt-cost.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
@@ -320,6 +325,60 @@ describe("startRun eligibility", () => {
       "Test: a report missing a line is refused",
       "Audit shows rounds",
     ]);
+  });
+
+  describe("a Paths: grant", () => {
+    const GRANT_FOLDER_WHY = pathGrantProblem("apps/web/package.json") as string;
+    const BODY = "## What\n\nPaths: package.json\n";
+    const approve = (paths: string[] = ["package.json"]) =>
+      store.addFlightDecision({
+        at: Date.now(),
+        kind: "grant",
+        seatId: "guido-1",
+        targetRunId: null,
+        ref: "mc#42",
+        questionId: null,
+        about: "mc#42: a ticket",
+        decision: grantDecisionText("mc#42", paths),
+        basis: "decision 1649",
+      });
+
+    it("refuses at start a ticket whose Paths: FLIGHT has not approved", async () => {
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body: BODY }),
+      });
+    });
+
+    it("refuses a grant for a file that cannot be granted", async () => {
+      approve(["apps/web/package.json"]);
+      await refused(422, grantUngrantableText("apps/web/package.json", GRANT_FOLDER_WHY), {
+        fetchTicket: ticketWith({ body: "Paths: apps/web/package.json\n" }),
+      });
+    });
+
+    it("starts with FLIGHT's decision and holds the grant for that run only", async () => {
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body: BODY }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
+      // the seat's next run, on a ticket with no Paths:, holds nothing
+      expect(runPathGrants(store, "guido-1:another")).toEqual([]);
+    });
+
+    it("a decision for other paths, or another ticket, does not cover the start", async () => {
+      approve(["other.json"]);
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body: BODY }),
+      });
+    });
+
+    it("starts a ticket with no Paths: line holding no grant", async () => {
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
   });
 
   it("10: starts Size M with no plan so its seat can write it", async () => {
@@ -2397,8 +2456,10 @@ describe("repo guidance at launch", () => {
     "Avoid: large rewrites.",
     "Keep the launch path boring.",
   ].join("\n");
-  const launchGrants = (start: { argv: unknown }) => {
-    const argv = start.argv as string[];
+  // The run id carries the launch's second, and the token, MCP config and prompt paths carry the
+  // run id; compare launches with it replaced.
+  const launchGrants = (start: { argv: unknown }, runId: string) => {
+    const argv = (start.argv as string[]).map((a) => a.split(runId).join("<run>"));
     const allowedAt = argv.indexOf("--allowedTools");
     const deniedAt = argv.indexOf("--disallowedTools");
     const promptAt = argv.indexOf("--append-system-prompt-file");
@@ -2473,24 +2534,29 @@ describe("repo guidance at launch", () => {
   });
 
   it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
-    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    // the two launches land in different seconds, as a slow machine can make them
+    let clock = Date.parse("2026-10-30T23:35:40.100Z");
+    const { sup, cfg } = make({ extraSeat: FLIGHT, now: () => clock });
     sup.start();
 
     const plain = await sup.startWatch("flight-1");
+    expect(plain.runId).toBe("flight-1:20261030T233540Z");
     await until(() => expect(launches()).toHaveLength(1));
     const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
-    const plainGrants = launchGrants(launches()[0] as { argv: unknown });
+    const plainGrants = launchGrants(launches()[0] as { argv: unknown }, plain.runId);
     await sup.endRun("flight-1");
+    clock = Date.parse("2026-10-30T23:35:41.900Z");
 
     const repo = cfg.repos[0];
     if (!repo) throw new Error("missing test repo");
     repo.guidance = guidance;
     const guided = await sup.startWatch("flight-1");
+    expect(guided.runId).toBe("flight-1:20261030T233541Z");
     await until(() => expect(launches()).toHaveLength(2));
     const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
     expect(guidedPrompt).toContain(advice);
     expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
-    expect(launchGrants(launches()[1] as { argv: unknown })).toEqual(plainGrants);
+    expect(launchGrants(launches()[1] as { argv: unknown }, guided.runId)).toEqual(plainGrants);
     await sup.endRun("flight-1");
 
     const build = await sup.startRun("guido-1", 42);

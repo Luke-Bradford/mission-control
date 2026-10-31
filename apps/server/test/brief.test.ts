@@ -95,6 +95,16 @@ const READONLY_CLOSE =
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 
+describe("ticketBrief path grant", () => {
+  it("names the files FLIGHT approved beyond the area, and only when there are some", () => {
+    expect(ticketBrief(input)).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: [] })).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: ["package.json", ".gitignore"] })).toContain(
+      "FLIGHT also approved this run to change package.json, .gitignore, and no other file outside it.",
+    );
+  });
+});
+
 describe("ticketBrief leftover changes", () => {
   it("omits the block for a fresh or clean worktree", () => {
     expect(ticketBrief(input)).not.toContain("Leftover changes");

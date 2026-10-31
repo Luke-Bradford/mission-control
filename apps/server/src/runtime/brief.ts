@@ -58,6 +58,8 @@ export interface BriefInput {
   branch: string;
   /** A writer's globs; [] = the whole checkout. */
   area: string[];
+  /** Files outside the area that FLIGHT approved for this run alone. */
+  granted?: readonly string[];
   /** Configured validation commands for this mode; ordinary sandboxed local commands remain available. */
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
@@ -141,7 +143,11 @@ const fullSuiteText = (fullSuite: readonly string[]): string =>
 export function ticketBrief(i: BriefInput): string {
   const writer = i.mode === "writer";
   const scope = writer
-    ? `Change files only inside your area: ${i.area.length > 0 ? i.area.join(", ") : "the whole checkout"}.`
+    ? `Change files only inside your area: ${i.area.length > 0 ? i.area.join(", ") : "the whole checkout"}.${
+        i.granted && i.granted.length > 0
+          ? ` FLIGHT also approved this run to change ${i.granted.join(", ")}, and no other file outside it.`
+          : ""
+      }`
     : "Read and report only; do not change files.";
   const note = cutNoteText(i.body, i.bodyTruncated, i.bodyLength);
   const ran =

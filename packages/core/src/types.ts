@@ -143,9 +143,6 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
-  flightReruns?: Record<string, number>;
-  /** Fresh RETRO requests by FLIGHT, at most two per head. */
-  flightRereviews?: Record<string, number>;
   /**
    * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
    * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
@@ -453,6 +450,12 @@ export type PullRequestSummary = Pick<
   | "updatedAt"
   | "mergedAt"
 >;
+
+/** A stored pull request's number and title: what a PR link shows. */
+export interface PrTitle {
+  number: number;
+  title: string;
+}
 
 export interface PullRequestView {
   repoId: RepoId;

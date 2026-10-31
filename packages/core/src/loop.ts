@@ -152,15 +152,28 @@ export const blockedNoteKey = (runId: string, epoch: number): string => `blocked
 /** Shared prefixes for CI activity events and parking reasons. */
 export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
 export const CI_FAILED_EVENT_PREFIX = "CI failed on ";
+export const CI_FLAKED_EVENT_PREFIX = "CI flaked on ";
 export const CI_RERUN_FAILED_EVENT_PREFIX = "CI failed again on the re-run of ";
 export const CI_PARK_FAILED_PREFIX = "CI failed ";
+
+/** The events and re-run state for a sha that CI now shows green; a re-run of that sha was a flake. */
+function ciPassed(loop: RunLoop, sha: string): { actions: LoopAction[]; rerun: RunLoop["rerun"] } {
+  const flaked = loop.rerun?.sha === sha;
+  const actions: LoopAction[] = [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${sha7(sha)}` }];
+  if (flaked)
+    actions.push({
+      kind: "event",
+      text: `${CI_FLAKED_EVENT_PREFIX}${sha7(sha)}: passed on re-run`,
+    });
+  return { actions, rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun };
+}
 
 /** Failure outcomes shared by Overview and the FLIGHT ledger. */
 export function isCiFailureEvent(text: string): boolean {
   return (
     !text.includes("no run could be re-run") &&
     (text.startsWith(CI_FAILED_EVENT_PREFIX) ||
-      text.startsWith("CI flaked on ") ||
+      text.startsWith(CI_FLAKED_EVENT_PREFIX) ||
       text.startsWith(CI_RERUN_FAILED_EVENT_PREFIX) ||
       text.startsWith(parkedEventText(CI_PARK_FAILED_PREFIX)))
   );
@@ -934,7 +947,53 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
     };
   }
+  // a ruling on a red head is void once the seat's newer push shows green checks: back to review
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === RULING_PARK || loop.parked?.kind === "review-ruling") &&
+    !loop.parked.ended &&
+    loop.ciFailedSha !== null &&
+    pr?.state === "open" &&
+    pr.ci === "passing" &&
+    pr.headSha !== null &&
+    pr.headSha !== loop.ciFailedSha &&
+    pushed?.sha === pr.headSha &&
+    headCommit === pr.headSha
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "review",
+        parked: null,
+        ciFails: 0,
+        transient: 0,
+        lastRefusal: null,
+        unparkedAt: now,
+      },
+      actions: [
+        {
+          kind: "event",
+          text: `CI green on ${sha7(pr.headSha)}; ruling on ${sha7(loop.ciFailedSha)} void`,
+        },
+      ],
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
+  // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
+  // in review or working with it still recorded: a ruling park resumes straight into review, and
+  // the merge step and the ruling park both read ciFailedSha, so a stale one wedged the run.
+  if (
+    (loop.phase === "review" || loop.phase === "working") &&
+    loop.ciFailedSha !== null &&
+    pushed?.sha === loop.ciFailedSha &&
+    headCommit === pushed.sha &&
+    pr?.state === "open" &&
+    pr.headSha === pushed.sha &&
+    pr.ci === "passing"
+  ) {
+    const passed = ciPassed(loop, pushed.sha);
+    return { loop: { ...loop, ciFailedSha: null, rerun: passed.rerun }, actions: passed.actions };
+  }
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
   }
@@ -1077,17 +1136,17 @@ function stateStep(s: LoopSnapshot): Step {
       };
     }
     if (pr.ci === "passing") {
-      const flaked = loop.rerun?.sha === pushed.sha;
-      const actions: LoopAction[] = [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${short}` }];
-      if (flaked) actions.push({ kind: "event", text: `CI flaked on ${short}: passed on re-run` });
+      const passed = ciPassed(loop, pushed.sha);
       return {
         loop: {
           ...loop,
           phase: "review",
           ciFails: 0,
-          rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
+          // a pass makes any recorded failure stale: every reader compares it with the current head
+          ciFailedSha: null,
+          rerun: passed.rerun,
         },
-        actions,
+        actions: passed.actions,
       };
     }
     if (pr.ci === "failing") {

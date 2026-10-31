@@ -115,6 +115,7 @@ import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
+import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
@@ -583,6 +584,39 @@ describe("commit", () => {
       ["docs/c.md", "outside"],
       ["web/b.ts", "other-area"],
     ]);
+  });
+
+  it("commits a protected file and one outside the area when this run holds a grant for them", async () => {
+    setRunPathGrants(store, RUN, ["package.json", "README.md"]);
+    write("package.json", '{"x":1}\n');
+    write("README.md", "hi2\n");
+    const r = await commit("chore: root files");
+    expect(r.isError).toBeUndefined();
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").split("\n").sort()).toEqual([
+      "",
+      "README.md",
+      "package.json",
+    ]);
+  });
+
+  it("keeps refusing the rest while a grant is held: another file, a nested package.json", async () => {
+    setRunPathGrants(store, RUN, ["package.json"]);
+    write("package.json", '{"x":1}\n');
+    write("docs/c.md", "c2\n");
+    write("apps/package.json", "{}\n");
+    const r = await commit("feat: x");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("docs/c.md is outside your area");
+    expect(r.text).toContain("apps/package.json is protected");
+    expect(r.text).not.toContain("Not committed: package.json");
+  });
+
+  it("refuses the same file to a run that holds no grant, though the seat's other run had one", async () => {
+    setRunPathGrants(store, "guido-1:20261019T100000Z", ["package.json"]);
+    write("package.json", '{"x":1}\n');
+    const r = await commit("chore: root");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("package.json is protected");
   });
 
   it("refuses one protected file, inside the area or nested, as it", async () => {
@@ -1117,6 +1151,40 @@ describe("ask_flight", () => {
         )
       ).isError,
     ).toBeUndefined();
+  });
+
+  it("counts FLIGHT's comms toward the runaway breaker and refuses them while it is tripped", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const line = { to: "CAPCOM", text: "Same line" };
+    for (let i = 0; i < 5; i++)
+      expect((await tool("comms_send").call(flight, line)).isError).toBeUndefined();
+    expect(await tool("comms_send").call(flight, line)).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's comms are not FLIGHT's writes
+    expect((await tool("comms_send").call(CTX, line)).isError).toBeUndefined();
+  });
+
+  it("stops and counts FLIGHT's comms_react like its comms_send", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const id = (await tool("comms_send").call(CTX, { to: "flight-1", text: "ping" })).text.replace(
+      /^Sent (.*)\.$/,
+      "$1",
+    );
+    const react = (c = flight) => tool("comms_react").call(c, { id, reaction: "seen" });
+    // five identical reactions trip the breaker; the sixth is refused and writes nothing
+    for (let i = 0; i < 5; i++) expect((await react()).isError).toBeUndefined();
+    expect(await react()).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's reactions are not FLIGHT's writes
+    expect((await react(CTX)).isError).toBeUndefined();
   });
 
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
