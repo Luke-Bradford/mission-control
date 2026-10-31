@@ -50,12 +50,12 @@ const run = (id: string, over: Partial<Run> = {}): Run => ({
   ...over,
 });
 
-const pr = (repoId: string, number: number): PullRequestView => ({
+const pr = (repoId: string, number: number, branch = BRANCH): PullRequestView => ({
   repoId,
   number,
   title: `PR ${number}`,
   url: `https://github.com/o/${repoId}/pull/${number}`,
-  branch: BRANCH,
+  branch,
   ticket: `${repoId}#7`,
   state: "open",
   isDraft: false,
@@ -85,12 +85,20 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function review(round: number, sha: string, at: number, findings: number) {
+function review(
+  round: number,
+  sha: string,
+  at: number,
+  findings: number,
+  prNumber = 30,
+  outcome: "fixed" | "held" = "fixed",
+  authorRunId = "dev-2",
+) {
   const id = store.requestReview({
-    authorRunId: "dev-2",
+    authorRunId,
     repoId: "shop-app",
     seatId: "retro-1",
-    prNumber: 30,
+    prNumber,
     sha,
     epoch: 0,
     attempt: 1,
@@ -110,8 +118,7 @@ function review(round: number, sha: string, at: number, findings: number) {
       scenario: "when it runs",
       fix: "change it",
     })),
-    resolutions:
-      round === 2 ? [{ findingRef: { reviewId: id - 1, pos: 0 }, outcome: "fixed" as const }] : [],
+    resolutions: round === 2 ? [{ findingRef: { reviewId: id - 1, pos: 0 }, outcome }] : [],
     at,
   });
   return id;
@@ -181,6 +188,26 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
       commands: [`git fetch origin ${BRANCH} && git switch ${BRANCH}`, "pnpm dev"],
       previewUrl: null,
     });
+  });
+
+  it("keeps a round open when RETRO held its blocking finding", async () => {
+    store.upsertPullRequests("shop-app", [pr("shop-app", 40)], NOW);
+    store.upsertRun(run("dev-3"));
+    review(1, "sha1", NOW - 50 * MIN, 1, 40, "fixed", "dev-3");
+    review(2, "sha2", NOW - 20 * MIN, 1, 40, "held", "dev-3");
+    const body = (await get("/api/qa/uat/shop-app/40")).json() as PrUatView;
+    expect(body.rounds.map((r) => [r.round, r.result])).toEqual([
+      [2, "open"],
+      [1, "open"],
+    ]);
+  });
+
+  it("quotes a branch name with shell characters and leaves tryIt.branch raw", async () => {
+    const odd = "x;touch${IFS}/tmp/p";
+    store.upsertPullRequests("shop-app", [pr("shop-app", 41, odd)], NOW);
+    const body = (await get("/api/qa/uat/shop-app/41")).json() as PrUatView;
+    expect(body.tryIt.branch).toBe(odd);
+    expect(body.tryIt.commands[0]).toBe(`git fetch origin '${odd}' && git switch '${odd}'`);
   });
 
   it("omits the run command when the repo has none", async () => {

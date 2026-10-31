@@ -1452,6 +1452,17 @@ describe("guard config", () => {
     ]);
   });
 
+  it("loads run_command into runCommand, leaves it unset without the key and refuses an empty one", () => {
+    const withRun = text.replace(
+      FULL_SUITE_BLOCK,
+      `${FULL_SUITE_BLOCK}\n    run_command: pnpm dev`,
+    );
+    expect(parse(withRun).repos[2]?.runCommand).toBe("pnpm dev");
+    expect(parse(text).repos[2]?.runCommand).toBeUndefined();
+    const empty = text.replace(FULL_SUITE_BLOCK, `${FULL_SUITE_BLOCK}\n    run_command: ""`);
+    expect(() => parse(empty)).toThrow();
+  });
+
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
     "refuses full_suite entry %j that crew seats may not run",
     (cmd) => {

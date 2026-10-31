@@ -17,6 +17,10 @@ export interface PrUatInput {
   repoOfSender: (from: string) => string | null;
 }
 
+/** The branch as one shell word: bare when it is only safe characters, else single-quoted. */
+const shellWord = (b: string): string =>
+  /^[A-Za-z0-9._/-]+$/.test(b) ? b : `'${b.replace(/'/g, "'\\''")}'`;
+
 /** Comms, rework rounds and try-it commands for one PR. */
 export function prUat({ store, pr, runCommand, singleRepo, repoOfSender }: PrUatInput): PrUatView {
   const ticketNumber = pr.ticket === null ? null : /#(\d+)$/.exec(pr.ticket)?.[1];
@@ -46,7 +50,7 @@ export function prUat({ store, pr, runCommand, singleRepo, repoOfSender }: PrUat
         file: f.file,
         line: f.line,
         summary: `${f.file}:${f.line} ${f.summary}`,
-        resolved: f.resolution !== undefined,
+        resolved: f.resolution !== undefined && f.resolution !== "held",
       }));
     const reply = all.find((m) => m.from === author && m.at > from && m.at < until);
     return {
@@ -77,7 +81,7 @@ export function prUat({ store, pr, runCommand, singleRepo, repoOfSender }: PrUat
     tryIt: {
       branch: pr.branch,
       commands: [
-        `git fetch origin ${pr.branch} && git switch ${pr.branch}`,
+        `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
         ...(runCommand === undefined ? [] : [runCommand]),
       ],
       previewUrl: null,
