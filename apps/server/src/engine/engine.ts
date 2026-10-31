@@ -835,6 +835,7 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
+        quietTurns: current ? (row?.quietTurns ?? 0) : 0,
         rateLimitedUntil: current ? (facts?.rateLimitedUntil ?? null) : null,
         openQuestion: store.openQuestions().some((q) => q.runId === run.id),
       },

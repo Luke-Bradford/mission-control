@@ -132,6 +132,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
       inTurn: false,
       lastTurnEndedAt: null,
       resumedAt: null,
+      quietTurns: 0,
       rateLimitedUntil: null,
       openQuestion: false,
       holdsRun: true,
@@ -1628,6 +1629,19 @@ describe("amendments from the reviews of Task 5", () => {
       pr: pr({ ci: "passing" }),
     });
     expect(JSON.stringify(passed.actions)).toContain("CI passed on aaaaaaa");
+  });
+
+  it("two turns in a row with no new commit make the next resume line push and report", () => {
+    const base = snap({}, { cardFor: "working:0" });
+    const resumed = (quietTurns: number) =>
+      reconcile({ ...base, seat: seat(base, { resumedAt: 6000, quietTurns }) }).actions.flatMap(
+        (x) => (x.kind === "send" ? [x.text] : []),
+      );
+    const [ordinary] = resumed(1);
+    expect(ordinary).toContain("Carry on with");
+    const [push] = resumed(2);
+    expect(push).toContain("Push what you have and report");
+    expect(push).not.toContain("Carry on with");
   });
 
   it("E5: a restart while rate-limited sends one Carry on, whichever line goes first", () => {
