@@ -4206,6 +4206,31 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
+      it("Send back works after the head moved during the wait; Accept does not", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        report("pushed again", SHA_B);
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        expect(await h.engine.uat(RUN, "accept", SHA)).toEqual({
+          lifted: false,
+          reason: "head-moved",
+        });
+        expect(await h.engine.uat(RUN, "send_back", SHA, "n")).toEqual({ lifted: true });
+        expect(loopOf().parked?.kind).not.toBe(UAT_PARK);
+      });
+
+      it("waits when the ticket's labels cannot be read", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        store.replaceBoard(REPO, []);
+        await waiting();
+        expect(loopOf().parked?.reason).toBe(
+          uatParkText(SHA, "its ticket's labels could not be read"),
+        );
+        expect(h.steps).not.toContain("merge");
+      });
+
       it("no uat rule leaves the merge path as before", async () => {
         h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true });
         featureCard();

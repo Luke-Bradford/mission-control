@@ -1121,6 +1121,8 @@ export function createEngine(deps: EngineDeps): Engine {
     if (labels.length === 0 && paths.length === 0) return null;
     const issue = issueOf(run);
     const card = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    // without the ticket's labels the rule cannot be judged: the operator decides
+    if (labels.length > 0 && card === undefined) return "its ticket's labels could not be read";
     const wanted = new Set(labels.map((l) => l.toLowerCase()));
     const label = card?.labels.find((l) => wanted.has(l.toLowerCase()));
     if (label !== undefined) return `ticket label ${label}`;
@@ -3001,11 +3003,12 @@ export function createEngine(deps: EngineDeps): Engine {
         if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
         const at = now();
         const short = held.sha.slice(0, 7);
-        const pushed = store.runPush(run.id);
-        const pr = findPr(run, loop);
-        if (pr?.state !== "open") return refuse("pr-not-open");
-        if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
         if (verdict === "accept") {
+          // an acceptance is for the head the operator looked at; a send back is allowed on a moved head
+          const pushed = store.runPush(run.id);
+          const pr = findPr(run, loop);
+          if (pr?.state !== "open") return refuse("pr-not-open");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
           store.setRunLoop(run.id, {
             ...loop,
             phase: held.from,
