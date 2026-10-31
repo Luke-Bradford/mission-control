@@ -379,6 +379,7 @@ describe("the mc tools", () => {
         startRun: vi.fn(),
         endRun: vi.fn(),
         endAsideRun: vi.fn(),
+        resumeRun: vi.fn(),
         interrupt: vi.fn(),
       },
       rules: vi.fn(),

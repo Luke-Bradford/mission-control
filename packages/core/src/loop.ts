@@ -471,6 +471,9 @@ export const asideEventText = (call: string): string =>
 /** A run in CI leaves its seat once its PR is open and its turn has ended. */
 export const asideInCiEventText = (call: string): string =>
   `in CI; ${call} is free for its next ticket`;
+/** A run still being built leaves its seat for rework due on another of the seat's PRs. */
+export const asideForReworkEventText = (call: string): string =>
+  `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -586,6 +589,8 @@ export interface LoopSnapshot {
   };
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
+  /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
+  reworkDue?: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
@@ -1269,6 +1274,26 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 }
 
 /**
+ * Whether the run being built leaves its seat at this turn end because rework is due on another of
+ * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
+ */
+function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat } = s;
+  return (
+    s.reworkDue === true &&
+    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
+    s.pushed === null &&
+    loop.phase === "working" &&
+    !loop.aside &&
+    s.ended === null &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn &&
+    !seat.openQuestion
+  );
+}
+
+/**
  * The main sha to merge into the run's branch now, or null. In a merge workspace, a run waiting at
  * its pushed sha is updated when its PR conflicts with main; its seat is between turns, or the
  * run is aside.
@@ -1497,7 +1522,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop)
+          : asideDue(s, loop) || displaceDue(s, loop)
             ? { kind: "set-aside" }
             : dueLine(s, loop);
     if (line !== null) actions.push(line);

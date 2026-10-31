@@ -5,7 +5,7 @@ import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
+import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -104,6 +104,8 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
+  loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
@@ -378,6 +380,11 @@ export interface BoardItem {
   subIssues: { done: number; total: number } | null;
   /** `ref` is `repo#number`; closed blockers are kept and flagged. */
   blockedBy: { ref: string; closed: boolean }[];
+  /**
+   * What the issue body says it waits on: issues on `Depends on` lines, PRs on `After PR` lines.
+   * Absent means none (a card stored before the field, or built by hand).
+   */
+  after?: { issues: number[]; prs: number[] };
   milestone: string | null;
   /** The project's single-select `Size` field; null when the project has none or the item has no value. */
   size: string | null;
@@ -439,6 +446,8 @@ export interface PullRequestView {
   title: string;
   url: string;
   branch: string;
+  /** The branch the PR merges into; another open PR's branch means it is stacked on that PR. Absent before it was read. */
+  base?: string | null;
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";
@@ -884,6 +893,8 @@ export interface CrewLoop {
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
+  /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
+  waitText?: string | null;
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */

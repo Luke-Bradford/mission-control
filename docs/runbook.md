@@ -1027,6 +1027,27 @@ run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). I
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
 
+### What a ticket waits on
+
+The hub reads one list of waits per ticket (`ticketWaits` in `packages/core/src/dependencies.ts`) from
+three places: GitHub's "blocked by" links, `Depends on #N` and `After PR N` lines in the issue body (the
+poll stores them on the board card as `after`), and a PR whose base is another open PR's branch (the poll
+stores the base on the PR). A dependency ends its wait only
+when it merged: a closed issue counts when a merged PR carries it (or, with no PR row left, its card is in
+Done); one closed with its PR unmerged, or an `After PR` that closed unmerged, keeps the wait and shows as
+"closed without merging" for FLIGHT to re-plan. A named PR the PR pages left out is read by number on the
+board poll; until it is read it counts as a wait.
+Every start path applies it: the engine's deal, a hand Start, FLIGHT's `start_seat`, `promote` and the
+queue reorder. The refusal names the wait and where its PR is ("waits on mc#1015 (PR 1033 in CI)").
+
+When the last wait of a ticket ends, the engine (each tick, `engine/dependencies.ts`) moves it from Blocked
+to Ready if it is otherwise complete (one area label, Done when, Size) and tells each of its open PRs' runs to
+merge main, once each. A step that fails or is refused is tried again after five minutes, for a day. FLIGHT's
+wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and `flight_state` and
+`GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
+it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
+`Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
+
 ### FLIGHT's controller powers
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
@@ -1040,6 +1061,7 @@ operator.
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a superuser repo, a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
 | `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
@@ -1161,9 +1183,15 @@ optional override that tightens the rules; removing it is a separate operator ch
 This code change does not edit `CLAUDE.md` or your home config.
 
 `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
-run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
+run may use; the engine parks a run that goes over. It is a runaway ceiling, not the expected use:
+set it well above what a large ticket needs (the live config uses `1500000`). A run that merely
+passes its expected use is not parked; Audit raises a finding for it (see Audit API). A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
-the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+the seat does not idle through CI. Rework on a set-aside run (review findings, a failed controller
+check, a CI failure) comes first, oldest first, ahead of any new ticket. If it lands while the seat is
+building a new ticket, that ticket is set aside at the seat's next turn end (its worktree, with its commits and any
+uncommitted work, is kept as it is; nothing is pushed) and comes back after the rework; the rework's
+wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
 `300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
@@ -1812,6 +1840,7 @@ repository checked out by the hub; PR numbers in another configured repository a
 - `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).
 - `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
 - `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
+- `tokenOveruse`: one finding per run started in range whose input + output tokens pass its ticket size's expected use. Expected use is 1.5 times the median of that size's build runs (only runs of build seats; watch, plan and review seats and observed loops are left out, as are runs of agents no longer configured) of the last `AUDIT_BASELINE_DAYS` (14) days, and `AUDIT_EXPECTED_TOKENS_DEFAULT` (400000) for a size with fewer than `AUDIT_BASELINE_MIN_RUNS` (5) of them or none. A finding carries review rounds, blocking findings by category, turns, uncached input, output, cache read and create, the expected use and a likely cause: `plan-gap` (scope or spec findings), `flaky-test-loop` (wrong or stale test findings), `rework-churn` (4 or more rounds, or 10 or more blocking findings), `wide-ticket` (Size L or XL with little rework) or `unexplained`. `groups` collects causes that repeat across two or more findings with a prevention to propose (`lesson`, `plan-rule` or `split-rule`); the proposal is text for the delegated path to take, nothing applies it. A finding never stops a run; only the `crew.run_token_budget` ceiling does.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.

@@ -8,14 +8,17 @@ import {
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
   type AuditMetrics,
+  type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditTokenOveruse,
   type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
@@ -31,6 +34,7 @@ import {
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  classifyOveruse,
   commsCutMarker,
   DECISION_DEFAULT_WAIT_MS,
   type Escalation,
@@ -63,16 +67,20 @@ import {
   GUARD_RULES,
   type GuardHit,
   type GuardRule,
+  groupOveruse,
   type HealthRow,
   type HudColumn,
   type HudState,
   inferTicket,
   type LoopEvent,
+  type LoopKind,
   type MachineSample,
   memoryTopicKey,
+  overusePrevention,
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
+  prCarries,
   QA_RETENTION_DAYS,
   type QaFindingView,
   type QaReviewRoundView,
@@ -97,8 +105,10 @@ import {
   type StrayKind,
   type Telemetry,
   type TestLockRun,
+  TICKET_SIZES,
   TITLE_MARKERS,
   type TokenUsage,
+  tokenBaselines,
   type UsageSample,
   validateMemoryNote,
   wakeKeyPrefix,
@@ -894,6 +904,7 @@ const toRun = (r: Row): Run => ({
     : { cliVersion: r.cli_version as string }),
   ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
   ...(r.effort == null ? {} : { effort: r.effort as string }),
+  ...(r.loop_kind == null ? {} : { loopKind: r.loop_kind as LoopKind }),
   ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
@@ -1240,6 +1251,8 @@ export class Store {
     for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
     // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
     this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
+    // What the issue body waits on (`{ issues, prs }` JSON), null for none; the next poll fills it.
+    this.addColumn("board_items", "after_deps", "TEXT");
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
@@ -1267,6 +1280,8 @@ export class Store {
       ["account_id", "TEXT"],
       ["effort", "TEXT"],
       ["prompt_hash", "TEXT"],
+      // The seat's loop kind at the start; `upsertRun` keeps the first value.
+      ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1334,6 +1349,8 @@ export class Store {
     this.addColumn("pull_requests", "additions", "INTEGER");
     this.addColumn("pull_requests", "deletions", "INTEGER");
     this.addColumn("pull_requests", "changed_files", "INTEGER");
+    // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
+    this.addColumn("pull_requests", "base", "TEXT");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1514,8 +1531,8 @@ export class Store {
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
            ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           account_id, effort, prompt_hash, loop_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1528,7 +1545,8 @@ export class Store {
            latest_plan = COALESCE(excluded.latest_plan, latest_plan),
            account_id = COALESCE(account_id, excluded.account_id),
            effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash)`,
+           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
+           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
       )
       .run(
         r.id,
@@ -1560,7 +1578,22 @@ export class Store {
         r.accountId ?? null,
         r.effort ?? null,
         r.promptHash ?? null,
+        r.loopKind ?? null,
       );
+  }
+
+  /**
+   * Gives runs stored before `loop_kind` existed the loop kind of their seat as configured now, so
+   * a seat removed later still shows as a build seat in Audit. A run that has one keeps it.
+   * Returns how many rows it set.
+   */
+  backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
+    const set = this.db.prepare(
+      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
+    );
+    let n = 0;
+    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
+    return n;
   }
 
   /** Completes immutable launch metadata once the generated prompt file exists. */
@@ -2443,8 +2476,8 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees, author)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees, author, after_deps)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -2454,7 +2487,8 @@ export class Store {
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
            item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees, author = excluded.author`,
+           assignees = excluded.assignees, author = excluded.author,
+           after_deps = excluded.after_deps`,
       );
       for (const i of items) {
         ins.run(
@@ -2482,6 +2516,9 @@ export class Store {
           i.projectId,
           JSON.stringify(i.assignees ?? []),
           i.author ?? null,
+          i.after && (i.after.issues.length > 0 || i.after.prs.length > 0)
+            ? JSON.stringify(i.after)
+            : null,
         );
       }
     });
@@ -2509,6 +2546,9 @@ export class Store {
       subIssues:
         r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
       blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
+      ...(typeof r.after_deps === "string"
+        ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
+        : {}),
       milestone: r.milestone as string | null,
       size: r.size as string | null,
       closed: r.closed === 1,
@@ -2552,9 +2592,10 @@ export class Store {
         ).map((r) => [r.number, r.read_at]),
       );
       const seen = new Set(prs.map((p) => p.number));
+      const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && at < readAt) del.run(repoId, number);
+        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
       }
       this.writePullRequests(
         repoId,
@@ -2564,12 +2605,28 @@ export class Store {
     });
   }
 
+  /**
+   * The PRs an open card waits on by name (`After PR N`) or through the issue they carry
+   * (`Depends on`): the sweep keeps them, or the wait would flicker each time it dropped one.
+   */
+  private namedPullRequests(repoId: RepoId): Set<number> {
+    const open = this.board(repoId).filter((c) => !c.closed);
+    const issues = new Set(open.flatMap((c) => c.after?.issues ?? []));
+    const named = new Set(open.flatMap((c) => c.after?.prs ?? []));
+    if (issues.size === 0) return named;
+    for (const p of this.pullRequests(repoId)) {
+      if ([...issues].some((n) => prCarries(p, repoId, n))) named.add(p.number);
+    }
+    return named;
+  }
+
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
+         base)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2579,7 +2636,7 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
     );
     const addHistory = this.db.prepare(
       "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
@@ -2668,6 +2725,7 @@ export class Store {
         p.additions ?? null,
         p.deletions ?? null,
         p.changedFiles ?? null,
+        p.base ?? null,
       );
       if (p.mergedAt !== null) {
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(p));
@@ -2828,6 +2886,7 @@ export class Store {
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
+      tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       surgeonProposals: [],
     };
   }
@@ -2926,6 +2985,113 @@ export class Store {
       }
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
+  }
+
+  /**
+   * Runs started in range whose input + output tokens pass their size's expected use (see
+   * `tokenBaselines`, built from build runs of the last `AUDIT_BASELINE_DAYS` days), largest first.
+   * Only runs of agents `kinds` marks as build count: watch, plan and review seats and observed
+   * loops have other shapes of use.
+   * A finding only: it reads the run, never changes it.
+   */
+  private auditTokenOveruse(
+    since: number,
+    until: number,
+    kinds: ReadonlyMap<string, AuditRunKind>,
+  ): AuditView["tokenOveruse"] {
+    const runRows = (sql: string, ...args: SQLInputValue[]) =>
+      this.db.prepare(sql).all(...args) as Row[];
+    // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
+    const from = `FROM runs r LEFT JOIN board_items b
+         ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
+       WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
+    // the loop kind stored at the run's start; a seat since removed still counts, and a row from
+    // before it was stored falls back to the seat's kind now
+    const isBuild = (r: Row): boolean => (r.loopKind ?? kinds.get(r.agentId as string)) === "build";
+    const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
+    const baselines = tokenBaselines(
+      runRows(
+        `SELECT r.agent_id AS agentId, r.loop_kind AS loopKind, b.size AS size, r.tokens AS tokens ${from}
+           AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
+        until - AUDIT_BASELINE_DAYS * DAY_MS,
+        until,
+      )
+        .filter(isBuild)
+        .map((r) => ({
+          size: r.size as string | null,
+          tokens: usage(r).input + usage(r).output,
+        })),
+    );
+    const blocking = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const runs: AuditTokenOveruse[] = [];
+    for (const r of runRows(
+      `SELECT r.id AS id, r.agent_id AS agentId, r.ticket AS ticket, r.started_at AS startedAt,
+         r.ended_at AS endedAt, r.loop_kind AS loopKind, r.tokens AS tokens, b.size AS size ${from}
+         AND r.started_at >= ? AND r.started_at <= ? ORDER BY r.started_at DESC`,
+      since,
+      until,
+    )) {
+      if (!isBuild(r)) continue;
+      const tokens = usage(r);
+      const total = tokens.input + tokens.output;
+      const size = r.size as string | null;
+      const expected = baselines.expected(size);
+      if (total <= expected) continue;
+      const id = r.id as string;
+      const rounds = this.db
+        .prepare("SELECT COUNT(*) AS n FROM reviews WHERE author_run_id = ? AND state = 'reported'")
+        .get(id) as { n: number };
+      const byCategory: AuditOveruseFacts["blockingByCategory"] = {};
+      let blockingTotal = 0;
+      for (const f of this.db
+        .prepare(
+          `SELECT COALESCE(category, 'uncategorised') AS category, COUNT(*) AS n FROM review_findings
+           WHERE author_run_id = ? AND severity IN (${blocking}) GROUP BY category`,
+        )
+        .all(id, ...BLOCKING_SEVERITIES) as { category: keyof typeof byCategory; n: number }[]) {
+        byCategory[f.category] = f.n;
+        blockingTotal += f.n;
+      }
+      const digest = this.db
+        .prepare(
+          "SELECT json_extract(digest, '$.turns') AS turns FROM run_digests WHERE run_id = ?",
+        )
+        .get(id) as { turns: number | null } | undefined;
+      const facts: AuditOveruseFacts = {
+        size,
+        reviewRounds: rounds.n,
+        blocking: blockingTotal,
+        blockingByCategory: byCategory,
+        turns: digest?.turns ?? null,
+      };
+      const cause = classifyOveruse(facts);
+      runs.push({
+        runId: id,
+        agentId: r.agentId as string,
+        ticket: r.ticket as string | null,
+        startedAt: r.startedAt as number,
+        ended: r.endedAt !== null,
+        tokens: total,
+        input: tokens.input,
+        output: tokens.output,
+        cacheRead: tokens.cacheRead,
+        cacheCreate: tokens.cacheCreate,
+        expected,
+        ...facts,
+        cause,
+        prevention: overusePrevention(cause),
+      });
+    }
+    runs.sort((a, b) => b.tokens - a.tokens || a.runId.localeCompare(b.runId));
+    return {
+      runs,
+      groups: groupOveruse(runs),
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: baselines.expected(size),
+        measured: baselines.bySize.has(size ?? ""),
+      })),
+    };
   }
 
   /** Crew-wide metrics over one window, both ends inclusive. */
@@ -3051,6 +3217,7 @@ export class Store {
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
+      ...(r.base == null ? {} : { base: r.base as string }),
     }));
   }
 

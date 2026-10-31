@@ -3155,6 +3155,57 @@ describe("triage and quiet wakes", () => {
     expect(signalState().triage).toEqual([]);
   });
 
+  it("wakes FLIGHT once when a chain of waiting tickets has stood still for 30 minutes", async () => {
+    liveCrew();
+    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
+    const mid = triageCard({
+      issueNumber: 2,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [1], prs: [] },
+    });
+    const top = triageCard({
+      issueNumber: 3,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [2], prs: [] },
+    });
+    store.replaceBoard("mc", [root, mid, top]);
+    const stalled = () => signalState().signals.filter((x) => x.kind === "chain_stalled");
+    expect(stalled()).toEqual([]);
+    nowMs += 29 * MIN;
+    expect(stalled()).toEqual([]);
+    nowMs += MIN;
+    const found = stalled();
+    // one signal for the whole chain, not one for each ticket in it
+    expect(found.map((x) => x.key)).toEqual(["mc#3>mc#2>mc#1"]);
+    expect(found[0]?.evidence).toContain("30 min");
+    markFlightSignalsShown(store, signalState(), nowMs);
+    expect(stalled().filter((x) => !x.told)).toEqual([]);
+  });
+
+  it("drops a stalled chain that ended before FLIGHT was told", () => {
+    liveCrew();
+    const waiting = triageCard({
+      issueNumber: 2,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [1], prs: [] },
+    });
+    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
+    store.replaceBoard("mc", [root, waiting]);
+    signalState();
+    nowMs += 31 * MIN;
+    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toHaveLength(1);
+    store.replaceBoard("mc", [{ ...root, status: "Done", state: "done", closed: true }, waiting]);
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { ticket: "mc#1", closingIssues: [1], state: "merged", mergedAt: nowMs })],
+      nowMs,
+    );
+    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toEqual([]);
+  });
+
   it("keeps the stored PR list and wake facts stable on a phase-only move and metadata timestamp change", () => {
     liveCrew();
     const build = run("r-guido", "guido-1", {
