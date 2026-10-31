@@ -81,7 +81,7 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
 export function evidenceCanUnpark(
@@ -385,6 +385,10 @@ export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
 export const conflictText = (files: readonly string[]): string =>
   `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** The line a PR that conflicts with main sends its seat, keyed so it goes once per pushed sha. */
+export const mergeMainKey = (runId: string, sha: string): string => `merge-main:${runId}:${sha}`;
+export const MERGE_MAIN_TEXT =
+  "Your PR conflicts with main. Call mc sync_main to merge main into your branch, resolve any conflicts it names, then call mc commit and mc report_evidence.";
 /** A Comms pointer to a conflict list delivered directly to the author seat. */
 export const conflictCommsText = (files: readonly string[]): string =>
   `Merging main conflicted in ${files.length} files; the list was sent to the seat.`;
@@ -891,10 +895,12 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [],
     };
   }
-  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does
+  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
+  // a conflict stop lifts the same way once the PR no longer conflicts
   if (
     loop.phase === "parked" &&
-    loop.parked?.kind === STUCK_PARK &&
+    (loop.parked?.kind === STUCK_PARK ||
+      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
     !loop.parked.ended &&
     pr?.state === "open" &&
     headCommit !== null &&
@@ -1044,7 +1050,18 @@ function stateStep(s: LoopSnapshot): Step {
       if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
         return unchanged(loop);
       }
-      return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
+      // already on the seat, is the operator's
+      const key = mergeMainKey(s.runId, pushed.sha);
+      if (loop.mainMerge || key in s.claimed) {
+        return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      }
+      return {
+        loop: { ...loop, phase: "working", pendingLine: { key, text: MERGE_MAIN_TEXT } },
+        actions: [
+          { kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` },
+        ],
+      };
     }
     if (pr.ci === "passing") {
       const flaked = loop.rerun?.sha === pushed.sha;

@@ -717,6 +717,11 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   *Blocked*). Your next message to the seat resumes it; the seat then needs a new commit, or a
   note starting `Ruling:`, before it can report again. A run parked because its PR was closed
   does not resume.
+- **Conflict with main.** A PR in CI that conflicts with main sends its seat one line (per pushed
+  sha) to call `mc sync_main`, resolve, commit and report; the run goes back to working, not to the
+  operator. Only a seat already told for that sha, or with a merge of main under way, parks on the
+  conflict. A run parked on a conflict accepts the seat's report of a new commit (a merge of main)
+  and goes back to CI by itself once the pushed head shows on a PR that no longer conflicts.
 - **Silent.** A seat that stops without reporting is nudged once, then parked.
 - **Merged.** The engine ends the run itself and the seat goes idle; in a `merge` repo it then
   takes its next Ready ticket.
