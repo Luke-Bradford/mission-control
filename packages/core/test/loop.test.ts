@@ -589,9 +589,16 @@ describe("state step", () => {
         expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
       }
       // a different head, or CI not passing, leaves it alone
-      const other = reconcile({ ...base, loop: { ...base.loop, phase: "review", ciFailedSha: SHA2 } });
+      const other = reconcile({
+        ...base,
+        loop: { ...base.loop, phase: "review", ciFailedSha: SHA2 },
+      });
       expect(other.loop.ciFailedSha).toBe(SHA2);
-      const red = reconcile({ ...base, pr: pr({ ci: "failing" }), loop: { ...base.loop, phase: "review" } });
+      const red = reconcile({
+        ...base,
+        pr: pr({ ci: "failing" }),
+        loop: { ...base.loop, phase: "review" },
+      });
       expect(red.loop.ciFailedSha).toBe(SHA);
     });
 
