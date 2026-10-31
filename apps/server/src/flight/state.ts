@@ -51,6 +51,7 @@ import {
   type FlightArrivalOperation,
   type FlightBriefSection,
   type FlightBriefView,
+  type FlightDecision,
   type FlightMemoryKind,
   type FlightMemoryNote,
   type FlightMemoryTitle,
@@ -293,10 +294,17 @@ export function recordWakeReasons(store: Store, runId: string, at: number, cause
 }
 
 /** The last day's wakes, by reason and by hour (24 buckets, the last one ending at `now`). */
-export function flightWakeHistory(store: Store, now: number): FlightWakeHistory {
+export function flightWakeHistory(
+  store: Store,
+  now: number,
+  decisions: readonly FlightDecision[] = store.flightDecisions(
+    now - FLIGHT_METRICS_DAY_MS,
+    FLIGHT_DECISIONS_SCAN_LIMIT,
+  ),
+): FlightWakeHistory {
   const since = now - FLIGHT_METRICS_DAY_MS;
   const wakes = store.flightWakes(since).filter((w) => w.at <= now);
-  const decided = store.flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT).map((d) => d.at);
+  const decided = decisions.map((d) => d.at);
   const idle = wakes.filter(
     (w) => !decided.some((at) => at >= w.at && at - w.at <= FLIGHT_WAKE_IDLE_MS),
   ).length;
@@ -396,7 +404,7 @@ export function flightView(
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
-    ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now) }),
+    ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
     promptWakes:
       found === null
         ? []
