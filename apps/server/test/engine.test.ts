@@ -356,6 +356,8 @@ interface Harness {
   /** PR-body edits, and the next results of postMinorFindings (empty: success). */
   minorCalls: { id: number; sha: string; retro: string }[];
   minorResults: PublishResult[];
+  /** The evidence sections written to the PR body. */
+  evidenceSections: (string | null)[];
   /** Commit-status writes, and the next results of setReviewStatus (empty: success). */
   statusCalls: { sha: string; state: string; description: string }[];
   statusResults: PublishResult[];
@@ -437,6 +439,7 @@ function harness(): Harness {
     duringStart: null,
     minorCalls: [],
     minorResults: [],
+    evidenceSections: [],
     statusCalls: [],
     statusResults: [],
     statusThrows: null,
@@ -552,6 +555,10 @@ function harness(): Harness {
             });
           }
           return res;
+        },
+        setEvidenceSection: async (_r, section) => {
+          x.evidenceSections.push(section);
+          return { ok: true };
         },
         markReady: (r) => step("ready", r),
         markDraft: (r) => step("draft", r),
@@ -2988,6 +2995,74 @@ describe("the engine runs reviews", () => {
     reported(first().id, []);
     await h.engine.reconcileRun(RUN);
     expect(h.steps).toContain("ready");
+  });
+
+  describe("screenshot evidence for a web PR", () => {
+    const WEB_FILES = [{ path: "apps/web/src/board/Card.tsx", changeType: "MODIFIED" }];
+    /** A stand-in for PrEvidence: pairs exist for the heads in `have`. */
+    const evidence = (have: Set<string>) => {
+      const ensured: { pr: number; sha: string; paths: readonly string[] }[] = [];
+      return {
+        ensured,
+        deps: {
+          baseUrl: "http://127.0.0.1:7421",
+          async ensure(t: { pr: number; sha: string; paths: readonly string[] }) {
+            ensured.push({ pr: t.pr, sha: t.sha, paths: t.paths });
+          },
+          gate(t: { sha: string; paths: readonly string[] }) {
+            const web = t.paths.some((p) => p.startsWith("apps/web/") && !p.includes("test"));
+            return !web || have.has(t.sha)
+              ? null
+              : "kept in draft until its screenshot evidence exists; missing pages: board";
+          },
+        },
+      };
+    };
+    const withEvidence = async (ev: ReturnType<typeof evidence>) => {
+      h.engine.stop();
+      h.engine = h.make({ evidence: ev.deps });
+      h.engine.start();
+      await h.engine.tick();
+    };
+    async function toReviewed(files: typeof WEB_FILES | []): Promise<void> {
+      await toReview();
+      setPr({ ci: "passing", files: [...files] });
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+    }
+
+    it("holds mark-ready while a web PR's head has no pairs, names the missing pages, releases once they exist", async () => {
+      const have = new Set<string>();
+      const ev = evidence(have);
+      await withEvidence(ev);
+      await toReviewed(WEB_FILES);
+      expect(h.steps).not.toContain("ready");
+      expect(h.steps).not.toContain("merge");
+      expect(loopOf().phase).not.toBe("parked");
+      expect(ev.ensured.at(-1)).toMatchObject({ pr: 12, sha: SHA });
+      expect(
+        store
+          .loopEventsOfRun(RUN)
+          .some((e) => e.text.includes("kept in draft") && e.text.includes("board")),
+      ).toBe(true);
+      have.add(SHA);
+      clock += MIN;
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toContain("ready");
+    });
+
+    it("does not hold a PR that changes no HUD page", async () => {
+      await withEvidence(evidence(new Set()));
+      await toReviewed([]);
+      expect(h.steps).toContain("ready");
+    });
+
+    it("does not let the pairs of an older head release a new one", async () => {
+      const have = new Set(["f".repeat(40)]);
+      await withEvidence(evidence(have));
+      await toReviewed(WEB_FILES);
+      expect(h.steps).not.toContain("ready");
+    });
   });
 
   it("stores RETRO screenshot-pair evidence for the QA board", async () => {

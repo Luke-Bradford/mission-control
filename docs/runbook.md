@@ -1980,6 +1980,46 @@ expiry, explicit close, or live-hub shutdown. Preparation has a five-minute dead
 operator close cancels preparation as well as a running child. Previews only run branches from the
 repository checked out by the hub; PR numbers in another configured repository are not eligible.
 
+### PR screenshot evidence
+
+A PR that changes the HUD carries screenshots of the pages it affects before it leaves draft. This
+applies only to the repository whose checkout runs the hub, and only on the live hub.
+
+**What is captured.** The files the PR changes (the first 100 the GitHub poll stores) are mapped to
+pages: a page's own directory under `apps/web/src/` or its `pages/` file affects that page;
+`hud.css`, `shell/`, `components/` and any file that cannot be placed affect every page in the nav
+catalogue; test files and paths outside `apps/web` affect none. For each page the hub renders
+1600×1000 in the light and in the dark scheme, on main and on the PR head. Both sides are
+hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
+one `VACUUM INTO` snapshot of the live database, so they show the same data. Each side is a
+detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
+its pages are done. Captures run one at a time; a failed capture is tried again after ten minutes.
+
+**What is stored.** Under `pr-evidence/<repo>/<pr>/<head sha>/` in the data dir (directories
+`0700`, files `0600`): `<page>-<light|dark>-<before|after|diff>.png` and `manifest.json`, which
+lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
+first). A pixel counts as changed when its colour differs by more than 24 across the three
+channels; regions group changes on a 16 px grid. The three newest heads of a PR are kept. The
+manifest is written last, so a head with no manifest was never captured. Nothing is uploaded.
+
+**Where it is read.** `GET /api/prs/<n>/evidence` answers the newest head's manifest (`?sha=` for
+one head, `?repo=` when two repos have the number) and `GET /api/prs/<n>/evidence/<sha>/<name>.png`
+an image. Neither needs the operator token, like the other read routes. The PR body gets a
+`## Screenshot evidence` section with one line per pair and links to its three images; it is
+rewritten for each new head and kept when RETRO's Minor findings are posted. RETRO's brief lists
+the pairs and the images are copied into its scratch copy under `.mc-review/evidence/`.
+
+**The hold.** The engine does not mark a web PR ready, nor merge it, until the pairs for its
+current head exist. Each pass that is held records a loop event on the run naming the pages still
+missing; the run is not parked, and moves on at the next pass once the capture lands. A push
+makes a new head, which needs its own pairs.
+
+**Limits.** Anything on a page that depends on the clock (relative times, live counts) differs
+between the two renders and shows as a changed region; read the regions against the diff. A PR
+with more than 100 changed files is judged on the first 100 the poll stores. A capture needs a
+system Chrome, `playwright-core` and the repo's pnpm store offline, as the FLIGHT screenshots and
+branch previews do.
+
 ## Audit API
 
 `GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:

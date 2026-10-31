@@ -15,7 +15,7 @@
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -23,7 +23,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { LOOPBACK_HOST, type RepoId } from "@mc/core";
+import { evidenceSectionText, LOOPBACK_HOST, type RepoId, type Run } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
 import { ChangeBus } from "./bus.ts";
@@ -59,7 +59,7 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
-import { renderHudInHelper } from "./flight/hud-render.ts";
+import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
@@ -78,6 +78,9 @@ import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { createPrEvidence } from "./pr-evidence/capture.ts";
+import { evidenceSideStarter } from "./pr-evidence/hubs.ts";
+import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
@@ -319,6 +322,59 @@ export async function main(): Promise<void> {
   const previewRepoId = config.crew?.sessions.find(
     (session) => hubRoot !== null && resolve(session.checkout) === hubRoot,
   )?.repoId;
+  // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
+  const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
+  const evidenceCheckout = config.crew?.sessions.find((s) => s.repoId === previewRepoId)?.checkout;
+  const prEvidence =
+    !preview && previewRepoId !== undefined && evidenceCheckout !== undefined
+      ? createPrEvidence({
+          store: evidenceStore,
+          repoId: previewRepoId,
+          workDir: join(dirname(dbPath), "pr-evidence-work"),
+          baseUrl: `http://${HOST}:${port}`,
+          mainSha: async () => {
+            await runPreviewCommand("git", ["-C", evidenceCheckout, "fetch", "origin", "HEAD"]);
+            return await gitOutput(evidenceCheckout, ["rev-parse", "FETCH_HEAD"]);
+          },
+          snapshot: async (to) => {
+            const source = new DatabaseSync(dbPath);
+            try {
+              source.prepare("VACUUM INTO ?").run(to);
+            } finally {
+              source.close();
+            }
+          },
+          startSide: evidenceSideStarter({
+            checkout: evidenceCheckout,
+            root: join(dirname(dbPath), "pr-evidence-work", "sides"),
+            run: runPreviewCommand,
+            freePort,
+            launch: async ({ worktree, port: sidePort, db }) => {
+              const child = spawn(
+                process.execPath,
+                ["--experimental-strip-types", "apps/server/src/main.ts"],
+                {
+                  cwd: worktree,
+                  env: evidenceEnvironment(sidePort, db),
+                  stdio: "ignore",
+                },
+              );
+              try {
+                await waitForPreview(child, sidePort);
+              } catch (e) {
+                await stopPreview(child).catch(() => {});
+                throw e;
+              }
+              return { stop: async () => await stopPreview(child) };
+            },
+          }),
+          render: (origin, path, colorScheme) => {
+            const guard = hudRenderRequest(origin);
+            return renderHudInHelper(guard.page(path), guard, { colorScheme });
+          },
+          log: (line) => log(line),
+        })
+      : undefined;
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
@@ -371,6 +427,7 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
+    ...(prEvidence === undefined ? {} : { prEvidence: evidenceStore }),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
   });
   // a seat that frees up is about to take new work: read the boards first
@@ -424,6 +481,17 @@ export async function main(): Promise<void> {
     },
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
+    ...(prEvidence === undefined
+      ? {}
+      : {
+          // the section for the PR's current head, so a rewrite of the body keeps it
+          prEvidenceSection: (run: Run) => {
+            const n = run.loop?.prNumber;
+            const sha = n == null ? null : store.pullRequest(run.repoId, n)?.headSha;
+            const manifest = n == null || !sha ? null : evidenceStore.manifest(run.repoId, n, sha);
+            return manifest === null ? null : evidenceSectionText(manifest, prEvidence.baseUrl);
+          },
+        }),
   };
   const mcTools = createMcTools(mcDeps);
 
@@ -461,6 +529,7 @@ export async function main(): Promise<void> {
     bus,
     supervisor,
     publisher: createPublisher(mcDeps),
+    ...(prEvidence === undefined ? {} : { evidence: prEvidence }),
     board: engineBoard,
     pollGithub: () => scheduler.refreshBoards(),
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
@@ -665,6 +734,7 @@ export async function main(): Promise<void> {
     previewRepoId,
     previewActivity,
     hudShots,
+    prEvidence: evidenceStore,
     queueReorder,
     mapRing,
     warmMap: true,
@@ -805,6 +875,49 @@ export function previewEnvironment(
     MC_PREVIEW_ACTIVITY_TOKEN: token,
     MC_PREVIEW_PARENT_PID: String(process.pid),
   };
+}
+
+/** The environment of a hub that serves one commit for screenshots: a read-only preview. */
+function evidenceEnvironment(sidePort: number, db: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.MC_CONFIG;
+  return {
+    ...env,
+    MC_PORT: String(sidePort),
+    MC_DB: db,
+    MC_NO_LOOP_WRITES: "1",
+    MC_NO_CREW: "1",
+    // the child leaves when this hub does
+    MC_PREVIEW_PARENT_PID: String(process.pid),
+  };
+}
+
+/** A loopback port nothing listens on now. */
+async function freePort(): Promise<number> {
+  return await new Promise<number>((resolvePort, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen({ host: HOST, port: 0 }, () => {
+      const address = probe.address();
+      probe.close(() =>
+        typeof address === "object" && address !== null
+          ? resolvePort(address.port)
+          : reject(new Error("no free port")),
+      );
+    });
+  });
+}
+
+/** What a git command prints, trimmed. */
+async function gitOutput(checkout: string, args: string[]): Promise<string> {
+  return await new Promise<string>((resolveOut, reject) => {
+    execFile(
+      "git",
+      ["-C", checkout, ...args],
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+      (err, out) => (err ? reject(err) : resolveOut(out.trim())),
+    );
+  });
 }
 
 const PREVIEW_READY_MS = 30_000;

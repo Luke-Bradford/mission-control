@@ -170,6 +170,21 @@ describe("hudRenderRequest", () => {
 });
 
 describe("renderHudWithPlaywright", () => {
+  it("opens the page in the colour scheme it is asked for, and in none when it is not", async () => {
+    const dark = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(dark.playwright),
+      colorScheme: "dark",
+    });
+    expect(dark.browser.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({ colorScheme: "dark" }),
+    );
+    const plain = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(plain.playwright));
+    const opened = (plain.browser.newContext.mock.calls as unknown as [object][])[0]?.[0];
+    expect(opened).not.toHaveProperty("colorScheme");
+  });
+
   it("sandboxes Chrome and installs context routes before creating the main page", async () => {
     const fake = fakePlaywright();
     const png = await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));

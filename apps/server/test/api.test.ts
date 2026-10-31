@@ -1520,6 +1520,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/test-lock/history"],
   ["GET", "/api/guard/hits?days=7"],
   ["GET", "/api/hud-screenshots/:id"],
+  ["GET", "/api/prs/:n/evidence"],
+  ["GET", "/api/prs/:n/evidence/:sha/:name"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
@@ -2247,6 +2249,7 @@ describe("local access", () => {
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
+      if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need

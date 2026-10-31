@@ -11,6 +11,11 @@ import {
   type CrewMode,
   type CrewRole,
   type DoneWhenEntry,
+  EVIDENCE_HEADING,
+  EVIDENCE_KINDS,
+  EVIDENCE_VIEWPORT,
+  type EvidencePair,
+  evidenceImageName,
   type LoopKind,
   MC_LINE_PREFIX,
   profileRouteText,
@@ -221,6 +226,8 @@ export interface ReviewBriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which wait for the test lock. */
   fullSuite: readonly string[];
+  /** The screenshot pairs of a web PR's head, with the directory in the scratch copy holding them. */
+  evidence?: { dir: string; mainSha: string; pairs: readonly EvidencePair[] };
   /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
   second?: { reason: string; findings: readonly StoredFinding[] };
 }
@@ -238,6 +245,21 @@ function newestNotes(notes: readonly string[]): { text: string; cut: boolean } {
     used = next;
   }
   return { text: kept.join(NOTES_SEPARATOR), cut: kept.length < notes.length };
+}
+
+const REGIONS_LISTED = 5;
+
+/** One pair as the review brief says it: how much changed, where, and the three files. */
+function evidenceLine(p: EvidencePair, dir: string): string {
+  const where = p.regions
+    .slice(0, REGIONS_LISTED)
+    .map((r) => `${r.width}×${r.height} at ${r.x},${r.y}`)
+    .join("; ");
+  const more =
+    p.regions.length > REGIONS_LISTED ? `; ${p.regions.length - REGIONS_LISTED} more` : "";
+  const count = p.regions.length === 1 ? "1 region" : `${p.regions.length} regions`;
+  const files = EVIDENCE_KINDS.map((k) => `${dir}/${evidenceImageName(p.page, p.scheme, k)}`);
+  return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
 }
 
 /** RETRO's first message: the PR, what it has to read, how to review, the ticket and the notes. */
@@ -261,6 +283,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
         ]
       : []),
     `- CI: every check passed on ${sha7}.`,
+    ...(i.evidence
+      ? [
+          `- ${i.evidence.dir}/: screenshots of the HUD pages this PR changes, main against this head, with a pixel diff. Read them (the Read tool shows an image); the list is below.`,
+        ]
+      : []),
     ...(i.touches.length > 0
       ? [
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
@@ -296,6 +323,16 @@ export function reviewBrief(i: ReviewBriefInput): string {
             (d) =>
               `${d.line}. "${d.text}" — ${d.status === "met" ? "met" : "not met"}: ${d.evidence}`,
           ),
+          "",
+        ]
+      : []),
+    ...(i.evidence
+      ? [
+          EVIDENCE_HEADING,
+          "",
+          `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} on the same data, this head against main ${i.evidence.mainSha.slice(0, 7)}. Changed pixels are red in the diff. Judge each changed region as the design pass asks, and a page the PR should have changed but did not.`,
+          "",
+          ...i.evidence.pairs.map((p) => evidenceLine(p, i.evidence?.dir ?? "")),
           "",
         ]
       : []),

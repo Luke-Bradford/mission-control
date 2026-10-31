@@ -152,6 +152,8 @@ import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
+import { stageReviewEvidence } from "../pr-evidence/review.ts";
+import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -412,6 +414,8 @@ export interface SupervisorDeps {
   login: () => string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
+  /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
+  prEvidence?: PrEvidenceStore;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -3663,6 +3667,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
+      const screenshots = await stageReviewEvidence(
+        deps.prEvidence,
+        info.repo.id,
+        review.prNumber,
+        review.sha,
+        scratch.path,
+      ).catch(() => undefined);
       const prevReply =
         prev === null
           ? null
@@ -3690,6 +3701,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
+        ...(screenshots === undefined ? {} : { evidence: screenshots }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(second === null

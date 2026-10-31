@@ -3663,6 +3663,14 @@ export class Store {
     return rows.map((r) => ({ number: r.number, title: r.title }));
   }
 
+  /** The paths of the diff files the poll last stored for a PR (the first PR_FILES_MAX). */
+  prFilePaths(repoId: RepoId, number: number): string[] {
+    const rows = this.db
+      .prepare("SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ?")
+      .all(repoId, number) as { path: string }[];
+    return rows.map((r) => r.path);
+  }
+
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
     const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
       repoId,
