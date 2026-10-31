@@ -583,6 +583,10 @@ describe("prepareCheckout", () => {
   });
 
   it("brings origin's tip into a reused worktree when asked", async () => {
+    // no global git config: the merge's email is the hub's fallback on every machine
+    const home = mkdtempSync(join(dir, "home-"));
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", home);
     const first = await prepareCheckout(input());
     const tip = commit(first.path, { "b.txt": "branch\n" });
     const main = commit(seed, { "m.txt": "main\n" });
@@ -594,11 +598,12 @@ describe("prepareCheckout", () => {
       before: tip,
     });
     expect(git(r.path, "log", "-1", "--format=%P")).toBe(`${tip} ${main}`);
-    // the fixture clone has no user.email: the merge carries the hub's fallback on every platform
+    // the fixture clone has no user.email either, so the merge carries the hub's fallback
     expect(git(r.path, "log", "-1", "--format=%an|%cn|%ae|%ce")).toBe(
       `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|${MC_FALLBACK_EMAIL}|${MC_FALLBACK_EMAIL}`,
     );
     expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
+    vi.unstubAllEnvs();
   });
 
   it("leaves a reused worktree's conflicts for the seat", async () => {

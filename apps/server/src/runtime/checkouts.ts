@@ -57,10 +57,11 @@ export const CREW_GIT_SLOW_MS = 120_000;
 /** The author and committer of the merge commit the hub makes. */
 export const MC_MERGE_AUTHOR = "Mission Control";
 /**
- * The email git falls back to when the clone has no `user.email`. Git reads the identity from
- * `GIT_*_EMAIL`, then the clone's config, then `EMAIL`, then the hostname; the clone's config wins
- * in production, and a bare checkout (the tests, a fresh machine) gets this instead of
- * "Committer identity unknown". Only `GIT_*` variables are stripped from git's environment.
+ * The email git falls back to when no git config sets `user.email`. Git reads the identity from
+ * `GIT_*_EMAIL`, then `user.email` in any config (local, global, system), then `EMAIL`, then the
+ * hostname; the clone's config wins in production, and a bare checkout (the tests, a fresh
+ * machine) gets this instead of a hostname guess or "Committer identity unknown". Only `GIT_*`
+ * variables are stripped from git's environment.
  */
 export const MC_FALLBACK_EMAIL = "mission-control@localhost";
 /** The environment for a commit or merge the hub makes under `name`. */

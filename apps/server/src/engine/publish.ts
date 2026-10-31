@@ -102,7 +102,7 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-export { MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
+export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
