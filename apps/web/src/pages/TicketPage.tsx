@@ -8,7 +8,15 @@ import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { boardPath, followLink } from "../router.ts";
-import { eventLine, findingsOf, KIND_WORD, mergeEvents } from "../ticket/ticketTimeline.ts";
+import {
+  eventLine,
+  findingsOf,
+  findingWord,
+  KIND_WORD,
+  mergeEvents,
+  type PageEvent,
+  prEvents,
+} from "../ticket/ticketTimeline.ts";
 import "../ticket/ticket.css";
 
 const dash = "—";
@@ -22,13 +30,19 @@ function Field({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-function Entry({ e, t, tz }: { e: TicketEvent; t: TicketHistory; tz: string | null }) {
+function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null }) {
   const findings = e.kind === "review" ? findingsOf(t, e.reviewId) : [];
   return (
     <li className="tk-event" data-kind={e.kind}>
       <span className="tk-when">{tz ? `${dayMonth(e.at, tz)} ${hhmm(e.at, tz)}` : dash}</span>
       <Pill tone="plain">{KIND_WORD[e.kind]}</Pill>
       <span className="tk-line">{eventLine(e)}</span>
+      {(e.kind === "comms" || e.kind === "decision") && (
+        <details className="tk-more">
+          <summary>Full text</summary>
+          <p className="tk-text">{e.kind === "comms" ? e.text : `${e.decision}\n${e.basis}`}</p>
+        </details>
+      )}
       {findings.length > 0 && (
         <details className="tk-findings">
           <summary>{plural(findings.length, "finding")}</summary>
@@ -37,7 +51,7 @@ function Entry({ e, t, tz }: { e: TicketEvent; t: TicketHistory; tz: string | nu
               <li key={f.pos}>
                 <Pill tone={f.severity === "Important" ? "warn" : "plain"}>{f.severity}</Pill>{" "}
                 <span className="mono">{`${f.file}:${f.line}`}</span> {f.summary}
-                <span className="muted">{f.state === "logged" ? " (resolved)" : " (open)"}</span>
+                <span className="muted">{` (${findingWord(f)})`}</span>
               </li>
             ))}
           </ul>
@@ -57,15 +71,29 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
   const tz = useTz();
   const t = res.data;
   const [older, setOlder] = useState<{ events: TicketEvent[]; next: string | null } | null>(null);
+  // every live event seen, so one that slides out of the newest page stays
+  const [kept, setKept] = useState<TicketEvent[]>([]);
   const [paging, setPaging] = useState<"idle" | "loading" | "failed">("idle");
   // another ticket starts with no older pages of the last one
   // biome-ignore lint/correctness/useExhaustiveDependencies: repoId and number name the ticket
   useEffect(() => {
     setOlder(null);
+    setKept([]);
     setPaging("idle");
   }, [repoId, number]);
-  const events = useMemo(() => mergeEvents(t?.timeline ?? [], older?.events ?? []), [t, older]);
+  useEffect(() => {
+    if (t) setKept((k) => mergeEvents(k, t.timeline));
+  }, [t]);
   const next = older ? older.next : (t?.nextBefore ?? null);
+  const events = useMemo(() => {
+    const all: PageEvent[] = mergeEvents<TicketEvent>(t?.timeline ?? [], kept, older?.events ?? []);
+    const oldest = all.length > 0 ? (all[all.length - 1] as PageEvent).at : 0;
+    // while older pages remain, a PR event before the oldest loaded one would sit out of order
+    const prs = prEvents(t ?? ({ prs: [] } as unknown as TicketHistory)).filter(
+      (p) => next === null || p.at >= oldest,
+    );
+    return mergeEvents<PageEvent>(all, prs);
+  }, [t, kept, older, next]);
 
   const loadOlder = async () => {
     if (next === null) return;

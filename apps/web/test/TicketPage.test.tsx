@@ -1,6 +1,7 @@
 import type { TicketEvent, TicketHistory } from "@mc/core";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hub, RESOURCES } from "../src/data.ts";
 import { TicketPage } from "../src/pages/TicketPage.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG } from "./fixtures.ts";
@@ -156,9 +157,10 @@ describe("TicketPage", () => {
         .closest("li")?.textContent,
     ).toMatch(/open/i);
     const tl = screen.getByRole("region", { name: "Timeline" });
-    expect(tl.querySelectorAll(".tk-event")).toHaveLength(5);
+    expect(tl.querySelectorAll(".tk-event")).toHaveLength(6);
     // comms text is inert text, not HTML
-    expect(within(tl).getByText(/Please <b>start<\/b>/)).toBeTruthy();
+    // shown in the line and again whole under "Full text"
+    expect(within(tl).getAllByText(/Please <b>start<\/b>/)).toHaveLength(2);
     expect(tl.querySelector("b")).toBeNull();
     expect(within(tl).getByText(/3 passing, 1 failing, 0 pending/)).toBeTruthy();
     expect(within(tl).getByText(/1 blocking, 0 minor/)).toBeTruthy();
@@ -186,7 +188,9 @@ describe("TicketPage", () => {
   });
 
   it("says the crew has not touched an empty timeline, and shows an unreachable GitHub", async () => {
-    show(history({ timeline: [], body: null, outcome: null, githubError: "rate limited" }));
+    show(
+      history({ timeline: [], prs: [], body: null, outcome: null, githubError: "rate limited" }),
+    );
     await screen.findByRole("heading", { name: "Quote cache" });
     expect(screen.getByText("The crew has not touched this ticket yet.")).toBeTruthy();
     expect(screen.getByText(/GitHub could not be reached: rate limited/)).toBeTruthy();
@@ -210,13 +214,112 @@ describe("TicketPage", () => {
     });
     render(<TicketPage repoId="shop-app" number={3349} />);
     fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
-    await waitFor(() => expect(document.querySelectorAll(".tk-event").length).toBe(6));
+    await waitFor(() => expect(document.querySelectorAll(".tk-event").length).toBe(7));
     expect(fn).toHaveBeenCalledWith(`${PATH}?before=CUR`, expect.anything());
     expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
     const items = [
       ...screen.getByRole("region", { name: "Timeline" }).querySelectorAll(".tk-event"),
     ];
-    expect(items).toHaveLength(6);
-    expect(items[5]?.textContent).toMatch(/failed/);
+    expect(items).toHaveLength(7);
+    expect(items[6]?.textContent).toMatch(/failed/);
+  });
+
+  it("keeps events that slide out of the live window after Load older", async () => {
+    const msg = (n: number): TicketEvent => ({
+      key: `m${String(n).padStart(3, "0")}`,
+      at: n * 1000,
+      kind: "comms",
+      id: `c${n}`,
+      from: "a",
+      to: "b",
+      label: null,
+      text: `msg ${n}`,
+    });
+    const range = (hi: number, lo: number) =>
+      Array.from({ length: hi - lo + 1 }, (_, i) => msg(hi - i));
+    let live = history({ prs: [], timeline: range(60, 11), nextBefore: "CUR" });
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: () => ({ status: 200, body: live }),
+      [`${PATH}?before=CUR`]: history({ prs: [], timeline: range(10, 1), nextBefore: null }),
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
+    await waitFor(() => expect(document.querySelectorAll(".tk-event").length).toBe(60));
+    live = history({ prs: [], timeline: range(63, 14), nextBefore: "CUR" });
+    await act(async () => {
+      hub.refetch(RESOURCES.ticketHistory("shop-app", 3349).path);
+    });
+    await waitFor(() => expect(document.querySelectorAll(".tk-event").length).toBe(63));
+    expect(screen.getAllByText(/msg 12$/).length).toBeGreaterThan(0);
+  });
+
+  it("words a finding by how it ended, not by its severity bucket", async () => {
+    const base = history();
+    const round = (base.prs[0] as TicketHistory["prs"][number]).rounds[0] as never as {
+      findings: unknown[];
+    };
+    round.findings = [
+      {
+        pos: 1,
+        severity: "Important",
+        file: "a.ts",
+        line: 1,
+        summary: "fixed one",
+        scenario: "",
+        fix: "",
+        state: "open",
+        resolution: "fixed",
+        resolvedInReviewId: 8,
+      },
+      {
+        pos: 2,
+        severity: "Minor",
+        file: "b.ts",
+        line: 2,
+        summary: "fresh minor",
+        scenario: "",
+        fix: "",
+        state: "logged",
+        resolution: null,
+        resolvedInReviewId: null,
+      },
+    ];
+    show(base);
+    await screen.findByText(/fixed one/);
+    expect(screen.getByText(/fixed one/).closest("li")?.textContent).toMatch(/\(fixed\)/);
+    const fresh = screen.getByText(/fresh minor/).closest("li")?.textContent ?? "";
+    expect(fresh).not.toMatch(/resolved/);
+    expect(fresh).toMatch(/logged in the PR/);
+  });
+
+  it("shows PR opened and merged in the timeline", async () => {
+    const base = history();
+    show({
+      ...base,
+      prs: [
+        {
+          ...(base.prs[0] as TicketHistory["prs"][number]),
+          createdAt: 2_500,
+          mergedAt: 6_500,
+          state: "merged",
+        },
+      ],
+    });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).getByText(/PR #40 opened: cache it/)).toBeTruthy();
+    expect(within(tl).getByText(/PR #40 merged: cache it/)).toBeTruthy();
+  });
+
+  it("holds the whole of a long Comms text in a details element", async () => {
+    const long = "word ".repeat(200).trim();
+    const base = history();
+    show({
+      ...base,
+      timeline: [{ ...(base.timeline[0] as TicketEvent), text: long } as TicketEvent],
+    });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    const more = tl.querySelector("details.tk-more");
+    expect(more?.querySelector(".tk-text")?.textContent).toBe(long);
   });
 });

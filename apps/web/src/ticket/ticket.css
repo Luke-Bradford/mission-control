@@ -110,6 +110,7 @@
   overflow: hidden;
 }
 
+.tk-more,
 .tk-findings {
   grid-column: 3;
   font-size: var(--fs-s);
