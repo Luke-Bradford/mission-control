@@ -49,6 +49,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { setRunPathGrants } from "../src/path-grants.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({
@@ -1367,6 +1368,22 @@ describe("merge steps", () => {
         SHA,
         "--",
       ]);
+    });
+
+    it("leaves a file this run holds a grant for out of the strays, so its PR is not parked at the gate", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      setRunPathGrants(store, R.id, ["package.json"]);
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["docs/b.md"] },
+      });
     });
 
     it("marks only HUD diffs for the design readiness gate", async () => {

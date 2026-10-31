@@ -12,6 +12,7 @@ import {
   CI_EXCERPT_MAX,
   type CiRerun,
   globMatches,
+  grantedPath,
   isProtectedPath,
   MC_PR_BODY_MAX,
   MC_PR_EDIT_FAILED,
@@ -51,6 +52,7 @@ import {
   readKnown,
   seatPlace,
 } from "../mcp/tools.ts";
+import { runPathGrants } from "../path-grants.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
@@ -939,7 +941,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           }
         }
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
-        const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p, extra));
+        const grants = runPathGrants(deps.store, run.id);
+        const strays = names.filter(
+          (p) =>
+            !grantedPath(grants, p) && (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),
+        );
         return {
           ok: true,
           facts: {

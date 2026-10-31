@@ -10,6 +10,7 @@ import {
   type CrewSandboxInput,
   codexCommand,
   type GuardEvent,
+  grantedPath,
   isProtectedPath,
   MC_MCP_SERVER,
   pathInArea,
@@ -140,6 +141,7 @@ export function codexEditAllowed(
   cwd: string,
   area: readonly string[],
   protectedFiles: readonly string[],
+  granted: readonly string[] = [],
 ): boolean {
   if (path === "" || path === ".") return false;
   const real = codexRelativePath(path, cwd);
@@ -150,7 +152,10 @@ export function codexEditAllowed(
       : relative(cwd, resolve(cwd, path));
     return (
       !rel.split("/").includes("..") &&
-      [rel, real].every((p) => pathInArea(area, p) && !isProtectedPath(p, protectedFiles))
+      [rel, real].every(
+        (p) =>
+          grantedPath(granted, p) || (pathInArea(area, p) && !isProtectedPath(p, protectedFiles)),
+      )
     );
   } catch {
     return false;

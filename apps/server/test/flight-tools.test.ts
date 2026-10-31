@@ -79,9 +79,13 @@ import {
   GH_READ_NOT_FOUND,
   GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
+  GRANT_NOT_LISTED_TEXT,
   GUARD_ACK_PREFIX,
   GUARD_ALLOW_OUTPUT,
   GUARD_CHECK_PATH,
+  grantDecisionText,
+  grantNotOnTicketText,
+  grantUngrantableText,
   HOLD_NOT_TRIAGING_REFUSED,
   headlineSavedText,
   headlineText,
@@ -107,6 +111,7 @@ import {
   PROFILE_PAIR_TEXT,
   type PullRequestView,
   passNeedsBriefText,
+  pathGrantProblem,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -1636,6 +1641,45 @@ describe("start_seat", () => {
       ),
     );
     expect(startCalls).toEqual([]);
+  });
+
+  describe("paths", () => {
+    const withPaths = (line: string) => {
+      fetchImpl = async (n) => ticket(n, { body: `${line}\n${DONE}` });
+    };
+    const grants = () => store.flightDecisionsAbout("grant", "mc#7");
+
+    it("logs a grant decision for the ticket's Paths: files, then starts the seat", async () => {
+      withPaths("Paths: package.json");
+      expect((await start({ paths: ["package.json"] })).isError).toBeUndefined();
+      expect(grants().map((d) => [d.decision, d.seatId, d.basis])).toEqual([
+        [grantDecisionText("mc#7", ["package.json"]), "guido-1", "ready"],
+      ]);
+      expect(startCalls).toHaveLength(1);
+    });
+
+    it("refuses a path the ticket does not list, and logs nothing", async () => {
+      withPaths("Paths: package.json");
+      expect(await start({ paths: [".gitignore"] })).toEqual(
+        refused(grantNotOnTicketText("mc#7", [".gitignore"])),
+      );
+      expect(grants()).toEqual([]);
+      expect(startCalls).toEqual([]);
+    });
+
+    it("refuses paths on a ticket with no Paths: line", async () => {
+      expect(await start({ paths: ["package.json"] })).toEqual(refused(GRANT_NOT_LISTED_TEXT));
+      expect(grants()).toEqual([]);
+    });
+
+    it("refuses a file that cannot be granted", async () => {
+      withPaths("Paths: .github/workflows/ci.yml");
+      const why = pathGrantProblem(".github/workflows/ci.yml") as string;
+      expect(await start({ paths: [".github/workflows/ci.yml"] })).toEqual(
+        refused(grantUngrantableText(".github/workflows/ci.yml", why)),
+      );
+      expect(grants()).toEqual([]);
+    });
   });
 
   it("FLIGHT explicitly starts otherwise excluded work as a draft while away", async () => {

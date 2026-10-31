@@ -510,6 +510,11 @@ describe("Codex seat floor", () => {
     expect(codexReadAllowed("escape/new/x", cwd)).toBe(false);
     expect(codexReadAllowed("dangling/x", cwd)).toBe(false);
     expect(codexEditAllowed("apps/web/new/a.ts", cwd, ["apps/web/**"], [])).toBe(true);
+    // a file FLIGHT approved for the run is editable outside the area and though protected, and no other
+    expect(codexEditAllowed("package.json", cwd, ["apps/web/**"], [], ["package.json"])).toBe(true);
+    expect(codexEditAllowed("pnpm-lock.yaml", cwd, ["apps/web/**"], [], ["package.json"])).toBe(
+      false,
+    );
     for (const path of [
       "package.json",
       ".github/workflows/x.yml",
