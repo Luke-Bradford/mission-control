@@ -1960,7 +1960,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const stopVerdict = (runId: string): string => {
         const run = store.run(runId);
         const loop = run?.loopKind;
-        if (run === null || loop === undefined || loop === "none" || loop === "watch") {
+        if (run === null || loop == null || loop === "none" || loop === "watch") {
           return GUARD_ALLOW_OUTPUT;
         }
         if (runReported(store, run, loop)) return GUARD_ALLOW_OUTPUT;
