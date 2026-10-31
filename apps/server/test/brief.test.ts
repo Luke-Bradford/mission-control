@@ -321,7 +321,7 @@ describe("role briefs", () => {
   it("GUIDO and INCO commit only with mc commit and report; Mission Control pushes and opens the PR", () => {
     for (const role of ["GUIDO", "INCO"]) {
       expect(mayNot(role)).toBe(
-        "Commit only with the mc commit tool; git writes in Bash are refused. When the ticket's work is done and committed, report it with mc report_evidence: Mission Control pushes your branch, opens the draft PR and messages you if CI fails. Never comment on GitHub, label, or move board cards. You have no network access and no gh.",
+        "Commit only with the mc commit tool; git writes in Bash are refused. You have no network access and no gh, so GitHub comments, labels and board moves go through FLIGHT.",
       );
     }
   });
