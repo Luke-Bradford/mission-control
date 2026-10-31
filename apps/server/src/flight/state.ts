@@ -42,6 +42,7 @@ import {
   FLIGHT_TICKETS_LISTED,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
+  FLIGHT_VIEW_MS,
   FLIGHT_WAKE_SETTING,
   type FlightArrivalDisposition,
   type FlightArrivalOperation,
@@ -396,6 +397,10 @@ export function flightView(
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now) }),
+    promptWakes:
+      found === null
+        ? []
+        : store.agentPromptWakes(found.seat.id, now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
     ...(found === null
       ? {}
       : { blocked: blockedWork(store, found.session.repoId, now, inThisLane(config)) }),

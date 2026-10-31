@@ -126,7 +126,12 @@ let nowMs: number;
 let watch: FlightWatch;
 let emitted: string[];
 let startCalls: { seatId: string; first: string | undefined }[];
-let sendCalls: { runId: string; key: string; text: string }[];
+let sendCalls: {
+  runId: string;
+  key: string;
+  text: string;
+  cost?: { wake: number; pieces: readonly { section: string; bytes: number }[] };
+}[];
 let endCalls: string[];
 let statusCalls: number;
 let startFails: string | null;
@@ -232,8 +237,8 @@ const makeWatch = () => {
         if (alive === false) alive = true;
         return { runId };
       },
-      send: async (runId, key, text): Promise<SendResult> => {
-        sendCalls.push({ runId, key, text });
+      send: async (runId, key, text, cost): Promise<SendResult> => {
+        sendCalls.push({ runId, key, text, cost });
         if (sendFails) return "busy";
         const ok = store.claimLine(key, {
           runId,
@@ -417,6 +422,19 @@ describe("FLIGHT's PR list", () => {
     expect(last.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("sends a due wake with the wake's number and its digest and lessons pieces", async () => {
+    liveCrew();
+    ask();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const call = sendCalls[0];
+    expect(call?.cost?.wake).toBe(1);
+    expect(call?.cost?.pieces.map((p) => p.section)).toEqual(["lessons", "digest"]);
+    const digest = JSON.stringify(JSON.parse(call?.text.split("\n").at(-1) ?? ""));
+    expect(call?.cost?.pieces.reduce((n, p) => n + p.bytes, 0)).toBe(Buffer.byteLength(digest));
   });
 
   it("does not wake again when a merged PR leaves the list after its wake", async () => {

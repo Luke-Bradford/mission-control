@@ -6525,7 +6525,12 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
+      expect(r.json()).toEqual({
+        seat: null,
+        decisions: [],
+        controllerDecisions: [],
+        promptWakes: [],
+      });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6564,6 +6569,32 @@ describe("crew routes", () => {
         context: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("GET /api/flight returns FLIGHT's wakes by section", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1" }));
+      const now = Date.now();
+      const sections = (n: number) => [{ section: "digest" as const, bytes: n * 4, tokens: n }];
+      store.recordPromptSections("flight-run", 0, now - 3000, sections(100));
+      store.recordPromptSections("flight-run", 1, now - 1000, [
+        ...sections(50),
+        { section: "tool_results", bytes: 8, tokens: 2 },
+      ]);
+      store.recordPromptSections("flight-run", 2, now - 25 * 60 * 60_000, sections(1));
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.promptWakes?.map((w) => w.wake)).toEqual([1, 0]);
+      expect(body.promptWakes?.[0]?.sections.map((x) => x.section)).toEqual([
+        "digest",
+        "tool_results",
+      ]);
+      expect(body.promptWakes?.[1]?.sections).toEqual(sections(100));
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -7900,6 +7931,29 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/newer-run/loop")).json().endedAt).toBeNull();
   });
 
+  it("GET /api/runs/:id/loop returns the run's prompt sections", async () => {
+    store.upsertRun(run({ id: "costed", agentId: "guido-1" }));
+    store.upsertRun(run({ id: "uncosted", agentId: "guido-1" }));
+    // stored out of order: the answer follows PROMPT_SECTIONS
+    store.recordPromptSections("costed", 0, NOW, [
+      { section: "ticket", bytes: 40, tokens: 10 },
+      { section: "role", bytes: 400, tokens: 100 },
+    ]);
+    const body = (await get("/api/runs/costed/loop")).json();
+    expect(body.prompt).toEqual([
+      {
+        runId: "costed",
+        wake: 0,
+        at: NOW,
+        sections: [
+          { section: "role", bytes: 400, tokens: 100 },
+          { section: "ticket", bytes: 40, tokens: 10 },
+        ],
+      },
+    ]);
+    expect((await get("/api/runs/uncosted/loop")).json().prompt).toEqual([]);
+  });
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -7953,6 +8007,7 @@ describe("the first loop's engine", () => {
       round: null,
       budget: null,
       review: null,
+      prompt: [],
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
   });

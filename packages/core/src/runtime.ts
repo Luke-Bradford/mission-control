@@ -1287,7 +1287,14 @@ export type SessionEvent =
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
   /** Codex sends its exit code; the Claude stream carries none and its Post hook does. */
-  | { kind: "tool-result"; toolUseId: string; ok?: boolean; exitCode?: number | null }
+  | {
+      kind: "tool-result";
+      toolUseId: string;
+      ok?: boolean;
+      exitCode?: number | null;
+      /** UTF-8 bytes of the result the model reads; Codex events carry none. */
+      bytes?: number;
+    }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }

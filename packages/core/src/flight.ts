@@ -1,6 +1,7 @@
 import { priorityRank } from "./board.ts";
 import type { AttentionKind, HudColumn, TicketSize } from "./hud.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
@@ -115,6 +116,8 @@ export interface FlightView {
   wakeHistory?: FlightWakeHistory;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
   blocked?: FlightBlocked[];
+  /** What each of FLIGHT's last-day prompts took by section, newest first. */
+  promptWakes?: PromptWakeCost[];
 }
 
 /** A ticket that waits on other work: what it waits on, the chain to the root, and the wait so far. */
