@@ -755,7 +755,9 @@ export const closeFailedText = (): string =>
   "Not closed: GitHub refused the comment and close; see the server log.";
 export const closeUnconfirmedText = (): string =>
   "Close unconfirmed: GitHub accepted the call but the ticket does not read as closed; the comment may have posted. Tell the operator.";
-/** The most waiting tickets whose bodies close_ticket reads for "Depends on", and how many at once. */
+/** The most tickets close_ticket's search may return; a full page may be missing some, so it refuses. */
+export const FLIGHT_CLOSE_SEARCH_LIMIT = 1000;
+/** The most waiting tickets mentioning the closed one whose bodies close_ticket reads for "Depends on", and how many at once. */
 export const FLIGHT_CLOSE_DEPENDENT_READS_MAX = 60;
 export const FLIGHT_CLOSE_DEPENDENT_READ_BATCH = 4;
 
@@ -884,8 +886,12 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
+export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
+/** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
+export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
@@ -909,10 +915,12 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
+  "idle_no_work",
   "chain_stalled",
   "github_budget",
   "hub_error",
   "old_park",
+  "push_unseen",
   "merge_stalled",
   "item_stale",
   "run_no_pr",
@@ -1115,7 +1123,7 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
-export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 300_000;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1130,7 +1138,7 @@ export const freshStartLine = (handover: { body: string; updatedAt: number } | n
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
   }`;
-/** "context 142K · fresh session at 150K"; null while the context is unknown. */
+/** "context 142K · fresh session at 300K"; null while the context is unknown. */
 export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
   tokens === null
     ? null

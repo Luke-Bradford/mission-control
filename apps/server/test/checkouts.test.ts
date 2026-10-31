@@ -1817,7 +1817,7 @@ describe("review scratch checkouts", () => {
       git(seed, "push", "-q", "origin", "main");
       const s = await prepareScratch(scratchInput(second));
       const r = await writeReviewInputs(clone, s, second, first);
-      expect(r).toEqual({ diffCut: false, since: true });
+      expect(r).toEqual({ diffCut: false, since: true, changedSince: ["b.txt"] });
       const all = read(REVIEW_DIFF_FILE);
       expect(all).toContain("+++ b/a.txt");
       expect(all).toContain("+++ b/b.txt");
@@ -1835,6 +1835,7 @@ describe("review scratch checkouts", () => {
         expect(await writeReviewInputs(clone, s, head, prev)).toEqual({
           diffCut: false,
           since: false,
+          changedSince: null,
         });
         expect(existsSync(join(scratchPath(), REVIEW_SINCE_FILE))).toBe(false);
       }

@@ -15,6 +15,7 @@ import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTy
 import { Incoming } from "./Incoming.tsx";
 import { Pending } from "./Pending.tsx";
 import { PowerRequests } from "./PowerRequests.tsx";
+import { PromptWakes } from "./PromptWakes.tsx";
 import { Summary } from "./Summary.tsx";
 import { WorkingLog } from "./WorkingLog.tsx";
 
@@ -167,6 +168,7 @@ export function DidTab() {
             <Incoming />
           </div>
         </Panel>
+        <PromptWakes />
         <WorkingLog />
       </div>
     </>

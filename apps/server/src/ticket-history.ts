@@ -1,6 +1,6 @@
 import {
   type CiRunView,
-  doneWhenItems,
+  doneWhenChecklist,
   type Run,
   type TicketEvent,
   type TicketHistory,
@@ -230,7 +230,7 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
     size: card?.size ?? null,
     labels: i.issue?.labels ?? card?.labels ?? [],
     outcome: body === null ? null : ticketOutcome(body),
-    doneWhen: body === null ? [] : doneWhenItems(body),
+    doneWhen: body === null ? [] : doneWhenChecklist(body),
     body,
     bodyTruncated: i.issue?.bodyTruncated ?? false,
     githubError: i.githubError,

@@ -39,6 +39,7 @@ import {
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
+  FLIGHT_CLOSE_SEARCH_LIMIT,
   FLIGHT_CLOSES_PER_HOUR,
   FLIGHT_DECISION_MAX,
   FLIGHT_GH_API_READS_PER_HOUR,
@@ -257,6 +258,9 @@ let moveImpl: () => Promise<MoveResult>;
 let ghCalls: string[][];
 let ghInputs: (string | undefined)[];
 let ghImpl: (args: string[]) => Promise<GhResult>;
+/** `gh search` calls (close_ticket's dependents search) are kept apart from the writes in ghCalls. */
+let searchCalls: string[][];
+let searchImpl: (args: string[]) => Promise<GhResult>;
 let reorderImpl: (
   seat: string,
   move: string,
@@ -368,6 +372,8 @@ beforeEach(() => {
   ghCalls = [];
   ghInputs = [];
   ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
+  searchCalls = [];
+  searchImpl = async () => ({ code: 0, stdout: "[]", stderr: "" });
   secrets = [];
   secretSource = async () => secrets;
   logs = [];
@@ -406,6 +412,10 @@ beforeEach(() => {
     login: "me",
     lockState: () => lockNow,
     gh: async (a, opts) => {
+      if (a[0] === "search") {
+        searchCalls.push(a);
+        return searchImpl(a);
+      }
       ghInputs.push(opts.input);
       ghCalls.push(a);
       return ghImpl(a);
@@ -7882,7 +7892,7 @@ describe("close_ticket", () => {
     fetchImpl = async () => {
       throw new Error("down");
     };
-    await refusedNothingWritten(closeCall(), /could not be read/);
+    await refusedNothingWritten(closeCall(), /GitHub is unreachable/);
   });
 
   it("stops at the hourly cap", async () => {
@@ -7924,13 +7934,80 @@ describe("close_ticket", () => {
     }
   });
 
-  it("refuses before any write when too many tickets wait to check dependents", async () => {
+  const mentions = (...numbers: number[]) => {
+    searchImpl = async () => ({
+      code: 0,
+      stdout: JSON.stringify(numbers.map((number) => ({ number }))),
+      stderr: "",
+    });
+  };
+
+  it("on a board of 150 waiting tickets, refuses and names the one that depends on it", async () => {
+    board(card(7), card(8), ...Array.from({ length: 150 }, (_, i) => card(100 + i)));
+    mentions(120);
+    const base = fetchImpl;
+    const reads: number[] = [];
+    fetchImpl = async (n) => {
+      reads.push(n);
+      return n === 120 ? ticket(n, { body: "Depends on #7" }) : base(n);
+    };
+    await refusedNothingWritten(closeCall(), /depend on it \(mc#120\)/);
+    expect(searchCalls).toEqual([
+      [
+        "search",
+        "issues",
+        "7",
+        "--repo=o/mc",
+        "--state=open",
+        "--match=body",
+        "--json=number",
+        `--limit=${String(FLIGHT_CLOSE_SEARCH_LIMIT)}`,
+      ],
+    ]);
+    expect(reads.filter((n) => n >= 100)).toEqual([120]);
+  });
+
+  it("on a board of 150 waiting tickets, closes when none of them mention it", async () => {
+    board(card(7), card(8), ...Array.from({ length: 150 }, (_, i) => card(100 + i)));
+    const base = fetchImpl;
+    const reads: number[] = [];
+    fetchImpl = async (n) => {
+      reads.push(n);
+      return base(n);
+    };
+    expect((await closeCall()).isError).not.toBe(true);
+    expect(reads.filter((n) => n >= 100)).toEqual([]);
+  });
+
+  it("reads a mentioning ticket's body and lets the close through when it does not depend on it", async () => {
+    board(card(7), card(8), card(9));
+    mentions(9);
+    const base = fetchImpl;
+    fetchImpl = async (n) => (n === 9 ? ticket(n, { body: "Not #7, see #7's twin" }) : base(n));
+    expect((await closeCall()).isError).not.toBe(true);
+  });
+
+  it("refuses when the search fails or answers something unreadable", async () => {
+    searchImpl = async () => ({ code: 1, stdout: "", stderr: "rate limited" });
+    await refusedNothingWritten(closeCall(), /could not search/);
+    searchImpl = async () => ({ code: 0, stdout: "not json", stderr: "" });
+    await refusedNothingWritten(closeCall(), /could not search/);
+  });
+
+  it("refuses when the search hit its result limit, so it may be missing tickets", async () => {
+    mentions(...Array.from({ length: FLIGHT_CLOSE_SEARCH_LIMIT }, (_, i) => 1000 + i));
+    await refusedNothingWritten(closeCall(), /could not search/);
+  });
+
+  it("refuses before any write when too many waiting tickets mention it to read", async () => {
     board(card(7), card(8), ...Array.from({ length: 61 }, (_, i) => card(100 + i)));
-    await refusedNothingWritten(closeCall(), /too many open tickets/);
+    mentions(...Array.from({ length: 61 }, (_, i) => 100 + i));
+    await refusedNothingWritten(closeCall(), /too many open tickets mention it/);
   });
 
   it("reads the waiting tickets' bodies at most four at a time", async () => {
     board(card(7), card(8), ...Array.from({ length: 12 }, (_, i) => card(100 + i)));
+    mentions(...Array.from({ length: 12 }, (_, i) => 100 + i));
     const base = fetchImpl;
     let live = 0;
     let peak = 0;
@@ -7959,6 +8036,7 @@ describe("close_ticket", () => {
 
   it("refuses when a waiting ticket's body says Depends on it, or cannot be read", async () => {
     board(card(7), card(8), card(9));
+    mentions(9);
     const base = fetchImpl;
     fetchImpl = async (n) => (n === 9 ? ticket(n, { body: "Depends on #7 and #2" }) : base(n));
     await refusedNothingWritten(closeCall(), /depend on it \(mc#9\)/);

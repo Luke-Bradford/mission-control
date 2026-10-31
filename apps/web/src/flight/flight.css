@@ -1400,3 +1400,17 @@ button.flight-link:hover {
 .drow .fullbrief {
   justify-self: start;
 }
+
+.flight-prompt-wakes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: var(--sp-4);
+  list-style: none;
+}
+
+.flight-prompt-wakes h3 {
+  margin: 0 0 var(--sp-2);
+  font-weight: 600;
+}

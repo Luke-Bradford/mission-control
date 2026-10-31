@@ -1906,12 +1906,13 @@ export async function writeReviewInputs(
   s: Scratch,
   sha: string,
   prevSha: string | null,
-): Promise<{ diffCut: boolean; since: boolean }> {
+): Promise<{ diffCut: boolean; since: boolean; changedSince: string[] | null }> {
   const common = await realpath(join(checkout, ".git")).catch((e) => {
     throw new CheckoutError("checkout", CHECKOUT_TEXT, { cause: e });
   });
   const pr = await diffText(checkout, common, s.mergeBase, sha);
   let since: { text: string; cut: boolean } | null = null;
+  let changedSince: string[] | null = null;
   if (
     prevSha !== null &&
     (await succeeds(
@@ -1919,11 +1920,19 @@ export async function writeReviewInputs(
     ))
   ) {
     since = await diffText(checkout, common, prevSha, sha);
+    // the files the author changed since that review, for tagging a late finding
+    const names = await crewGit(
+      checkout,
+      ["diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", prevSha, sha, "--"],
+      common,
+      { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS, maxBuffer: REVIEW_DIFF_MAX_BUFFER },
+    );
+    changedSince = names.split("\0").filter((n) => n !== "");
   }
   await mkdir(join(s.path, REVIEW_INPUT_DIR));
   await writeFile(join(s.path, REVIEW_DIFF_FILE), pr.text, { flag: "wx" });
   if (since !== null) await writeFile(join(s.path, REVIEW_SINCE_FILE), since.text, { flag: "wx" });
-  return { diffCut: pr.cut, since: since !== null };
+  return { diffCut: pr.cut, since: since !== null, changedSince };
 }
 
 const SESSION_OWNER_FILE = "mission-control-session.json";

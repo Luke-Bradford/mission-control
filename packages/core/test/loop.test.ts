@@ -23,7 +23,9 @@ import {
   LOOP_TEXT_REVIEW_PR,
   LOOP_TEXT_WORKING,
   loopText,
+  MERGE_MAIN_TEXT,
   MERGE_STEP_WORDS,
+  mergeMainKey,
   mergeStepFailedText,
   NEW_LOOP,
   NO_CI_AFTER_MS,
@@ -130,6 +132,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
       inTurn: false,
       lastTurnEndedAt: null,
       resumedAt: null,
+      quietTurns: 0,
       rateLimitedUntil: null,
       openQuestion: false,
       holdsRun: true,
@@ -407,6 +410,38 @@ describe("state step", () => {
     }
   });
 
+  it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    expect(stopped.parked?.kind).toBe("stuck");
+    // the stored PR row later carries the pushed head
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, stopped));
+    expect(r.loop).toMatchObject({
+      phase: "ci",
+      parked: null,
+      pushStartedAt: NOW,
+      pushFor: SHA,
+      unparkedAt: NOW,
+    });
+    expect(events(r.actions)).toEqual([`PR #12 shows ${SHA.slice(0, 7)}; back to CI`]);
+  });
+
+  it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    for (const over of [
+      { pr: pr({ headSha: SHA2 }) },
+      { pr: pr({ headSha: null }) },
+      { pr: null },
+      { pr: pr({ state: "closed" as const }) },
+      { headCommit: SHA2 },
+    ] as Partial<LoopSnapshot>[]) {
+      expect(reconcile(inCi(over, stopped)).loop.phase).toBe("parked");
+    }
+  });
+
   it("9: a push or PR not there yet, within ten minutes, waits", () => {
     for (const over of [
       { pushed: null },
@@ -423,9 +458,13 @@ describe("state step", () => {
     expect(r.loop.phase).toBe("ci");
   });
 
-  it("10: a conflicting PR parks", () => {
-    const r = reconcile(inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) }));
-    expect(r.loop.parked).toEqual({
+  it("10: a conflicting PR sends the seat to merge main; told once, it parks", () => {
+    const s = inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("working");
+    expect(r.loop.parked).toBeNull();
+    expect(r.loop.pendingLine).toEqual({ key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT });
+    expect(reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.parked).toEqual({
       kind: "conflict",
       reason: "PR #12 conflicts with main",
       ended: false,
@@ -1078,7 +1117,10 @@ describe("sequences", () => {
   });
 
   it("a crash after a park repeats the card move and the note", () => {
-    const s = inCi({ pr: pr({ mergeable: "CONFLICTING" }) });
+    const s = inCi({
+      pr: pr({ mergeable: "CONFLICTING" }),
+      claimed: { [mergeMainKey("r1", SHA)]: NOW },
+    });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("parked");
     const next = again(s, r.loop);
@@ -1589,6 +1631,19 @@ describe("amendments from the reviews of Task 5", () => {
     expect(JSON.stringify(passed.actions)).toContain("CI passed on aaaaaaa");
   });
 
+  it("two turns in a row with no new commit make the next resume line push and report", () => {
+    const base = snap({}, { cardFor: "working:0" });
+    const resumed = (quietTurns: number) =>
+      reconcile({ ...base, seat: seat(base, { resumedAt: 6000, quietTurns }) }).actions.flatMap(
+        (x) => (x.kind === "send" ? [x.text] : []),
+      );
+    const [ordinary] = resumed(1);
+    expect(ordinary).toContain("Carry on with");
+    const [push] = resumed(2);
+    expect(push).toContain("Push what you have and report");
+    expect(push).not.toContain("Carry on with");
+  });
+
   it("E5: a restart while rate-limited sends one Carry on, whichever line goes first", () => {
     const base = snap({}, { cardFor: "working:0" });
     const limited = seat(base, { state: "parked", resumedAt: 6000, rateLimitedUntil: null });
@@ -1857,6 +1912,22 @@ describe("review decisions", () => {
       seat: seat(sent, { state: "idle" as const, lastTurnEndedAt: NOW - 1000 }),
     };
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
+  });
+
+  it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");
+    expect(send).toMatchObject({
+      kind: "send",
+      text: expect.stringContaining(`a.ts:3 — ${finding.summary}`),
+    });
+    expect((send as { text: string }).text).toContain(`Suggested fix: ${finding.fix}`);
+  });
+
+  it("a blocking review with no stored finding text wakes the author with nothing", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const r = reconcile(inReview(withReview(rows, [])));
+    expect(kinds(r.actions, "send")).toEqual([]);
   });
 
   it("sends an answered finding back to RETRO on the same head", () => {
@@ -2228,14 +2299,14 @@ describe("set aside", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
-  it("a park wakes it", () => {
+  it("a park on the seat's own work wakes it", () => {
     const r = reconcile(
       off(
         {},
         {
           ...asideOf(),
           phase: "parked",
-          parked: { kind: "review-failed", reason: "x", ended: false },
+          parked: { kind: "ci", reason: "x", ended: false },
         },
       ),
     );
@@ -2243,14 +2314,51 @@ describe("set aside", () => {
     expect(kindsOf(r.actions)).toContain("wake");
   });
 
-  it("the third blocking review parks and wakes it", () => {
+  it("the third blocking review parks and the run stays aside", () => {
     const rows = facts(
       [fact({ id: 1, blocking: 1 }), fact({ id: 2, blocking: 1 }), fact({ id: 3, blocking: 1 })],
       [finding],
     );
     const r = reconcile(off({ review: rows, claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 } }));
     expect(r.loop.phase).toBe("parked");
+    expect(r.loop.parked?.kind).toBe("review");
+    expect(r.loop.aside?.wake).toBe(false);
+    expect(kindsOf(r.actions)).not.toContain("wake");
+  });
+
+  it.each(["review", "review-ruling", "ruling", "review-failed"])(
+    "a run parked on a %s park waits on someone else: it is set aside, and an aside one is not woken",
+    (kind) => {
+      const parked: Partial<RunLoop> = {
+        phase: "parked",
+        parked: { kind, reason: "x", ended: false },
+      };
+      expect(kindsOf(reconcile(base({}, parked)).actions)).toContain("set-aside");
+      const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
+      expect(r.loop.aside?.wake).toBe(false);
+      expect(kindsOf(r.actions)).not.toContain("wake");
+    },
+  );
+
+  it("a run that ruled on a CI failure is set aside, though CI failed on its pushed sha", () => {
+    const ruling = {
+      evidence: { id: 2, at: 3000, ruling: true },
+      evidenceCount: 2,
+      review: facts([]),
+    };
+    const ruled = reconcile(
+      base(ruling, { phase: "working", ciFailedSha: SHA, reportedEvidenceId: 1 }),
+    );
+    expect(ruled.loop.parked?.kind).toBe("ruling");
+    const next = reconcile(base(ruling, ruled.loop));
+    expect(kindsOf(next.actions)).toContain("set-aside");
+  });
+
+  it("settling the wait brings the run back", () => {
+    // the park lifted: the run is working again, and an aside one is woken
+    const r = reconcile(off({}, { phase: "working", parked: null, ...asideOf(false) }));
     expect(r.loop.aside?.wake).toBe(true);
+    expect(kindsOf(r.actions)).toContain("wake");
   });
 
   it("clean review stays aside", () => {

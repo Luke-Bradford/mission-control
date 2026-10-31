@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   type CrewMode,
   type CrewRole,
+  type DoneWhenEntry,
   type LoopKind,
   MC_LINE_PREFIX,
   profileRouteText,
@@ -81,7 +82,7 @@ const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``
 /** When a seat calls FLIGHT (mc call_flight), as the briefs tell it. */
 const CALL_FLIGHT_WHEN =
   "Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes.";
-const WRITER_CLOSE = `Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make. ${CALL_FLIGHT_WHEN}`;
+const WRITER_CLOSE = `Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it and one doneWhen entry for each line of the ticket's ## Done when (met with its evidence, a test name, a file or a measurement; or not met with the reason). Mission Control refuses a report that leaves a line out. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make. ${CALL_FLIGHT_WHEN}`;
 const READONLY_CLOSE = `You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. ${CALL_FLIGHT_WHEN} Reply with your findings, starting with DONE.`;
 
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
@@ -197,6 +198,8 @@ export interface ReviewBriefInput {
   bodyLength: number;
   /** The author's report notes, oldest first. */
   notes: readonly string[];
+  /** The author's latest answer to each of the ticket's Done-when lines; empty when it gave none. */
+  doneWhen?: readonly DoneWhenEntry[];
   prevSha: string | null;
   /** The last review's id, which `report_findings` resolutions refer to when they name no id. */
   prevReviewId: number | null;
@@ -234,6 +237,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
   const sha7 = i.sha.slice(0, 7);
   const note = cutNoteText(i.body, i.bodyTruncated, i.bodyLength);
   const notes = newestNotes(i.notes);
+  const table = i.doneWhen ?? [];
   const lines = [
     `You are ${i.call}, the reviewer on ${i.repo}. Review PR #${i.prNumber} for ${i.repo}#${i.issue}: ${i.title}. Its head is ${i.sha} (review round ${i.round}).`,
     "",
@@ -257,6 +261,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
     `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings and reply from the last review" : ""}.`,
     "",
     "How to review:",
+    ...(table.length > 0
+      ? [
+          "0. Judge the author's Done-when table below before anything else. Your first findings are the lines marked met whose evidence does not hold, and the lines marked not met whose reason you do not accept; a line the PR does not deliver is Important.",
+        ]
+      : []),
     i.since && i.prevSha !== null
       ? `1. Read the ticket and ${REVIEW_SINCE_FILE} first${i.prevFindings.length > 0 ? ", and judge each finding and the developer's reply below" : ""}. Go back to ${REVIEW_DIFF_FILE} only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.`
       : `1. Read the ticket and ${REVIEW_DIFF_FILE}. Open a whole file, or the code that calls it, only where the diff leaves a doubt.`,
@@ -271,6 +280,17 @@ export function reviewBrief(i: ReviewBriefInput): string {
     ...(note === null ? [] : [note, ""]),
     i.body,
     "",
+    ...(table.length > 0
+      ? [
+          "## The author's Done-when table",
+          "",
+          ...table.map(
+            (d) =>
+              `${d.line}. "${d.text}" — ${d.status === "met" ? "met" : "not met"}: ${d.evidence}`,
+          ),
+          "",
+        ]
+      : []),
     "## The author's report notes, oldest first",
     "",
     notes.text === "" ? "(none)" : notes.text,

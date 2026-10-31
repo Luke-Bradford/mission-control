@@ -59,6 +59,7 @@ import {
   crewMcpConfig,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
+  doneWhenItems,
   eligibleToStart,
   errorText as errText,
   GUARD_CHECK_PATH,
@@ -67,6 +68,7 @@ import {
   HUD_STATE_LABEL,
   hasPlanSection,
   inferTicket,
+  isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
   MCP_PATH,
@@ -537,13 +539,13 @@ export interface Supervisor {
    */
   sessionAlive?(seatId: string): boolean | null;
   /**
-   * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
+   * Ends the run `ok`, `endedBy: "engine"` (`"superseded"` when the hub drops a review, so the missing report is no error), only when it is its seat's current run, closes its
    * process (with none attached, ends any keeper it left and revokes its token), removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
    * seat idle. An ended or unknown run is left alone, with no event. A run Stop is already ending
    * stays Stop's (endedBy operator, seat stopped, worktree kept). Does nothing on a server that
    * does not run crew (disabled, or without the crew lock).
    */
-  endRunByEngine(runId: string): Promise<void>;
+  endRunByEngine(runId: string, reason?: "superseded"): Promise<void>;
   /**
    * Takes the run off its seat while it is in review: the process is closed, the worktree kept and
    * the seat left idle with no run; the run is not ended and no event is emitted. Null (nothing
@@ -750,10 +752,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   };
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
-  const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
+  /** A message waiting at a resume leads: the hub's "carry on" must not be the seat's first word. */
+  const withInbox = (
+    seatId: string,
+    runId: string,
+    text: string,
+    inboxFirst = false,
+  ): InboxContext => {
     const inbox = deps.inbox?.(seatId, runId) ?? { text: "", messageIds: [] };
+    const joined = inboxFirst ? `${inbox.text}\n\n${text}` : `${text}\n\n${inbox.text}`;
     return {
-      text: inbox.text === "" ? text : text === "" ? inbox.text : `${text}\n\n${inbox.text}`,
+      text: inbox.text === "" ? text : text === "" ? inbox.text : joined,
       messageIds: inbox.messageIds,
     };
   };
@@ -3165,6 +3174,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      // the lines report_evidence will hold the seat to, as the ticket words them now
+      if (def.loop === "build" && !readOnly)
+        store.setRunDoneWhen(runId, doneWhenItems(ticket.body));
       if ((checkout.leftoverChanges?.length ?? 0) > 0) {
         store.addLoopEvent(
           `${runId}:leftover-changes`,
@@ -3618,6 +3630,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
       const prevReply =
@@ -3637,6 +3650,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         notes: evidence.map((e) => e.note),
+        doneWhen: evidence.at(-1)?.doneWhen ?? [],
         prevSha: prev?.sha ?? null,
         prevReviewId: prev?.id ?? null,
         prevFindings: prev
@@ -3796,7 +3810,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     await dropScratch(info, run.id, run.seq, worktree);
   }
 
-  async function endRunByEngine(runId: string): Promise<void> {
+  async function endRunByEngine(runId: string, reason?: "superseded"): Promise<void> {
     if (!mayAct()) return;
     const moving = transfers.get(store.run(runId)?.agentId ?? "");
     if (moving) await moving;
@@ -3811,7 +3825,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // a run set aside in review: no process, no seat; its worktree is all it holds
       const aside = run.loop?.aside;
       if (aside && live.get(seatId)?.run.id !== runId) {
-        await endAside(run, info, aside.worktree, "engine");
+        await endAside(run, info, aside.worktree, reason ?? "engine");
       }
       return;
     }
@@ -3825,7 +3839,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // Recorded first, so nothing after it can end the run twice.
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
-    store.setRunEnded(runId, at, "ok", "engine");
+    store.setRunEnded(runId, at, "ok", reason ?? "engine");
     removeRunFiles(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
@@ -4101,7 +4115,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
       try {
-        const inbox = withInbox(seatId, runId, text);
+        const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
         writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {

@@ -47,6 +47,7 @@ import {
   DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
+  type DoneWhenEntry,
   type Escalation,
   estimateTokens,
   type FindingResolution,
@@ -259,6 +260,10 @@ CREATE TABLE IF NOT EXISTS run_evidence (
   tests TEXT NOT NULL DEFAULT '[]', tests_added TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS run_evidence_run ON run_evidence(run_id);
+-- The ticket's Done-when lines as they stood when a run started; a report must answer each one.
+CREATE TABLE IF NOT EXISTS run_done_when (
+  run_id TEXT NOT NULL, pos INTEGER NOT NULL, line TEXT NOT NULL, PRIMARY KEY (run_id, pos)
+);
 -- One review of a run's pushed sha (7b-1); attempt counts the tries of one sha within a loop epoch.
 CREATE TABLE IF NOT EXISTS reviews (
   id INTEGER PRIMARY KEY, author_run_id TEXT NOT NULL, repo_id TEXT NOT NULL, seat_id TEXT NOT NULL,
@@ -871,7 +876,19 @@ export interface Evidence {
   at: number;
   tests: ReportedTest[];
   testsAdded: { file: string; failedOnBase: boolean }[];
+  /** The author's answer to each of the ticket's Done-when lines; empty for an older report. */
+  doneWhen: DoneWhenEntry[];
 }
+
+const evidenceOf = (r: Row): Evidence => ({
+  id: r.id as number,
+  runId: r.run_id as string,
+  note: r.note as string,
+  at: r.at as number,
+  tests: JSON.parse(r.tests as string) as ReportedTest[],
+  testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
+  doneWhen: JSON.parse(r.done_when as string) as DoneWhenEntry[],
+});
 
 /** One issue in a seat's queue; `takenAt` is set while the seat holds it. */
 export interface QueueRow {
@@ -1111,6 +1128,7 @@ const seatRow = (r: Row): SeatSessionRow => ({
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
   lastTurnStartedAt: (r.last_turn_started_at as number | null | undefined) ?? null,
+  quietTurns: (r.quiet_turns as number | null | undefined) ?? 0,
   ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
 });
 
@@ -1430,6 +1448,8 @@ export class Store {
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
+    // Turns in a row that ended with no new commit; the resume line reads it.
+    this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
@@ -1452,6 +1472,9 @@ export class Store {
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("reviews", "changed_since", "TEXT");
+    this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("review_findings", "category", "TEXT");
     this.addColumn("review_findings", "resolution", "TEXT");
     this.addColumn("review_findings", "resolved_review_id", "INTEGER");
@@ -1967,6 +1990,33 @@ export class Store {
       )
       .all() as Row[];
     return new Set(rows.map((r) => r.ticket as string));
+  }
+
+  /**
+   * True while crew work stands at the machine guard or has just passed it: a queued ticket, a
+   * queued review, or a ticket run (a review's included) that has not ended and is not set aside.
+   */
+  hasPendingStart(): boolean {
+    const found = (sql: string, ...params: string[]): boolean =>
+      this.db.prepare(sql).get(...params) !== undefined;
+    return (
+      found("SELECT 1 FROM queues WHERE taken_at IS NULL LIMIT 1") ||
+      found("SELECT 1 FROM reviews WHERE state = ? LIMIT 1", "queued") ||
+      found(
+        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+      )
+    );
+  }
+
+  /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  hasActiveRun(): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+        )
+        .get() !== undefined
+    );
   }
 
   /**
@@ -3193,6 +3243,28 @@ export class Store {
         since,
         until,
       ) as unknown as AuditView["reworkRounds"],
+      reviewRounds: {
+        prs: rows(
+          `SELECT rounds, COUNT(*) AS count FROM (
+             SELECT MAX(round) AS rounds FROM reviews
+             WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
+             GROUP BY author_run_id, pr_number
+           ) GROUP BY rounds ORDER BY rounds`,
+          since,
+          until,
+        ) as unknown as { rounds: number; count: number }[],
+        late: rows(
+          `SELECT v.seat_id AS seatId, r.model AS model, COUNT(*) AS findings, SUM(f.late) AS late
+           FROM review_findings f JOIN reviews v ON v.id = f.review_id
+           LEFT JOIN runs r ON r.id = v.run_id
+           WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+             AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
+           GROUP BY v.seat_id, r.model ORDER BY late DESC, v.seat_id, r.model`,
+          since,
+          until,
+          ...BLOCKING_SEVERITIES,
+        ) as unknown as { seatId: string; model: string | null; findings: number; late: number }[],
+      },
       refusalsByRule: rows(
         `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
         since,
@@ -4167,11 +4239,12 @@ export class Store {
     details: {
       tests?: ReportedTest[];
       testsAdded?: { file: string; failedOnBase: boolean }[];
+      doneWhen?: DoneWhenEntry[];
     } = {},
   ): number {
     const r = this.db
       .prepare(
-        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added, done_when) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(
         runId,
@@ -4179,6 +4252,7 @@ export class Store {
         at,
         JSON.stringify(details.tests ?? []),
         JSON.stringify(details.testsAdded ?? []),
+        JSON.stringify(details.doneWhen ?? []),
       );
     this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
@@ -4188,16 +4262,29 @@ export class Store {
     const r = this.db
       .prepare("SELECT * FROM run_evidence WHERE run_id = ? ORDER BY id DESC LIMIT 1")
       .get(runId) as Row | undefined;
-    return r
-      ? {
-          id: r.id as number,
-          runId: r.run_id as string,
-          note: r.note as string,
-          at: r.at as number,
-          tests: JSON.parse(r.tests as string) as ReportedTest[],
-          testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-        }
-      : null;
+    return r ? evidenceOf(r) : null;
+  }
+
+  /** Records the ticket's Done-when lines for a run, replacing any recorded before (none: no rule). */
+  setRunDoneWhen(runId: string, lines: readonly string[]): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM run_done_when WHERE run_id = ?").run(runId);
+      const insert = this.db.prepare(
+        "INSERT INTO run_done_when (run_id, pos, line) VALUES (?, ?, ?)",
+      );
+      lines.forEach((line, pos) => {
+        insert.run(runId, pos, line);
+      });
+    }, true);
+  }
+
+  /** The run's recorded Done-when lines in ticket order; empty when none were recorded. */
+  runDoneWhen(runId: string): string[] {
+    return (
+      this.db
+        .prepare("SELECT line FROM run_done_when WHERE run_id = ? ORDER BY pos")
+        .all(runId) as Row[]
+    ).map((r) => r.line as string);
   }
 
   /** Every note the run's seat reported, oldest first. */
@@ -4205,14 +4292,7 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM run_evidence WHERE run_id = ? ORDER BY id")
       .all(runId) as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      runId: r.run_id as string,
-      note: r.note as string,
-      at: r.at as number,
-      tests: JSON.parse(r.tests as string) as ReportedTest[],
-      testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-    }));
+    return rows.map(evidenceOf);
   }
 
   /** Queues a review; its id, or null when the (run, sha, epoch, attempt) key already exists. */
@@ -4353,13 +4433,30 @@ export class Store {
           runId,
         );
       if (res.changes !== 1) return;
-      const author = (
-        this.db.prepare("SELECT author_run_id FROM reviews WHERE id = ?").get(reviewId) as Row
-      ).author_run_id as string;
+      const row = this.db
+        .prepare("SELECT author_run_id, round, changed_since FROM reviews WHERE id = ?")
+        .get(reviewId) as Row;
+      const author = row.author_run_id as string;
+      // late: a later round's finding on a file the author did not touch since the last review
+      const changed =
+        (row.round as number) >= 2 && row.changed_since !== null
+          ? new Set(JSON.parse(row.changed_since as string) as string[])
+          : null;
+      // a finding the reviewer holds from the last round was raised then, so it is carried, not late
+      const heldFile = this.db.prepare(
+        "SELECT file FROM review_findings WHERE review_id = ? AND pos = ?",
+      );
+      const held = new Set<string>();
+      for (const x of r.resolutions ?? []) {
+        if (x.outcome !== "held") continue;
+        const file = (heldFile.get(x.findingRef.reviewId, x.findingRef.pos) as Row | undefined)
+          ?.file;
+        if (typeof file === "string") held.add(file);
+      }
       const insert = this.db.prepare(
         `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
-           scenario, fix, category, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           scenario, fix, category, state, late)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       r.findings.forEach((f, pos) => {
         insert.run(
@@ -4374,6 +4471,7 @@ export class Store {
           f.fix,
           f.category ?? null,
           isBlocking(f) ? "open" : "logged",
+          changed !== null && !changed.has(f.file) && !held.has(f.file) ? 1 : 0,
         );
       });
       const insertCheck = this.db.prepare(
@@ -4440,6 +4538,13 @@ export class Store {
     return recorded;
   }
 
+  /** The files the author changed since the previous reviewed sha, for tagging late findings. */
+  setReviewChangedSince(reviewId: number, files: readonly string[]): void {
+    this.db
+      .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
+      .run(JSON.stringify(files), reviewId);
+  }
+
   findingsOf(reviewId: number): StoredFinding[] {
     const rows = this.db
       .prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY pos")
@@ -4454,6 +4559,7 @@ export class Store {
       fix: r.fix as string,
       category: (r.category as StoredFinding["category"]) ?? undefined,
       state: r.state as StoredFinding["state"],
+      late: r.late === 1,
       resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
       resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
     }));
@@ -5741,7 +5847,8 @@ export class Store {
            reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
            error_since = CASE WHEN excluded.state != 'error' THEN NULL
              WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END`,
+             ELSE excluded.updated_at END,
+           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
       )
       .run(
         row.seatId,
@@ -5756,11 +5863,21 @@ export class Store {
       );
   }
 
-  /** Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. */
+  /**
+   * Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. A turn
+   * that made no commit since the one before it adds to the seat's quiet turns; a commit clears them.
+   */
   setSeatTurnEnded(seatId: string, at: number | null): void {
+    const row = this.db
+      .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
+      .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
+    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
-      .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+      .prepare(
+        "UPDATE seat_sessions SET last_turn_ended_at = ?, quiet_turns = CASE WHEN ? THEN 0 ELSE quiet_turns + 1 END WHERE seat_id = ?",
+      )
+      .run(at, at === null || committed ? 1 : 0, seatId);
   }
 
   /** Records that the seat started a turn at `at`. */

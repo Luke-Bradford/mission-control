@@ -111,7 +111,7 @@ export interface Run {
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
-  endedBy?: "operator" | "engine" | "exit" | null;
+  endedBy?: "operator" | "engine" | "superseded" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
   noReport?: NoReport | null;
 }
@@ -1274,6 +1274,8 @@ export interface SeatSessionRow {
   lastTurnEndedAt?: number | null;
   /** When the seat's current (or most recent) turn started. */
   lastTurnStartedAt?: number | null;
+  /** Turns in a row that ended with no new commit. Absent on a row not read. */
+  quietTurns?: number;
 }
 
 /** A crew session's context window, from its `get_context_usage` control request. */

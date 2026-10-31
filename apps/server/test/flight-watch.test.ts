@@ -17,6 +17,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_NO_WORK_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_LOOPS_SETTING,
@@ -49,6 +50,7 @@ import {
   RULING_PARK,
   type Run,
   type SeatSessionRow,
+  STUCK_PARK,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2237,7 +2239,7 @@ describe("the FLIGHT watcher", () => {
     const idle = () =>
       listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
 
-    it("sends one handover wake at 151K, then rotates once that turn ends", async () => {
+    it("sends one handover wake just past the limit, then rotates once that turn ends", async () => {
       liveCrew();
       watch.start();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
@@ -2318,11 +2320,11 @@ describe("the FLIGHT watcher", () => {
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
         text: null,
       });
-      context(151_000);
+      context(301_000);
       expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
-        tokens: 151_000,
+        tokens: 301_000,
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-        text: "context 151K · fresh session at 150K",
+        text: "context 301K · fresh session at 300K",
       });
     });
   });
@@ -2608,6 +2610,12 @@ describe("wakeSummary", () => {
       ).toBe(true);
     });
 
+    it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {
+      const stuck = state({ seats: [s({ parked: { kind: STUCK_PARK, reason: "x" } })] });
+      expect(pending(stuck)).toBe(false);
+      expect(wakeFacts(stuck)).toBe(wakeFacts(state({ seats: [s({})] })));
+    });
+
     it("is true for a stopped build seat even with no ticket, and the summary counts it", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
@@ -2786,6 +2794,17 @@ describe("ops signals", () => {
       });
       store.setSeatSession(row("guido-1", "r-park", "parked"));
       store.addLoopEvent("park-old", "r-park", "parked: push stuck", T0 - 16 * MIN);
+    },
+    push_unseen() {
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.upsertRun(run("r-unseen", "guido-1", { ticket: "mc#176" }));
+      store.setRunLoop("r-unseen", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+      });
+      store.setSeatSession(row("guido-1", "r-unseen", "parked"));
+      store.addLoopEvent("park-unseen", "r-unseen", "parked: PR has no head", T0 - 31 * MIN);
     },
     merge_stalled() {
       store.upsertRun(run("r-ready", "guido-1", { ticket: "mc#176" }));
@@ -3207,9 +3226,9 @@ describe("ops signals", () => {
     store.replaceBoard("mc", [
       triageCard({ status: "Ready", blockedBy: [{ ref: "mc#1", closed: false }] }),
     ]);
-    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    expect(signalState().signals.filter((s) => s.kind === "idle_seat" && !s.told)).toEqual([]);
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
-    expect(signalState().signals[0]?.kind).toBe("idle_seat");
+    expect(signalState().signals.map((s) => s.kind)).toContain("idle_seat");
   });
 
   it("does not count a previous run's last turn as time idle after the seat is freed", () => {
@@ -3784,6 +3803,64 @@ describe("ops review regressions", () => {
     },
   );
 
+  it.each([
+    ["superseded", false],
+    ["engine", true],
+    ["exit", true],
+  ] as const)(
+    "a running review's run ended by %s without a report: signal is %s",
+    (endedBy, raised) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      }) as number;
+      store.setReviewState(reviewId, ["queued"], "running", { at: T0, runId: "review-run" });
+      const r = run("review-run", "retro-1", { reviewId, endedAt: T0, status: "ok", endedBy });
+      store.upsertRun(r);
+      store.setRunEnded(r.id, T0, "ok", endedBy);
+      recordNoReport(store, r, "review", { code: 0, signal: null, lastStderr: "" }, null, T0);
+      const signals = signalState().signals;
+      if (raised)
+        expect(signals).toContainEqual(expect.objectContaining({ key: "report:review-run" }));
+      else expect(signals).toEqual([]);
+    },
+  );
+
+  it("raises a hub_error for a blocking review that holds no finding text", () => {
+    live("guido-1", "r-guido");
+    const reviewId = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "head1234",
+      epoch: 1,
+      attempt: 1,
+      round: 2,
+      at: T0,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "reported", { at: T0 });
+    expect(signalState().signals).toEqual([]);
+    const raw = store as unknown as {
+      db: { prepare(sql: string): { run(...a: number[]): unknown } };
+    };
+    raw.db.prepare("UPDATE reviews SET blocking = 1 WHERE id = ?").run(reviewId);
+    expect(signalState().signals).toContainEqual(
+      expect.objectContaining({
+        kind: "hub_error",
+        key: `findings:r-guido:${reviewId}`,
+        evidence: expect.stringContaining("no finding text is stored"),
+      }),
+    );
+  });
+
   it("keeps watch errors stable across updates and restart, and keys a new error after recovery", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
@@ -4351,6 +4428,58 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).toContain("idle_seat");
   });
 
+  describe("an idle seat with nothing startable in Ready", () => {
+    // a laned hub: the lane:work card is another lane's, so nothing is startable here
+    const laned = {
+      ...config,
+      crew: { ...(config.crew as NonNullable<typeof config.crew>), lane: "home" as const },
+    };
+    const idleNoWork = () =>
+      flightState({ config: laned, store, busy: [], now: nowMs }).signals.filter((s) =>
+        s.key.startsWith("inco-1:"),
+      );
+    beforeEach(() => {
+      // Ready holds only a ticket of another lane: the seat's queue stays empty
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: T0 - FLIGHT_IDLE_NO_WORK_MS });
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:work"] })]);
+      store.replaceQueue("inco-1", []);
+    });
+
+    it("wakes FLIGHT once, naming the seat and its area", () => {
+      const found = idleNoWork().filter((s) => s.kind === "idle_no_work");
+      expect(found).toHaveLength(1);
+      expect(found[0]?.evidence).toContain("inco-1");
+      expect(found[0]?.evidence).toContain("apps/web/**");
+    });
+
+    it("is not raised when Ready holds a startable ticket of the hub's lane (draft repo, no queue)", () => {
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:home"] })]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised before 5 minutes idle", () => {
+      nowMs -= MIN;
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised while the seat has startable work queued", () => {
+      store.replaceQueue("inco-1", [{ repoId: "mc", issue: 176 }]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("raises nothing new in the same hour, then again after it", () => {
+      const first = flightState({ config: laned, store, busy: [], now: nowMs });
+      markFlightSignalsShown(store, first, nowMs);
+      // the seat starts and finishes work: a new idle episode within the hour
+      nowMs += 20 * MIN;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toEqual([]);
+      nowMs += FLIGHT_HOUR_MS;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toHaveLength(1);
+    });
+  });
+
   it("a park counts after 15 minutes, not before", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
@@ -4364,6 +4493,23 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("old_park");
     nowMs += 2 * MIN;
     expect(kinds()).toContain("old_park");
+  });
+
+  it("a push the PR does not show is the engine's for 30 minutes, then a wake reason", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-park", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-park", "parked"));
+    store.addLoopEvent("p", "r-park", "parked: PR has no head", T0 - 29 * MIN);
+    expect(kinds()).not.toContain("old_park");
+    expect(kinds()).not.toContain("push_unseen");
+    nowMs += 2 * MIN;
+    expect(kinds().filter((k) => k === "push_unseen")).toHaveLength(1);
+    expect(kinds()).not.toContain("old_park");
   });
 
   it("a controller request counts after 15 minutes, and an answer from CAPCOM ends it", () => {

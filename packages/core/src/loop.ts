@@ -81,7 +81,7 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
 export function evidenceCanUnpark(
@@ -126,6 +126,8 @@ export const REFUSAL_TRIES = 3;
 export const CI_PENDING_MAX_MS = 30 * 60_000;
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
+/** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
+export const STUCK_PARK = "stuck";
 
 /** The engine reconciles every looped run this often. */
 export const ENGINE_TICK_MS = 60_000;
@@ -383,6 +385,10 @@ export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
 export const conflictText = (files: readonly string[]): string =>
   `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** The line a PR that conflicts with main sends its seat, keyed so it goes once per pushed sha. */
+export const mergeMainKey = (runId: string, sha: string): string => `merge-main:${runId}:${sha}`;
+export const MERGE_MAIN_TEXT =
+  "Your PR conflicts with main. Call mc sync_main to merge main into your branch, resolve any conflicts it names, then call mc commit and mc report_evidence.";
 /** A Comms pointer to a conflict list delivered directly to the author seat. */
 export const conflictCommsText = (files: readonly string[]): string =>
   `Merging main conflicted in ${files.length} files; the list was sent to the seat.`;
@@ -397,6 +403,17 @@ export const mainConflictText = (mainSha: string, n: number): string =>
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
   "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. There is no turn or time limit: work until it is done or truly blocked; if blocked, name the blocker. When the work is committed, call mc report_evidence.";
+/** What a resume says to a seat whose last QUIET_TURNS_BEFORE_PUSH turns each ended with no new commit. */
+export const RESUME_PUSH_TEXT =
+  "Push what you have and report: call mc report_evidence for {ref} now. Your last turns ended with no new commit. If you are blocked, name the blocker in the report.";
+export const QUIET_TURNS_BEFORE_PUSH = 2;
+/** The lines that resume a seat (a restart, a reset rate limit): a waiting message goes ahead of them. */
+export const isResumeLineKey = (key: string): boolean =>
+  key.startsWith("resume:") || key.startsWith("ratelimit:") || key.startsWith("rv-resume:");
+const resumeText = (seat: { quietTurns: number }, ref: string): string =>
+  fillLoopText(seat.quietTurns >= QUIET_TURNS_BEFORE_PUSH ? RESUME_PUSH_TEXT : RESUME_TEXT, {
+    ref,
+  });
 export const NUDGE_TEXT =
   "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
 export const NUDGE_TRIES = 3;
@@ -582,6 +599,8 @@ export interface LoopSnapshot {
     inTurn: boolean;
     lastTurnEndedAt: number | null;
     resumedAt: number | null;
+    /** Turns in a row that ended with no new commit. */
+    quietTurns: number;
     rateLimitedUntil: number | null;
     openQuestion: boolean;
     /** The seat row holds this unended run. */
@@ -889,6 +908,32 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [],
     };
   }
+  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
+  // a conflict stop lifts the same way once the PR no longer conflicts
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === STUCK_PARK ||
+      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "ci",
+        parked: null,
+        pushStartedAt: now,
+        pushFor: headCommit,
+        unparkedAt: now,
+        transient: 0,
+        lastRefusal: null,
+      },
+      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
@@ -1004,7 +1049,7 @@ function stateStep(s: LoopSnapshot): Step {
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(
           loop,
-          "stuck",
+          STUCK_PARK,
           `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
         );
       }
@@ -1018,7 +1063,18 @@ function stateStep(s: LoopSnapshot): Step {
       if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
         return unchanged(loop);
       }
-      return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
+      // already on the seat, is the operator's
+      const key = mergeMainKey(s.runId, pushed.sha);
+      if (loop.mainMerge || key in s.claimed) {
+        return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      }
+      return {
+        loop: { ...loop, phase: "working", pendingLine: { key, text: MERGE_MAIN_TEXT } },
+        actions: [
+          { kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` },
+        ],
+      };
     }
     if (pr.ci === "passing") {
       const flaked = loop.rerun?.sha === pushed.sha;
@@ -1234,6 +1290,8 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.P !== null &&
     rv.cur !== null &&
     rv.blocked &&
+    // a blocking count with no stored text is never sent: the author would have nothing to fix
+    rv.R.findings.length > 0 &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
     fixesSent(s.claimed, s.runId, loop.epoch) + 1 < reviewRoundLimit(s, loop, rv.P)
   );
@@ -1244,9 +1302,17 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
-/** A park that waits on someone's call, not on the seat: the seat may be free while it stands. */
+/**
+ * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
+ * free while it stands. The run rejoins its seat's queue when the park is lifted.
+ */
 const isDecisionPark = (kind: string | undefined): boolean =>
-  kind === CONTROLLER_CHECK_PARK || kind === MERGE_HOLD_PARK;
+  kind === CONTROLLER_CHECK_PARK ||
+  kind === MERGE_HOLD_PARK ||
+  kind === RULING_PARK ||
+  kind === "review" ||
+  kind === "review-ruling" ||
+  kind === "review-failed";
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
@@ -1265,7 +1331,8 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     !seat.openQuestion &&
     pushed !== null &&
     s.headCommit === pushed.sha &&
-    loop.ciFailedSha !== pushed.sha &&
+    // a ruling on the failure waits on FLIGHT or the operator, not on a fix
+    (loop.ciFailedSha !== pushed.sha || loop.parked?.kind === RULING_PARK) &&
     pr?.state === "open" &&
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
@@ -1397,7 +1464,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
       ([k, at]) => k.startsWith(`ratelimit:${runId}:`) && at >= (seat.resumedAt ?? 0),
     );
     if (free(key) && !told) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 
@@ -1423,7 +1490,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
     const waiting =
       seat.rateLimitedUntil === null && lastTry !== null && s.now - lastTry < RATE_LIMIT_RETRY_MS;
     if (free(key) && !waiting) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 

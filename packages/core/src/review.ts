@@ -110,6 +110,11 @@ export interface ReviewFinding {
 export interface StoredFinding extends ReviewFinding {
   pos: number;
   state: "open" | "logged";
+  /**
+   * Set by the hub: a finding in round 2 or later on a file unchanged since the previous review,
+   * one an earlier round could have raised.
+   */
+  late?: boolean;
   /** How it ended: set when a later round reports, by RETRO's resolutions or by the engine. */
   resolution?: FindingResolutionOutcome;
   /** The later review that resolved it. */

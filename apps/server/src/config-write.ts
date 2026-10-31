@@ -358,6 +358,7 @@ async function onboard(
           requiredChecks: [],
           commands: defaultSeatCommands(),
           protectedFiles: [],
+          keepBranches: [],
           autonomy: "draft" as const,
           flightPowers: "standard" as const,
         }
@@ -659,6 +660,7 @@ async function add(
     requiredChecks: [],
     commands: defaultSeatCommands(),
     protectedFiles: [],
+    keepBranches: [],
     autonomy: "draft",
     flightPowers: "standard",
   };
