@@ -25,6 +25,7 @@ import {
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
+  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -441,6 +442,7 @@ describe("startWatch", () => {
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--append-system-prompt-file")),
     ).toEqual([
       ...FLIGHT_FULL_BUILTINS,
+      ...READONLY_TOOLS.filter((t) => t.startsWith("mcp__")),
       "mcp__mc__log_decision",
       "mcp__mc__wait_on",
       "mcp__mc__read_ticket",
