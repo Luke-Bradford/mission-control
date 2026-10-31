@@ -935,6 +935,23 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (loop.phase === "parked") return unchanged(loop);
+  // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
+  // in review or working with it still recorded: a ruling park resumes straight into review, and
+  // the merge step and the ruling park both read ciFailedSha, so a stale one wedged the run.
+  if (
+    (loop.phase === "review" || loop.phase === "working") &&
+    loop.ciFailedSha !== null &&
+    pushed?.sha === loop.ciFailedSha &&
+    headCommit === pushed.sha &&
+    pr?.state === "open" &&
+    pr.headSha === pushed.sha &&
+    pr.ci === "passing"
+  ) {
+    return {
+      loop: { ...loop, ciFailedSha: null },
+      actions: [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${sha7(pushed.sha)}` }],
+    };
+  }
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
   }
@@ -1085,9 +1102,8 @@ function stateStep(s: LoopSnapshot): Step {
           ...loop,
           phase: "review",
           ciFails: 0,
-          // a sha that failed earlier and now passes is no longer the failed one: the merge step
-          // and the ruling park both read ciFailedSha, and a stale one wedged the run in review
-          ciFailedSha: loop.ciFailedSha === pushed.sha ? null : loop.ciFailedSha,
+          // a pass makes any recorded failure stale: every reader compares it with the current head
+          ciFailedSha: null,
           rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
         },
         actions,
