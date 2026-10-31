@@ -37,6 +37,7 @@ import {
   type InstallRunner,
   installAfterSync,
   installEnv,
+  MC_FALLBACK_EMAIL,
   MC_MERGE_AUTHOR,
   prepareCheckout,
   prepareDetachedCheckout,
@@ -593,8 +594,9 @@ describe("prepareCheckout", () => {
       before: tip,
     });
     expect(git(r.path, "log", "-1", "--format=%P")).toBe(`${tip} ${main}`);
-    expect(git(r.path, "log", "-1", "--format=%an|%cn")).toBe(
-      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}`,
+    // the fixture clone has no user.email: the merge carries the hub's fallback on every platform
+    expect(git(r.path, "log", "-1", "--format=%an|%cn|%ae|%ce")).toBe(
+      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|${MC_FALLBACK_EMAIL}|${MC_FALLBACK_EMAIL}`,
     );
     expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
   });
