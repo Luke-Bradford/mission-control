@@ -707,7 +707,9 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Git:** no git writes; a seat commits with `mc commit` and brings main in with `mc sync_main`,
   and the engine pushes and opens the draft PR after a report. Its sandbox cannot write the
   clone's git dirs either.
-- **GitHub:** no `gh` at all; GitHub goes through Mission Control.
+- **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
+  PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
+  minor-findings section is kept; refused for a PR that is not the run's).
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).

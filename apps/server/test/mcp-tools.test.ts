@@ -65,6 +65,8 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_NO_PR,
+  MC_PR_BODY_REFUSED,
   MC_PR_UNCLOSED,
   MC_PUSH_CHECKS,
   MC_PUSH_FAILED,
@@ -79,6 +81,7 @@ import {
   MC_TOOL_GRANTS,
   MC_TOOL_NAMES,
   MC_TOOLS,
+  MINOR_HEADING,
   NEW_LOOP,
   originMovedText,
   PROFILE_PAIR_TEXT,
@@ -91,7 +94,9 @@ import {
   planUnsafePathsText,
   planWrittenText,
   prNamedRefText,
+  prEditedText,
   prNotifyText,
+  prNotRunsText,
   prSecretText,
   pushChecksText,
   pushPrDoneText,
@@ -339,6 +344,7 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
+      [MC_TOOL_NAMES.prBody, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
       ["report_evidence", ["writer", "read-only"]],
@@ -353,6 +359,7 @@ describe("the mc tools", () => {
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.prBody,
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
       MC_TOOLS.reportEvidence,
@@ -3477,6 +3484,57 @@ describe("push and draft_pr", () => {
       expect(await openDraftPr(pushDeps(), RUN, { title: "t", body: "b" })).toEqual({
         text: PR_URL,
       });
+    });
+  });
+
+  describe("pr_body", () => {
+    const MINORS = `${MINOR_HEADING}\n\nRETRO logged these.\n\n- \`a.ts:3\` — first\n`;
+    const view = (over: Record<string, unknown> = {}) => ({
+      "pr view": {
+        stdout: JSON.stringify({
+          headRefName: BRANCH,
+          state: "OPEN",
+          body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nCloses #42.\n`,
+          ...over,
+        }),
+      },
+    });
+    const edit = (body: string, t: McTool[] = ts()) => tool("pr_body", t).call(CTX, { body });
+    const edits = () => ghCalls().filter((c) => c.args[1] === "edit");
+
+    it("replaces the run's PR body and keeps the minor-findings section", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      expect(await edit("New text.")).toEqual({ text: prEditedText(12) });
+      expect(edits()).toHaveLength(1);
+      const body = edits()[0]?.body ?? "";
+      expect(body).toContain("New text.");
+      expect(body).not.toContain("old");
+      expect(body).toContain(MINORS.trimEnd());
+      expect(body).toContain("Closes #42.");
+      expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("refuses a PR that is not the run's, and edits nothing", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      for (const over of [{ headRefName: "other" }, { state: "CLOSED" }]) {
+        ghState(view(over));
+        expect(await edit("New text.")).toEqual({ text: prNotRunsText(12), isError: true });
+      }
+      expect(edits()).toEqual([]);
+    });
+
+    it("refuses when the run has no PR yet", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: null });
+      expect(await edit("New text.")).toEqual({ text: MC_PR_BODY_NO_PR, isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a body that mentions someone", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      expect(await edit("ping @octocat")).toEqual({ text: MC_PR_BODY_REFUSED, isError: true });
+      expect(edits()).toEqual([]);
     });
   });
 

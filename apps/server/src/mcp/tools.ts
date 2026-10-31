@@ -94,6 +94,8 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_MAX,
+  MC_PR_BODY_NO_PR,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
   MC_PR_FAILED,
@@ -115,6 +117,7 @@ import {
   MC_SYNC_OFF,
   MC_TEXT_MAX,
   MC_TOOL_NAMES,
+  MINOR_HEADING,
   mcToolHitText,
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
@@ -289,6 +292,7 @@ const CommitArgs = z.strictObject({
   message: text(MC_TEXT_MAX),
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
+const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const CallArgs = z.strictObject({
   reason: text(MC_TEXT_MAX),
@@ -1322,6 +1326,18 @@ export async function editRunPrBody(
   }
 }
 
+/**
+ * The engine's minor-findings section of a PR body (heading to the next heading, the closing line
+ * or the hub's line), or null when the body has none.
+ */
+function minorSection(body: string): string | null {
+  const at = body.indexOf(MINOR_HEADING);
+  if (at === -1) return null;
+  const rest = body.slice(at + MINOR_HEADING.length);
+  const end = rest.search(/^(?:#{1,2}\s|Closes #\d+\.|Opened by )/m);
+  return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
+}
+
 /** Another open writer run whose changes share paths with a commit. */
 export interface Clash {
   seatId: string;
@@ -1641,6 +1657,33 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (liveRun(ctx) === null) return ENDED;
     if (deps.syncMain === undefined) return { text: MC_SYNC_OFF, isError: true };
     return deps.syncMain(ctx.runId);
+  }
+
+  async function prBodyTool(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = PrBodyArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const place = writerPlace(deps, ctx.runId, MC_TOOL_NAMES.prBody);
+    if ("text" in place) return place;
+    const run = deps.store.run(ctx.runId);
+    if (run === null || run.endedAt !== null) return ENDED;
+    const prNumber = run.loop?.prNumber ?? null;
+    if (prNumber === null) return { text: MC_PR_BODY_NO_PR, isError: true };
+    // the engine's own section outlives the seat's rewrite
+    let section: string | null = null;
+    const viewed = await deps.gh(
+      ["pr", "view", String(prNumber), `--repo=${repoOf(deps, run)}`, "--json=body"],
+      { cwd: crewDir(deps.dbPath) },
+    );
+    if (viewed.code === 0) {
+      try {
+        const current = (JSON.parse(viewed.stdout) as { body?: unknown }).body;
+        section = typeof current === "string" ? minorSection(current) : null;
+      } catch {
+        section = null;
+      }
+    }
+    const body = section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
+    return editRunPrBody(deps, ctx.runId, prNumber, body);
   }
 
   async function commit(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2631,6 +2674,26 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       modes: ["writer"],
       call: syncMain,
+    },
+    {
+      name: MC_TOOL_NAMES.prBody,
+      description:
+        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          body: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_PR_BODY_MAX,
+            description: "The new PR body, in Markdown.",
+          },
+        },
+        required: ["body"],
+        additionalProperties: false,
+      },
+      modes: ["writer"],
+      call: prBodyTool,
     },
     {
       name: MC_TOOL_NAMES.askFlight,
