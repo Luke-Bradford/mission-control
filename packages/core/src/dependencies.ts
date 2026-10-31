@@ -12,6 +12,8 @@ import type { BoardItem, PullRequestView } from "./types.ts";
 export interface DependencyWait {
   ref: string;
   text: string;
+  /** The hub never read this PR: it gates a start, but its ending is not a release. */
+  unread?: true;
 }
 
 /** What the body names: the shape the board card stores as `after`. */
@@ -119,7 +121,11 @@ export function ticketWaits(i: WaitInput): DependencyWait[] {
         : p.state === "open"
           ? prStageText(p)
           : `PR ${n} (closed without merging)`;
-    out.set(`PR ${n}`, { ref: `PR ${n}`, text });
+    out.set(`PR ${n}`, {
+      ref: `PR ${n}`,
+      text,
+      ...(p === undefined ? { unread: true as const } : {}),
+    });
   }
   // a PR of this ticket stacked on another open PR's branch
   for (const own of prs) {

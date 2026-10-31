@@ -42,7 +42,7 @@ export interface ReleasedWait {
 
 export interface WaitRecord {
   /** Each waiting ticket: its open waits (refs) and when the hub first saw it wait. */
-  waiting: Record<string, { open: string[]; since: number }>;
+  waiting: Record<string, { open: string[]; unread?: string[]; since: number }>;
   released: ReleasedWait[];
 }
 
@@ -86,13 +86,20 @@ export function observeWaits(
     const waits = waitsOf(card);
     if (waits.length === 0) continue;
     const ref = `${repoId}#${card.issueNumber}`;
-    waiting[ref] = { open: waits.map((w) => w.ref), since: record.waiting[ref]?.since ?? now };
+    const unread = waits.filter((w) => w.unread === true).map((w) => w.ref);
+    waiting[ref] = {
+      open: waits.map((w) => w.ref),
+      ...(unread.length > 0 ? { unread } : {}),
+      since: record.waiting[ref]?.since ?? now,
+    };
   }
   const released = record.released.filter((r) => now - r.at < WAIT_RELEASED_KEEP_MS);
   for (const [ref, entry] of Object.entries(record.waiting)) {
     if (waiting[ref] !== undefined) continue;
     // a ticket that closed or left the board did not get released
     if (!open.some((c) => `${repoId}#${c.issueNumber}` === ref)) continue;
+    // a wait the hub never read has no known end: reading the PR later is not a release
+    if (entry.open.every((r) => entry.unread?.includes(r))) continue;
     released.push({ ref, resolved: entry.open, at: now });
   }
   const next = { waiting, released };

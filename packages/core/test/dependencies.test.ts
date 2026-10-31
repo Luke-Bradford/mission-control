@@ -122,7 +122,7 @@ describe("ticketWaits", () => {
         board,
         prs: [],
       }),
-    ).toEqual([{ ref: "PR 1033", text: "PR 1033 (not read yet)" }]);
+    ).toEqual([{ ref: "PR 1033", text: "PR 1033 (not read yet)", unread: true }]);
   });
 
   it("waits on an open GitHub blocked-by link, once with a body line for the same issue", () => {

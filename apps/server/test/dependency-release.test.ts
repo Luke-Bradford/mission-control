@@ -259,6 +259,29 @@ describe("release on merge", () => {
     expect(store.pullRequests(REPO).map((p) => p.number)).toContain(1033);
   });
 
+  it("does not release a card whose only wait was a PR the hub had not read yet", async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+    expect(moves).toEqual([]);
+    expect(synced).toEqual([]);
+    expect(observeWaits(store, REPO, T0 + 2 * MIN).released).toEqual([]);
+  });
+
+  it("still releases a card whose After PR was read as open and then merged", async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900)], T0);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+    expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
+  });
+
   it("leaves an incomplete dependent in Blocked", async () => {
     seed();
     await release(T0);
