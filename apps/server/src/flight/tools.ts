@@ -1000,7 +1000,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const unpauseSeat = (seat: string, call: string, at: number): string | null => {
     const pause = pausedSeat(store, seat);
     if (pause === null) return null;
-    writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at);
+    if (!writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at, undefined, "FLIGHT"))
+      return null;
     bus.emit("settings");
     return `FLIGHT lifted the crew pause on ${call} (${pause.reason})`;
   };
@@ -1376,7 +1377,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         unpaused !== null &&
         JSON.stringify(readCrewPause(store)) === pauseAfter
       ) {
-        writeCrewPause(store, priorPause, at);
+        writeCrewPause(store, priorPause, at, undefined, "FLIGHT");
         bus.emit("settings");
       }
       if (priorSeat !== null && wasStopped && JSON.stringify(store.seatSession(seat)) === seatAfter)
@@ -3127,7 +3128,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
         if (!live) {
           if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
-            writeCrewPause(store, pause, at);
+            writeCrewPause(store, pause, at, undefined, "FLIGHT");
           // Only a newer stop is the operator's; an error the failed resume left is not.
           const cur = row.state === "stopped" ? store.seatSession(a.seat) : null;
           if (cur !== null && cur.state !== "stopped")

@@ -8475,6 +8475,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         by: "op",
         liftedBy: "FLIGHT",
       });
+      // and the log says FLIGHT changed the operator's pause, not that the crew was paused anew
+      expect(store.hubEvents(0).map((e) => e.text)).toContain(
+        "Crew pause by op changed by FLIGHT: all",
+      );
     });
     it("needs superuser to override a stop or a pause", async () => {
       need(cfg.repos[0]).flightPowers = "standard";

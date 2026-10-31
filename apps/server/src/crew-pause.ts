@@ -1,4 +1,4 @@
-import { CREW_PAUSE_SETTING, type CrewPause, seatIsPaused } from "@mc/core";
+import { CREW_PAUSE_SETTING, type CrewPause, sameCrewPauseRecord, seatIsPaused } from "@mc/core";
 import { z } from "zod";
 import { type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
@@ -91,15 +91,39 @@ export function reviewPausedMs(store: Store, row: ReviewClock, at: number): numb
   return elapsed;
 }
 
-/** Settle the old interval and open the new one even if no engine tick fell between edits. */
+/**
+ * Settle the old interval and open the new one even if no engine tick fell between edits.
+ * A `writer` other than the record's `by` (FLIGHT) may only edit the seats of the record another
+ * actor set: it never clears or replaces it. A refused write leaves the record and logs why;
+ * the result says whether the write went through.
+ */
 export function writeCrewPause(
   store: Store,
   pause: CrewPause | null,
   at: number,
   reviews: ReviewClock[] = store.reviewsIn(["running"]),
-): void {
+  writer?: string,
+): boolean {
+  const prev = readCrewPause(store);
+  if (writer !== undefined && prev !== null && prev.by !== writer) {
+    if (!sameCrewPauseRecord(prev, pause)) {
+      store.addHubEvent(
+        `Crew pause kept: ${writer} cannot replace the pause ${prev.by} set (${prev.reason})`,
+        at,
+      );
+      return false;
+    }
+  }
   for (const row of reviews) reviewPausedMs(store, row, at);
   store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
-  store.addHubEvent(pause === null ? "Crew resumed" : `Crew paused: ${pause.reason}`, at);
+  store.addHubEvent(
+    pause === null
+      ? "Crew resumed"
+      : writer !== undefined && prev !== null && prev.by !== writer
+        ? `Crew pause by ${prev.by} changed by ${writer}: ${pause.reason}`
+        : `Crew paused: ${pause.reason}`,
+    at,
+  );
   for (const row of reviews) reviewPausedMs(store, row, at);
+  return true;
 }
