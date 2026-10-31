@@ -8473,6 +8473,42 @@ describe("the runaway breaker", () => {
     expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
   });
 
+  it("counts a loop of unconfirmed queue reorders, which record a decision and return an error", async () => {
+    reorderImpl = async () => ({ ok: false, text: "Priority swap incomplete." });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      expect(
+        (
+          await call("promote", {
+            action: "queue-reorder",
+            seat: "guido-1",
+            move: "mc#2",
+            above: "mc#3",
+            basis: "b",
+          })
+        ).isError,
+      ).toBe(true);
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("counts a loop of field edits that land part-way and then fail", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    moveImpl = async () => ({ ok: false, reason: "no Status option" });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) {
+      const r = await call("set_fields", {
+        issue: 7,
+        size: "M",
+        status: "Blocked",
+        basis: "b",
+      });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("then stopped");
+    }
+    expect(flags()).toHaveLength(1);
+  });
+
   it("does not trip on six identical headline updates", async () => {
     const headline = () =>
       call("update_brief", { section: FLIGHT_HEADLINE, text: "H", basis: "wake" });

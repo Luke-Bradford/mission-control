@@ -3301,6 +3301,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const WRITES_BEFORE_FAILING: ReadonlySet<string> = new Set([
     MC_TOOL_NAMES.createTicket,
     MC_TOOL_NAMES.closeTicket,
+    MC_TOOL_NAMES.promote,
+    MC_TOOL_NAMES.editCard,
+    MC_TOOL_NAMES.setFields,
+    MC_TOOL_NAMES.editIssue,
+  ]);
+  /** A field edit that stopped part-way says what it set ("Set size on mc#7, then stopped: …"). */
+  const PARTIAL_EDIT_TOOLS: ReadonlySet<string> = new Set([
+    MC_TOOL_NAMES.editCard,
+    MC_TOOL_NAMES.setFields,
   ]);
   const flightTools: McTool[] = [
     {
@@ -3761,6 +3770,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             // that then missed the project); so may an attempt that left no row. A refused call
             // wrote nothing, so only the tools that can write before they fail are looked at.
             (rowAdded && WRITES_BEFORE_FAILING.has(tool.name)) ||
+            (PARTIAL_EDIT_TOOLS.has(tool.name) && result.text.startsWith("Set ")) ||
             tool.name === MC_TOOL_NAMES.screenshotHud ||
             (tool.name === MC_TOOL_NAMES.closeTicket &&
               (result.text.includes(closeUnconfirmedText()) ||
