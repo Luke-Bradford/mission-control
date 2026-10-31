@@ -3748,11 +3748,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const rowsBefore = store.flightDecisions(0, 1)[0]?.id ?? 0;
       const result = await tool.call(ctx, args);
       if (!write) return result;
+      const rowAdded = (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore;
       const landed =
         result.isError !== true
-          ? tool.name !== MC_TOOL_NAMES.acceptRuling ||
-            (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore
-          : // an attempt may have written before it failed
+          ? tool.name !== MC_TOOL_NAMES.acceptRuling || rowAdded
+          : // a call that recorded a decision before it failed wrote something (a filed ticket
+            // that then missed the project); so may an attempt that left no row
+            rowAdded ||
             tool.name === MC_TOOL_NAMES.screenshotHud ||
             (tool.name === MC_TOOL_NAMES.closeTicket &&
               (result.text.includes(closeUnconfirmedText()) ||

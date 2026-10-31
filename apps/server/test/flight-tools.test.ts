@@ -3449,6 +3449,21 @@ describe("create_ticket", () => {
     okGh();
   });
 
+  it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
+    let n = 40;
+    ghImpl = async (a) => {
+      if (a[0] === "issue" && a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      if (a[0] === "issue" && a[1] === "create")
+        return { code: 0, stdout: `https://github.com/o/mc/issues/${++n}\n`, stderr: "" };
+      if (a[0] === "project") return { code: 1, stdout: "", stderr: "no project scope" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    for (let i = 0; i < 3; i++)
+      expect((await call("create_ticket", C({ title: `Server: filed ${i}` }))).isError).toBe(true);
+    expect(ghCalls.filter((a) => a[0] === "issue" && a[1] === "create")).toHaveLength(3);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(3);
+  });
+
   it("does not claim Backlog in a draft repo, where no card moves", async () => {
     const mc = cfg.repos[0];
     if (mc === undefined) throw new Error("no repo");
