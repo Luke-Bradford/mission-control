@@ -1396,6 +1396,20 @@ const accountable = (category: string, item: unknown): boolean => {
 };
 
 /** What a wake newly lists, as reasons: the facts in `current` that `previous` did not have. */
+/** The tickets of the item a fact is about: the item itself, or the item an item_stale signal names. */
+const itemTickets = (
+  category: string,
+  item: unknown,
+  itemRefs: readonly { key: string; ticket: string | null }[],
+): string[] => {
+  const stale = typeof item === "string" && item.startsWith("item_stale:");
+  const key = stale ? item.slice("item_stale:".length) : item;
+  if (category !== "items" && !(category === "signals" && stale)) return [];
+  return itemRefs.flatMap((x) =>
+    x.ticket !== null && (stale ? x.key.replace(/:\d+$/, "") : x.key) === key ? [x.ticket] : [],
+  );
+};
+
 export function wakeReasons(
   previous: string,
   current: string,
@@ -1414,12 +1428,7 @@ export function wakeReasons(
           200,
         ),
         // an item's ticket is a target too: a brief or wait on the ticket handles the item
-        targets: [
-          ...factTargets(category, item),
-          ...(category === "items"
-            ? itemRefs.flatMap((x) => (x.key === item && x.ticket !== null ? [x.ticket] : []))
-            : []),
-        ],
+        targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
       }));
   });
 }
