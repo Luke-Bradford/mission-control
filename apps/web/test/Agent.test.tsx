@@ -1963,10 +1963,16 @@ describe("Agent page: runs", () => {
     const row = $(container, "#loopP .runrow:not(.head)") as HTMLElement;
     const cell = $(row, ".rticket") as HTMLElement;
     expect(within(cell).getByRole("link", { name: "shop-app #3227" }).getAttribute("href")).toBe(
-      "https://github.com/octo-org/shop-app/issues/3227",
+      "/tickets/shop-app/3227",
     );
+    expect(
+      within(cell).getByRole("link", { name: "shop-app #3227 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/issues/3227");
     const chip = within(cell).getByRole("link", { name: "shop-app PR #3240" });
-    expect(chip.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/3240");
+    expect(chip.getAttribute("href")).toBe("/tickets/shop-app/3227");
+    expect(
+      within(cell).getByRole("link", { name: "shop-app PR #3240 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/pull/3240");
     expect(chip.closest(".rref")?.getAttribute("title")).toBe("Quote cache");
     expect(cell.textContent).toContain("Merged");
     // the PR link and its pill wrap as one unit

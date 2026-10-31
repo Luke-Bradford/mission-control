@@ -189,6 +189,13 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
+  it("passes a per-run dollar cap when one is supplied", () => {
+    const a = crewCliArgs({ ...base, maxBudgetUsd: 12.5 });
+    expect(count(a, "--max-budget-usd")).toBe(1);
+    expect(a[a.indexOf("--max-budget-usd") + 1]).toBe("12.5");
+    expect(crewCliArgs(base)).not.toContain("--max-budget-usd");
+  });
+
   it("resumes with --resume instead of --session-id", () => {
     const a = crewCliArgs({ ...base, resume: true });
     expect(a[a.indexOf("--resume") + 1]).toBe(base.sessionId);
@@ -269,6 +276,7 @@ describe("the allowlist in phase 2b", () => {
     expect(MC_TOOLS).toEqual({
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
+      prBody: "mcp__mc__pr_body",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",

@@ -94,6 +94,9 @@ import {
   syncMergedText,
   syncTooSoonText,
   type TicketView,
+  UAT_PARK,
+  uatParkText,
+  uatSendBackText,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -1924,6 +1927,42 @@ describe("The operator's message", () => {
     setLoop({ phase: "parked", parked: { kind: "budget", reason: "over", ended: false } });
     await h.engine.onOperatorMessage(RUN);
     expect(loopOf()).toMatchObject({ phase: "working", budgetExtra: 1000 });
+  });
+
+  describe("the template's dollar cap", () => {
+    const spend = (vendor: "claude" | "codex" = "claude"): void => {
+      giveProfile({ budgetUsd: 12.5 });
+      store.upsertRun({ ...(store.run(RUN) as Run), costUsd: 12.5 });
+      if (vendor === "codex") {
+        // `upsertRun` never rewrites a run's vendor either
+        const db = new DatabaseSync(join(dir, "mc.sqlite"));
+        try {
+          db.prepare("UPDATE runs SET vendor = 'codex' WHERE id = ?").run(RUN);
+        } finally {
+          db.close();
+        }
+      }
+    };
+
+    it("parks a Claude run that has spent its cap, and Resume refuses it", async () => {
+      spend();
+      await h.engine.tick();
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: "budget", reason: "used $12.50 of a $12.50 budget" },
+      });
+      expect(await h.engine.onOperatorMessage(RUN)).toEqual({
+        lifted: false,
+        reason: "dollar-cap",
+      });
+      expect(loopOf().phase).toBe("parked");
+    });
+
+    it("gives a Codex run no dollar cap", async () => {
+      spend("codex");
+      await h.engine.tick();
+      expect(loopOf().parked).toBeNull();
+    });
   });
 
   it.each(["ruling", "review-failed"] as const)(
@@ -4127,6 +4166,131 @@ describe("the engine runs reviews", () => {
       it("refuses to hold or release when there is nothing to do", async () => {
         expect((await h.engine.releaseMergeHold(RUN, "CAPCOM")).ok).toBe(false);
         expect((await h.engine.holdMerge("nope", "CAPCOM", "x")).ok).toBe(false);
+      });
+    });
+
+    describe("the repo's uat rule", () => {
+      const uatRules = (uat: { labels: string[]; paths: string[] }) => {
+        h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, uat });
+      };
+      const featureCard = () => store.replaceBoard(REPO, [item({ labels: ["type:feature"] })]);
+      const waiting = async () => {
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(UAT_PARK));
+      };
+
+      it("a passing feature PR does not merge until Accept", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        expect(h.steps).not.toContain("merge");
+        expect(loopOf().parked?.reason).toBe(uatParkText(SHA, "ticket label type:feature"));
+        expect(loopOf().uat).toEqual({ sha: SHA, from: "review", accepted: false });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.uat(RUN, "accept", SHA.slice(0, 7))).toEqual({ lifted: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("a diff that touches a uat path waits too", async () => {
+        uatRules({ labels: [], paths: ["ui/**"] });
+        h.touches = ["ui/page.ts"];
+        await waiting();
+        expect(loopOf().parked?.reason).toBe(uatParkText(SHA, "it changes ui/page.ts"));
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("Accept on a moved head or another sha is refused", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        expect(await h.engine.uat(RUN, "accept", SHA_B.slice(0, 7))).toEqual({
+          lifted: false,
+          reason: "head-moved",
+        });
+        setPr({ headSha: "f".repeat(40) });
+        expect(await h.engine.uat(RUN, "accept", SHA)).toEqual({
+          lifted: false,
+          reason: "head-moved",
+        });
+        expect(loopOf().parked?.kind).toBe(UAT_PARK);
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("Send back gives the seat its note and a new round, and the PR waits again after the next pass", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        const epoch = loopOf().epoch;
+        expect(await h.engine.uat(RUN, "send_back", SHA, "the swatches are unreadable")).toEqual({
+          lifted: true,
+        });
+        expect(h.sent.at(-1)?.text).toBe(uatSendBackText(SHA, "the swatches are unreadable"));
+        expect(loopOf().phase).toBe("working");
+        expect(loopOf().epoch).toBe(epoch + 1);
+        expect(loopOf().uat).toBeNull();
+        expect(h.steps).not.toContain("merge");
+        // the seat fixes it: the next head passes CI and review and waits again
+        report("Fixed the swatches", SHA_B);
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        const second = need(reviewRows().find((r) => r.sha === SHA_B));
+        reported(second.id, []);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(UAT_PARK));
+        expect(loopOf().uat).toEqual({ sha: SHA_B, from: "review", accepted: false });
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("Send back works after the head moved during the wait; Accept does not", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        report("pushed again", SHA_B);
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        expect(await h.engine.uat(RUN, "accept", SHA)).toEqual({
+          lifted: false,
+          reason: "head-moved",
+        });
+        expect(await h.engine.uat(RUN, "send_back", SHA, "n")).toEqual({ lifted: true });
+        expect(loopOf().parked?.kind).not.toBe(UAT_PARK);
+      });
+
+      it("waits when the ticket's labels cannot be read", async () => {
+        uatRules({ labels: ["type:feature"], paths: [] });
+        store.replaceBoard(REPO, []);
+        await waiting();
+        expect(loopOf().parked?.reason).toBe(
+          uatParkText(SHA, "its ticket's labels could not be read"),
+        );
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("no uat rule leaves the merge path as before", async () => {
+        h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true });
+        featureCard();
+        await gateOpen();
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+        expect(loopOf().parked).toBeNull();
+        expect(loopOf().uat).toBeUndefined();
+      });
+
+      it.each(["FLIGHT", "CAPCOM"] as const)("%s cannot lift it with a resume", async (by) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        uatRules({ labels: ["type:feature"], paths: [] });
+        featureCard();
+        await waiting();
+        expect(await h.engine.onOperatorMessage(RUN, by)).toEqual({
+          lifted: false,
+          reason: "use-uat",
+        });
+        expect(loopOf().parked?.kind).toBe(UAT_PARK);
+      });
+
+      it("a verdict on a run that is not waiting is refused", async () => {
+        await gateOpen();
+        expect(await h.engine.uat(RUN, "accept", SHA)).toMatchObject({ lifted: false });
       });
     });
 

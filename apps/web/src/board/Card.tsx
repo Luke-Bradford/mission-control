@@ -241,7 +241,13 @@ export const Card = memo(function Card({
       <div className="kref">
         {mine && <Lamp kind="warn" pulse={unacked} label="Needs you" />}
         {worked && <Lamp kind="ok" pulse label="Being worked on" />}
-        <RepoRef repoId={item.repoId} number={item.issueNumber} bare={!showRepo} url={item.url} />
+        <RepoRef
+          repoId={item.repoId}
+          number={item.issueNumber}
+          bare={!showRepo}
+          url={item.url}
+          to={ticketPath(item.repoId, item.issueNumber)}
+        />
         {item.priority && <span className="p">{item.priority}</span>}
         {item.size && <span>{item.size}</span>}
         <span className="spacer" />

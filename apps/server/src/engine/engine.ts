@@ -69,6 +69,7 @@ import {
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   hudColumnOf,
+  isDollarCapReason,
   isReviewBudgetFailure,
   type LoopAction,
   type LoopReviewFacts,
@@ -132,6 +133,10 @@ import {
   TAKE_STALE_MS,
   type TicketView,
   ticketControllerCheck,
+  UAT_PARK,
+  UAT_USE_ROUTE,
+  uatParkText,
+  uatSendBackText,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -236,6 +241,8 @@ export type OperatorRefusal =
   | "rework-undelivered"
   | "use-controller-check"
   | "use-merge-hold"
+  | "use-uat"
+  | "dollar-cap"
   | "engine-error";
 
 export type MergeHoldBy = "CAPCOM" | "FLIGHT";
@@ -260,6 +267,9 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
   "use-merge-hold": MERGE_HOLD_USE_ROUTE,
+  "use-uat": UAT_USE_ROUTE,
+  "dollar-cap":
+    "the run reached its template's dollar cap, and its Claude process keeps the cap it started with; end the run and start the ticket again",
   "engine-error": "the engine hit an error; see the hub log",
 };
 
@@ -302,6 +312,17 @@ export interface Engine {
   controllerCheck(
     runId: string,
     verdict: "pass" | "fail",
+    sha: string,
+    note?: string,
+  ): Promise<OperatorResult>;
+  /**
+   * The operator's verdict on a run parked for acceptance (UAT). `accept` (only while the PR head is
+   * still the parked head) lets the next pass merge through the usual gates; `send_back` sends the
+   * note to the seat as a new rework round and ends the park.
+   */
+  uat(
+    runId: string,
+    verdict: "accept" | "send_back",
     sha: string,
     note?: string,
   ): Promise<OperatorResult>;
@@ -900,6 +921,8 @@ export function createEngine(deps: EngineDeps): Engine {
       lastEngineLineAt: store.lastEngineLineAt(run.id),
       tokens: run.tokens === null ? 0 : run.tokens.input + run.tokens.output,
       budget: config.crew?.runTokenBudget ?? Number.MAX_SAFE_INTEGER,
+      costUsd: run.costUsd,
+      budgetUsd: run.vendor === "codex" ? null : (run.profile?.profile.budgetUsd ?? null),
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
@@ -1090,6 +1113,76 @@ export function createEngine(deps: EngineDeps): Engine {
     if (check !== null) cur.controllerCheckRequired = true;
     if (check === null && cur.controllerCheckRequired !== true) return null;
     return { park: controllerCheckParkText(sha, check ?? "") };
+  }
+
+  /**
+   * Why the repo's `uat` rule makes this merge wait for the operator's acceptance: null merges.
+   * A ticket label or a touched path matches; a diff that cannot be read counts as a match, so the
+   * operator decides. Once the operator accepted this head it waits no more.
+   */
+  async function uatHold(run: Run, cur: RunLoop, sha: string): Promise<string | null> {
+    if (cur.uat?.sha === sha && cur.uat.accepted) return null;
+    const rules = await rulesFor(run.repoId);
+    const { labels, paths } = rules?.uat ?? { labels: [], paths: [] };
+    if (labels.length === 0 && paths.length === 0) return null;
+    const issue = issueOf(run);
+    const card = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    // without the ticket's labels the rule cannot be judged: the operator decides
+    if (labels.length > 0 && card === undefined) return "its ticket's labels could not be read";
+    const wanted = new Set(labels.map((l) => l.toLowerCase()));
+    const label = card?.labels.find((l) => wanted.has(l.toLowerCase()));
+    if (label !== undefined) return `ticket label ${label}`;
+    if (paths.length === 0) return null;
+    try {
+      const touched = await publisher.hardRuleTouches(run, sha, paths);
+      return touched.length === 0 ? null : `it changes ${touched[0]}`;
+    } catch (e) {
+      log(`${run.id}: could not read the diff for its uat rule: ${(e as Error).message}`);
+      return "its diff could not be read";
+    }
+  }
+
+  /**
+   * The operator's note to the author of a run that was sent back (a failed controller check, a
+   * send back at UAT). A run off its seat gets it through Comms and a pending line, and the engine
+   * wakes it; otherwise it goes straight to the seat. False when it could not be delivered.
+   */
+  async function sendBack(
+    run: Run,
+    loop: RunLoop,
+    next: RunLoop,
+    text: string,
+    key: string,
+    mirror: string,
+  ): Promise<boolean> {
+    const row = {
+      at: now(),
+      from: COMMS_CAPCOM,
+      to: run.agentId,
+      ticket: run.ticket ?? null,
+      ref: run.ticket ?? null,
+      targetRunId: run.id,
+      text: commsMirror(text, mirror),
+    };
+    if (loop.aside) {
+      // off its seat (the seat may hold another run now): the note waits in Comms for the
+      // run, and the engine wakes it, in working, once its seat is free
+      const stored = store.addComms(row);
+      if (stored === null) return false;
+      // the pending line below carries the note to the seat: the inbox must not repeat it
+      store.markCommsInboxRead(run.agentId, [stored.id]);
+      next.pendingLine = { key, text };
+      next.aside = { ...loop.aside, wake: true };
+      return true;
+    }
+    const sent = await supervisor.send(run.id, key, text);
+    // a paused seat reads it when it resumes: the verdict is recorded all the same
+    if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId)) return false;
+    const stored = store.addComms(row);
+    // delivered by the line above: not again from the inbox
+    if (stored !== null && (sent === "sent" || sent === "dup"))
+      store.markCommsInboxRead(run.agentId, [stored.id]);
+    return true;
   }
 
   async function act(
@@ -1528,6 +1621,23 @@ export function createEngine(deps: EngineDeps): Engine {
             `${run.id}:${cur.epoch}:parked:controller-check:${a.sha}`,
             run.id,
             parkedEventText(check.park),
+            at,
+          );
+          out.again = true;
+          return;
+        }
+        // the repo's `uat` rule holds the merge until the operator accepts this head
+        const uatWhy = await uatHold(run, cur, a.sha);
+        if (uatWhy !== null) {
+          const reason = uatParkText(a.sha, uatWhy);
+          out.parked = true;
+          cur.uat = { sha: a.sha, from: cur.phase, accepted: false };
+          cur.phase = "parked";
+          cur.parked = { kind: UAT_PARK, reason, ended: false };
+          store.addLoopEvent(
+            `${run.id}:${cur.epoch}:parked:uat:${a.sha}`,
+            run.id,
+            parkedEventText(reason),
             at,
           );
           out.again = true;
@@ -2604,8 +2714,10 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("not-parked");
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
+        if (kind === "budget" && isDollarCapReason(loop.parked.reason)) return refuse("dollar-cap");
         // only the controller's verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
+        if (kind === UAT_PARK) return refuse("use-uat");
         if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
@@ -2847,46 +2959,105 @@ export function createEngine(deps: EngineDeps): Engine {
             flightClearedSha: null,
           };
           const text = controllerCheckFailText(held.sha, note);
-          const row = {
-            at,
-            from: COMMS_CAPCOM,
-            to: run.agentId,
-            ticket: run.ticket ?? null,
-            ref: run.ticket ?? null,
-            targetRunId: run.id,
-            text: commsMirror(text, "Controller check failed; the full note was sent to the seat."),
-          };
-          if (loop.aside) {
-            // off its seat (the seat may hold another run now): the note waits in Comms for the
-            // run, and the engine wakes it, in working, once its seat is free
-            const stored = store.addComms(row);
-            if (stored === null) return refuse("rework-undelivered");
-            // the pending line below carries the note to the seat: the inbox must not repeat it
-            store.markCommsInboxRead(run.agentId, [stored.id]);
-            next.pendingLine = {
-              key: `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+          const key = `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`;
+          if (
+            !(await sendBack(
+              run,
+              loop,
+              next,
               text,
-            };
-            next.aside = { ...loop.aside, wake: true };
-          } else {
-            const sent = await supervisor.send(
-              run.id,
-              `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
-              text,
-            );
-            // a paused seat reads it when it resumes: the verdict is recorded all the same
-            if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId))
-              return refuse("rework-undelivered");
-            const stored = store.addComms(row);
-            // delivered by the line above: not again from the inbox
-            if (stored !== null && (sent === "sent" || sent === "dup"))
-              store.markCommsInboxRead(run.agentId, [stored.id]);
-          }
+              key,
+              "Controller check failed; the full note was sent to the seat.",
+            ))
+          )
+            return refuse("rework-undelivered");
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
             run.id,
             `controller check failed on ${short}: sent back for rework`,
+            at,
+          );
+        }
+        lastTransient.delete(run.id);
+        bus.emit("agents");
+        bus.emit("attention");
+        result = { lifted: true };
+        await pass(run.id);
+      }).then(() => result);
+    },
+
+    uat(runId, verdict, sha, note) {
+      let result: OperatorResult = { lifted: false, reason: "engine-error" };
+      const refuse = (reason: OperatorRefusal): void => {
+        result = { lifted: false, reason };
+      };
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      return onChain(runId, async () => {
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run === null || !loop) return refuse("not-parked");
+        const held = loop.uat;
+        if (
+          run.endedAt !== null ||
+          loop.phase !== "parked" ||
+          loop.parked?.kind !== UAT_PARK ||
+          loop.parked.ended ||
+          !held
+        )
+          return refuse("not-parked");
+        // the verdict is for the head the operator looked at
+        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
+        const at = now();
+        const short = held.sha.slice(0, 7);
+        if (verdict === "accept") {
+          // an acceptance is for the head the operator looked at; a send back is allowed on a moved head
+          const pushed = store.runPush(run.id);
+          const pr = findPr(run, loop);
+          if (pr?.state !== "open") return refuse("pr-not-open");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
+          store.setRunLoop(run.id, {
+            ...loop,
+            phase: held.from,
+            parked: null,
+            uat: { ...held, accepted: true },
+          });
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:uat:${held.sha}:accept`,
+            run.id,
+            `accepted by the operator on ${short}`,
+            at,
+          );
+        } else {
+          const next: RunLoop = {
+            ...loop,
+            epoch: loop.epoch + 1,
+            phase: "working",
+            parked: null,
+            uat: null,
+            ciFails: 0,
+            transient: 0,
+            lastRefusal: null,
+            unparkedAt: at,
+            reviewWaivedSha: null,
+            flightClearedSha: null,
+          };
+          if (
+            !(await sendBack(
+              run,
+              loop,
+              next,
+              uatSendBackText(held.sha, note ?? ""),
+              `${run.id}:uat-send-back:${held.sha}:${loop.epoch}`,
+              "Sent back at acceptance; the full note was sent to the seat.",
+            ))
+          )
+            return refuse("rework-undelivered");
+          store.setRunLoop(run.id, next);
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
+            run.id,
+            `sent back by the operator on ${short}`,
             at,
           );
         }

@@ -103,6 +103,7 @@ export const MC_TOOL_GRANTS: Readonly<
     base: [
       "commit",
       "sync_main",
+      MC_TOOL_NAMES.prBody,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -315,6 +316,7 @@ export const WRITER_TOOLS = [
   "Skill",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
+  MC_TOOLS.prBody,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -1150,6 +1152,8 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
+  /** Per-run Claude spend cap, passed as `--max-budget-usd`; absent: no CLI cap. */
+  maxBudgetUsd?: number | null;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
   /**
@@ -1263,6 +1267,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
+    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--tools",

@@ -46,6 +46,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
+const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
@@ -220,6 +221,11 @@ export const RESOURCES = {
   ticket: (repoId: string, issueNumber: number): ResourceRef => ({
     path: `/api/boards/${enc(repoId)}/items/${issueNumber}`,
     topic: null,
+  }),
+  // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
+  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
+    topic: before ? null : TICKET_TOPICS,
   }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.

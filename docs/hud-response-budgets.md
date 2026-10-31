@@ -35,6 +35,10 @@ carries its checks as `{ name, kind, state, attempt }`; `?detail=1` returns the 
 `?shape=summary` is the list shape: repo, number, title, url, branch, head, ticket, state, draft,
 review, `ci` rollup and timestamps, with no checks, assignees, closing issues or size fields.
 
+Every row, in every shape, also carries `preview` (the running preview, or null) and `previewable`.
+`previewable` is true only where `POST /api/previews` could start one now: a preview-capable hub, the
+repo it runs, a configured checkout and an open PR. Repos without preview support say false.
+
 `GET /api/repos/:repoId/prs/titles?numbers=4,9` is the number and title of each stored PR among
 those numbers (1 to 50), lowest number first; a PR the hub has not stored is left out. It is what
 a link needs to name a PR, without the list.

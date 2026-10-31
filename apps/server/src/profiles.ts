@@ -53,6 +53,7 @@ export const fileProfile = z
   .strictObject({
     trigger: z.string().min(1).max(300).optional(),
     budget: z.number().int().positive().nullable().optional(),
+    budget_usd: z.number().positive().nullable().optional(),
     orchestration_only: z.boolean().optional(),
     nodes: z.array(fileStep).min(1).max(30).optional(),
     name: z
@@ -84,6 +85,7 @@ const toProfile = (f: z.infer<typeof fileProfile>): Profile => ({
   steps: f.steps.map((s) => ({ ...s, phase: s.phase ?? null })),
   ...(f.trigger === undefined ? {} : { trigger: f.trigger }),
   ...(f.budget === undefined ? {} : { budget: f.budget }),
+  ...(f.budget_usd === undefined ? {} : { budgetUsd: f.budget_usd }),
   ...(f.orchestration_only === undefined ? {} : { orchestrationOnly: f.orchestration_only }),
   ...(f.nodes === undefined
     ? {}
@@ -175,6 +177,7 @@ export function profilesView(
       })),
       trigger: p.trigger,
       budget: p.budget,
+      budgetUsd: p.budgetUsd,
       orchestrationOnly: p.orchestrationOnly,
       nodes: p.nodes,
       planRequired: p.planRequired,
@@ -201,6 +204,7 @@ export function profileHash(p: Profile): string {
     })),
     trigger: p.trigger,
     budget: p.budget,
+    budgetUsd: p.budgetUsd,
     orchestrationOnly: p.orchestrationOnly,
     nodes: p.nodes?.map((s) => ({
       name: s.name,
@@ -261,6 +265,7 @@ const fileValue = (p: Profile) => ({
   rounds: p.rounds,
   trigger: p.trigger,
   budget: p.budget,
+  budget_usd: p.budgetUsd,
   orchestration_only: p.orchestrationOnly,
   nodes: p.nodes,
 });

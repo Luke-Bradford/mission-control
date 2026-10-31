@@ -21,6 +21,7 @@ import {
   phaseOf,
   SpiderSim,
   type Spoke,
+  spokeName,
 } from "./spider.ts";
 
 /** A link's newest message, for the hover card. */
@@ -160,6 +161,9 @@ function walkOrder(nodes: readonly SpiderNode[], centre: Point): SpiderNode[] {
  * resting drift is a CSS animation on each node's body, so a still graph costs no frames, and
  * everything pauses while the panel is scrolled out of view.
  */
+/** Below this plot width the rim role names are left out: the rail cannot hold them and the seat names. */
+const RIM_NAMES_MIN_W = 480;
+
 export function CommsSpider({
   frame: f,
   spokes,
@@ -637,6 +641,15 @@ export function CommsSpider({
           {spokes.map((spoke) => {
             const tip = onSpoke(f, spoke.angle, 1);
             const out = onSpoke(f, spoke.angle, 1 + 8 / Math.max(1, f.rx));
+            // In a narrow rail the seat names carry the role; rim names would sit on them or clip.
+            const name =
+              f.w >= RIM_NAMES_MIN_W
+                ? spokeName(
+                    spoke,
+                    (id) => byId.has(id),
+                    (id) => byId.get(id)?.name ?? id,
+                  )
+                : null;
             const cos = Math.cos((spoke.angle * Math.PI) / 180);
             const sin = Math.sin((spoke.angle * Math.PI) / 180);
             // Clear of the seat names, which hang under their nodes: lower spokes' names drop.
@@ -644,18 +657,24 @@ export function CommsSpider({
             // Every seat on this spoke is away: the spoke stays, dimmed and marked.
             const empty = spoke.ids.every((id) => !byId.has(id));
             return (
-              <g key={spoke.key} className={`comms-spoke${empty ? " away" : ""}`}>
+              <g
+                key={spoke.key}
+                data-spoke={spoke.key}
+                className={`comms-spoke${empty ? " away" : ""}`}
+              >
                 <line className="comms-spoke-line" x1={f.cx} y1={f.cy} x2={tip.x} y2={tip.y} />
-                <text
-                  className="comms-spoke-name"
-                  x={out.x}
-                  y={out.y + drop}
-                  dy="0.34em"
-                  textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
-                >
-                  {spoke.key}
-                  {empty && <tspan className="away-mark"> · away</tspan>}
-                </text>
+                {(name !== null || empty) && (
+                  <text
+                    className="comms-spoke-name"
+                    x={out.x}
+                    y={out.y + drop}
+                    dy="0.34em"
+                    textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
+                  >
+                    {name ?? spoke.key}
+                    {empty && <tspan className="away-mark"> · away</tspan>}
+                  </text>
+                )}
               </g>
             );
           })}

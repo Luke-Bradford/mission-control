@@ -80,4 +80,21 @@ describe("PrChip", () => {
     expect(container.querySelector(".pill")).toBeNull();
     expect(screen.queryByText("held")).toBeNull();
   });
+
+  it("opens the PR's ticket page when it names a ticket, with GitHub as the second link", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<PrChip pr={{ ...pr, ticket: "site-builder#12" }} />);
+    const link = await screen.findByRole("link", { name: "site-builder PR #7" });
+    expect(link.getAttribute("href")).toBe("/tickets/site-builder/12");
+    expect(
+      screen.getByRole("link", { name: "site-builder PR #7 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/site-builder/pull/7");
+  });
+
+  it("links a PR with no ticket to GitHub alone", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<PrChip pr={pr} />);
+    const link = await screen.findByRole("link", { name: "site-builder PR #7" });
+    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/site-builder/pull/7");
+  });
 });

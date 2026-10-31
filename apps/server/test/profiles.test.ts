@@ -193,7 +193,7 @@ describe("template descriptions", () => {
   });
 
   it("loads typed metadata, hashes it, and rejects unknown check kinds and fields", () => {
-    const metadata = "\n    budget: 120000\n    trigger: label custom";
+    const metadata = "\n    budget: 120000\n    budget_usd: 12.5\n    trigger: label custom";
     const text = two.replace(
       "steps: [{ name: do, phase: working }]",
       "steps: [{ name: do, phase: working, gate: true, max: 2, retry: again, role: GUIDO, checks: [{kind: gate, text: approval}] }]",
@@ -206,6 +206,7 @@ describe("template descriptions", () => {
       max: 2,
       checks: [{ kind: "gate", text: "approval" }],
     });
+    expect((ps as Profile[]).at(-1)?.budgetUsd).toBe(12.5);
     expect(profileHash(p)).not.toBe(
       profileHash({ ...p, steps: [{ name: "do", phase: "working" }] }),
     );

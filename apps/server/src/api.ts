@@ -91,7 +91,9 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
+  type PrUatView,
   type PullRequestListRow,
+  type PullRequestPreviewFacts,
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
@@ -126,6 +128,8 @@ import {
   type TicketView,
   type Topic,
   TYPE_LABELS,
+  UAT_PARK,
+  UAT_USE_ROUTE,
   UPDATE_LOG_UNREADABLE,
   UPDATE_UNAVAILABLE,
   type UpdateLog,
@@ -277,6 +281,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -465,7 +470,7 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "holdMerge" | "releaseMergeHold">>;
+    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -547,6 +552,15 @@ const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
   z.strictObject({ action: z.literal("release") }),
 ]);
+const UatBody = z
+  .strictObject({
+    action: z.enum(["accept", "send_back"]),
+    note: z.string().max(COMMS_MESSAGE_MAX).optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.action === "send_back" && (b.note === undefined || b.note.trim() === ""))
+      ctx.addIssue({ code: "custom", path: ["note"], message: "a send back needs a note" });
+  });
 const ControllerCheckBody = z
   .strictObject({
     verdict: z.enum(["pass", "fail"]),
@@ -716,7 +730,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts();
+  const mapConflicts = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const sources: RingSource[] = [];
@@ -1315,6 +1333,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
+  /** The checkout a preview of this repo would run from; the start route and the PR rows both ask. */
+  const previewCheckout = (repo: (typeof config.repos)[number]) =>
+    config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+  /**
+   * What a repo's PR rows say about previews: `previewable` is whether `POST /api/previews` could
+   * start one now (a preview hub, this repo, a checkout, an open PR); `preview` is the running one.
+   */
+  const prPreviewFor = (repo: (typeof config.repos)[number]) => {
+    const supported =
+      deps.previews !== undefined &&
+      repo.id === deps.previewRepoId &&
+      previewCheckout(repo) !== undefined;
+    return (pr: { number: number; state: string }): PullRequestPreviewFacts => ({
+      previewable: supported && pr.state === "open",
+      preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+    });
+  };
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
@@ -2262,6 +2297,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: docs/runbook.md#qa-board-data (a PR's Comms, rework rounds and try-it commands, for the QA readiness card)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/qa/uat/:repoId/:number",
+        async (req, reply): Promise<PrUatView | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return prUat({
+            store,
+            pr,
+            runCommand: repo.runCommand,
+            previewUrl:
+              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number)?.url ?? null) : null,
+            singleRepo: config.repos.length === 1,
+            repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+          });
+        },
+      );
+
       // Reader: docs/runbook.md#qa-board-data (milestones with due dates and progress)
       api.get(
         "/qa/milestones",
@@ -2848,18 +2905,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const prPreview = prPreviewFor(repo);
         const listed = store.pullRequestsSince(
           repo.id,
           all === "1" ? null : now() - window * 86_400_000,
         );
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
-        const previewFor = (number: number) =>
-          repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
         if (shape === "summary")
-          return prs.map((pr) => ({ ...prSummaryRow(pr), preview: previewFor(pr.number) }));
+          return prs.map((pr) => ({ ...prSummaryRow(pr), ...prPreview(pr) }));
         return detail === "1"
-          ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
-          : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
+          ? prs.map((pr) => ({ ...pr, ...prPreview(pr) }))
+          : prs.map((pr) => ({ ...prSummary(pr), ...prPreview(pr) }));
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
       api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
@@ -2890,11 +2946,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            ...pr,
-            preview:
-              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
-          };
+          return { ...pr, ...prPreviewFor(repo)(pr) };
         },
       );
 
@@ -2930,11 +2982,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .pullRequests(repo.id)
           .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
         if (!pr) return reply.code(404).send({ error: "open PR not found" });
-        const match = {
-          repo,
-          pr,
-          checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
-        };
+        const match = { repo, pr, checkout: previewCheckout(repo) };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
         try {
           return await deps.previews.start({
@@ -4109,6 +4157,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .code(409)
             .send({ error: `nothing to resume: ${CONTROLLER_CHECK_USE_ROUTE}` });
         }
+        if (run.loop.parked?.kind === UAT_PARK) {
+          return reply.code(409).send({ error: `nothing to resume: ${UAT_USE_ROUTE}` });
+        }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
         const lifted = reviewWaiver
@@ -4157,6 +4208,58 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!result.lifted) {
             return reply.code(409).send({
               error: `controller check not recorded: ${operatorRefusalText(result.reason)}`,
+            });
+          }
+          return { ok: true };
+        },
+      );
+      // The operator's acceptance (UAT) of a tested PR the repo's `uat` rule holds: accept lets it merge,
+      // send back gives the seat the note and a new round. FLIGHT has no tool for this.
+      // Reader: docs/runbook.md#accept-or-send-back-a-pr-at-uat
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/uat",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          const n = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (repo === undefined || n === 0) return reply.code(404).send({ error: "unknown PR" });
+          const body = UatBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          const run = store
+            .loopRuns(Date.now())
+            .find(
+              (r) =>
+                r.repoId === repo.id &&
+                r.endedAt === null &&
+                r.loop?.prNumber === n &&
+                r.loop.parked?.kind === UAT_PARK,
+            );
+          if (run === undefined || !run.loop?.uat)
+            return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          if (deps.engine?.uat === undefined || deps.engine.status().on !== true) {
+            return reply.code(409).send({ error: "the loop engine is off" });
+          }
+          if (body.data.note !== undefined) {
+            try {
+              await validateCommsText(deps.knownSecrets ?? (async () => []), body.data.note);
+            } catch (e) {
+              return crewFail(
+                new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+                reply,
+              );
+            }
+          }
+          const result = await deps.engine.uat(
+            run.id,
+            body.data.action,
+            run.loop.uat.sha,
+            body.data.note,
+          );
+          if (!result.lifted) {
+            return reply.code(409).send({
+              error: `acceptance not recorded: ${operatorRefusalText(result.reason)}`,
             });
           }
           return { ok: true };

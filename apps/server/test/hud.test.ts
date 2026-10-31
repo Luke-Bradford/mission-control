@@ -808,6 +808,50 @@ describe("attention items", () => {
   });
 });
 
+describe("attention items: Needs you holds decisions only (#1177)", () => {
+  const escItem = () => attentionItems(config, store, NOW).find((i) => i.key === "esc:shop-app#9");
+
+  it("a recent escalation of a live loop is the operator's", () => {
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
+    expect(escItem()?.owner).toBe("operator");
+  });
+
+  it("an escalation of a paused loop is the loop's, not a Needs-you item", () => {
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
+    expect(escItem()?.owner).toBe("loop");
+  });
+
+  it("a paused loop's old draft PR waits on nobody", () => {
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    store.replaceBoard("shop-app", [boardItem({})]);
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 7,
+          title: "spec",
+          url: "https://github.com/o/shop-app/pull/7",
+          branch: "docs/42-spec",
+          ticket: "shop-app#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: NOW - 9 * DAY,
+          updatedAt: NOW - 9 * DAY,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      0,
+    );
+    expect(attentionItems(config, store, NOW).filter((i) => i.kind === "pr")).toEqual([]);
+  });
+});
+
 describe("attentionItems: PRs waiting on you", () => {
   const pr = (over: Partial<PullRequestView> = {}): PullRequestView => ({
     repoId: "shop-app",
@@ -1269,14 +1313,23 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.reviewing).toBeNull();
   });
 
-  it("carries the CLI version and the seat's configured effort; a loop has neither", () => {
+  it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
     const c = withCrew();
     const seatCfg = c.crew?.sessions[0]?.seats[0];
     if (seatCfg) seatCfg.effort = "max";
+    store.upsertRun(
+      crewRun({
+        profile: {
+          profile: { ...(DEFAULT_PROFILES[0] as Profile), budgetUsd: 12.5 },
+          route: { by: "label", label: "type:feature" },
+          hash: "profile-hash",
+        },
+      }),
+    );
     const rows = crew(c, store, NOW, NO_LOCK, () => "2.1.302").rows;
     const by = (id: string) => rows.find((r) => r.id === id);
-    expect(by("GUIDO-1")?.cli).toEqual({ version: "2.1.302", effort: "max" });
-    expect(by("RETRO-1")?.cli).toEqual({ version: "2.1.302", effort: null });
+    expect(by("GUIDO-1")?.cli).toEqual({ version: "2.1.302", effort: "max", budgetUsd: 12.5 });
+    expect(by("RETRO-1")?.cli).toEqual({ version: "2.1.302", effort: null, budgetUsd: null });
     expect(by("shop-app-ta")?.cli).toEqual({ version: null, effort: null });
     expect(
       crew(c, store, NOW, NO_LOCK, () => null).rows.find((r) => r.id === "GUIDO-1")?.cli.version,
@@ -3329,6 +3382,19 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
     raise("blocked:r-cc:0", "blocked", "r-cc");
     expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(true);
+    // so is a PR waiting for the operator's acceptance
+    store.upsertRun(
+      run({
+        id: "r-uat",
+        agentId: "guido-1",
+        loop: {
+          ...(store.run("r-budget")?.loop as RunLoop),
+          parked: { kind: "uat", reason: "waiting for your acceptance", ended: false },
+        },
+      }),
+    );
+    raise("blocked:r-uat:0", "blocked", "r-uat");
+    expect(isOperatorCall({ key: "note:blocked:r-uat:0", kind: "blocked" }, store)).toBe(true);
     // an error a seat is stuck on stays raw too, so it still pings
     store.addCrewError({
       agentId: "guido-1",

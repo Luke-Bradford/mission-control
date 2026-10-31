@@ -33,6 +33,13 @@ Claude seats and HTTP remain available. A successful catalog is cached for confi
 edits and reloads. Config writes refuse unvalidated Codex models and efforts with
 400. Existing Claude model identifiers and effort options keep loading.
 
+A Claude seat (FLIGHT's included) can state its `effort` (`low`, `medium`, `high` or
+`max`); the hub passes it as `--effort`, and the Agent page shows it beside the model.
+Omit it and the CLI picks its own default, which changes between CLI versions, so set it
+for any seat whose cost or quality matters. Pair it with a template's `budget_usd` (see
+Template profiles) for a hard per-run dollar cap. Choose `max` only where a comparison
+shows a quality gain.
+
 `updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
 binary they started on. Update Codex manually between runs. Resuming a run uses
 the run's saved model.
@@ -155,12 +162,14 @@ profiles:
     checks: []                  # CI checks named in the brief
     tries: 2                    # CI failures before the run parks (1 to 10)
     rounds: 2                   # blocking reviews before the run parks (1 to 10)
+    budget_usd: 12.50           # optional Claude spend cap per run; omit until you choose one
 ```
 
 - **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
+- **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
 ## Moving from Control Centre
@@ -707,7 +716,9 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Git:** no git writes; a seat commits with `mc commit` and brings main in with `mc sync_main`,
   and the engine pushes and opens the draft PR after a report. Its sandbox cannot write the
   clone's git dirs either.
-- **GitHub:** no `gh` at all; GitHub goes through Mission Control.
+- **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
+  PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
+  minor-findings section is kept; refused for a PR that is not the run's).
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
@@ -1035,6 +1046,23 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Accept or send back a PR at UAT
+
+A repo whose rules set `uat` (labels, paths or both) keeps the engine from merging a matching PR until
+you accept it. When the PR's review is clean and CI is green, the run parks as `uat`, "waiting for
+your acceptance on <head>" with the label or path that matched. It shows in Needs you, on the Board
+card and on the PR chip. If the diff cannot be read, the PR waits too. Look at the work, then:
+
+```sh
+curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept"}'
+```
+
+`accept` lets the engine merge on its next pass through the usual gates (hard-rule clearance, holds,
+the rest). It is tied to the head you looked at: a later head waits again. `send_back` needs a
+`"note"`; the seat gets it as the first line of a new rework round. After its next push passes review
+and CI, the PR waits again. FLIGHT cannot clear this wait: `merge_pr` and a plain resume refuse it.
+It applies to repos where the engine merges (`merge` workspaces).
+
 ### Record a controller check
 
 A ticket with a controller-check heading (`## Controller check`, or a near spelling: another level,
@@ -1252,6 +1280,9 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 - `hard_rules_by`: `operator` (default) or `controller`; superuser FLIGHT powers remain a separate
   user-config setting.
 - `always_ask`: labels that require the operator.
+- `uat`: `{ labels: [...], paths: [...] }`. A tested PR waits for your acceptance when its ticket
+  has one of the labels or its diff touches one of the paths (see "Accept or send back a PR at
+  UAT"). Missing or empty means no UAT. A repo block's lists are unioned with user config's.
 
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
@@ -1261,7 +1292,7 @@ A repo block optionally tightens the rules in the first fenced `yaml` block unde
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
 worktree; a change takes effect once merged and fetched. `hard_rules` is unioned with an explicit
 user-config list (even `[]`); it replaces the defaults only when user config supplies no list.
-`always_ask` is unioned, and `hard_rules_by` is `operator` if either source says `operator`.
+`always_ask` and `uat` are unioned, and `hard_rules_by` is `operator` if either source says `operator`.
 The default counts as `operator`, so a block cannot set `controller` unless user config sets it.
 User-config `templates`, `promote_backlog` and `needs` win whenever supplied, including empty maps,
 empty lists and `false`; the block may fill omitted keys. The block may replace `pick_from` and
@@ -1412,6 +1443,16 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   `review-screenshots/` beside the database for 90 days (`QA_RETENTION_DAYS`) and listed under its
   review round in `GET /api/qa/findings` (`reviews[].screenshots`: `id`, `label`, `width`,
   `theme`, `at`). `GET /api/qa/review-shots/:id` serves one PNG, with the operator token.
+- **PR readiness: Comms, rework and try-it.** `GET /api/qa/uat/:repoId/:number` carries, for one
+  PR: `comms`, the newest 20 messages whose ref or ticket is the PR or its ticket (sender, time,
+  text; newest first); `rounds`, each reported review round newest first with its blocking findings
+  as `file:line summary`, the author seat's newest message before the next round (`reply`), the
+  first branch commit before the next round (`fixSha`) and a `result` (`clean`, `resolved` or
+  `open`); and `tryIt`, the branch name as the run pushed it, `git fetch origin <branch> && git
+  switch <branch>` plus the repo's `run_command` from `config.yaml` when it sets one. `previewUrl`
+  is the URL of the PR's running branch preview (see Branch previews), else null. `uat` says whether the PR's open run is parked for the
+  operator's acceptance (`waiting`), when it parked (`since`) and the note the operator last sent it
+  back with (`note`); a PR with no such run answers `{ waiting: false, since: null, note: null }`.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
   window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
   - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`

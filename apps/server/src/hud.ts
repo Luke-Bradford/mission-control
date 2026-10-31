@@ -82,6 +82,7 @@ import {
   strayText,
   type TestLockState,
   type TokenUsage,
+  UAT_PARK,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention } from "./attention-holds.ts";
@@ -674,7 +675,11 @@ function buildCrew(
         sessionId: view.sessionId,
         cli:
           agent.kind === "crew"
-            ? { version: cliVersionOnce(), effort: agent.seat.effort ?? null }
+            ? {
+                version: cliVersionOnce(),
+                effort: agent.seat.effort ?? null,
+                budgetUsd: latest?.profile?.profile.budgetUsd ?? null,
+              }
             : { version: null, effort: null },
         review:
           agent.kind === "crew"
@@ -806,7 +811,9 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.kind !== "blocked") return false;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-  return park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK;
+  return (
+    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
+  );
 }
 
 /**
@@ -1127,10 +1134,19 @@ function buildAttentionItems(
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
+    // A paused, parked or stopped loop asks nobody: its open escalations stay on its card until
+    // it runs again.
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === e.repoId);
+    const loopIdle =
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped");
     items.push({
-      // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
+      // a needs-you label asks the operator whatever the kind, unless its loop is paused, parked or
+      // stopped; a [loop-blocked] title is always the loop's
       owner:
-        e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
+        !loopIdle && (e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind))
+          ? OWNER_OPERATOR
+          : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -1196,6 +1212,13 @@ function buildAttentionItems(
   );
   for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
+    // a paused, parked or stopped loop's PRs wait on nobody: they stay on its card
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === repo.id);
+    if (
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped")
+    )
+      continue;
     // a ticket the board has seen closed clears its PR's item
     const onBoard = new Set(
       store

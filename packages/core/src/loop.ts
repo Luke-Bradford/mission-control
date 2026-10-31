@@ -187,6 +187,17 @@ export const RULING_PARK = "ruling";
 export const CONTROLLER_CHECK_PARK = "controller-check";
 /** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
 export const MERGE_HOLD_PARK = "merge-hold";
+/** The park kind of a run that passed review and CI but waits for the operator's acceptance (UAT). */
+export const UAT_PARK = "uat";
+/** The park reason: the sha waiting and why the repo's `uat` rule matched. */
+export const uatParkText = (sha: string, why: string): string =>
+  `waiting for your acceptance on ${sha.slice(0, 7)} (${why})`;
+/** Why a plain resume or message cannot lift this park. */
+export const UAT_USE_ROUTE =
+  "this run waits for the operator's acceptance: POST /api/prs/:repo/:n/uat";
+/** The rework line for a PR the operator sent back at UAT; `note` is the operator's. */
+export const uatSendBackText = (sha: string, note: string): string =>
+  `The operator sent ${sha.slice(0, 7)} back at acceptance.\n\n${note}\n\nFix it, commit, and report again.`;
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
 /** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
@@ -663,6 +674,9 @@ export interface LoopSnapshot {
   lastEngineLineAt: number | null;
   tokens: number;
   budget: number;
+  /** Claude's reported spend and its template cap; null when no dollar cap applies. */
+  costUsd?: number | null;
+  budgetUsd?: number | null;
   ended: { reason: string } | null;
   /** null or absent: no reviewer for this run's session (7a behaviour). */
   review?: LoopReviewFacts | null;
@@ -746,6 +760,16 @@ const park = (loop: RunLoop, kind: string, reason: string): Step => ({
 });
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
+
+/** The budget park's reason when the run has spent its template's dollar cap, else null. */
+const dollarCapReason = (s: LoopSnapshot): string | null =>
+  s.budgetUsd != null && s.costUsd != null && s.costUsd >= s.budgetUsd
+    ? `used $${s.costUsd.toFixed(2)} of a $${s.budgetUsd.toFixed(2)} budget`
+    : null;
+
+/** Whether a budget park's reason is the dollar cap's: Resume cannot lift it (the CLI keeps its cap). */
+export const isDollarCapReason = (reason: string): boolean =>
+  /^used \$[\d.]+ of a \$[\d.]+ budget$/.test(reason);
 
 const nudgePrefix = (s: LoopSnapshot): string =>
   `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
@@ -912,13 +936,20 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (s.ended !== null && !loop.parked?.ended) {
+    // the CLI stops itself at its cap: the end keeps the dollar figure the cap hit parked with
+    const capReason = dollarCapReason(s);
+    const parked =
+      loop.parked?.kind === "budget"
+        ? { ...loop.parked, ended: true }
+        : capReason !== null
+          ? { kind: "budget", reason: capReason, ended: true }
+          : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
     return {
-      loop: {
-        ...loop,
-        phase: "parked",
-        parked: { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true },
-      },
-      actions: [],
+      loop: { ...loop, phase: "parked", parked },
+      actions:
+        capReason !== null && loop.parked?.kind !== "budget"
+          ? [{ kind: "event", text: parkedEventText(capReason) }]
+          : [],
     };
   }
   // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
@@ -1200,6 +1231,9 @@ function stateStep(s: LoopSnapshot): Step {
     return unchanged(loop);
   }
 
+  // like the token park, after the report step: a cap passed on the last turn still pushes the PR
+  const capReason = loop.phase === "working" ? dollarCapReason(s) : null;
+  if (capReason !== null) return park(loop, "budget", capReason);
   if (loop.phase === "working" && s.tokens > s.budget + loop.budgetExtra) {
     // s.tokens is input + output tokens, as the engine supplies them (cache reads are not counted)
     return park(
@@ -1370,6 +1404,7 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
  */
 const isDecisionPark = (kind: string | undefined): boolean =>
   kind === CONTROLLER_CHECK_PARK ||
+  kind === UAT_PARK ||
   kind === MERGE_HOLD_PARK ||
   kind === RULING_PARK ||
   kind === "review" ||
