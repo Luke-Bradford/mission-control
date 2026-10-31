@@ -111,6 +111,28 @@ describe("runPrs", () => {
     expect(other).not.toHaveProperty("hold");
   });
 
+  it("shows a PR waiting for the operator's acceptance, on that PR only", () => {
+    store.upsertPullRequests("shop-app", [pr({ state: "open" })], 0);
+    const waiting = {
+      ...NEW_LOOP,
+      phase: "parked" as const,
+      prNumber: 41,
+      parked: { kind: "uat", reason: "waiting", ended: false },
+      uat: { sha: "a".repeat(40), from: "review" as const, accepted: false },
+    };
+    const prs = [
+      { repo: "octo-org/shop-app", number: 41 },
+      { repo: "octo-org/shop-app", number: 42 },
+    ];
+    const [held, other] = runPrs(config, store, run({ prs, loop: waiting }));
+    expect(held?.uat).toEqual({ sha: "a".repeat(40) });
+    expect(other).not.toHaveProperty("uat");
+    // accepted, or no longer parked on it: nothing waits
+    expect(
+      runPrs(config, store, run({ prs, loop: { ...waiting, parked: null } }))[0],
+    ).not.toHaveProperty("uat");
+  });
+
   it("reads each repo's PRs once per cache, not once per run", () => {
     store.upsertPullRequests("shop-app", [pr()], 0);
     const read = vi.spyOn(store, "pullRequests");

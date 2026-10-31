@@ -1035,6 +1035,23 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Accept or send back a PR at UAT
+
+A repo whose rules set `uat` (labels, paths or both) keeps the engine from merging a matching PR until
+you accept it. When the PR's review is clean and CI is green, the run parks as `uat`, "waiting for
+your acceptance on <head>" with the label or path that matched. It shows in Needs you, on the Board
+card and on the PR chip. If the diff cannot be read, the PR waits too. Look at the work, then:
+
+```sh
+curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept"}'
+```
+
+`accept` lets the engine merge on its next pass through the usual gates (hard-rule clearance, holds,
+the rest). It is tied to the head you looked at: a later head waits again. `send_back` needs a
+`"note"`; the seat gets it as the first line of a new rework round. After its next push passes review
+and CI, the PR waits again. FLIGHT cannot clear this wait: `merge_pr` and a plain resume refuse it.
+It applies to repos where the engine merges (`merge` workspaces).
+
 ### Record a controller check
 
 A ticket with a controller-check heading (`## Controller check`, or a near spelling: another level,
@@ -1250,6 +1267,9 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 - `hard_rules_by`: `operator` (default) or `controller`; superuser FLIGHT powers remain a separate
   user-config setting.
 - `always_ask`: labels that require the operator.
+- `uat`: `{ labels: [...], paths: [...] }`. A tested PR waits for your acceptance when its ticket
+  has one of the labels or its diff touches one of the paths (see "Accept or send back a PR at
+  UAT"). Missing or empty means no UAT. A repo block's lists are unioned with user config's.
 
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
@@ -1259,7 +1279,7 @@ A repo block optionally tightens the rules in the first fenced `yaml` block unde
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
 worktree; a change takes effect once merged and fetched. `hard_rules` is unioned with an explicit
 user-config list (even `[]`); it replaces the defaults only when user config supplies no list.
-`always_ask` is unioned, and `hard_rules_by` is `operator` if either source says `operator`.
+`always_ask` and `uat` are unioned, and `hard_rules_by` is `operator` if either source says `operator`.
 The default counts as `operator`, so a block cannot set `controller` unless user config sets it.
 User-config `templates`, `promote_backlog` and `needs` win whenever supplied, including empty maps,
 empty lists and `false`; the block may fill omitted keys. The block may replace `pick_from` and

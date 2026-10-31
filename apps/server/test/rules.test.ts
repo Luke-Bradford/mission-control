@@ -92,6 +92,20 @@ describe("parseRepoRules", () => {
     expect(() => parseRepoRules(block("mc: {tech_debt_issue: 0}\n"))).toThrow(/tech_debt_issue/);
   });
 
+  it("reads the uat rule, and a repo block can only add to the user config's", () => {
+    expect(parseRepoRules(null).uat).toEqual({ labels: [], paths: [] });
+    const base = userRules({ uat: { labels: ["type:feature"] } });
+    expect(base.uat).toEqual({ labels: ["type:feature"], paths: [] });
+    const rules = parseRepoRules(
+      block('mc: {uat: {labels: ["type:feature", ux], paths: ["apps/web/**"]}}'),
+      base,
+    );
+    expect(rules.uat).toEqual({ labels: ["type:feature", "ux"], paths: ["apps/web/**"] });
+    expect(parseRepoRules(block("mc: {uat: {}}"), base).uat).toEqual(base.uat);
+    expect(() => parseRepoRules(block("mc: {uat: {paths: [/abs]}}"), base)).toThrow(/uat/);
+    expect(() => parseRepoRules(block("mc: {uat: {other: []}}"), base)).toThrow(/other/);
+  });
+
   it("unions hard rules and always-ask labels and keeps operator authority", () => {
     const base = userRules({
       hard_rules: ["policy/**"],

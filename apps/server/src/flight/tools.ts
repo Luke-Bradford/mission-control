@@ -281,6 +281,7 @@ import {
   ticketPathGrants,
   ticketReadText,
   trackedText,
+  UAT_PARK,
   UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
@@ -3186,6 +3187,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       "merge",
       async (a, repo, ctx) => {
         const run = prRun(a.pr);
+        if (run?.loop?.parked?.kind === UAT_PARK)
+          return fail(
+            "This PR waits for the operator's acceptance; only the operator can clear it.",
+          );
         if (!run?.loop?.awaitingFlight || !deps.engine?.clearFlight)
           return fail("No awaiting-flight run PR in your lane.");
         if (flightFloorBlocked(run.loop))
