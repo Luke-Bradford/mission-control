@@ -123,6 +123,7 @@ import {
   type TelemetryRange,
   type TestLockHistory,
   type TestLockView,
+  type TicketView,
   type Topic,
   TYPE_LABELS,
   UPDATE_LOG_UNREADABLE,
@@ -266,7 +267,13 @@ import { type MapPersist, mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
-import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
+import {
+  evidenceProblemText,
+  type McToolsDeps,
+  prTextProblem,
+  readKnown,
+  seatPlace,
+} from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
@@ -309,6 +316,12 @@ import {
 } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
@@ -2955,6 +2968,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
+
+      // Reader: docs/runbook.md#ticket-history (the ticket page is a later web ticket)
+      api.get<{
+        Params: { repoId: string; number: string };
+        Querystring: { before?: string; limit?: string };
+      }>("/tickets/:repoId/:number", async (req, reply) => {
+        const repo = config.repos.find((r) => r.id === req.params.repoId);
+        if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const n = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+        if (n === 0 || n > MAX_ISSUE_NUMBER)
+          return reply.code(404).send({ error: "unknown issue" });
+        const { before: rawBefore, limit: rawLimit } = req.query;
+        const before = rawBefore === undefined ? null : decodeCursor(rawBefore);
+        if (rawBefore !== undefined && before === null)
+          return reply.code(400).send({ error: "before: not a cursor from this endpoint" });
+        const limit = rawLimit === undefined ? TICKET_PAGE_DEFAULT : Number(rawLimit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > TICKET_PAGE_MAX)
+          return reply
+            .code(400)
+            .send({ error: `limit: a whole number from 1 to ${TICKET_PAGE_MAX}` });
+        let issue: TicketView | null = null;
+        let githubError: string | null = null;
+        try {
+          issue = await fetchTicket(repo, n, await githubGql(), config.repos);
+        } catch (e) {
+          // The local facts still answer; the page shows why the body is missing.
+          githubError = e instanceof Error ? e.message : String(e);
+        }
+        const history = ticketHistory({
+          store,
+          repoId: repo.id,
+          github: repo.github,
+          number: n,
+          issue,
+          githubError,
+          singleRepo: config.repos.length === 1,
+          repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+          before,
+          limit,
+        });
+        return history ?? reply.code(404).send({ error: "unknown issue" });
+      });
 
       // Setup runs one at a time per repo, so a second tab pressing it waits and then finds the fields.
       const setupLocks = new Map<string, Promise<unknown>>();

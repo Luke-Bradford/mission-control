@@ -325,6 +325,19 @@ merged-PR history remain available to Activity and Telemetry for one year. Repor
 unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
+### Ticket history
+
+`GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
+its fields (title, outcome, done-when items with their ticked state, size, priority, status,
+labels, GitHub URL), every run on it (seat, phase, times, tokens), its PRs with each review round's
+findings and how later rounds resolved them, the checks of each head, and one timeline, newest
+first, of runs, review rounds, CI results per head, FLIGHT decisions and Comms messages that name
+the ticket. The timeline is paged: `limit` (1 to 200, default 50) and `before`, the `nextBefore`
+cursor of the previous page; `nextBefore` is null on the last page. The body, outcome and
+done-when items are read live from GitHub; if GitHub does not answer, the rest still comes back
+with `body: null` and `githubError` saying why. Every lookup uses a ticket index, so a long
+history never scans a table. It is read-only and needs the operator token like the other reads.
+
 ### Page-load budget
 
 Every HUD page's first load stays under 500 KB gzipped, and no single response is over 300 KB

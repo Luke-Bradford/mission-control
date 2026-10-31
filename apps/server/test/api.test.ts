@@ -1392,6 +1392,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app"],
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
+  ["GET", "/api/tickets/shop-app/7"],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
@@ -2580,6 +2581,7 @@ describe("local access", () => {
             .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
