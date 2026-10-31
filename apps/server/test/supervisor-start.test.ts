@@ -2534,25 +2534,24 @@ describe("repo guidance at launch", () => {
   });
 
   it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
-    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    // the two launches land in different seconds, as a slow machine can make them
+    let clock = Date.parse("2026-10-30T23:35:40.100Z");
+    const { sup, cfg } = make({ extraSeat: FLIGHT, now: () => clock });
     sup.start();
 
-    // only Date is faked: the two launches land in different seconds, as a slow machine can make them
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-30T23:35:40.100Z"));
     const plain = await sup.startWatch("flight-1");
+    expect(plain.runId).toBe("flight-1:20261030T233540Z");
     await until(() => expect(launches()).toHaveLength(1));
     const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
     const plainGrants = launchGrants(launches()[0] as { argv: unknown }, plain.runId);
     await sup.endRun("flight-1");
-    vi.setSystemTime(new Date("2026-10-30T23:35:41.900Z"));
+    clock = Date.parse("2026-10-30T23:35:41.900Z");
 
     const repo = cfg.repos[0];
     if (!repo) throw new Error("missing test repo");
     repo.guidance = guidance;
     const guided = await sup.startWatch("flight-1");
-    vi.useRealTimers();
-    expect(guided.runId).not.toBe(plain.runId);
+    expect(guided.runId).toBe("flight-1:20261030T233541Z");
     await until(() => expect(launches()).toHaveLength(2));
     const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
     expect(guidedPrompt).toContain(advice);
