@@ -4,17 +4,21 @@ import type { AddressInfo } from "node:net";
 /**
  * A local stand-in for the Anthropic Messages API, so a real `claude` process can run a seat's
  * Bash call with no network and no login. It answers the first model turn with one Bash call
- * (`command`) and every turn after a tool result with a plain "done".
+ * (`command`) and every turn after a tool result with a plain "done", keeping the text of each
+ * tool result it is sent.
  */
 export interface FakeAnthropic {
   url: string;
   /** How many Bash calls the CLI was asked to make (0: the CLI never reached the model). */
   bashCalls: () => number;
+  /** The text of every tool result the CLI sent back, in order: what the Bash command printed. */
+  toolResults: () => string[];
   close: () => Promise<void>;
 }
 
 export async function startFakeAnthropic(command: string): Promise<FakeAnthropic> {
   let bashCalls = 0;
+  const toolResults: string[] = [];
   const message = (content: unknown[], stop: string | null) => ({
     id: "msg_fake",
     type: "message",
@@ -43,6 +47,8 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
         // an unreadable body gets the plain answer
       }
       const hasResult = JSON.stringify(body.messages ?? []).includes('"tool_result"');
+      // the newest turn's results only: every later request repeats the earlier ones
+      if (hasResult) toolResults.push(...resultTexts(body.messages));
       const canBash = (body.tools ?? []).some((t) => t.name === "Bash");
       const call = canBash && !hasResult;
       if (call) bashCalls++;
@@ -87,6 +93,25 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     bashCalls: () => bashCalls,
+    toolResults: () => [...toolResults],
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
+}
+
+/** The text of the tool results in the last message of a request (a string, or text blocks). */
+function resultTexts(messages: unknown): string[] {
+  const last = Array.isArray(messages) ? messages.at(-1) : undefined;
+  const content = (last as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b): b is { type: string; content?: unknown } => b?.type === "tool_result")
+    .map((b) =>
+      typeof b.content === "string"
+        ? b.content
+        : Array.isArray(b.content)
+          ? b.content
+              .map((c: { text?: unknown }) => (typeof c.text === "string" ? c.text : ""))
+              .join("")
+          : "",
+    );
 }
