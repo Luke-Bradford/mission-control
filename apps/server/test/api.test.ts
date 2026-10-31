@@ -4217,9 +4217,11 @@ describe("boards, escalations, health", () => {
         bus,
         now: () => clock,
         supervisor: stubSupervisor(),
-        mapTree: (...args) => {
+        // a slow build: a rebuild on every load would blow the 500 ms budget
+        mapTree: async (...args) => {
           builds.push(args[0]);
-          return mapTree(...args);
+          await new Promise((r) => setTimeout(r, 600));
+          return await mapTree(...args);
         },
       });
       return { a, builds, checkout };
@@ -4290,12 +4292,15 @@ describe("boards, escalations, health", () => {
     });
 
     it("answers the map in under 500 ms once the tree is cached", async () => {
-      const { a } = openMap(join(dir, "fast.jsonl"));
+      const { a, builds } = openMap(join(dir, "fast.jsonl"));
       try {
         await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        // past the whole-payload cache, so only the tree cache can keep this load fast
+        clock += 16_000;
         const start = performance.now();
         await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
         expect(performance.now() - start).toBeLessThan(500);
+        expect(builds).toHaveLength(1);
       } finally {
         await a.close();
       }
