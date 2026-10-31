@@ -1,6 +1,6 @@
 import type { CpuInfo } from "node:os";
 import type { MachineSample } from "@mc/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   cpuPercent,
   type MachineDeps,
@@ -232,6 +232,34 @@ describe("sampleMachine", () => {
     const bad = await sampleMachine(deps({ vmStat: async () => "nonsense" }));
     expect(bad.sample.memUsedBytes).toBe(TOTAL - 1024 ** 3);
     expect(bad.errors).toHaveLength(1);
+  });
+
+  it("reads only os values and spawns no command when spawn is off", async () => {
+    const never = vi.fn(async () => {
+      throw new Error("spawned");
+    });
+    const prev = sample({ swapUsedBytes: 7, swapTotalBytes: 9, memoryPressureFreePct: 40 });
+    const r = await sampleMachine(
+      deps({
+        spawn: false,
+        vmStat: never,
+        swapUsage: never,
+        memoryPressure: never,
+        ps: never,
+        psTree: never,
+        prev,
+      }),
+    );
+    expect(never).not.toHaveBeenCalled();
+    expect(r.errors).toEqual([]);
+    expect(r.sample.memUsedBytes).toBe(TOTAL - 1024 ** 3);
+    expect(r.sample).toMatchObject({
+      load1: 1.25,
+      diskFreeBytes: 250 * 4096,
+      swapUsedBytes: 7,
+      memoryPressureFreePct: 40,
+      agents: prev.agents,
+    });
   });
 
   it("disk failing keeps the previous disk values, or null", async () => {

@@ -24,6 +24,11 @@ export interface MachineDeps {
   psTree: () => Promise<string>;
   /** The test-lock holder's command; null when the lock is free. */
   testCommand: string | null;
+  /**
+   * False reads only os values (cpus, load, memory, disk): no `vm_stat`, `sysctl`, `memory_pressure`
+   * or `ps` is spawned, and those parts keep their value from `prev`. Default: true.
+   */
+  spawn?: boolean;
   prevCpus: CpuInfo[] | null;
   prev: MachineSample | null;
   now: number;
@@ -38,7 +43,10 @@ export interface MachineResult {
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** The real dependencies: no shell, 2 s timeout on each command. */
-export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now" | "testCommand"> {
+export function realMachineDeps(): Omit<
+  MachineDeps,
+  "prevCpus" | "prev" | "now" | "testCommand" | "spawn"
+> {
   const run = async (cmd: string, args: string[], maxBuffer?: number) =>
     (await execFileP(cmd, args, { timeout: COMMAND_TIMEOUT_MS, encoding: "utf8", maxBuffer }))
       .stdout;
@@ -235,13 +243,18 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
     errors.push(`cpu: ${msg(e)}`);
   }
 
+  const spawn = deps.spawn !== false;
   const memTotalBytes = deps.totalmem();
   let memUsedBytes: number | null;
-  try {
-    memUsedBytes = parseVmStat(await deps.vmStat(), memTotalBytes);
-    if (memUsedBytes === null) throw new Error("unrecognised vm_stat output");
-  } catch (e) {
-    errors.push(`vm_stat: ${msg(e)}`);
+  if (spawn) {
+    try {
+      memUsedBytes = parseVmStat(await deps.vmStat(), memTotalBytes);
+      if (memUsedBytes === null) throw new Error("unrecognised vm_stat output");
+    } catch (e) {
+      errors.push(`vm_stat: ${msg(e)}`);
+      memUsedBytes = Math.max(0, memTotalBytes - deps.freemem());
+    }
+  } else {
     memUsedBytes = Math.max(0, memTotalBytes - deps.freemem());
   }
 
@@ -257,21 +270,25 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
 
   let swapUsedBytes = prev?.swapUsedBytes ?? null;
   let swapTotalBytes = prev?.swapTotalBytes ?? null;
-  try {
-    const swap = parseSwapUsage(await deps.swapUsage());
-    if (swap === null) throw new Error("unrecognised vm.swapusage output");
-    swapUsedBytes = swap.usedBytes;
-    swapTotalBytes = swap.totalBytes;
-  } catch (e) {
-    errors.push(`swap: ${msg(e)}`);
+  if (spawn) {
+    try {
+      const swap = parseSwapUsage(await deps.swapUsage());
+      if (swap === null) throw new Error("unrecognised vm.swapusage output");
+      swapUsedBytes = swap.usedBytes;
+      swapTotalBytes = swap.totalBytes;
+    } catch (e) {
+      errors.push(`swap: ${msg(e)}`);
+    }
   }
 
   let memoryPressureFreePct = prev?.memoryPressureFreePct ?? null;
-  try {
-    memoryPressureFreePct = parseMemoryPressure(await deps.memoryPressure());
-    if (memoryPressureFreePct === null) throw new Error("unrecognised memory_pressure output");
-  } catch (e) {
-    errors.push(`memory_pressure: ${msg(e)}`);
+  if (spawn) {
+    try {
+      memoryPressureFreePct = parseMemoryPressure(await deps.memoryPressure());
+      if (memoryPressureFreePct === null) throw new Error("unrecognised memory_pressure output");
+    } catch (e) {
+      errors.push(`memory_pressure: ${msg(e)}`);
+    }
   }
 
   let load1 = prev?.load1 ?? null;
@@ -283,16 +300,18 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
 
   let agents = prev?.agents ?? null;
   let topConsumers = prev?.topConsumers ?? [];
-  try {
-    const ps = await deps.ps();
-    agents = parsePs(ps);
-    topConsumers = parseTopConsumers(ps);
-  } catch (e) {
-    errors.push(`ps: ${msg(e)}`);
+  if (spawn) {
+    try {
+      const ps = await deps.ps();
+      agents = parsePs(ps);
+      topConsumers = parseTopConsumers(ps);
+    } catch (e) {
+      errors.push(`ps: ${msg(e)}`);
+    }
   }
 
   let testRun: MachineSample["testRun"] = null;
-  if (deps.testCommand !== null) {
+  if (spawn && deps.testCommand !== null) {
     try {
       testRun = testRunUse(parsePsTree(await deps.psTree()), deps.testCommand);
     } catch (e) {

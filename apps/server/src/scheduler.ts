@@ -242,6 +242,8 @@ export interface Collectors {
     prev: MachineSample | null,
     now: number,
     testCommand: string | null,
+    /** Whether the reading may spawn `vm_stat`, `sysctl`, `memory_pressure` and `ps`. */
+    spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
 }
@@ -261,6 +263,11 @@ export interface SchedulerDeps {
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
   hasViewClients?: () => boolean;
+  /**
+   * A ticket or review waits for the machine guard to admit it. Default: from the stored queues,
+   * queued reviews and Ready cards. Only read while no browser is connected.
+   */
+  startPending?: () => boolean;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
@@ -345,8 +352,8 @@ export function realCollectors(config: CcConfig): Collectors {
         now,
       );
     },
-    machine: (prevCpus, prev, now, testCommand) =>
-      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
+    machine: (prevCpus, prev, now, testCommand, spawn) =>
+      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand, spawn }),
     transcripts: maintainTranscripts,
   };
 }
@@ -391,6 +398,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let latestMachine: MachineSample | null = null;
   let machineCpus: CpuInfo[] | null = null;
   let machineMinute = -1;
+  /** The capacity guard held new starts at the last stored sample. */
+  let machineBlocked = false;
+  /**
+   * Whether this machine reading may spawn commands. The swap and memory-pressure thresholds (the
+   * swap hard limit always applies) need `sysctl` and `memory_pressure`, so a browser, a start
+   * waiting at the guard, or a held guard (to see it clear) spawns; an idle hub reads os values.
+   */
+  const machineSpawns = (): boolean =>
+    !noViewClients() || machineBlocked || (deps.startPending ?? (() => store.hasPendingStart()))();
   let machineStatus: { ok: boolean; error: string | null; at: number } | null = null;
   /** The last backfill left nothing to read: later ticks only count until something is left. */
   let backfillDone = false;
@@ -475,11 +491,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     triageTimer.unref();
   };
 
+  /** True when the hub knows no browser is connected; a caller that cannot tell reads eagerly. */
+  const noViewClients = (): boolean => deps.hasViewClients?.() === false;
+
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
   const sweepAcks = (rows?: CrewRow[]) => {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
-    const currentRows = rows ?? crew(config, store, at, lock).rows;
+    // Rows are read only if a hold needs them, and then without event timelines (the sweep keeps
+    // none).
+    const currentRows = (): CrewRow[] =>
+      rows ?? crew(config, store, at, lock, undefined, true).rows;
     let waiting: Set<string> | undefined;
     if (
       evaluateHolds(
@@ -496,7 +518,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             );
         },
         (since) =>
-          currentRows.some((r) => {
+          currentRows().some((r) => {
             if (r.kind !== "crew" || r.role === "FLIGHT" || r.hudState === "stopped") return false;
             const seat = store.seatSession(r.id);
             return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
@@ -509,7 +531,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         },
         (key) => {
           waiting ??= new Set(
-            attentionItems(config, store, at, lock, currentRows, null, true).map((i) => i.key),
+            attentionItems(config, store, at, lock, rows, null, true).map((i) => i.key),
           );
           return !waiting.has(key);
         },
@@ -517,6 +539,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     )
       emit("attention");
     void applyDefaults();
+    // The ack sweep is housekeeping: a hub with no browser leaves it to the next poll with one.
+    if (noViewClients()) return;
     store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
   };
 
@@ -552,6 +576,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   const afterLoopTick = () => {
+    if (noViewClients()) return sweepAcks();
     const at = now();
     const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK).rows;
     recordStateChanges(rows, at);
@@ -562,9 +587,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let unsubscribeCrew: (() => void) | null = null;
   let crewTimer: NodeJS.Timeout | null = null;
   const recordCrewSoon = () => {
-    if (crewTimer !== null) return;
+    if (crewTimer !== null || noViewClients()) return;
     crewTimer = setTimeout(() => {
       crewTimer = null;
+      if (noViewClients()) return;
       try {
         const at = now();
         // The feed refetches on `agents`; announce what was just recorded (the re-read finds no change).
@@ -1045,6 +1071,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         latestMachine,
         at,
         deps.lockState?.().holder?.command ?? null,
+        machineSpawns(),
       );
       machineCpus = r.cpus;
       latestMachine = r.sample;
@@ -1066,6 +1093,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           at,
           capacityConfig,
         );
+        machineBlocked = capacity.blocked;
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;

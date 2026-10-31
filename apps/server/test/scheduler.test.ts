@@ -55,6 +55,7 @@ import {
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
+import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -776,6 +777,34 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
         });
 
+        it("builds no crew view across loop ticks and agents events while no browser is connected", async () => {
+          vi.useFakeTimers();
+          const timelines = vi.spyOn(views, "runEventsIndex");
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          s.start();
+          await vi.advanceTimersByTimeAsync(3000);
+          const before = crewCalls();
+          for (let i = 0; i < 4; i++) {
+            states["seat-guido"] = i % 2 === 0 ? "running" : "idle";
+            at = NOW + 15_000 * (i + 1);
+            await s.tick("ta");
+            await s.tick("studio");
+            bus.emit("agents");
+            await vi.advanceTimersByTimeAsync(1500);
+          }
+          expect(crewCalls()).toBe(before);
+          expect(timelines).not.toHaveBeenCalled();
+          expect(store.agentEvents(0)).toEqual([]);
+          await s.stop();
+        });
+
         it("ignores topics other than agents", async () => {
           const s = await started();
           const before = crewCalls();
@@ -1008,12 +1037,12 @@ describe("scheduler", () => {
         lockState: () => lock,
       });
       await s.tick("machine");
-      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test");
+      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test", true);
 
       lock = hud.NO_LOCK;
       const prev = s.machine();
       await s.tick("machine");
-      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
+      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null, true);
     });
 
     it("runs every 10 s, keeps the latest sample in memory and emits machine", async () => {
@@ -1079,6 +1108,31 @@ describe("scheduler", () => {
       await s.tick("machine");
 
       expect(c.machine).toHaveBeenCalledOnce();
+      // os values only: nothing waits at the guard, so no vm_stat, sysctl, memory_pressure or ps
+      expect(vi.mocked(c.machine).mock.calls[0]?.[4]).toBe(false);
+    });
+
+    it("spawns the machine commands for a browser, a start at the guard, or a held guard", async () => {
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const spawnFor = async (over: Partial<Parameters<typeof createScheduler>[0]>) => {
+        const c = stubs();
+        const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c, ...over });
+        await s.tick("machine");
+        return vi.mocked(c.machine).mock.calls[0]?.[4];
+      };
+      expect(await spawnFor({ hasViewClients: () => true, startPending: () => false })).toBe(true);
+      expect(await spawnFor({ hasViewClients: () => false, startPending: () => true })).toBe(true);
+      expect(await spawnFor({ hasViewClients: () => false, startPending: () => false })).toBe(
+        false,
+      );
+      // the default pending check reads the store: a queued ticket is a start at the guard
+      expect(await spawnFor({ hasViewClients: () => false })).toBe(false);
+      store.replaceQueue("seat-a", [{ repoId: "shop-app", issue: 1 }]);
+      expect(await spawnFor({ hasViewClients: () => false })).toBe(true);
     });
 
     it("writes the first sample of each minute to the store, not every tick", async () => {

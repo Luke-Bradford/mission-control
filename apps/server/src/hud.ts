@@ -947,7 +947,8 @@ export function attentionItems(
   hubLogin: string | null = null,
   includeHeld = false,
 ): AttentionItem[] {
-  const given = rows ?? crew(config, store, now, lock).rows;
+  // no caller's rows: the summary crew, since attention never reads the event timelines
+  const given = rows ?? crew(config, store, now, lock, undefined, true).rows;
   const origin = rowOrigins.get(given);
   return memoised(
     store,
