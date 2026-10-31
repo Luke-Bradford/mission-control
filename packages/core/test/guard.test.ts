@@ -154,6 +154,10 @@ describe("FLIGHT's full profile", () => {
     ["git push origin HEAD", "merge-push"],
     ["git push origin HEAD:mc/7", "merge-push"],
     ["git push --all origin", "merge-push"],
+    ["git push origin $(git branch --show-current)", "merge-push"],
+    ['git push origin "$(git rev-parse --abbrev-ref HEAD)"', "merge-push"],
+    ["git push origin `git branch --show-current`", "merge-push"],
+    ["git push origin @{0}", "merge-push"],
     ["git merge mc/7 && git push origin HEAD", "merge-push"],
     ["sqlite3 mc.db \"update settings set value='[]' where key='flight.approvals'\"", "repo-rules"],
     ["git push origin +mc/7", "merge-push"],
@@ -203,17 +207,37 @@ describe("flightTicketWrites", () => {
     expect(flightTicketWrites("gh issue edit 7 --add-label x")).toEqual({
       issues: [7],
       project: false,
+      unreadable: false,
     });
     expect(flightTicketWrites("gh issue close 8 && gh issue reopen 9")).toEqual({
       issues: [8, 9],
       project: false,
+      unreadable: false,
     });
     expect(
       flightTicketWrites("gh issue edit https://github.com/o/r/issues/12 --title x").issues,
     ).toEqual([12]);
     expect(flightTicketWrites("gh project item-edit --id X").project).toBe(true);
-    expect(flightTicketWrites("gh issue view 7")).toEqual({ issues: [], project: false });
-    expect(flightTicketWrites("gh pr close 7")).toEqual({ issues: [], project: false });
+    // flags before the numbers, a flag value that looks like a word, and several numbers
+    expect(flightTicketWrites("gh issue close -c done 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue close --comment done 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit -R o/r 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit --add-label x 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit 8 7 --add-label x").issues).toEqual([8, 7]);
+    // a write whose ticket cannot be read is unreadable, and refused
+    expect(flightTicketWrites("gh issue edit --add-label x").unreadable).toBe(true);
+    expect(flightTicketWrites("gh issue close some-branch").unreadable).toBe(true);
+    expect(flightTicketWrites("gh issue close 7").unreadable).toBe(false);
+    expect(flightTicketWrites("gh issue view 7")).toEqual({
+      issues: [],
+      project: false,
+      unreadable: false,
+    });
+    expect(flightTicketWrites("gh pr close 7")).toEqual({
+      issues: [],
+      project: false,
+      unreadable: false,
+    });
   });
 });
 

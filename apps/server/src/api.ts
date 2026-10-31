@@ -2119,6 +2119,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 rule: "repo-rules",
                 text: `${GUARD_RULES["repo-rules"]}: a board item write in the shell (use set_fields or edit_card)`,
               };
+            } else if (writes.unreadable) {
+              verdict = {
+                kind: "deny",
+                rule: "repo-rules",
+                text: `${GUARD_RULES["repo-rules"]}: a ticket edit whose number the guard cannot read (name each ticket: gh issue edit <number>)`,
+              };
             } else if (writes.issues.length > 0) {
               const rules = await deps.repoRules?.(seat.repoId);
               const held =

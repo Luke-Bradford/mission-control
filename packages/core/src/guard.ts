@@ -2182,7 +2182,8 @@ function pushRefusal(rest: readonly string[]): string | null {
   }
   if (positional.length < 2) return "git push needs an explicit branch: git push origin <branch>";
   for (const ref of positional.slice(1)) {
-    if (ref.split(":").some((side) => side === "HEAD" || side === "@"))
+    // a literal HEAD, or a name built at run time, may be the checked-out branch (main in the hub checkout)
+    if (ref.split(":").some((side) => side === "HEAD" || side === "@" || /[$`]|@\{/.test(side)))
       return "git push needs an explicit branch: git push origin <branch>";
   }
   return null;
@@ -3208,6 +3209,31 @@ const GH_ISSUE_WRITES = new Set([
   "pin",
   "unpin",
 ]);
+/** The `gh issue` flags that take a value in the next word (`--flag=value` carries its own). */
+const GH_ISSUE_VALUE_FLAGS = new Set([
+  "-c",
+  "--comment",
+  "-r",
+  "--reason",
+  "-R",
+  "--repo",
+  "-t",
+  "--title",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "-m",
+  "--milestone",
+  "-a",
+  "--add-assignee",
+  "--remove-assignee",
+  "-l",
+  "--add-label",
+  "--remove-label",
+  "--add-project",
+  "--remove-project",
+]);
 const GH_PROJECT_WRITES = new Set([
   "item-edit",
   "item-archive",
@@ -3220,18 +3246,36 @@ const GH_PROJECT_WRITES = new Set([
  * The tickets a shell command edits through `gh issue`, and whether it writes a project item
  * (#1214): the guard holds `always_ask` tickets and the board to FLIGHT's tools.
  */
-export function flightTicketWrites(command: string): { issues: number[]; project: boolean } {
+export function flightTicketWrites(command: string): {
+  issues: number[];
+  project: boolean;
+  /** A write verb whose ticket numbers could not all be read: the guard refuses it. */
+  unreadable: boolean;
+} {
   const issues: number[] = [];
   let project = false;
+  let unreadable = false;
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...args] = argv;
     if (program !== "gh") continue;
     if (args[0] === "project" && GH_PROJECT_WRITES.has(args[1] ?? "")) project = true;
     if (args[0] === "issue" && GH_ISSUE_WRITES.has(args[1] ?? "")) {
-      const ref = args.slice(2).find((a) => !a.startsWith("-"));
-      const n = /^(?:#)?(\d+)$/.exec(ref ?? "")?.[1] ?? /\/issues\/(\d+)$/.exec(ref ?? "")?.[1];
-      if (n !== undefined) issues.push(Number(n));
+      // gh takes its flags before or after the numbers, and several numbers: collect every positional
+      const rest = args.slice(2);
+      const found: number[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i] ?? "";
+        if (GH_ISSUE_VALUE_FLAGS.has(a)) i++;
+        else if (a.startsWith("-")) continue;
+        else {
+          const n = /^(\d+)$/.exec(a)?.[1] ?? /\/issues\/(\d+)$/.exec(a)?.[1];
+          if (n === undefined) unreadable = true;
+          else found.push(Number(n));
+        }
+      }
+      if (found.length === 0) unreadable = true;
+      issues.push(...found);
     }
   }
-  return { issues, project };
+  return { issues, project, unreadable };
 }

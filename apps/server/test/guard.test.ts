@@ -579,6 +579,9 @@ describe("POST /api/guard/check", () => {
           "gh issue edit 7 --add-label x",
           "gh issue close 7",
           "gh issue view 8 && gh issue close 7",
+          "gh issue close -c done 7",
+          "gh issue edit -R o/r 7 --add-label x",
+          "gh issue edit 8 7 --add-label x",
         ].entries()) {
           const r = await check(tokF, bash(`a${i}`, command), ask);
           expect(reason(r.body)).toContain("always_ask");
@@ -587,6 +590,11 @@ describe("POST /api/guard/check", () => {
           "{}",
         );
         expect((await check(tokF, bash("rd", "gh issue view 7"), ask)).body).toBe("{}");
+      });
+
+      it("refuses a ticket edit whose number it cannot read", async () => {
+        const r = await check(tokF, bash("u1", "gh issue edit --add-label x"), ask);
+        expect(reason(r.body)).toContain("cannot read");
       });
 
       it("refuses a board item write in the shell, pointing to set_fields", async () => {
