@@ -452,6 +452,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const gate = new TopicGate({
     agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
     health: () => healthContent(store.status()),
+    // keys and owners only: an item's relative text changes every minute and is no news
+    attention: () =>
+      attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
+        i.key,
+        i.owner,
+      ]),
   });
 
   /** Sends each queued topic once, and each gated topic that changed. Attention items are built from agents and escalations. */
@@ -471,8 +477,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const t of topics) gate.changed(t);
       for (const t of maybe) if (gate.changed(t)) topics.push(t);
     }
+    // attention follows agents or escalations, and also goes out alone when its items changed
+    // (a clock-only item, such as an unanswered question turning due, changes no crew row)
+    const follows = topics.includes("agents") || topics.includes("escalations");
+    if (follows && !topics.includes("attention")) {
+      if (!noViewClients()) gate.changed("attention"); // keep the stored hash in step
+      topics.push("attention");
+    }
     for (const t of topics) bus.emit(t);
-    if (topics.includes("agents") || topics.includes("escalations")) bus.emit("attention");
   };
 
   const arm = () => {
@@ -835,7 +847,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           c.ta(loop, store, now(), taState, undefined, c.launchctl),
         );
       }
-      emitIfChanged("agents", "health");
+      emitIfChanged("agents", "health", "attention");
       afterLoopTick();
     },
     studio: async () => {
@@ -855,7 +867,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           ),
         );
       }
-      emitIfChanged("agents", "health");
+      emitIfChanged("agents", "health", "attention");
       afterLoopTick();
     },
     sessions: readLiveSessions,
@@ -946,7 +958,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // Board rows and PRs reach the board, escalations the attention items, only when they changed.
       if (changed.boards) emit("boards");
       if (changed.escalations) emit("escalations");
-      emitIfChanged("agents", "health");
+      emitIfChanged("agents", "health", "attention");
       emit("limits");
       sweepAcks();
       // the poll is what the loop waits on (a PR's CI, a merge): each looped run is judged on it

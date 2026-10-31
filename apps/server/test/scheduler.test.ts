@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BACKFILL_COLLECTOR,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   type CrewRow,
   ENGINE_TICK_MS,
   FLIGHT_LOOPS_SETTING,
@@ -1102,6 +1103,31 @@ describe("scheduler", () => {
       flushEmits();
       expect(topics.filter((t) => t === "agents")).toHaveLength(1);
       expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+    });
+
+    it("a Needs-you item that turns due with no crew row changing still sends attention", async () => {
+      vi.useFakeTimers();
+      const T = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 3_600_000;
+      let at = T;
+      const s = createScheduler({ config, store, bus, now: () => at, collectors: stubs() });
+      store.addComms({
+        at: T - 14 * 60_000,
+        from: "alpha",
+        to: "beta",
+        label: "question",
+        text: "which way?",
+        ticket: null,
+        mentions: [],
+      });
+      await s.tick("ta");
+      flushEmits();
+      topics.length = 0;
+      at = T + 2 * 60_000;
+      await s.tick("ta");
+      flushEmits();
+      expect(topics).toContain("attention");
+      expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+      expect(topics).not.toContain("agents");
     });
 
     it("an unchanged GitHub poll emits limits but not agents or health", async () => {

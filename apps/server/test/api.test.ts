@@ -701,6 +701,7 @@ describe("Comms API", () => {
     await withCommsApp(async (comms) => {
       const counts = (await comms.inject({ method: "GET", url: "/api/comms/counts" })).json() as {
         id: string;
+        contacts: number;
         recent24h: number;
         unread: number;
         directUnread: number;
@@ -711,10 +712,12 @@ describe("Comms API", () => {
       const page = (await comms.inject({ method: "GET", url: "/api/comms/agents/alpha" })).json();
       expect(alpha).toEqual({
         id: "alpha",
+        contacts: page.contacts.reduce((n: number, c: { count: number }) => n + c.count, 0),
         recent24h: 2,
         unread: page.unread,
         directUnread: page.directUnread,
       });
+      expect(alpha?.contacts).toBeGreaterThan(0);
       expect(counts.find((c) => c.id === "beta")?.recent24h).toBe(1);
     });
   });

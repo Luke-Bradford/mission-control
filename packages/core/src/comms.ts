@@ -72,9 +72,11 @@ export interface CommsMessage {
   pinned?: boolean;
   operator: boolean;
 }
-/** One agent's Comms figures for the nav: messages in the last 24 hours and the unread counts. */
+/** One agent's Comms figures for the nav: messages in the last 24 hours, with its contacts, and the unread counts. */
 export interface CommsCount {
   id: string;
+  /** Messages with its contacts, all time, excluding the crew channel. */
+  contacts: number;
   recent24h: number;
   unread: number;
   directUnread: number;

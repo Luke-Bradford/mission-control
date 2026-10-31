@@ -1586,15 +1586,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return rows.map((row) => storedCommsMessage(row, pins));
       };
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
-      /** An agent's unread counts, as its page shows them (the page and the counts route share this). */
+      /** The agents an agent has talked with, as its conversation list names them. */
+      const commsContacts = (id: string) =>
+        store.commsContactIds(id).filter((contact) => contact !== id && contact !== COMMS_CREW);
+      /** Direct-line replies not yet seen. Needs you no longer counts them; the thread does (#757). */
+      const directUnreadOf = (id: string) =>
+        id === COMMS_CAPCOM
+          ? 0
+          : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct).length;
+      /** An agent's counts, as its page shows them (the page and the counts route share these). */
       const agentCommsCounts = (id: string) => ({
+        // every message with its contacts, all time: the figure the nav row shows
+        contacts: commsContacts(id).reduce(
+          (n, contact) =>
+            n +
+            store.commsCounts(
+              { pair: [id, contact] },
+              store.commsScopeCursor(pairScope(id, contact)),
+            ).count,
+          0,
+        ),
         unread: store.commsCounts({ agent: id }, store.commsScopeCursor(`agent-all:${id}`)).unread,
-        // Needs you no longer counts direct-line replies; the thread does (#757)
-        directUnread:
-          id === COMMS_CAPCOM
-            ? 0
-            : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
-                .length,
+        directUnread: directUnreadOf(id),
       });
       const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
       /** `?limit=&before=` of a Comms read; null when either is malformed (the caller answers 400). */
@@ -1693,20 +1706,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const inbox =
           summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = store
-          .commsContactIds(id)
-          .filter((contact) => contact !== id && contact !== COMMS_CREW)
-          .map((contact) => {
-            const scope: CommsReadScope = { pair: [id, contact] };
-            const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-            const last = store.commsPage(scope, 1).rows[0];
-            return {
-              id: contact,
-              lastMessage: last === undefined ? null : storedCommsMessage(last),
-              count: counts.count,
-              unread: counts.unread,
-            };
-          });
+        const contacts = commsContacts(id).map((contact) => {
+          const scope: CommsReadScope = { pair: [id, contact] };
+          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
+          const last = store.commsPage(scope, 1).rows[0];
+          return {
+            id: contact,
+            lastMessage: last === undefined ? null : storedCommsMessage(last),
+            count: counts.count,
+            unread: counts.unread,
+          };
+        });
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
@@ -1714,7 +1724,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           contacts,
           inboxCursor,
           inboxUnread: store.commsCounts({ inbox: id }, inboxCursor).unread,
-          directUnread: agentCommsCounts(id).directUnread,
+          directUnread: directUnreadOf(id),
         };
       });
       // Reader: apps/web/src/comms/CommsNav.tsx (the nav rows' message counts)
