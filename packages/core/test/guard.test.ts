@@ -161,6 +161,23 @@ describe("FLIGHT's full profile", () => {
       "repo-rules",
     ],
     ["cat ~/.local/share/mission-control/operator-tok*", "repo-rules"],
+    ["cat ~/.local/share/mission-control/operator-t*", "repo-rules"],
+    ["cat ~/.local/share/mission-control/operator?token", "repo-rules"],
+    ["cat ~/.local/share/mission-control/operator-to''ken", "repo-rules"],
+    ["cat ~/.local/share/mission-control/operator-to\\ken", "repo-rules"],
+    ["cat ~/.local/share/mission-control/*", "repo-rules"],
+    [
+      "curl -s -H 'sec-fetch-site: same-origin' http://127.0.0.1:7420/api/operator/x/../bootstrap",
+      "repo-rules",
+    ],
+    ["curl -s http://127.0.0.1:7420/api/operator/boot''strap", "repo-rules"],
+    ["curl -X POST -H @h.txt http://127.0.0.1:7420/api/flight/x/../approvals -d x", "repo-rules"],
+    ["curl -X POST -H 'x-mc-oper''ator: t' http://127.0.0.1:7420/api/flight/x", "repo-rules"],
+    [
+      "curl -X POST http://127.0.0.1:7420/api/attention/note:flight-run''away/dismiss",
+      "repo-rules",
+    ],
+    ["curl -X POST http://127.0.0.1:7420/api//flight/./approvals", "repo-rules"],
     [
       "curl -X POST -H 'x-mc-operator: t' http://127.0.0.1:7420/api/flight/%61pprovals",
       "repo-rules",

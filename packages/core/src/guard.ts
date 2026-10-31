@@ -2165,9 +2165,27 @@ const APPROVAL_PATHS =
 /** `%xx` escapes decoded, so `flight/%61pprovals` is read as the route the hub will route it to. */
 const decodePercent = (s: string): string =>
   s.replace(/%([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(Number.parseInt(h, 16)));
-/** Whether a command or path names the operator token, the HUD's bootstrap, approvals or the breaker. */
+/** A path with `%xx` decoded and `/./`, `/seg/../` and `//` folded away, as curl and the hub's router read it. */
+const normPath = (w: string): string => {
+  let x = decodePercent(w);
+  let y: string;
+  do {
+    y = x;
+    x = x
+      .replace(/\/\.(?=\/|$)/g, "")
+      .replace(/\/[^/]+\/\.\.(?=\/|$)/g, "")
+      .replace(/\/{2,}/g, "/");
+  } while (x !== y);
+  return x;
+};
+/** Whether a command, word or path names the operator token, the HUD's bootstrap, approvals or the breaker. */
 const namesControllerAct = (s: string): boolean =>
-  APPROVAL_PATHS.test(s) || APPROVAL_PATHS.test(decodePercent(s));
+  APPROVAL_PATHS.test(s) ||
+  APPROVAL_PATHS.test(decodePercent(s)) ||
+  APPROVAL_PATHS.test(normPath(s));
+/** A glob that could expand to the operator token file: `operator-t*`, `operator?token`, or any glob in the hub's data dir. */
+const globsToken = (w: string): boolean =>
+  /operator[^\s/]*[*?[]/i.test(w) || /mission-control\/[^\s]*[*?[]/i.test(w);
 
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
@@ -2298,7 +2316,10 @@ export function guardDecision(
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") {
-    if (ctx.fullAccess && namesControllerAct(e.input.file_path ?? ""))
+    if (
+      ctx.fullAccess &&
+      (namesControllerAct(e.input.file_path ?? "") || globsToken(e.input.file_path ?? ""))
+    )
       return deny(
         "repo-rules",
         "the operator token, approvals and the runaway breaker are a controller's",
@@ -2351,7 +2372,8 @@ export function guardDecision(
           "repo-rules",
           "sqlite3 on the hub's database runs with -readonly and no dot-command that writes",
         );
-      if (namesControllerAct(command))
+      // each parsed word too: the parser has already taken out quotes and backslashes (`operator-to''ken`)
+      if (namesControllerAct(command) || argv.some((w) => namesControllerAct(w) || globsToken(w)))
         return deny(
           "repo-rules",
           "the operator token, approvals and the runaway breaker are a controller's",
