@@ -947,9 +947,19 @@ function stateStep(s: LoopSnapshot): Step {
     pr.headSha === pushed.sha &&
     pr.ci === "passing"
   ) {
+    const flaked = loop.rerun?.sha === pushed.sha;
+    const actions: LoopAction[] = [
+      { kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${sha7(pushed.sha)}` },
+    ];
+    if (flaked)
+      actions.push({ kind: "event", text: `CI flaked on ${sha7(pushed.sha)}: passed on re-run` });
     return {
-      loop: { ...loop, ciFailedSha: null },
-      actions: [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${sha7(pushed.sha)}` }],
+      loop: {
+        ...loop,
+        ciFailedSha: null,
+        rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
+      },
+      actions,
     };
   }
   if (pr?.state === "closed") {

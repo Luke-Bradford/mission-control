@@ -2783,12 +2783,27 @@ describe("merge workspace", () => {
     });
   });
 
-  it("a ruling on CI whose head is now green drops the failure and goes on, with no ruled note", () => {
+  it("a ruling on CI while it is red: today's ruled note, no merge", () => {
+    const r = reconcile(merge({ pr: pr({ ci: "failing", isDraft: true }) }, { ciFailedSha: SHA }));
+    noMerge(r);
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyRuledText(REF, 12, RETRO, SHA),
+    });
+  });
+
+  it("a ruling on CI whose head is now green drops the failure, then merges on the next pass", () => {
     // the ruling park resumed into review with the failed sha still recorded; GitHub shows it green
-    const r = reconcile(merge({}, { ciFailedSha: SHA }));
+    const r = reconcile(merge({}, { ciFailedSha: SHA, rerun: reran() }));
     expect(r.loop.ciFailedSha).toBeNull();
-    expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
+    expect(events(r.actions)).toEqual([
+      "CI passed on aaaaaaa",
+      "CI flaked on aaaaaaa: passed on re-run",
+    ]);
     expect(r.actions.some((x) => x.kind === "note" && x.noteKind === "ready")).toBe(false);
+    expect(kindsOf(reconcile({ ...merge(), loop: r.loop }).actions)).toContain("merge");
   });
 
   it("a blocking review: no merge, no ready note", () => {
