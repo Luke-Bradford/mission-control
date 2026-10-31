@@ -45,7 +45,7 @@ export function PrChip({
   showState?: boolean;
 }) {
   const now = useNow();
-  const check = "check" in pr && pr.state === "open" && !pr.isDraft ? pr.check : null;
+  const check = "check" in pr && pr.state === "open" ? pr.check : null;
   const pill =
     pr.state === "merged" || pr.state === "closed"
       ? prPill({ state: pr.state })
