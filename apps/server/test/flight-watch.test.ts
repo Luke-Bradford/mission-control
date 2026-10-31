@@ -2591,6 +2591,12 @@ describe("wakeSummary", () => {
       ).toBe(true);
     });
 
+    it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {
+      const stuck = state({ seats: [s({ parked: { kind: STUCK_PARK, reason: "x" } })] });
+      expect(pending(stuck)).toBe(false);
+      expect(wakeFacts(stuck)).toBe(wakeFacts(state({ seats: [s()] })));
+    });
+
     it("is true for a stopped build seat even with no ticket, and the summary counts it", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
