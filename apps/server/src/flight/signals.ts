@@ -475,6 +475,15 @@ export function flightSignals(i: {
     );
   }
 
+  // only a `merge` repo has its Ready cards dealt into queues; elsewhere FLIGHT starts them itself
+  const dealt = config.repos.find((r) => r.id === repo)?.autonomy === "merge";
+  const readyInLane = board.some(
+    (b) =>
+      !b.closed &&
+      hudColumnOf(b) === "Ready" &&
+      inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
+      !b.blockedBy.some((d) => !d.closed),
+  );
   for (const seat of seats) {
     const row = store.seatSession(seat.id);
     const since = row ? Math.max(row.updatedAt, row.lastTurnEndedAt ?? row.updatedAt) : undefined;
@@ -511,7 +520,8 @@ export function flightSignals(i: {
       !seat.atStop &&
       since !== undefined &&
       now - since >= FLIGHT_IDLE_NO_WORK_MS &&
-      !work
+      !work &&
+      (dealt || !readyInLane)
     ) {
       const id = `idle_no_work:${seat.id}:${since}`;
       // at most one wake per seat an hour: an earlier episode's signal, untold or told within

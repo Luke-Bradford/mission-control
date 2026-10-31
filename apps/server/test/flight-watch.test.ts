@@ -4429,8 +4429,10 @@ describe("the sweep's new checks hold back until their time", () => {
   });
 
   describe("an idle seat with nothing startable in Ready", () => {
+    // a laned hub: the lane:work card is another lane's, so nothing is startable here
+    const laned = { ...config, crew: { ...config.crew!, lane: "home" as const } };
     const idleNoWork = () =>
-      flightState({ config, store, busy: [], now: nowMs }).signals.filter((s) =>
+      flightState({ config: laned, store, busy: [], now: nowMs }).signals.filter((s) =>
         s.key.startsWith("inco-1:"),
       );
     beforeEach(() => {
@@ -4447,6 +4449,11 @@ describe("the sweep's new checks hold back until their time", () => {
       expect(found[0]?.evidence).toContain("apps/web/**");
     });
 
+    it("is not raised when Ready holds a startable ticket of the hub's lane (draft repo, no queue)", () => {
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:home"] })]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
     it("is not raised before 5 minutes idle", () => {
       nowMs -= MIN;
       expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
@@ -4458,7 +4465,7 @@ describe("the sweep's new checks hold back until their time", () => {
     });
 
     it("raises nothing new in the same hour, then again after it", () => {
-      const first = flightState({ config, store, busy: [], now: nowMs });
+      const first = flightState({ config: laned, store, busy: [], now: nowMs });
       markFlightSignalsShown(store, first, nowMs);
       // the seat starts and finishes work: a new idle episode within the hour
       nowMs += 20 * MIN;
