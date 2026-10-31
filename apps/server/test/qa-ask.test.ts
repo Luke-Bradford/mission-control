@@ -183,7 +183,11 @@ describe("askQa", () => {
   });
 
   it("answers 502 when the answer cannot be posted", async () => {
-    runner.mockResolvedValue({ answer: "the key is hunter2-secret-0123456789abcdef-xyz", sources: [], tokens: 1 });
+    runner.mockResolvedValue({
+      answer: "the key is hunter2-secret-0123456789abcdef-xyz",
+      sources: [],
+      tokens: 1,
+    });
     deps.send = (from, text, ref) =>
       sendComms(
         {
