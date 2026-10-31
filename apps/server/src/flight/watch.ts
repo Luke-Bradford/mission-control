@@ -522,17 +522,18 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
     if (context !== null && context > FLIGHT_CONTEXT_ROTATE_TOKENS) {
-      if (handover?.runId !== runId) {
+      let asked = handover?.runId === runId ? handover : null;
+      if (asked === null) {
         const sent = await supervisor.send(runId, handoverKey(runId), FLIGHT_HANDOVER_ASK);
-        if (sent === "sent") handover = { runId, at: t };
+        if (sent === "sent") asked = handover = { runId, at: t };
         // a handover already sent (before a hub restart) is taken as written
-        else if (sent === "dup") handover = { runId, at: 0 };
-        if (sent !== "dup") return;
+        else if (sent === "dup") asked = handover = { runId, at: 0 };
+        else return;
+        if (sent === "sent") return;
       }
-      if (lastTurnEndAt >= handover.at) {
+      if (lastTurnEndAt >= asked.at) {
         rotating = true;
         await supervisor.endRunByEngine(runId);
-        return;
       }
       return;
     }
