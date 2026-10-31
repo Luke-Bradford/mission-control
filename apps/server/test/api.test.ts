@@ -1471,6 +1471,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
   ["POST", "/api/prs/shop-app/12/uat", { action: "accept" }],
+  ["POST", "/api/qa/shop-app/12/ask", { text: "Which tests cover this?" }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
@@ -2279,6 +2280,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url.startsWith("/api/qa/") && url.endsWith("/ask")) {
+        // the fixture has no QA runner: the question is refused, not answered
+        expect(r.statusCode, `${method} ${url}`).toBe(503);
+        continue;
+      }
       if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
@@ -2590,6 +2596,7 @@ describe("local access", () => {
             .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(/\/prs\/:repoId\/12\/uat$/, "/prs/:repoId/:number/uat")
+            .replace(/\/qa\/:repoId\/12\/ask$/, "/qa/:repoId/:pr/ask")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
@@ -8797,6 +8804,104 @@ describe("operator token", () => {
       });
       expect(r.statusCode).toBe(409);
       expect(r.json().error).toContain("controller-check");
+    });
+  });
+
+  describe("qa ask route", () => {
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const runs: unknown[] = [];
+    let app: FastifyInstance;
+    const post = (headers: Record<string, string>, payload: object, pr = "4") =>
+      app.inject({
+        method: "POST",
+        url: `/api/qa/shop-app/${pr}/ask`,
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      const seats = config.crew?.sessions[0]?.seats ?? [];
+      seats.push({
+        id: "retro-1",
+        role: "RETRO",
+        accountId: "claude-main",
+        model: "sonnet",
+        area: [],
+        mode: "scratch",
+      });
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number: 4,
+            title: "t",
+            url: "https://github.com/o/shop-app/pull/4",
+            branch: "fix/9-x",
+            ticket: "shop-app#9",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "pending",
+            createdAt: 1,
+            updatedAt: 2,
+            mergedAt: null,
+            mergeCommitSha: null,
+            headSha: null,
+            mergeable: null,
+            author: null,
+            assignees: [],
+            checks: [],
+            closingIssues: [],
+          },
+        ],
+        0,
+      );
+      runs.length = 0;
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        qaAsk: async (job) => {
+          runs.push(job);
+          return { answer: "Covered by cache.test.ts.", sources: ["cache.test.ts"], tokens: 10 };
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { text: "why?" })).statusCode).toBe(401);
+      expect(runs).toEqual([]);
+    });
+
+    it("rejects a bad body and an unknown PR or repo", async () => {
+      expect((await post(key, {})).statusCode).toBe(400);
+      expect((await post(key, { text: "q", extra: 1 })).statusCode).toBe(400);
+      expect((await post(key, { text: "q" }, "99")).statusCode).toBe(404);
+      expect((await post(key, { text: "q" }, "x")).statusCode).toBe(404);
+      expect(runs).toEqual([]);
+    });
+
+    it("answers on the PR's thread, and refuses the sixth question with the reason", async () => {
+      for (let i = 0; i < 5; i++) {
+        const r = await post(key, { text: `question ${i}` });
+        expect(r.statusCode).toBe(200);
+        expect(r.json().message).toMatchObject({ ref: "PR 4", from: "retro-1" });
+      }
+      expect(runs).toHaveLength(5);
+      const sixth = await post(key, { text: "one more" });
+      expect(sixth.statusCode).toBe(429);
+      expect(sixth.json().error).toContain("5 questions per PR per day");
+      expect(runs).toHaveLength(5);
     });
   });
 

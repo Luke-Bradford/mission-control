@@ -1393,6 +1393,19 @@ is never counted as spend.
 - When an earlier usage source fails and a later one succeeds, the account stays `ok` and the
   earlier failure's message is kept as a note in the collector's `error` field.
 
+## Ask QA about a PR
+
+`POST /api/qa/:repoId/:pr/ask` with `{ "text": "..." }` takes a question about a PR from the operator.
+It picks the review seat that last reviewed the PR, or any free review seat of the repo. That seat
+answers in a short run with read tools only (Read, Grep, Glob) and at most 100k tokens
+(`QA_ASK_TOKEN_CAP`). The answer is a Comms message to CAPCOM with `ref: PR <n>`, so it shows in the
+PR's thread and on Comms. It starts with the question and ends with the tests and evidence it used.
+
+- At most 5 questions per PR per local day (`QA_ASK_DAILY_LIMIT`). The sixth answers 429 with the reason.
+  A failed run still counts.
+- 404: unknown repo or PR. 503: no review seat is free, or the server has no QA runner
+  (`AppDeps.qaAsk`). 502: the run failed.
+
 ## QA board data
 
 The hub records what the QA board needs as it goes; nothing here writes to GitHub. Test-lock holds,

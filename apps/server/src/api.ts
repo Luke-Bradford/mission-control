@@ -281,6 +281,7 @@ import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
+import { askQa, QA_ASK_TEXT_MAX, type QaAskRunner } from "./qa-ask.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
@@ -466,6 +467,8 @@ export interface AppDeps {
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
     Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
+  /** Answers an operator's question about a PR in a short read-only review-seat run; absent: the ask route answers 503. */
+  qaAsk?: QaAskRunner;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -547,6 +550,7 @@ const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
   z.strictObject({ action: z.literal("release") }),
 ]);
+const QaAskBody = z.strictObject({ text: z.string().trim().min(1).max(QA_ASK_TEXT_MAX) });
 const UatBody = z
   .strictObject({
     action: z.enum(["accept", "send_back"]),
@@ -4155,6 +4159,60 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             });
           }
           return { ok: true };
+        },
+      );
+      // The operator asks QA about a PR; a review seat answers on the PR's Comms thread (ref `PR n`).
+      // Reader: docs/runbook.md#ask-qa-about-a-pr
+      api.post<{ Params: { repoId: string; pr: string } }>(
+        "/qa/:repoId/:pr/ask",
+        async (req, reply) => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
+          if (repo === undefined || pr === 0) return reply.code(404).send({ error: "unknown PR" });
+          const body = QaAskBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (deps.qaAsk === undefined || !deps.supervisor)
+            return reply.code(503).send({ error: "QA questions are not available on this server" });
+          const supervisor = deps.supervisor;
+          try {
+            await validateCommsText(deps.knownSecrets ?? (async () => []), body.data.text);
+          } catch (e) {
+            return reply
+              .code(400)
+              .send({ error: e instanceof Error ? e.message : "Comms message refused." });
+          }
+          const at = now();
+          const out = await askQa(
+            {
+              config,
+              store,
+              now,
+              seatBusy: (id) => supervisor.seatBusy(id),
+              runner: deps.qaAsk,
+              send: (from, text, ref) =>
+                sendComms(
+                  {
+                    store,
+                    crew: commsCrew,
+                    knownSecrets: deps.knownSecrets ?? (async () => []),
+                    now,
+                    seatSender: false,
+                  },
+                  from,
+                  { to: COMMS_CAPCOM, text, ref },
+                ),
+            },
+            {
+              repoId: repo.id,
+              pr,
+              text: body.data.text,
+              day: startOfLocalDay(at, config.operator.timezone),
+            },
+          );
+          if (!out.ok) return reply.code(out.status).send({ error: out.error });
+          bus.emit("agents");
+          bus.emit("attention");
+          return { message: out.message, remaining: out.remaining };
         },
       );
       // The operator's acceptance (UAT) of a tested PR the repo's `uat` rule holds: accept lets it merge,

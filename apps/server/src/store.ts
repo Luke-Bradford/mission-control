@@ -4349,6 +4349,17 @@ export class Store {
     return rows.map(toReview);
   }
 
+  /** The seat that last reviewed the PR, else null. */
+  lastReviewSeat(repoId: string, prNumber: number): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT seat_id FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
+         ORDER BY ended_at DESC, id DESC LIMIT 1`,
+      )
+      .get(repoId, prNumber) as { seat_id: string } | undefined;
+    return row?.seat_id ?? null;
+  }
+
   /** The latest review of a PR that has reported, else null. */
   latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
     const row = this.db
