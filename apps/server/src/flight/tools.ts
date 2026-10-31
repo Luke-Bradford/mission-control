@@ -75,6 +75,7 @@ import {
   draftedReplyText,
   duplicateLabelText,
   duplicateTitleText,
+  EDIT_UNCONFIRMED_TEXT,
   END_UNREADABLE_TEXT,
   ENGINE_OFF_TEXT,
   eligibleToStart,
@@ -3246,6 +3247,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             ...(lane ? [`lane:${lane}`] : []),
           ]),
         ];
+        let boardEdited = false;
         if (a.size !== undefined || a.priority !== undefined) {
           if (!deps.board.edit) return fail("Board edits unavailable.");
           if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
@@ -3254,6 +3256,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             ...(a.priority === undefined ? {} : { priority: a.priority }),
           });
           if (!result.ok) return fail(result.reason);
+          boardEdited = true;
         }
         if (a.labels !== undefined || a.lane !== undefined || a.assignees !== undefined) {
           if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
@@ -3267,8 +3270,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               }),
             },
           );
-          if (result.code !== 0)
-            return fail("GitHub refused the card edit; refresh before retrying.");
+          if (result.code !== 0) {
+            const refused = "GitHub refused the card edit; refresh before retrying.";
+            // the size or priority edit landed first: say so, which also counts it for the breaker
+            return fail(
+              boardEdited ? `Set size/priority on #${a.issue}, then stopped: ${refused}` : refused,
+            );
+          }
         }
         bus.emit("boards");
         return { text: `Edited #${a.issue}.` };
@@ -3429,9 +3437,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.createTicket,
     MC_TOOL_NAMES.closeTicket,
     MC_TOOL_NAMES.promote,
-    MC_TOOL_NAMES.editCard,
-    MC_TOOL_NAMES.setFields,
-    MC_TOOL_NAMES.editIssue,
   ]);
   /** A field edit that stopped part-way says what it set ("Set size on mc#7, then stopped: …"). */
   const PARTIAL_EDIT_TOOLS: ReadonlySet<string> = new Set([
@@ -3899,6 +3904,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             // wrote nothing, so only the tools that can write before they fail are looked at.
             (rowAdded && WRITES_BEFORE_FAILING.has(tool.name)) ||
             (PARTIAL_EDIT_TOOLS.has(tool.name) && result.text.startsWith("Set ")) ||
+            (tool.name === MC_TOOL_NAMES.editIssue && result.text === EDIT_UNCONFIRMED_TEXT) ||
             tool.name === MC_TOOL_NAMES.screenshotHud ||
             (tool.name === MC_TOOL_NAMES.closeTicket &&
               (result.text.includes(closeUnconfirmedText()) ||

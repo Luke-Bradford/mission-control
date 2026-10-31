@@ -680,6 +680,8 @@ export const closeComment = (replacement: number): string =>
 export const CLOSED_PREFIX = "Closed as";
 export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
   `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
+/** edit_issue's answer when GitHub took the edit but the ticket does not show it: it may have landed. */
+export const EDIT_UNCONFIRMED_TEXT = "The edit could not be confirmed on GitHub; read the ticket.";
 /** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both count as writes for the runaway breaker even though the call returns an error. */
 export const CLOSE_UNCONFIRMED_DECISION =
   "Close unconfirmed; the comment and close may have landed";

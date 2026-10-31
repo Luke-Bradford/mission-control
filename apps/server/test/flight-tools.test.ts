@@ -8870,6 +8870,41 @@ describe("the runaway breaker", () => {
     expect(flags()).toHaveLength(1);
   });
 
+  it("does not count refused edit_card, edit_issue or set_fields calls, which write nothing", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    const refusals = [
+      ["edit_card", { issue: 7, assignees: ["nobody"], basis: "b" }],
+      ["edit_issue", { issue: 7, basis: "b" }],
+      ["set_fields", { issue: 7, labels: ["lane:other"], basis: "b" }],
+    ] as const;
+    for (const [name, args] of refusals)
+      for (let i = 0; i < 6; i++) expect((await call(name, args)).isError).toBe(true);
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
+  });
+
+  it("counts a loop of edit_card calls whose card edit lands and whose label write then fails", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    ghImpl = async () => ({ code: 1, stdout: "", stderr: "refused" });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) {
+      const r = await call("edit_card", {
+        issue: 7,
+        size: "S",
+        labels: ["area:server"],
+        basis: "b",
+      });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("then stopped");
+    }
+    expect(flags()).toHaveLength(1);
+  });
+
   it("counts a loop of field edits that land part-way and then fail", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     need(cfg.repos[0]).autonomy = "merge";

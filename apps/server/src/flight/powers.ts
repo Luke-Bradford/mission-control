@@ -8,6 +8,7 @@
 import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
+  EDIT_UNCONFIRMED_TEXT,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
@@ -169,7 +170,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         (a.body !== undefined && after.body !== a.body) ||
         (a.title !== undefined && after.title !== a.title)
       )
-        return fail("The edit could not be confirmed on GitHub; read the ticket.");
+        return fail(EDIT_UNCONFIRMED_TEXT);
       bus.emit("boards");
       return { text: `Edited ${ref}.` };
     },
