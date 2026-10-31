@@ -99,6 +99,7 @@ import {
   type PrFileInput,
   type ProfileOverride,
   type PrTestsView,
+  type PrTitle,
   type PullRequestView,
   prCarries,
   QA_RETENTION_DAYS,
@@ -3546,6 +3547,17 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
+  pullRequestTitles(repoId: RepoId, numbers: readonly number[]): PrTitle[] {
+    if (numbers.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT number, title FROM pull_requests WHERE repo_id = ? AND number IN (${numbers.map(() => "?").join(", ")}) ORDER BY number ASC`,
+      )
+      .all(repoId, ...numbers) as { number: number; title: string }[];
+    return rows.map((r) => ({ number: r.number, title: r.title }));
+  }
+
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
     const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
       repoId,
@@ -6741,6 +6753,27 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
       .all(since, limit) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      at: r.at as number,
+      kind: r.kind as FlightDecisionKind,
+      seatId: r.seat_id as string | null,
+      targetRunId: r.target_run_id as string | null,
+      ref: r.ref as string | null,
+      questionId: r.question_id as number | null,
+      about: r.about as string,
+      decision: r.decision as string,
+      basis: r.basis as string,
+    }));
+  }
+
+  /** The decisions of one kind about one ticket, newest first. */
+  flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
+      )
+      .all(kind, ref) as Row[];
     return rows.map((r) => ({
       id: r.id as number,
       at: r.at as number,

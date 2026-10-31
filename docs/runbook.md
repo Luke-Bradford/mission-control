@@ -882,12 +882,38 @@ Seats cannot change them:
 - a commit that holds one is refused whole;
 - the hub won't install from a branch that changes an install input.
 
-When a ticket needs such a change, land it outside the crew, in one of two ways:
+When a ticket needs such a change, a seat can make it under a path grant (next section). Otherwise
+land it outside the crew, in one of two ways:
 - **by hand:** change it in your own checkout and open the PR yourself;
 - **a controller PR:** have the head agent, working outside the crew under your eye, open it.
 
 Once it is merged, start the seat's run, or a new one. A run branches from origin's default
 branch as it was when the run started.
+
+### A ticket that changes files outside every area: a path grant
+
+A ticket whose change sits outside every seat's area (the root `package.json`, `.gitignore`,
+`CLAUDE.md`), or in a protected file, lists the files in a `Paths:` line:
+
+```
+Paths: package.json, .gitignore
+```
+
+A start of that ticket is refused (422) until FLIGHT has approved the files: `mc start_seat { seat, issue,
+paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") and then starts the seat.
+Every start path checks it, FLIGHT's, the engine's and the operator's.
+
+- The run may write exactly the listed files that sit outside its area or are protected, for that
+  run only. Another run on the same seat holds nothing it was not given. The grant is fixed when
+  the run starts; editing the ticket later changes nothing.
+- It covers the Edit and Write tools, the `mc commit` check, the push's stray check and the Codex
+  write floor. Every other protected file and every other file outside the area stays refused.
+- Only a file at the repo's top can be granted when a protected-file rule covers it (`package.json`
+  yes, `apps/web/package.json` no). `.github/`, `.husky/`, `.claude/`, `.codex/`, `.npmrc`,
+  `.pnpmfile.cjs`, `.gitattributes`, `.gitmodules` and `.git` are never granted.
+- The merge gates do not change: a hard-rule path in the diff still needs FLIGHT's clearance (or the
+  operator's, on a repo that keeps it) before merge, and the hub still won't install from a branch
+  that changes an install input.
 
 ### Python dependencies in crew worktrees
 

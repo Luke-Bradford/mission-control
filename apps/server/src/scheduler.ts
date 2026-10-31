@@ -108,6 +108,7 @@ import {
 } from "./machine-capacity.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
+import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
@@ -443,25 +444,66 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** Topics queued for the current coalescing window, and the timer that ends it. */
   const pending = new Set<Topic>();
+  /** Topics queued to go out only if their content changed (see TopicGate). */
+  const gated = new Set<Topic>();
   let emitTimer: NodeJS.Timeout | null = null;
 
-  /** Sends each queued topic once. Attention items are built from agents and escalations. */
+  /** What each gated topic's page shows, hashed on each flush to tell a changed topic from a re-poll. */
+  const gate = new TopicGate({
+    agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
+    health: () => healthContent(store.status()),
+    // keys and owners only: an item's relative text changes every minute and is no news
+    attention: () =>
+      attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
+        i.key,
+        i.owner,
+      ]),
+  });
+
+  /** Sends each queued topic once, and each gated topic that changed. Attention items are built from agents and escalations. */
   const flushEmits = () => {
     if (emitTimer !== null) clearTimeout(emitTimer);
     emitTimer = null;
     const topics = [...pending];
+    const maybe = [...gated].filter((t) => !pending.has(t));
     pending.clear();
+    gated.clear();
+    if (noViewClients()) {
+      // no crew view is built for a hash while nobody watches; the next flush with a viewer sends
+      topics.push(...maybe);
+      gate.reset();
+    } else {
+      // a forced topic is hashed too, so the stored hash follows what was sent
+      for (const t of topics) gate.changed(t);
+      for (const t of maybe) if (gate.changed(t)) topics.push(t);
+    }
+    // attention follows agents or escalations, and also goes out alone when its items changed
+    // (a clock-only item, such as an unanswered question turning due, changes no crew row)
+    const follows = topics.includes("agents") || topics.includes("escalations");
+    if (follows && !topics.includes("attention")) {
+      if (!noViewClients()) gate.changed("attention"); // keep the stored hash in step
+      topics.push("attention");
+    }
     for (const t of topics) bus.emit(t);
-    if (topics.includes("agents") || topics.includes("escalations")) bus.emit("attention");
+  };
+
+  const arm = () => {
+    if (emitTimer === null && (pending.size > 0 || gated.size > 0)) {
+      emitTimer = setTimeout(flushEmits, EMIT_COALESCE_MS);
+      emitTimer.unref();
+    }
   };
 
   /** Queues topics; the window's first emit starts the EMIT_COALESCE_MS timer. */
   const emit = (...topics: Topic[]) => {
     for (const t of topics) pending.add(t);
-    if (emitTimer === null && pending.size > 0) {
-      emitTimer = setTimeout(flushEmits, EMIT_COALESCE_MS);
-      emitTimer.unref();
-    }
+    arm();
+  };
+
+  /** Queues topics that go out only if their content changed since they were last sent. */
+  const emitIfChanged = (...topics: Topic[]) => {
+    for (const t of topics) gated.add(t);
+    arm();
   };
 
   const applyDefaults = async () => {
@@ -805,7 +847,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           c.ta(loop, store, now(), taState, undefined, c.launchctl),
         );
       }
-      emit("agents", "health");
+      emitIfChanged("agents", "health", "attention");
       afterLoopTick();
     },
     studio: async () => {
@@ -825,7 +867,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           ),
         );
       }
-      emit("agents", "health");
+      emitIfChanged("agents", "health", "attention");
       afterLoopTick();
     },
     sessions: readLiveSessions,
@@ -916,7 +958,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // Board rows and PRs reach the board, escalations the attention items, only when they changed.
       if (changed.boards) emit("boards");
       if (changed.escalations) emit("escalations");
-      emit("agents", "health", "limits");
+      emitIfChanged("agents", "health", "attention");
+      emit("limits");
       sweepAcks();
       // the poll is what the loop waits on (a PR's CI, a merge): each looped run is judged on it
       // (not awaited: a push or a PR may take a while, and the poll's next tick must not wait on it)
