@@ -20,6 +20,7 @@ import {
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
   asideEventText,
+  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   awayDiffSafe,
@@ -147,7 +148,8 @@ import {
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { wakeDueAsideRun } from "./aside.ts";
+import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
   EMPTY_LOG,
@@ -871,6 +873,7 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
         : {}),
@@ -1357,7 +1360,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
-        cur.aside = { worktree, wake: false };
+        // (a run set aside mid-build is due back as soon as the rework is out of the way)
+        cur.aside = { worktree, wake: cur.phase === "working" };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1369,7 +1373,11 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "ci" ? asideInCiEventText(call) : asideEventText(call),
+          cur.phase === "working"
+            ? asideForReworkEventText(call)
+            : cur.phase === "ci"
+              ? asideInCiEventText(call)
+              : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1396,8 +1404,18 @@ export function createEngine(deps: EngineDeps): Engine {
         try {
           await supervisor.wakeRun(run.id);
         } catch (e) {
-          // the seat is busy or the hub is stopping: the next pass tries again
-          if (isTransientStart(e)) return;
+          // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
+          // seat is looked at now, to give way to this rework if its turn has ended
+          if (isTransientStart(e)) {
+            const holder = supervisor.seat(run.agentId)?.runId ?? null;
+            if (
+              holder !== null &&
+              holder !== run.id &&
+              store.run(holder)?.loop?.phase === "working"
+            )
+              void reconcileRun(holder);
+            return;
+          }
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
@@ -2371,7 +2389,7 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const repoId of new Set(runs.map((r) => r.repoId))) await rulesFor(repoId);
   }
 
-  return {
+  const engine: Engine = {
     start() {
       if (!deps.enabled || started) return;
       started = true;
@@ -2473,6 +2491,20 @@ export function createEngine(deps: EngineDeps): Engine {
           await phase("refresh rule notes", () => refreshRuleNotes(runs));
           await phase("sweep notes", () => sweepNotes(notes));
           await phase("untake stale", untakeStale);
+          await phase("release dependents", () =>
+            releaseDependents({
+              store,
+              config,
+              now,
+              move: deps.board.move,
+              syncMain: engine.syncMain,
+              rules: deps.rules,
+              fetchTicket: deps.fetchTicket,
+              prsFor,
+              ...(deps.pollGithub ? { pollGithub: deps.pollGithub } : {}),
+              log,
+            }),
+          );
           await phase("take for seats", takeForSeats);
           await phase("kick reviews", kickReviews);
         });
@@ -3118,4 +3150,5 @@ export function createEngine(deps: EngineDeps): Engine {
       return { on: live(), note: notes.length === 0 ? null : notes.join("; ") };
     },
   };
+  return engine;
 }

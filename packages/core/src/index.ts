@@ -5,6 +5,7 @@ export * from "./board.ts";
 export * from "./collectors.ts";
 export * from "./comms.ts";
 export * from "./crew-pause.ts";
+export * from "./dependencies.ts";
 export * from "./flight.ts";
 export * from "./flight-memory.ts";
 export * from "./guard.ts";

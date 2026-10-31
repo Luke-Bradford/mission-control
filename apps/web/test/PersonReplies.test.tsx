@@ -67,7 +67,7 @@ function setup(
       item({ key: "decision:1", text: "Related question", escalationId: null }),
     ],
     "/api/escalations": [],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/notifications": {
       open: [
         {
@@ -192,7 +192,7 @@ it.each(["loading", "failed", "empty"])("shows a %s person source response", asy
   stubFetch({
     "/api/attention": [item({ key, kind: "person", escalationId: null })],
     "/api/escalations": [],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/notifications":
       state === "failed"
         ? () => ({ status: 502, body: { error: "Source unavailable" } })

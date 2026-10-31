@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
@@ -1300,6 +1301,14 @@ describe("review round", () => {
     expect(fresh.loop.phase).toBe("ci");
   });
 
+  it("15: a run past the default expected use keeps working until the ceiling", () => {
+    // the budget is the runaway ceiling; passing AUDIT_EXPECTED_TOKENS_DEFAULT is an Audit finding only
+    const past = AUDIT_EXPECTED_TOKENS_DEFAULT + 1;
+    expect(reconcile({ ...snap({ tokens: past }), budget: 1_500_000 }).loop.phase).toBe("working");
+    const over = reconcile({ ...snap({ tokens: 1_500_001 }), budget: 1_500_000 });
+    expect(over.loop.parked?.kind).toBe("budget");
+  });
+
   it("15: only a working run parks over budget", () => {
     const r = reconcile(
       snap({ tokens: 5000, pushed: { sha: SHA, at: 1 }, headCommit: SHA }, { phase: "review" }),
@@ -2152,6 +2161,46 @@ describe("set aside", () => {
 
   it("no review seat: held", () => {
     expect(kindsOf(reconcile(base({ asideOk: false })).actions)).not.toContain("set-aside");
+  });
+
+  describe("rework due on the seat", () => {
+    /** A new ticket being built, its seat between turns, another run of the seat due back. */
+    const building = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, reworkDue: true, ...over },
+        { phase: "working", cardFor: "working:0", ...loop },
+      );
+      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
+    };
+
+    it("sets the working run aside at its turn end, with no review seat needed", () => {
+      for (const s of [building(), building({ asideOk: false })]) {
+        const r = reconcile(s);
+        expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+        expect(r.loop.phase).toBe("working");
+      }
+    });
+
+    it("waits for the turn to end, and for the seat to be free of questions", () => {
+      const b = building();
+      const cases: [string, LoopSnapshot][] = [
+        ["in turn", building({ seat: { ...b.seat, inTurn: true } })],
+        ["open question", building({ seat: { ...b.seat, openQuestion: true } })],
+        ["not idle", building({ seat: { ...b.seat, state: "running" } })],
+        ["seat does not hold the run", building({ seat: { ...b.seat, holdsRun: false } })],
+        ["no rework due", building({ reworkDue: false })],
+        ["already pushed", building({ pushed: { sha: SHA, at: NOW - 60_000 } })],
+        ["ended", building({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("the displaced run is flagged to come back, behind the rework", () => {
+      const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
+      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
   });
 
   it("not set aside", () => {

@@ -52,7 +52,7 @@ const TEMPLATES = [
 
 const cfg = { ...CONFIG, profiles: { source: "built-in", error: null, list: TEMPLATES } };
 
-beforeEach(() => stubFetch({ "/api/crew": { rows: [], firstRunToday: null } }));
+beforeEach(() => stubFetch({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } }));
 afterEach(cleanup);
 
 const steps = (region: HTMLElement): (string | null)[] =>
@@ -145,7 +145,7 @@ describe("Setup › Loops templates", () => {
     }) as unknown as RunView;
     let currentRuns: RunView[] = [selectedRun];
     const fetchFn = stubFetch({
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/boards/shop-app": [boardItem()],
       "/api/agents/guido-1/runs?limit=50": () => ({ status: 200, body: currentRuns }),
       "/api/agents/retro-1/runs?limit=50": [],
@@ -303,7 +303,7 @@ describe("Setup › Loops templates", () => {
       loop: null,
     }) as unknown as RunView;
     const fetchFn = stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             id: "retro-2",
@@ -473,13 +473,13 @@ describe("Setup › Loops templates", () => {
   it("counts running seats per template and lists current occupants only on their step as inert text", async () => {
     const unsafeId = "<img src=x onerror=alert(1)>";
     const fetchFn = stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         ...crew,
         rows: crew.rows.map((r) => (r.id === "inco-1" ? { ...r, id: unsafeId } : r)),
       },
     });
     render(<Loops config={cfg} />);
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
     expect(screen.getByRole("button", { name: /^small-change/ }).textContent).toContain(
       "1 running",
@@ -499,7 +499,7 @@ describe("Setup › Loops templates", () => {
   // Sessions are crew sessions (#387); a repo id is not a session.
   it.each(["s1"])("filters template counts and occupants for %s", async (session) => {
     const fetchFn = stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         ...crew,
         rows: [
           ...crew.rows,
@@ -509,15 +509,15 @@ describe("Setup › Loops templates", () => {
     });
     setSession(session);
     render(<Loops config={cfg} />);
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
     expect(screen.queryByText("elsewhere")).toBeNull();
   });
 
   it("shows zero running after an empty crew loads", async () => {
-    const fetchFn = stubFetch({ "/api/crew": { rows: [], firstRunToday: null } });
+    const fetchFn = stubFetch({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } });
     render(<Loops config={cfg} />);
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("0 running");
   });
 

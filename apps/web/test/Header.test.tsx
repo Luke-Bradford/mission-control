@@ -43,7 +43,7 @@ function routes(
 ) {
   return stubFetch({
     "/api/test-lock": over.lock ?? { holder: null, waiting: [] },
-    "/api/crew": over.crew ?? crew(),
+    "/api/crew?shape=summary": over.crew ?? crew(),
     "/api/attention": over.attention ?? [],
     "/api/settings/away": over.away ?? DEFAULT_AWAY,
     "/api/machine": over.machine ?? { latest: null },

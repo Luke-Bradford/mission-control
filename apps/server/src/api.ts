@@ -559,6 +559,7 @@ const GuardCheckBody = z.strictObject({
       pages: z.string().optional(),
       offset: z.number().optional(),
       limit: z.number().optional(),
+      timeout: z.number().optional(),
     })
     .optional(),
 });
@@ -1925,14 +1926,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const check = await checks?.lockedBy(who.runId, command);
             if (check) verdict = { kind: "lock", command: check };
           }
-          if (
-            verdict.kind !== "deny" &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string"
-          ) {
-            await checks?.begin(key, command);
+          // the check's record starts when the call does: after any wait for the test lock
+          const startCheck = async () => {
+            if (body.data.tool_name !== "Bash" || typeof command !== "string") return;
+            await checks?.begin(key, command, [], {
+              background: body.data.tool_input?.run_in_background === true,
+              timeoutMs: body.data.tool_input?.timeout,
+            });
+          };
+          if (verdict.kind === "allow") {
+            await startCheck();
+            return answer();
           }
-          if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {
             store.addGuardHit({
               agentId: who.seatId,
@@ -1973,6 +1978,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               res.once("close", () => {
                 if (!delivered) lock.release(key);
               });
+              await startCheck();
               return answer();
             }
             // a grant that landed after the hang-up: nobody will run that call

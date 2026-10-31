@@ -61,6 +61,7 @@ const api = {
   [RESOURCES.runLoop(RUN).path]: view,
   [RESOURCES.runs(SEAT).path]: [],
   [RESOURCES.crew.path]: { rows: [row], firstRunToday: null },
+  [RESOURCES.crewDetail(SEAT).path]: row,
   [RESOURCES.attention.path]: [],
   [RESOURCES.limits.path]: [],
 };

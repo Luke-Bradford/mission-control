@@ -29,6 +29,7 @@ export const MC_TOOL_NAMES = {
   flightState: "flight_state",
   promote: "promote",
   endRun: "end_run",
+  resumeSeat: "resume_seat",
   acceptRuling: "accept_ruling",
   mergePr: "merge_pr",
   settlePark: "settle_park",
@@ -90,6 +91,7 @@ export const MC_TOOLS = {
   flightState: mcTool(MC_TOOL_NAMES.flightState),
   promote: mcTool(MC_TOOL_NAMES.promote),
   endRun: mcTool(MC_TOOL_NAMES.endRun),
+  resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
   acceptRuling: mcTool(MC_TOOL_NAMES.acceptRuling),
   mergePr: mcTool(MC_TOOL_NAMES.mergePr),
   settlePark: mcTool(MC_TOOL_NAMES.settlePark),
@@ -375,6 +377,60 @@ export const MC_PUSH_CHECKS =
 export type CheckState = "missing" | "failed";
 const CHECKS_ADVICE =
   "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again.";
+
+/** Claude's Bash tool kills a call at this many ms when the call names no `timeout`. */
+export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
+/** The `timeout` a seat gives a check call: the lock wait and both checks fit well inside it. */
+export const CHECK_BASH_TIMEOUT_MS = 600_000;
+/** Why the hub did not count a started check call. */
+export const CHECK_DROP_REASONS = [
+  "not-plain",
+  "dirty-start",
+  "dirty-end",
+  "head-moved",
+  "turn-ended",
+  "background",
+  "timeout",
+  "unreadable",
+] as const;
+export type CheckDropReason = (typeof CHECK_DROP_REASONS)[number];
+/** A check call the hub saw start and did not count: which check, on which commit, and why. */
+export interface CheckDrop {
+  reason: CheckDropReason;
+  /** The configured check the call ran. */
+  command: string;
+  /** The commit the call started on; null when the clone could not be read. */
+  head: string | null;
+  /** The shell command the seat ran. */
+  invoked: string;
+  at: number;
+}
+const sha7 = (sha: string | null): string =>
+  sha === null ? "an unreadable commit" : sha.slice(0, 7);
+/** One sentence on why a check call was not counted, for the push refusal. */
+export const checkDropText = (d: CheckDrop): string => {
+  switch (d.reason) {
+    case "not-plain":
+      return `the call \`${d.invoked}\` was not counted: it chains the check with a pipe, ||, ;, a line break or another command. Run it exactly as written.`;
+    case "dirty-start":
+      return `the call started on ${sha7(d.head)} with uncommitted or untracked files in the tree, so it was not counted. Commit or delete them, then run the check again.`;
+    case "dirty-end":
+      return `the call left uncommitted or untracked files in the tree (on ${sha7(d.head)}), so it was not counted. Commit or delete them, then run the check again.`;
+    case "head-moved":
+      return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
+    case "turn-ended":
+      return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "background":
+      return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
+    case "timeout":
+      return `the call ran past its Bash timeout and was killed (on ${sha7(d.head)}). Run it again with the Bash timeout parameter set to ${CHECK_BASH_TIMEOUT_MS}; a check can wait for the test lock before it runs.`;
+    case "unreadable":
+      return "the hub could not read the seat's clone when the call started, so it was not counted. Run the check again.";
+  }
+};
+/** The line for a check the hub never saw start: the hub restarted, or the call never reached it. */
+export const CHECK_NO_START_TEXT =
+  "the hub saw no start of this check on this run (it may have restarted, or the call never reached it). Run it again in the foreground with the Bash timeout parameter set to 600000.";
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,
@@ -388,15 +444,26 @@ export const pushChecksText = (
       exitCode: number | null;
       at: number;
     } | null;
+    /** The newest call of this check the hub saw start and did not count, if any. */
+    dropped?: CheckDrop | null;
   }[],
 ): string => {
   const lines = found.map((c) => {
     const result = c.state === "failed" ? "failed" : "not run";
-    return `- ${result}: ${c.command}\n  ${
+    const recorded =
       c.recorded == null
-        ? "nothing recorded"
-        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
-    }`;
+        ? null
+        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`;
+    const why = c.dropped == null ? null : checkDropText(c.dropped);
+    const detail = [
+      recorded,
+      why !== null
+        ? `not counted: ${why}`
+        : c.state === "missing"
+          ? `nothing recorded on ${head.slice(0, 7)}: ${CHECK_NO_START_TEXT}`
+          : null,
+    ].filter((l): l is string => l !== null);
+    return `- ${result}: ${c.command}\n  ${detail.join("\n  ")}`;
   });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;
 };

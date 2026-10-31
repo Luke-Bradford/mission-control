@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import type { CcConfig } from "../src/config.ts";
+import { wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
   awayQuotaReserve,
@@ -562,6 +563,30 @@ describe("refillQueues", () => {
     expect(issues(SERVER)).toEqual([2]);
   });
 
+  it("leaves out a card whose body says it depends on an open issue, until that closes", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "In progress", state: "in progress" }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "Done", state: "done", closed: true }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
+  it("does not deal a card whose dependency closed without merging", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "Todo", state: "planned", closed: true }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("orders by Priority P0, P1, P2, unset, then by age", async () => {
     store.replaceBoard(REPO, [
       card(1, { priority: null, createdAt: NOW - 9 * DAY }),
@@ -969,6 +994,48 @@ describe("takeNext", () => {
     store.upsertRun(run({ id: "r-other", agentId: WEB, ticket: `${REPO}#8`, loop: aside(true) }));
     store.setRunLoop("r-aside", aside(false));
     expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("rework first: a free seat with a rework due and Ready tickets takes the rework, not a ticket", async () => {
+    const aside = (wake: boolean) => ({ ...NEW_LOOP, aside: { worktree: "/w/x", wake } });
+    store.upsertRun(
+      run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: aside(true) }),
+    );
+    seatRow("idle");
+    await queued(card(1));
+    await queued(card(2));
+    await take();
+    expect(started).toEqual([]);
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-aside");
+  });
+
+  it("rework first: two reworks come back oldest first, and a run displaced mid-build after both", () => {
+    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
+    const at = (n: number) => NOW - n * 60_000;
+    // the displaced one is the oldest, but has no push: it waits behind both reworks
+    store.upsertRun(
+      run({
+        id: "r-displaced",
+        agentId: SERVER,
+        ticket: `${REPO}#7`,
+        startedAt: at(30),
+        loop: { ...aside, phase: "working" },
+      }),
+    );
+    for (const [id, n, started] of [
+      ["r-younger", 8, at(10)],
+      ["r-older", 9, at(20)],
+    ] as const) {
+      store.upsertRun(
+        run({ id, agentId: SERVER, ticket: `${REPO}#${n}`, startedAt: started, loop: aside }),
+      );
+      store.setRunPush({ runId: id, sha: "a".repeat(40), at: NOW });
+    }
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-older");
+    store.setRunLoop("r-older", { ...aside, aside: { worktree: "/w/x", wake: false } });
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-younger");
+    store.setRunLoop("r-younger", { ...aside, aside: { worktree: "/w/x", wake: false } });
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-displaced");
   });
 
   it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {

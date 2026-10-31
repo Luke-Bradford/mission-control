@@ -8,9 +8,15 @@ import {
   ACTIVITY_WINDOW_MS,
   type ActivityRow,
   type CrewRow,
+  commsAgentPath,
+  commsNavPath,
+  crewDetailPath,
+  crewSummaryPath,
+  dockStreamPath,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
   type PullRequestView,
+  prListPath,
   TOPICS,
   type Topic,
 } from "@mc/core";
@@ -68,7 +74,10 @@ export const RESOURCES = {
     topic: METRICS_TOPICS,
   }),
   focus: (id: string): ResourceRef => ({ path: `/api/seats/${enc(id)}/focus`, topic: "config" }),
-  crew: { path: "/api/crew", topic: "agents" },
+  // Summary rows: what every page but the Agent's detail reads (no event timelines).
+  crew: { path: crewSummaryPath(), topic: "agents" },
+  /** One crew row in full, with its events and digest: the Agent page. */
+  crewDetail: (id: string): ResourceRef => ({ path: crewDetailPath(id), topic: "agents" }),
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },
   // Whether this server runs crew sessions (off on a preview, or when another server holds
@@ -131,8 +140,14 @@ export const RESOURCES = {
    * replies, reactions, pins and read cursors. */
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  /** A nav row's read: the conversation list and counts, no messages. */
+  commsNav: (agentId: string): ResourceRef => ({
+    path: commsNavPath(agentId),
+    topic: "agents",
+  }),
+  /** The selected agent's newest messages; older ones page in by `before`. */
   commsAgent: (agentId: string): ResourceRef => ({
-    path: `/api/comms/agents/${enc(agentId)}`,
+    path: commsAgentPath(agentId),
     topic: "agents",
   }),
   commsContact: (agentId: string, contactId: string): ResourceRef => ({
@@ -143,19 +158,20 @@ export const RESOURCES = {
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
+  commsMetrics: { path: "/api/comms/metrics", topic: "agents" },
   commsChatter: { path: "/api/comms/chatter", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
-    path: `/api/agents/${enc(agentId)}/stream`,
+    path: dockStreamPath(agentId),
     topic: "agents",
   }),
   // Only the PRs linked to a ticket: the Board, the one reader, shows no other (#26 A1).
   prs: (repoId: string): ResourceRef => ({
-    path: `/api/repos/${enc(repoId)}/prs?linked=1`,
+    path: prListPath(repoId, true),
     topic: "boards",
   }),
-  // Every PR of the repo, linked to a ticket or not: the command palette reaches them all.
+  // The repo's PRs as a list shows them, linked to a ticket or not: the palette reaches them all.
   allPrs: (repoId: string): ResourceRef => ({
-    path: `/api/repos/${enc(repoId)}/prs`,
+    path: prListPath(repoId),
     topic: "boards",
   }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
@@ -565,6 +581,12 @@ class Hub {
       }
     }
     return data;
+  }
+
+  /** Refetch the crew list, and the seat's own full row when the Agent page shows one. */
+  refetchCrew(id?: string): void {
+    this.refetch(RESOURCES.crew.path);
+    if (id !== undefined) this.refetch(RESOURCES.crewDetail(id).path);
   }
 
   refetch(path: string): void {

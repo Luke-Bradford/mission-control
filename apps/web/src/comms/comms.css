@@ -45,7 +45,7 @@
 
 .comms-decisions {
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   max-height: 46%;
   min-height: 0;
@@ -122,6 +122,13 @@
   transition:
     background-color 150ms ease,
     box-shadow 150ms ease;
+}
+
+/* The lists are flex columns that scroll: a row keeps its own height rather than squeezing into
+   the one below when there are more rows than room. */
+.comms-nav button,
+.comms-contacts button {
+  flex: none;
 }
 
 .comms-nav button:hover,
@@ -893,4 +900,9 @@
   grid-column: 1 / -1;
   display: flex;
   gap: var(--sp-1);
+}
+
+.comms-older {
+  display: flex;
+  justify-content: center;
 }

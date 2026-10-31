@@ -59,6 +59,7 @@ import {
   commentTextText,
   controllerCheckOf,
   createBodyText,
+  createDependsText,
   createdDecision,
   createdDraftText,
   createdFieldsFailedText,
@@ -273,6 +274,7 @@ import {
   UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
+  undeclaredPrDependency,
   unknownLabelText,
   untrackedText,
   WAITS_ON_ONLY_BACKLOG,
@@ -280,6 +282,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
+import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -297,6 +300,7 @@ import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
+import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -378,7 +382,14 @@ export interface FlightToolsDeps {
   /** `endRun` ends a run on its seat; `endAsideRun` one set aside in review, which holds no seat. */
   supervisor: Pick<
     Supervisor,
-    "message" | "busy" | "startRun" | "endRun" | "endAsideRun" | "interrupt"
+    | "message"
+    | "busy"
+    | "startRun"
+    | "endRun"
+    | "endAsideRun"
+    | "interrupt"
+    | "resumeRun"
+    | "sessionAlive"
   >;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
@@ -1246,6 +1257,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       laneDefault: config.crew?.laneDefault ?? false,
       body,
       closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);
     if (planner) {
@@ -1693,12 +1705,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const areas = areaLabelsOf(rules, card);
       if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
       if (areas.length === 0) return fail(moveNoAreaText(ref));
-      const waits = new Set(card.blockedBy.filter((b) => !b.closed).map((b) => b.ref));
+      const waits = new Map(card.blockedBy.filter((b) => !b.closed).map((b) => [b.ref, b.ref]));
       for (const n of dependsOn(body)) {
         const dep = board.find((i) => i.issueNumber === n);
-        if (dep === undefined || !dep.closed) waits.add(`${repo.id}#${n}`);
+        if (dep === undefined || !dep.closed) waits.set(`${repo.id}#${n}`, `${repo.id}#${n}`);
       }
-      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits]));
+      for (const w of waitReader(store, repo.id)(card)) waits.set(w.ref, w.text);
+      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits.values()]));
     }
     if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     const result = await deps.board.move({
@@ -1806,6 +1819,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ...(hasDoneWhenSection(body) ? [] : ["## Done when"]),
     ];
     if (missing.length > 0) return fail(createBodyText(missing));
+    const builds = undeclaredPrDependency(body, repo.id, store.pullRequests(repo.id));
+    if (builds !== null) return fail(createDependsText(builds.pr, builds.line));
     const known = await readKnown(deps, "create_ticket");
     const unfit = await textProblem(
       ctx,
@@ -2864,7 +2879,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean } = {},
+    options: { engine?: boolean; records?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -2888,7 +2903,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             return fail(AWAY_WRITES_REFUSED);
           const result = await act(c.args, repo, ctx);
           // close_ticket records its own decision (ref, title, URL) once a write has landed.
-          if (kind !== "close" && (kind !== "rerun" || !result.isError))
+          if (
+            kind !== "close" &&
+            options.records !== false &&
+            (kind !== "rerun" || !result.isError)
+          )
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
           bus.emit("flight");
           return result;
@@ -2929,7 +2948,115 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
   }
 
+  const ResumeSeatArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
+
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.resumeSeat,
+      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). Lifts the seat's stop or crew pause and names it; a failed resume ends the run. Refuses budget, account, Away-quota, machine-capacity and held runs.",
+      ResumeSeatArgs,
+      "pause",
+      async (a) => {
+        const cfg = seatCfg(a.seat);
+        if (cfg === undefined) return fail(notInSessionText(a.seat));
+        const call = seatCallSign(a.seat);
+        const loopKind = seatDef(cfg).loop;
+        if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
+        const row = store.seatSession(a.seat);
+        const run = row?.runId === null || row === null ? null : store.run(row.runId);
+        const at = now();
+        if (loopKind === "plan" && activeAway(store, at, config.operator.timezone))
+          return fail(AWAY_PLANNER_REFUSED);
+        if (run !== null && run.endedAt === null) {
+          if (!inRunLane(run)) return fail("Run is in another lane.");
+          const accountId = runAccountId(store, run.id, cfg.accountId);
+          if (run.loop?.parked?.kind === "budget") return fail("Run is held by its budget.");
+          if (accountAtStop(config, store, accountId, at))
+            return fail(accountStoppedText(seatCallSign(a.seat), accountId));
+          if (
+            awayQuotaUnknown(config, store, accountId, at) ||
+            awayQuotaReserve(config, store, accountId, at)
+          )
+            return fail(AWAY_QUOTA_REFUSED);
+        }
+        if (
+          run === null ||
+          run.endedAt !== null ||
+          row === null ||
+          deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
+          deps.supervisor.sessionAlive?.(a.seat) === true ||
+          row.state === "running"
+        )
+          return fail(
+            run === null || run.endedAt !== null || row === null
+              ? `${call} holds no unfinished run to resume.`
+              : `${call} is neither stopped, paused nor waiting to resume.`,
+          );
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          store.machineSamples(machineCapacitySince(at, capacityConfig)),
+          at,
+          capacityConfig,
+        );
+        if (capacity.blocked)
+          return fail(`the machine has insufficient headroom: ${capacity.reason}`);
+        if (row.state === "stopped")
+          store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
+        if (held(run)) {
+          if (row.state === "stopped") store.setSeatSession(row);
+          return fail("Run is held.");
+        }
+        const pause = pausedSeat(store, a.seat);
+        const pauseText = unpauseSeat(a.seat, call, at);
+        const lifted = [
+          pauseText,
+          row.state === "stopped" ? "the operator had stopped the seat" : null,
+        ]
+          .filter((t) => t !== null)
+          .join("; ");
+        const filed = (outcome: string): void => {
+          record(now(), {
+            kind: "pause",
+            about: MC_TOOL_NAMES.resumeSeat,
+            decision: `${outcome}${lifted === "" ? "" : `: ${lifted}`}.`,
+            basis: a.basis,
+            seatId: a.seat,
+            targetRunId: run.id,
+          });
+        };
+        // What this call wrote; a rollback leaves a newer change by the operator alone.
+        const pauseAfter = JSON.stringify(readCrewPause(store));
+        try {
+          await deps.supervisor.resumeRun(run.id);
+        } catch {
+          // The supervisor records the failure and ends the run when recovery cannot start it.
+        }
+        const after = store.seatSession(a.seat);
+        const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
+        if (!live) {
+          if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
+            writeCrewPause(store, pause, at);
+          // Only a newer stop is the operator's; an error the failed resume left is not.
+          const cur = row.state === "stopped" ? store.seatSession(a.seat) : null;
+          if (cur !== null && cur.state !== "stopped")
+            store.setSeatSession({ ...cur, state: "stopped", reason: row.reason, updatedAt: at });
+          const outcome =
+            store.run(run.id)?.endedAt !== null
+              ? "ended after the failed resume"
+              : "is not running";
+          filed(`${call}'s run ${outcome}`);
+          return fail(`${call}'s run ${outcome}.`);
+        }
+        bus.emit("settings");
+        bus.emit("agents");
+        filed(`Resume started for ${call}'s run`);
+        return {
+          text: `Resume started for ${call}'s run${lifted === "" ? "" : `: ${lifted}`}.`,
+        };
+      },
+      z.toJSONSchema(ResumeSeatArgs),
+      { engine: false, records: false },
+    ),
     superTool(
       MC_TOOL_NAMES.mergePr,
       "Clear an awaiting-flight run PR in your lane; the engine merges it. Workflows, repo rules and operator holds remain protected.",
@@ -3462,7 +3589,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.createTicket,
-      description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
+      description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. Work cut from or built on an open PR needs a Depends on line for that PR's ticket (or After PR N); without one the call is refused. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
       inputSchema: objectSchema(
         {
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
@@ -3730,6 +3857,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.flightState,
     MC_TOOL_NAMES.screenshotHud,
     MC_TOOL_NAMES.endRun,
+    MC_TOOL_NAMES.resumeSeat,
     MC_TOOL_NAMES.dismissItem,
     MC_TOOL_NAMES.holdPr,
     MC_TOOL_NAMES.briefItem,

@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import {
   type AttentionItem,
+  type BoardItem,
   carriedFrom,
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
@@ -71,6 +72,7 @@ import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
 import { readCrewPause } from "../crew-pause.ts";
+import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
 import {
@@ -314,8 +316,17 @@ export function flightView(
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
+    ...(found === null
+      ? {}
+      : { blocked: blockedWork(store, found.session.repoId, now, inThisLane(config)) }),
   };
 }
+
+/** Whether a card is in the hub's lane, as the wake lists cards. */
+const inThisLane =
+  (config: CcConfig) =>
+  (card: Pick<BoardItem, "labels">): boolean =>
+    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false);
 
 /** All nine sections of a session's brief, in order; one never written (or no session) is empty. */
 export function flightBriefSections(store: Store, sessionId: string | null): FlightBriefSection[] {
@@ -534,6 +545,7 @@ export function flightState(i: {
       discussions,
       signals: [],
       triage: [],
+      blocked: [],
       time: clockHm(now, tz),
       repo: "",
       lane: config.crew?.lane ?? null,
@@ -638,6 +650,7 @@ export function flightState(i: {
   };
 
   const active = store.activeTickets();
+  const waitsOf = waitReader(store, session.repoId);
   const tickets = board
     .filter(
       (b) =>
@@ -645,7 +658,7 @@ export function flightState(i: {
         inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&
-        !b.blockedBy.some((x) => !x.closed),
+        waitsOf(b).length === 0,
     )
     .sort(
       (a, b) =>
@@ -983,6 +996,7 @@ export function flightState(i: {
     aside,
     questions,
     tickets,
+    blocked: blockedWork(store, session.repoId, now, inThisLane(config)),
     prs,
     items,
     holds,

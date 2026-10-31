@@ -37,7 +37,7 @@ function apiFor(count: number, failed = false) {
     })),
     "/api/qa/ci-runs?days=90": { runs: [] },
     "/api/qa/findings?days=90": { findings: [] },
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/repos/mission-control/map": impactMap(),
   };
 }
