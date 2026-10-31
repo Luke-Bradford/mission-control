@@ -49,6 +49,7 @@ Use the repo's own test setup: its browser test helper, its test database, its r
   - every link and button goes where its label says, and the route exists;
   - forms handle required fields, bad input, too-long input and double submit, each with a message;
   - every control is reachable by keyboard, with visible focus.
+- **Preview.** When your review has a preview of the PR head (the brief says so), use `mc preview_browser` on it before a browser test: open each changed screen with the hub's real data, click through the flow the PR changes, type into its forms, read what the page shows, measure at the widths above and take screenshots for your findings. It reaches only the preview's own origin; a path that leaves it is refused.
 
   A skipped browser test is a check you could not run.
 - **APIs.** Call each changed route in-process, with the framework's request or inject helper. Try no auth, another user's resource, missing and wrong-typed fields, extra fields, a huge body, boundary values, and the same call twice. Check the status codes, the error shape, and that the response matches what its callers read.
