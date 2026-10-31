@@ -750,19 +750,39 @@ describe("state step", () => {
     });
   });
 
-  it("the dollar cap: a resume's allowance raises it, and a parked loop keeps its own park", () => {
-    expect(
-      reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5 }, { budgetUsdExtra: 12.5 })).loop.phase,
-    ).toBe("working");
-    expect(
-      reconcile(snap({ costUsd: 25, budgetUsd: 12.5 }, { budgetUsdExtra: 12.5 })).loop.parked
-        ?.reason,
-    ).toBe("used $25.00 of a $25.00 budget");
+  it("a parked loop keeps its own park past the dollar cap", () => {
     const review = { kind: "review", reason: "r", ended: false };
     expect(
       reconcile(snap({ costUsd: 13, budgetUsd: 12.5 }, { phase: "parked", parked: review })).loop
         .parked?.kind,
     ).toBe("review");
+  });
+
+  it("a cap passed on the report turn still goes to ci; the CLI's end keeps the dollar park", () => {
+    const reported = snap(
+      {
+        costUsd: 12.6,
+        budgetUsd: 12.5,
+        headCommit: SHA,
+        evidence: { id: 2, at: 1, ruling: false },
+        evidenceCount: 2,
+      },
+      { phase: "working", reportedEvidenceId: 1 },
+    );
+    expect(reconcile(reported).loop.phase).toBe("ci");
+    const parked = {
+      kind: "budget",
+      reason: "used $12.50 of a $12.50 budget",
+      ended: false,
+    };
+    expect(
+      reconcile(
+        snap(
+          { costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } },
+          { phase: "parked", parked },
+        ),
+      ).loop.parked,
+    ).toEqual({ ...parked, ended: true });
   });
 
   it("the dollar cap leaves a pushed PR in ci or review moving", () => {

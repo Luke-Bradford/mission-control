@@ -169,8 +169,6 @@ export interface RunLoop {
   lastRefusal: string | null;
   epoch: number;
   budgetExtra: number;
-  /** Dollars Resume added to the template's cap; absent on a loop stored before the cap existed. */
-  budgetUsdExtra?: number;
   parked: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
   touches: {

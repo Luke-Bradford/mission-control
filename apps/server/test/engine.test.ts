@@ -1944,17 +1944,18 @@ describe("The operator's message", () => {
       }
     };
 
-    it("parks a Claude run that has spent its cap, and Resume raises the cap by one template's worth", async () => {
+    it("parks a Claude run that has spent its cap, and Resume refuses it", async () => {
       spend();
       await h.engine.tick();
       expect(loopOf()).toMatchObject({
         phase: "parked",
         parked: { kind: "budget", reason: "used $12.50 of a $12.50 budget" },
       });
-      await h.engine.onOperatorMessage(RUN);
-      expect(loopOf()).toMatchObject({ phase: "working", budgetUsdExtra: 12.5 });
-      await h.engine.tick();
-      expect(loopOf().phase).toBe("working");
+      expect(await h.engine.onOperatorMessage(RUN)).toEqual({
+        lifted: false,
+        reason: "dollar-cap",
+      });
+      expect(loopOf().phase).toBe("parked");
     });
 
     it("gives a Codex run no dollar cap", async () => {

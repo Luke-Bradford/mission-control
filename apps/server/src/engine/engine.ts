@@ -94,6 +94,7 @@ import {
   minorIssueFailedText,
   minorNotPostedText,
   modeOfSeat,
+  isDollarCapReason,
   NEW_LOOP,
   parkedEventText,
   pendingSeatWork,
@@ -241,6 +242,7 @@ export type OperatorRefusal =
   | "use-controller-check"
   | "use-merge-hold"
   | "use-uat"
+  | "dollar-cap"
   | "engine-error";
 
 export type MergeHoldBy = "CAPCOM" | "FLIGHT";
@@ -266,6 +268,8 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
   "use-merge-hold": MERGE_HOLD_USE_ROUTE,
   "use-uat": UAT_USE_ROUTE,
+  "dollar-cap":
+    "the run reached its template's dollar cap, and its Claude process keeps the cap it started with; end the run and start the ticket again",
   "engine-error": "the engine hit an error; see the hub log",
 };
 
@@ -2710,6 +2714,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("not-parked");
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
+        if (kind === "budget" && isDollarCapReason(loop.parked.reason)) return refuse("dollar-cap");
         // only the controller's verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
@@ -2801,7 +2806,6 @@ export function createEngine(deps: EngineDeps): Engine {
         };
         if (kind === "budget") {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
-          next.budgetUsdExtra = (next.budgetUsdExtra ?? 0) + (run.profile?.profile.budgetUsd ?? 0);
         }
         if (kind === "review" || kind === "review-ruling") {
           const staysInReview = opts?.action === "accept" || opts?.action === "second_review";

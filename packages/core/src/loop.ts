@@ -498,7 +498,6 @@ export const NEW_LOOP: RunLoop = {
   lastRefusal: null,
   epoch: 0,
   budgetExtra: 0,
-  budgetUsdExtra: 0,
   parked: null,
   touches: null,
   cardFor: null,
@@ -762,6 +761,16 @@ const park = (loop: RunLoop, kind: string, reason: string): Step => ({
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
 
+/** The budget park's reason when the run has spent its template's dollar cap, else null. */
+const dollarCapReason = (s: LoopSnapshot): string | null =>
+  s.budgetUsd != null && s.costUsd != null && s.costUsd >= s.budgetUsd
+    ? `used $${s.costUsd.toFixed(2)} of a $${s.budgetUsd.toFixed(2)} budget`
+    : null;
+
+/** Whether a budget park's reason is the dollar cap's: Resume cannot lift it (the CLI keeps its cap). */
+export const isDollarCapReason = (reason: string): boolean =>
+  /^used \$[\d.]+ of a \$[\d.]+ budget$/.test(reason);
+
 const nudgePrefix = (s: LoopSnapshot): string =>
   `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
 const nudges = (s: LoopSnapshot): number[] =>
@@ -926,35 +935,21 @@ function stateStep(s: LoopSnapshot): Step {
           : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
     };
   }
-  // like the token park, only while the seat works: a cap passed on the last turn leaves a
-  // pushed PR moving. An ended run is parked anyway, so it keeps the dollar figure.
-  if (
-    (loop.phase === "working" || s.ended !== null) &&
-    loop.phase !== "parked" &&
-    s.budgetUsd !== null &&
-    s.budgetUsd !== undefined &&
-    s.costUsd !== null &&
-    s.costUsd !== undefined &&
-    s.costUsd >= s.budgetUsd + (loop.budgetUsdExtra ?? 0)
-  ) {
-    const reason = `used $${s.costUsd.toFixed(2)} of a $${(s.budgetUsd + (loop.budgetUsdExtra ?? 0)).toFixed(2)} budget`;
-    return {
-      loop: {
-        ...loop,
-        phase: "parked",
-        parked: { kind: "budget", reason, ended: s.ended !== null },
-      },
-      actions: [{ kind: "event", text: parkedEventText(reason) }],
-    };
-  }
   if (s.ended !== null && !loop.parked?.ended) {
+    // the CLI stops itself at its cap: the end keeps the dollar figure the cap hit parked with
+    const capReason = dollarCapReason(s);
+    const parked =
+      loop.parked?.kind === "budget"
+        ? { ...loop.parked, ended: true }
+        : capReason !== null
+          ? { kind: "budget", reason: capReason, ended: true }
+          : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
     return {
-      loop: {
-        ...loop,
-        phase: "parked",
-        parked: { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true },
-      },
-      actions: [],
+      loop: { ...loop, phase: "parked", parked },
+      actions:
+        capReason !== null && loop.parked?.kind !== "budget"
+          ? [{ kind: "event", text: parkedEventText(capReason) }]
+          : [],
     };
   }
   // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
@@ -1236,6 +1231,9 @@ function stateStep(s: LoopSnapshot): Step {
     return unchanged(loop);
   }
 
+  // like the token park, after the report step: a cap passed on the last turn still pushes the PR
+  const capReason = loop.phase === "working" ? dollarCapReason(s) : null;
+  if (capReason !== null) return park(loop, "budget", capReason);
   if (loop.phase === "working" && s.tokens > s.budget + loop.budgetExtra) {
     // s.tokens is input + output tokens, as the engine supplies them (cache reads are not counted)
     return park(
