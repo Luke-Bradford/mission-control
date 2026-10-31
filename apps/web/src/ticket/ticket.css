@@ -116,6 +116,13 @@
   font-size: var(--fs-s);
 }
 
+.tk-more > summary,
+.tk-findings > summary {
+  min-height: 24px;
+  padding: var(--sp-1) 0;
+  cursor: pointer;
+}
+
 .tk-findings li {
   padding: var(--sp-1) 0;
   overflow-wrap: anywhere;

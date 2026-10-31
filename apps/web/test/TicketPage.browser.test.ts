@@ -83,6 +83,12 @@ describeRendered("The ticket page in a browser", () => {
               (await page.reachable(".tk-event", ".tk-timeline .pb")).every(Boolean),
               `${label} events`,
             ).toBe(true);
+            const sums = await page.boxes(".tk-more > summary");
+            expect(sums.length, label).toBeGreaterThan(0);
+            expect(
+              sums.every((b) => b.height >= 24 && b.width >= 24),
+              `${label} targets`,
+            ).toBe(true);
           } else {
             await page.box(".tk-timeline .muted"); // the empty line is shown
           }
