@@ -161,6 +161,9 @@ function walkOrder(nodes: readonly SpiderNode[], centre: Point): SpiderNode[] {
  * resting drift is a CSS animation on each node's body, so a still graph costs no frames, and
  * everything pauses while the panel is scrolled out of view.
  */
+/** Below this plot width the rim role names are left out: the rail cannot hold them and the seat names. */
+const RIM_NAMES_MIN_W = 480;
+
 export function CommsSpider({
   frame: f,
   spokes,
@@ -637,13 +640,16 @@ export function CommsSpider({
           />
           {spokes.map((spoke) => {
             const tip = onSpoke(f, spoke.angle, 1);
-            // the name sits clear of the outermost seat's own name, which hangs under its node
-            const out = onSpoke(f, spoke.angle, 1 + 22 / Math.max(1, f.rx));
-            const name = spokeName(
-              spoke,
-              (id) => byId.has(id),
-              (id) => byId.get(id)?.name ?? id,
-            );
+            const out = onSpoke(f, spoke.angle, 1 + 8 / Math.max(1, f.rx));
+            // In a narrow rail the seat names carry the role; rim names would sit on them or clip.
+            const name =
+              f.w >= RIM_NAMES_MIN_W
+                ? spokeName(
+                    spoke,
+                    (id) => byId.has(id),
+                    (id) => byId.get(id)?.name ?? id,
+                  )
+                : null;
             const cos = Math.cos((spoke.angle * Math.PI) / 180);
             const sin = Math.sin((spoke.angle * Math.PI) / 180);
             // Clear of the seat names, which hang under their nodes: lower spokes' names drop.
