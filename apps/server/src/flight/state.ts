@@ -72,6 +72,7 @@ import {
   READY_LABEL,
   RULING_PARK,
   type Run,
+  STUCK_PARK,
   seatCallSign,
   seatDef,
   type TestLockState,
@@ -1387,9 +1388,10 @@ const stoppedSeats = (s: FlightState): string[] =>
 
 /** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
 const flightParkKind = (kind: string): boolean =>
-  kind === RULING_PARK ||
-  kind === "review-failed" ||
-  (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
+  kind !== STUCK_PARK && // the engine lifts it once the PR shows the push; push_unseen says when it has not
+  (kind === RULING_PARK ||
+    kind === "review-failed" ||
+    (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind));
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(

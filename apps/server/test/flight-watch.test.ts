@@ -49,6 +49,7 @@ import {
   RULING_PARK,
   type Run,
   type SeatSessionRow,
+  STUCK_PARK,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2608,6 +2609,12 @@ describe("wakeSummary", () => {
       ).toBe(true);
     });
 
+    it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {
+      const stuck = state({ seats: [s({ parked: { kind: STUCK_PARK, reason: "x" } })] });
+      expect(pending(stuck)).toBe(false);
+      expect(wakeFacts(stuck)).toBe(wakeFacts(state({ seats: [s({})] })));
+    });
+
     it("is true for a stopped build seat even with no ticket, and the summary counts it", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
@@ -2786,6 +2793,17 @@ describe("ops signals", () => {
       });
       store.setSeatSession(row("guido-1", "r-park", "parked"));
       store.addLoopEvent("park-old", "r-park", "parked: push stuck", T0 - 16 * MIN);
+    },
+    push_unseen() {
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.upsertRun(run("r-unseen", "guido-1", { ticket: "mc#176" }));
+      store.setRunLoop("r-unseen", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+      });
+      store.setSeatSession(row("guido-1", "r-unseen", "parked"));
+      store.addLoopEvent("park-unseen", "r-unseen", "parked: PR has no head", T0 - 31 * MIN);
     },
     merge_stalled() {
       store.upsertRun(run("r-ready", "guido-1", { ticket: "mc#176" }));
@@ -4364,6 +4382,23 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("old_park");
     nowMs += 2 * MIN;
     expect(kinds()).toContain("old_park");
+  });
+
+  it("a push the PR does not show is the engine's for 30 minutes, then a wake reason", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-park", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-park", "parked"));
+    store.addLoopEvent("p", "r-park", "parked: PR has no head", T0 - 29 * MIN);
+    expect(kinds()).not.toContain("old_park");
+    expect(kinds()).not.toContain("push_unseen");
+    nowMs += 2 * MIN;
+    expect(kinds().filter((k) => k === "push_unseen")).toHaveLength(1);
+    expect(kinds()).not.toContain("old_park");
   });
 
   it("a controller request counts after 15 minutes, and an answer from CAPCOM ends it", () => {

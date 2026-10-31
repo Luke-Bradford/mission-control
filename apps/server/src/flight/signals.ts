@@ -13,6 +13,7 @@ import {
   FLIGHT_MERGE_STALL_MS,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_OLD_PARK_MS,
+  FLIGHT_PUSH_UNSEEN_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAITS_SETTING,
@@ -29,6 +30,7 @@ import {
   noReportExitReason,
   type PullRequestView,
   parkedEventText,
+  STUCK_PARK,
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
@@ -592,8 +594,20 @@ export function flightSignals(i: {
     ...(i.aside ?? []).flatMap((x) => (x.parked === null ? [] : [{ id: x.runId, at: x.seat }])),
   ]) {
     const at = parkedAt.get(parkedRun.id);
-    if (at === undefined || now - at < FLIGHT_OLD_PARK_MS) continue;
+    if (at === undefined) continue;
     const run = store.run(parkedRun.id);
+    if (run?.loop?.parked?.kind === STUCK_PARK) {
+      // the engine lifts this park the pass the PR shows the push; one still standing needs a decision
+      if (now - at >= FLIGHT_PUSH_UNSEEN_MS)
+        raise(
+          "push_unseen",
+          `${parkedRun.id}:${at}`,
+          at,
+          `${parkedRun.at} ${run.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run.loop.parked.reason}`,
+        );
+      continue;
+    }
+    if (now - at < FLIGHT_OLD_PARK_MS) continue;
     raise(
       "old_park",
       `${parkedRun.id}:${at}`,

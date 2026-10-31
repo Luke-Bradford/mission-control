@@ -1492,6 +1492,19 @@ describe("refusals", () => {
     expect(loopOf().parked?.reason).toContain(text);
   });
 
+  it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
+    setPr({ ci: "passing", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "pending", headSha: SHA });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null, unparkedAt: clock });
+  });
+
   describe("the note's text is written for the operator", () => {
     const speaksToTheSeat =
       /ask the operator|ask them|tell the operator|the operator has been|Try again|your branch|your reply/;
