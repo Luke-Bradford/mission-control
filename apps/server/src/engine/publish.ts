@@ -144,6 +144,9 @@ export type RerunStateResult =
   | { ok: false; text: string; transient: boolean };
 /** A completed run with one of these conclusions did not fail. */
 const NOT_FAILED_CONCLUSIONS = ["success", "skipped", "neutral"];
+/** A run that failed, timed out or was cancelled has jobs to re-run. */
+const needsRerun = (conclusion: unknown): boolean =>
+  conclusion === "failure" || conclusion === "timed_out" || conclusion === "cancelled";
 
 /**
  * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
@@ -713,7 +716,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         }
         const failed = runs.flatMap((r: unknown) => {
           const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return x?.conclusion === "failure" &&
+          return needsRerun(x?.conclusion) &&
             typeof x.databaseId === "number" &&
             Number.isSafeInteger(x.databaseId)
             ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
@@ -737,9 +740,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       const listed = await actionsRuns(repo, sha, "databaseId,conclusion,attempt");
       if (isRefusal(listed)) return listed;
-      const failed = listed.filter(
-        (r) => r.conclusion === "failure" || r.conclusion === "timed_out",
-      );
+      const failed = listed.filter((r) => needsRerun(r.conclusion));
       if (failed.length === 0) return final(NO_FAILED_RUN);
       const done: CiRerun["runs"] = [];
       for (const r of failed) {
@@ -771,8 +772,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
         listed.some(
           (r) =>
-            !saved.some((s) => s.id === r.id) &&
-            (r.conclusion === "failure" || r.conclusion === "timed_out"),
+            !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion),
         );
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
