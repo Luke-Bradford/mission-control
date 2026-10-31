@@ -18,6 +18,7 @@ export * from "./map-fixture.ts";
 export * from "./mcp.ts";
 export * from "./metrics.ts";
 export * from "./needs-you.ts";
+export * from "./path-grants.ts";
 export * from "./plain-talk.ts";
 export * from "./profiles.ts";
 export * from "./prompt-cost.ts";

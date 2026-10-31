@@ -6755,6 +6755,27 @@ export class Store {
     }));
   }
 
+  /** The decisions of one kind about one ticket, newest first. */
+  flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
+      )
+      .all(kind, ref) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      at: r.at as number,
+      kind: r.kind as FlightDecisionKind,
+      seatId: r.seat_id as string | null,
+      targetRunId: r.target_run_id as string | null,
+      ref: r.ref as string | null,
+      questionId: r.question_id as number | null,
+      about: r.about as string,
+      decision: r.decision as string,
+      basis: r.basis as string,
+    }));
+  }
+
   /** Replaces one section of a session's brief. */
   setFlightBriefSection(r: FlightBriefRow): void {
     this.db

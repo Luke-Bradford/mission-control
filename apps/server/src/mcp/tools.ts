@@ -74,6 +74,7 @@ import {
   firstPrNotifier,
   fixKey,
   formerSubmoduleText,
+  grantedPath,
   isProtectedPath,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
@@ -189,6 +190,7 @@ import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { runPathGrants } from "../path-grants.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
@@ -1691,6 +1693,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const writers = session.seats.filter((s) => s.id !== seat.id && seatDef(s).mode === "writer");
       /** The repo's own protected globs, on top of PROTECTED_FILES. */
       const extra = config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
+      /** Files outside the area that FLIGHT approved for this run alone. */
+      const grants = runPathGrants(store, run.id);
       /** What this call has deleted so far: every answer from then on says so. */
       const removed: string[] = [];
       /** The advisory lines about files another open run changed; appended to a commit's answer. */
@@ -1746,7 +1750,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             foreign.push(p);
             continue;
           }
-          if (isProtectedPath(p, extra)) {
+          if (!grantedPath(grants, p) && isProtectedPath(p, extra)) {
             kept.push(p);
             continue;
           }
@@ -1758,7 +1762,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           if (h === "folder" || h === "nested" || w === "folder") notFile.push(p);
           else if (w === "linked") linked.push(p);
           else if (h === "none" && w === "missing") missing.push(p);
-          else if (h === "file" && !pathInArea(seat.area, p)) {
+          else if (h === "file" && !grantedPath(grants, p) && !pathInArea(seat.area, p)) {
             const owner = writers.find((x) => pathInArea(x.area, p));
             if (owner === undefined) outside.push(p);
             else {
@@ -1918,9 +1922,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           } else if (fromMain.has(p)) {
             // main's own version of the path: no area, protected or stray check applies
             if (special.has(p)) links.push(p);
-          } else if (isProtectedPath(p, extra)) {
+          } else if (!grantedPath(grants, p) && isProtectedPath(p, extra)) {
             kept.push(p);
-          } else if (!pathInArea(seat.area, p)) {
+          } else if (!grantedPath(grants, p) && !pathInArea(seat.area, p)) {
             const owner = writers.find((w) => pathInArea(w.area, p));
             if (owner === undefined) {
               outside.push(p);
