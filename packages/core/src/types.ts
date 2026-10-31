@@ -433,6 +433,17 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
 
+/**
+ * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
+ * `previewable` is true only where `POST /api/previews` could start one now: the hub supports
+ * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
+ * null; the web offers "Start preview" when `previewable && preview === null`.
+ */
+export interface PullRequestPreviewFacts {
+  previewable: boolean;
+  preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
+}
+
 /** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
 export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
 
@@ -980,8 +991,8 @@ export interface CrewRow {
   model: string | null;
   /** Crew: the config session id; null for a loop. */
   sessionId: string | null;
-  /** Crew: the `claude --version` read at the server and the seat's configured effort; null for a loop. */
-  cli: { version: string | null; effort: string | null };
+  /** Crew: the `claude --version` read at the server, configured effort, and current run's dollar cap; null for a loop. */
+  cli: { version: string | null; effort: string | null; budgetUsd?: number | null };
   /** The open PR on the latest run's branch (in the seat's repo), else null. */
   review: {
     prNumber: number;

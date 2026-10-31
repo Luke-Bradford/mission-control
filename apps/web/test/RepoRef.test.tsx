@@ -99,8 +99,11 @@ describe("RepoRef", () => {
       </>,
     );
     expect((await screen.findByRole("link", { name: "shop-app #3349" })).getAttribute("href")).toBe(
-      "https://github.com/octo-org/shop-app/issues/3349",
+      "/tickets/shop-app/3349",
     );
+    expect(
+      screen.getByRole("link", { name: "shop-app #3349 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/issues/3349");
     expect(screen.getByText("<b>x</b>")).toBeTruthy();
   });
 });

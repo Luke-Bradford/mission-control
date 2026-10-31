@@ -1936,6 +1936,42 @@ describe("The operator's message", () => {
     expect(loopOf()).toMatchObject({ phase: "working", budgetExtra: 1000 });
   });
 
+  describe("the template's dollar cap", () => {
+    const spend = (vendor: "claude" | "codex" = "claude"): void => {
+      giveProfile({ budgetUsd: 12.5 });
+      store.upsertRun({ ...(store.run(RUN) as Run), costUsd: 12.5 });
+      if (vendor === "codex") {
+        // `upsertRun` never rewrites a run's vendor either
+        const db = new DatabaseSync(join(dir, "mc.sqlite"));
+        try {
+          db.prepare("UPDATE runs SET vendor = 'codex' WHERE id = ?").run(RUN);
+        } finally {
+          db.close();
+        }
+      }
+    };
+
+    it("parks a Claude run that has spent its cap, and Resume refuses it", async () => {
+      spend();
+      await h.engine.tick();
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: "budget", reason: "used $12.50 of a $12.50 budget" },
+      });
+      expect(await h.engine.onOperatorMessage(RUN)).toEqual({
+        lifted: false,
+        reason: "dollar-cap",
+      });
+      expect(loopOf().phase).toBe("parked");
+    });
+
+    it("gives a Codex run no dollar cap", async () => {
+      spend("codex");
+      await h.engine.tick();
+      expect(loopOf().parked).toBeNull();
+    });
+  });
+
   it.each(["ruling", "review-failed"] as const)(
     "a %s park resumes without a review waiver",
     async (kind) => {

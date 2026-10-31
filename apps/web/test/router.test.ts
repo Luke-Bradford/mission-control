@@ -143,7 +143,7 @@ describe("path helpers", () => {
     expect(agentPath("a b")).toBe("/agent/a%20b");
     expect(tracePath("a b", "run/x")).toBe("/agent/a%20b?trace=run%2Fx");
     expect(boardPath("a/b")).toBe("/board/a%2Fb");
-    expect(ticketPath("shop-app", 3227)).toBe("/board/shop-app/3227");
+    expect(ticketPath("shop-app", 3227)).toBe("/tickets/shop-app/3227");
     expect(itemPath("esc:shop-app#3227")).toBe("/comms/esc%3Ashop-app%233227");
     expect(route(itemPath("esc:shop-app#3227"))).toEqual({
       page: "comms",
@@ -229,5 +229,28 @@ describe("legacyRedirect()", () => {
     expect(legacyRedirect("/nope", "")).toBeNull();
     expect(legacyRedirect("/needs/%zz", "")).toBeNull();
     expect(legacyRedirect("/", "")).toBeNull();
+  });
+});
+
+describe("the ticket page route", () => {
+  it("is /tickets/:repo/:number", async () => {
+    const { route, ticketPath } = await import("../src/router.ts");
+    expect(ticketPath("shop-app", 3227)).toBe("/tickets/shop-app/3227");
+    expect(ticketPath("a/b", 1)).toBe("/tickets/a%2Fb/1");
+    expect(route("/tickets/shop-app/3227")).toEqual({
+      page: "ticket",
+      repoId: "shop-app",
+      number: 3227,
+    });
+    expect(route("/tickets/a%20b/9/")).toEqual({ page: "ticket", repoId: "a b", number: 9 });
+    for (const bad of [
+      "/tickets",
+      "/tickets/shop-app",
+      "/tickets/shop-app/0",
+      "/tickets/shop-app/x",
+      "/tickets/%/1",
+      "/tickets/a/1/x",
+    ])
+      expect(route(bad), bad).toBeNull();
   });
 });

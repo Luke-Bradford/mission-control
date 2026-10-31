@@ -249,8 +249,8 @@ describe("Comms routes", () => {
     expect(screen.getByText("Comms ticket")).toBeTruthy();
     expect(screen.getByText("In progress")).toBeTruthy();
     expect(screen.getByText("Agent")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
-      "/board/shop-app/707",
+    expect(screen.getByRole("link", { name: "Open ticket page" }).getAttribute("href")).toBe(
+      "/tickets/shop-app/707",
     );
     const earlier = document.getElementById("comms-message-comms:earlier") as HTMLElement;
     const later = document.getElementById("comms-message-comms:later") as HTMLElement;
@@ -292,8 +292,8 @@ describe("Comms routes", () => {
     expect(await screen.findByText("Empty ticket")).toBeTruthy();
     expect(screen.getByText("Ready")).toBeTruthy();
     expect(screen.getByText("CAPCOM")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
-      "/board/shop-app/999",
+    expect(screen.getByRole("link", { name: "Open ticket page" }).getAttribute("href")).toBe(
+      "/tickets/shop-app/999",
     );
     expect(screen.getByText("No messages yet.")).toBeTruthy();
     const composer = screen.getByLabelText("Post to #crew as CAPCOM · tagged #999");

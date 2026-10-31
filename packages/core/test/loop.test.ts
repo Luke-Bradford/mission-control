@@ -741,6 +741,58 @@ describe("state step", () => {
     expect(reconcile(inCi({ tokens: 5000 })).loop.phase).toBe("ci");
   });
 
+  it("parks an ended run when Claude reaches its dollar cap", () => {
+    const r = reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } }));
+    expect(r.loop.parked).toEqual({
+      kind: "budget",
+      reason: "used $12.50 of a $12.50 budget",
+      ended: true,
+    });
+  });
+
+  it("a parked loop keeps its own park past the dollar cap", () => {
+    const review = { kind: "review", reason: "r", ended: false };
+    expect(
+      reconcile(snap({ costUsd: 13, budgetUsd: 12.5 }, { phase: "parked", parked: review })).loop
+        .parked?.kind,
+    ).toBe("review");
+  });
+
+  it("a cap passed on the report turn still goes to ci; the CLI's end keeps the dollar park", () => {
+    const reported = snap(
+      {
+        costUsd: 12.6,
+        budgetUsd: 12.5,
+        headCommit: SHA,
+        evidence: { id: 2, at: 1, ruling: false },
+        evidenceCount: 2,
+      },
+      { phase: "working", reportedEvidenceId: 1 },
+    );
+    expect(reconcile(reported).loop.phase).toBe("ci");
+    const parked = {
+      kind: "budget",
+      reason: "used $12.50 of a $12.50 budget",
+      ended: false,
+    };
+    expect(
+      reconcile(
+        snap(
+          { costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } },
+          { phase: "parked", parked },
+        ),
+      ).loop.parked,
+    ).toEqual({ ...parked, ended: true });
+  });
+
+  it("the dollar cap leaves a pushed PR in ci or review moving", () => {
+    expect(reconcile(inCi({ costUsd: 12.6, budgetUsd: 12.5 })).loop.phase).toBe("ci");
+    const review = reconcile(
+      snap({ costUsd: 12.6, budgetUsd: 12.5, headCommit: SHA }, { phase: "review" }),
+    );
+    expect(review.loop.parked?.kind).not.toBe("budget");
+  });
+
   describe("16: silent after three carry-on resumes", () => {
     const keys = ["nudge:r1:0:0:1", "nudge:r1:0:0:2", "nudge:r1:0:0:3"];
     const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>
