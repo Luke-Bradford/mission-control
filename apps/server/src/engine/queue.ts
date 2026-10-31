@@ -672,7 +672,7 @@ export function accountAtStop(
   });
 }
 
-/** Only new away starts need fresh readings for both windows. Resumes/reviews/watch are unaffected. */
+/** Only new away starts need fresh readings for both windows. Resumes by the engine, reviews and watch are unaffected; FLIGHT's resume_seat checks it too. */
 export function awayQuotaUnknown(
   config: CcConfig,
   store: Store,
