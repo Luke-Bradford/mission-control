@@ -279,6 +279,22 @@ therefore includes a hub restart and the crew's normal shutdown and resume. This
 the launchd job; do not install it for a manually started hub. Check the expanded entry with
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
 
+### FLIGHT runaway breaker
+
+FLIGHT has no hourly, per-run or per-ticket caps on what it does; it makes judgement calls. One
+breaker stops it when it loops. It counts every successful FLIGHT write call (the tool and what it
+acted on), whether or not the call leaves a row in Decided without you. It trips when FLIGHT makes
+more than 200 of them in an hour, or the same tool with the same arguments (a queue reorder: the same ticket) 5 times in 30 minutes. FLIGHT's own bookkeeping (`track`, `untrack`, `log_decision`, `update_brief`, `remember`, `forget`) counts toward the hourly total but never trips the repeat rule; focus reads and a ruling still pending are reads. FLIGHT's Comms messages, a close that is left unconfirmed and `screenshot_hud` count too. While it is tripped every FLIGHT
+write is refused with the breaker's text (reads still work), the trip is logged in Decided without
+you, and one flag appears in Needs you. Operator holds, budget and account stops, secret
+redaction and the git safety rules are not affected by it and stay as they were.
+
+Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker by
+dismissing its flag in Needs you, or with `curl -s -X POST 127.0.0.1:7420/api/flight/runaway/lift -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'`. The lift is logged and clears the
+flag and starts the count afresh, so the calls that tripped it do not trip it again; it answers 409
+when the breaker is not tripped. `flight_state` shows `breaker.tripped`. While it is tripped the hub
+sends FLIGHT no wakes (it could only idle), and the wake facts list the breaker.
+
 ### Map payload cache and polling
 
 `/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
@@ -984,8 +1000,8 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
 action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
-configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
-cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+configured review-round cap, optionally adding a short fix list, as many as it judges right (each grant
+gives the head one more blocking review before the run parks again). A rework for a run set aside while its seat is
 on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
@@ -1136,14 +1152,14 @@ hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controll
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat) |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
 | `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a superuser repo, a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
 | `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
-| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
 
 Three further tools give FLIGHT the controller's reach without a shell (#1214). Each landed call is a
 FLIGHT decision on the Audit ledger with its route or verb, body and basis, and each is refused during Away:
@@ -1169,7 +1185,7 @@ still runs before each of FLIGHT's calls and holds it to the repo's rules only, 
 - `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (every number is read, with flags before or after it; judged on the board the hub last read; refused when a number or the repo's rules cannot be read), and any `gh project item-*` write (use `set_fields` or `edit_card`).
 
 `gh_write` refuses an `always_ask` or other-lane ticket, and refuses when the card cannot be read live. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
-a `shell` decision, with credentials redacted, so the runaway breaker can count them when it lands. The
+a `shell` decision, with credentials redacted. The runaway breaker counts `operator` (POST), `gh_write` and `crew_tidy` calls like any other FLIGHT write; shell commands are on the ledger but the breaker does not count them yet. The
 operator token and `GH_TOKEN` are not added to FLIGHT's environment: `operator` and the operator's own `gh` login are its routes.
 
 ### FLIGHT approvals
@@ -1322,7 +1338,7 @@ hold before it takes no new ticket; it applies live, and starts by hand are not 
 **FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
 not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
-`released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
+`released_at`), shows in FLIGHT's digest as
 `holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
 (`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
 promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
@@ -1474,8 +1490,7 @@ socket) and every request it makes, loopback included, goes through a loopback-o
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
 The shot is taken after the shell is ready, the lazy page's `Loading…` placeholder has gone and the
-page's requests have been quiet for 400 ms. Renders are one at a time per host, capped per FLIGHT
-per hour, and the repo's powers are rechecked just before launch.
+page's requests have been quiet for 400 ms. Renders are one at a time per host, and the repo's powers are rechecked just before launch.
 
 Each screenshot is kept under `hud-screenshots/` in the data dir (directory `0700`, files `0600`,
 an opaque 128-bit id), at most 50 files and one week. The tool's answer ends with `Reference:

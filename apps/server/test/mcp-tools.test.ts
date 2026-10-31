@@ -1153,6 +1153,40 @@ describe("ask_flight", () => {
     ).toBeUndefined();
   });
 
+  it("counts FLIGHT's comms toward the runaway breaker and refuses them while it is tripped", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const line = { to: "CAPCOM", text: "Same line" };
+    for (let i = 0; i < 5; i++)
+      expect((await tool("comms_send").call(flight, line)).isError).toBeUndefined();
+    expect(await tool("comms_send").call(flight, line)).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's comms are not FLIGHT's writes
+    expect((await tool("comms_send").call(CTX, line)).isError).toBeUndefined();
+  });
+
+  it("stops and counts FLIGHT's comms_react like its comms_send", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const id = (await tool("comms_send").call(CTX, { to: "flight-1", text: "ping" })).text.replace(
+      /^Sent (.*)\.$/,
+      "$1",
+    );
+    const react = (c = flight) => tool("comms_react").call(c, { id, reaction: "seen" });
+    // five identical reactions trip the breaker; the sixth is refused and writes nothing
+    for (let i = 0; i < 5; i++) expect((await react()).isError).toBeUndefined();
+    expect(await react()).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's reactions are not FLIGHT's writes
+    expect((await react(CTX)).isError).toBeUndefined();
+  });
+
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
     await ask({ question: "one?" });
     liveSeat("retro", "retro:1");

@@ -38,6 +38,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
@@ -69,6 +70,7 @@ import {
   REVIEW_ROUNDS,
   type ReviewRow,
   type ReviewState,
+  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
   type SeatSessionRow,
@@ -100,6 +102,7 @@ import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
+import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
 import {
@@ -787,6 +790,8 @@ interface FlightTriage {
   liveSince: number;
   /** An "off" FLIGHT within FLIGHT_OFF_GRACE_MS: when the item will show, else null. */
   showsAt: number | null;
+  /** The runaway breaker is tripped: FLIGHT stands down but the item shows only if items wait. */
+  breaker?: boolean;
 }
 
 /**
@@ -797,6 +802,7 @@ interface FlightTriage {
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
@@ -858,9 +864,33 @@ function flightLiveSince(store: Store, flightId: string, run: Run): number {
 }
 
 function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage | null {
+  const triage = flightTriageNow(config, store, now);
+  if (triage === null) return null;
+  // items raised while the breaker held FLIGHT back get a fresh window after the lift
+  return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
+}
+
+function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
   const found = flightSeat(config);
   if (found === null) return null;
   const flightId = found.seat.id;
+  // FLIGHT's writes are stopped until the operator lifts the breaker, so it triages nothing:
+  // items reach the operator at once
+  const tripped = runawayTrip(store);
+  if (tripped !== null) {
+    return {
+      flightId,
+      repoId: found.session.repoId,
+      triaging: false,
+      live: false,
+      cause: "down",
+      detail: RUNAWAY_TRIAGE_DETAIL,
+      since: tripped.at,
+      liveSince: 0,
+      showsAt: null,
+      breaker: true,
+    };
+  }
   const live = flightLive(config, store);
   const notes = store.notes().filter((n) => n.dismissedAt === null);
   const note =
@@ -1346,6 +1376,8 @@ function withNotTriaging(
           (!triage.triaging && i.flightTriage === "waiting")),
     )
     .sort((a, b) => a.at - b.at);
+  // a tripped breaker is the flag's business: the item adds nothing unless something waits
+  if (triage.breaker === true && members.length === 0) return items;
   const cause: FlightNotTriagingCause | null =
     triage.cause ?? (triage.triaging && members.length > 0 ? "late" : null);
   if (cause === null) return items;

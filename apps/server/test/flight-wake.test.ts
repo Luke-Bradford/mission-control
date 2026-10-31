@@ -106,7 +106,7 @@ const busyBoard = (): FlightState => ({
   questions: [{ id: 1, seat: "guido-0", ticket: "mc#40", text: "Which lane?", ageMin: 0 }],
   items: [],
   holds: [],
-  limits: { startsLeft: 10, messagesLeft: 30 },
+  breaker: { tripped: false, reason: null },
 });
 
 describe("wake deltas", () => {

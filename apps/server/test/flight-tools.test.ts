@@ -22,7 +22,6 @@ import {
   CLOSE_UNCONFIRMED_DECISION,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
-  capText,
   ciLogText,
   ciNoCheckText,
   ciNoFailedText,
@@ -33,31 +32,22 @@ import {
   DEFAULT_AWAY,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_ARG_MAX,
-  FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
   FLIGHT_BRIEF_SECTION_MAX,
   FLIGHT_BRIEF_TITLES,
-  FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_CLOSE_SEARCH_LIMIT,
-  FLIGHT_CLOSES_PER_HOUR,
   FLIGHT_DECISION_MAX,
-  FLIGHT_GH_API_READS_PER_HOUR,
   FLIGHT_GH_READ_MAX,
-  FLIGHT_GH_READS_PER_HOUR,
   FLIGHT_HANDLING_MAX_MS,
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
-  FLIGHT_HOUR_MS,
-  FLIGHT_HUD_RENDERS_PER_HOUR,
-  FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
   FLIGHT_MEMORY_BODY_MAX,
-  FLIGHT_MEMORY_EDITS_PER_HOUR,
   FLIGHT_MEMORY_OPERATOR,
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_SOURCE_MAX,
@@ -66,12 +56,11 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
-  FLIGHT_NOTES_PER_HOUR,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
-  FLIGHT_PROMOTES_PER_HOUR,
   FLIGHT_RETROSPECTIVE_SETTING,
-  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_RUNAWAY,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
@@ -121,7 +110,10 @@ import {
   type RunLoop,
   researchText,
   retiredBriefText,
-  reworkCapText,
+  runawayNoteText,
+  runawayRefusedText,
+  runawaySameReason,
+  runawayWritesReason,
   type SeatSessionRow,
   startMissingNeedsText,
   type TestLockState,
@@ -150,13 +142,14 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
+import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
-import { attentionItems, CREW_ERROR_KEY } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -255,8 +248,8 @@ let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
 let endImpl: (seatId: string) => Promise<void>;
 let asideEnds: string[];
-let rulingImpl: (mayRerun: boolean) => Promise<AcceptRulingResult>;
-let rulingCalls: { runId: string; mayRerun: boolean }[];
+let rulingImpl: () => Promise<AcceptRulingResult>;
+let rulingCalls: { runId: string }[];
 let syncImpl: () => Promise<SyncMainResult>;
 let syncCalls: string[];
 let dirty: string[] | null;
@@ -482,9 +475,9 @@ beforeEach(() => {
         return lifts ? { lifted: true } : { lifted: false, reason: refuseWith ?? "not-parked" };
       },
       status: () => ({ on: engineOn, note: null }),
-      acceptRuling: async (runId, opts) => {
-        rulingCalls.push({ runId, mayRerun: opts.mayRerun });
-        return rulingImpl(opts.mayRerun);
+      acceptRuling: async (runId) => {
+        rulingCalls.push({ runId });
+        return rulingImpl();
       },
       syncMain: async (runId) => {
         syncCalls.push(runId);
@@ -667,17 +660,11 @@ describe("log_decision", () => {
     expect(seen).toEqual([]);
   });
 
-  it("allows 60 notes an hour, then refuses the 61st", async () => {
-    for (let i = 0; i < FLIGHT_NOTES_PER_HOUR; i++) {
-      expect((await tool.call(ctx(), args())).isError).toBeUndefined();
+  it("has no hourly limit on notes", async () => {
+    for (let i = 0; i < 61; i++) {
+      expect((await tool.call(ctx(), args({ about: `note ${i}` }))).isError).toBeUndefined();
     }
-    const r = await tool.call(ctx(), args());
-    expect(r).toEqual({
-      text: "Not done: you logged notes 60 times in the last hour, the most allowed. Wait, or ask the operator.",
-      isError: true,
-    });
-    nowMs += 61 * 60_000;
-    expect((await tool.call(ctx(), args())).isError).toBeUndefined();
+    expect(store.flightDecisions(0, 100)).toHaveLength(61);
   });
 });
 
@@ -1147,25 +1134,15 @@ describe("screenshot_hud", () => {
     expect(await second).toMatchObject({ image: { mimeType: "image/png" } });
   });
 
-  it("counts attempted launches, expires the hourly cap, and describes the limit", async () => {
+  it("has no limit on attempted launches", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     screenshotImpl = async () => {
       throw new Error("Chrome refused");
     };
-    for (let n = 0; n < FLIGHT_HUD_RENDERS_PER_HOUR; n++)
+    for (let n = 0; n < 4; n++)
       expect((await call("screenshot_hud", { page: "/" })).text).toBe("Chrome refused");
-    expect(await call("screenshot_hud", { page: "/" })).toEqual({
-      text: capText("attempted HUD renders", FLIGHT_HUD_RENDERS_PER_HOUR),
-      isError: true,
-    });
-    expect(screenshotCalls).toHaveLength(FLIGHT_HUD_RENDERS_PER_HOUR);
-    expect(named("screenshot_hud").description).toContain(
-      `At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour`,
-    );
-
-    nowMs += FLIGHT_HOUR_MS + 1;
-    expect((await call("screenshot_hud", { page: "/" })).text).toBe("Chrome refused");
-    expect(screenshotCalls).toHaveLength(FLIGHT_HUD_RENDERS_PER_HOUR + 1);
+    expect(screenshotCalls).toHaveLength(4);
+    expect(named("screenshot_hud").description).not.toContain("attempts per FLIGHT per hour");
   });
 
   it("permits only one render globally at a time", async () => {
@@ -1280,17 +1257,12 @@ describe("read_ticket", () => {
     );
   });
 
-  it("allows 60 reads an hour, then refuses the 61st", async () => {
+  it("has no hourly limit on reads", async () => {
     fetchImpl = async (n) => ticket(n);
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 70; i++) {
       expect((await call("read_ticket", { issue: 1 })).isError).toBeUndefined();
     }
-    expect(await call("read_ticket", { issue: 1 })).toEqual(
-      refused(
-        "Not done: you read tickets 60 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(fetchCalls).toHaveLength(60);
+    expect(fetchCalls).toHaveLength(70);
   });
 
   it("answers a planner seat, from its own repo", async () => {
@@ -1312,11 +1284,11 @@ describe("read_ticket", () => {
     expect(fetchRepos).toEqual(["other"]);
   });
 
-  it("counts a planner's reads apart from FLIGHT's", async () => {
+  it("reads for a planner too, with no limit", async () => {
     live("fao-1", "r-fao");
     fetchImpl = async (n) => ticket(n);
-    for (let i = 0; i < 60; i++) await call("read_ticket", { issue: 1 });
-    expect((await call("read_ticket", { issue: 1 })).isError).toBe(true);
+    for (let i = 0; i < 65; i++) await call("read_ticket", { issue: 1 });
+    expect((await call("read_ticket", { issue: 1 })).isError).toBeUndefined();
     expect(
       (await call("read_ticket", { issue: 1 }, ctx("fao-1", "r-fao"))).isError,
     ).toBeUndefined();
@@ -1560,13 +1532,6 @@ describe("answer_question", () => {
     expect(store.question(id)?.answeredAt).toBeNull();
   });
 
-  it("applies the per-seat message cap to the asker", async () => {
-    const id = ask();
-    for (let i = 0; i < 6; i++) addDecision({ kind: "message", seatId: "guido-1" });
-    expect((await call("answer_question", A(id))).isError).toBe(true);
-    expect(messageCalls).toEqual([]);
-  });
-
   it("keeps a passed question open through later FLIGHT messages and answers", async () => {
     const passed = ask();
     await passUp(passed);
@@ -1599,17 +1564,11 @@ describe("answer_question", () => {
     );
   });
 
-  it("caps answers at 30 messages an hour, but still passes", async () => {
+  it("has no hourly cap on answers", async () => {
     const id = ask();
-    for (let i = 0; i < 30; i++) addDecision({});
-    expect(await call("answer_question", A(id))).toEqual(
-      refused(
-        "Not done: you sent messages 30 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(messageCalls).toEqual([]);
-    expect((await passUp(id, "b")).isError).toBeUndefined();
-    expect(store.question(id)?.passedAt).toBe(NOW);
+    for (let i = 0; i < 30; i++) addDecision({ about: `answer ${i}` });
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(messageCalls).toHaveLength(1);
   });
 });
 
@@ -1905,40 +1864,17 @@ describe("start_seat", () => {
     );
   });
 
-  it("5: caps starts at 4 an hour per developer seat (8 with two)", async () => {
-    for (let i = 0; i < 7; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+  it("5: has no hourly cap on starts", async () => {
+    for (let i = 0; i < 12; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
     expect((await start()).isError).toBeUndefined();
-    expect(await start({ issue: 6 })).toEqual(
-      refused(
-        "Not done: you started tickets 8 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
   });
 
-  it("5: keeps the cap at 4 an hour with one developer seat", async () => {
-    const seats = cfg.crew?.sessions[0]?.seats ?? [];
-    seats.splice(
-      seats.findIndex((s) => s.id === "inco-1"),
-      1,
-    );
-    for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
-    expect(await start()).toEqual(
-      refused(
-        "Not done: you started tickets 4 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-  });
-
-  it("6: refuses the same ticket within 24 hours", async () => {
-    await start();
-    nowMs += 2 * 60 * 60_000;
-    expect(await start()).toEqual(
-      refused(
-        "Not started: you started mc#7 in the last 24 hours; ask the operator before starting it again.",
-      ),
-    );
-    nowMs += 25 * 60 * 60_000;
-    expect((await start()).isError).toBeUndefined();
+  it("6: starts the same ticket three times in a day, with no refusal", async () => {
+    for (let i = 0; i < 3; i++) {
+      expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+      nowMs += 2 * 60 * 60_000;
+    }
+    expect(startCalls).toHaveLength(3);
   });
 
   it("7: refuses a card that is missing, in the wrong column, active or blocked", async () => {
@@ -2259,13 +2195,9 @@ describe("start_seat planner", () => {
     expect((await plan()).text).toContain("no done_when or size");
   });
 
-  it("a start by a seat no longer in the config still holds back a restart", async () => {
+  it("restarts a ticket whatever seat started it before", async () => {
     addDecision({ at: nowMs - 60 * 60_000, kind: "start", seatId: "guido-9", ref: "mc#7" });
-    expect(await plan()).toEqual(
-      refused(
-        "Not started: you started mc#7 in the last 24 hours; ask the operator before starting it again.",
-      ),
-    );
+    expect((await plan()).isError).toBeUndefined();
   });
 
   it("refuses a ticket with no Size even when the repo does not need one", async () => {
@@ -2297,10 +2229,9 @@ describe("start_seat planner", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("refuses at the hourly cap", async () => {
+  it("has no hourly cap on starts", async () => {
     for (let i = 0; i < 8; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
-    expect((await plan()).text).toContain("started tickets 8 times");
-    expect(startCalls).toEqual([]);
+    expect((await plan()).isError).toBeUndefined();
   });
 
   it("starts a build seat as before, and refuses a watch seat", async () => {
@@ -2387,19 +2318,10 @@ describe("message_seat", () => {
     expect(messageCalls).toEqual([]);
   });
 
-  it("caps messages to one seat at 6 an hour", async () => {
-    for (let i = 0; i < 6; i++) expect((await call("message_seat", M())).isError).toBeUndefined();
-    expect(await call("message_seat", M())).toEqual(
-      refused("Not sent: you sent GUIDO-1 6 messages in the last hour, the most allowed."),
-    );
-    expect((await call("message_seat", M({ seat: "inco-1" }))).isError).toBeUndefined();
-  });
-
-  it("caps all messages at 30 an hour", async () => {
+  it("has no per-seat or hourly cap on messages", async () => {
     for (let i = 0; i < 30; i++) addDecision({ kind: "unpark", seatId: `s-${i}` });
-    expect((await call("message_seat", M())).text).toBe(
-      "Not done: you sent messages 30 times in the last hour, the most allowed. Wait, or ask the operator.",
-    );
+    for (let i = 0; i < 4; i++) expect((await call("message_seat", M())).isError).toBeUndefined();
+    expect((await call("message_seat", M({ seat: "inco-1" }))).isError).toBeUndefined();
   });
 
   it("returns a send failure", async () => {
@@ -2618,21 +2540,12 @@ describe("message_seat unpark", () => {
     expect((await call("message_seat", U())).text).toBe("Not sent: GUIDO-1's run is not parked.");
   });
 
-  it("caps the 3rd un-park of a run", async () => {
-    parked("ci");
-    for (let i = 0; i < 2; i++) {
-      addDecision({
-        at: NOW - 48 * 60 * 60_000,
-        kind: "unpark",
-        seatId: "guido-1",
-        targetRunId: "r-g",
-      });
+  it("un-parks one run 5 times, with no refusal", async () => {
+    for (let i = 0; i < 5; i++) {
+      parked("ci");
+      expect((await call("message_seat", U())).isError).toBeUndefined();
     }
-    expect(await call("message_seat", U())).toEqual(
-      refused(
-        'Not sent: you have un-parked this run 2 times; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-      ),
-    );
+    expect(decisions().filter((d) => d.kind === "unpark")).toHaveLength(5);
   });
 
   it("refuses with the engine off", async () => {
@@ -2646,6 +2559,22 @@ describe("message_seat unpark", () => {
 });
 
 describe("end_run", () => {
+  it("five identical end_run calls trip the runaway breaker", async () => {
+    const end = async () => {
+      // each end frees the seat: the same ticket is parked again for the next one
+      live("guido-1", "r-g", { ticket: "mc#7" });
+      store.setRunLoop("r-g", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "nothing", reason: "nothing to push", ended: false },
+      });
+      return call("end_run", { runId: "r-g", basis: "nothing left to do" });
+    };
+    for (let i = 0; i < 5; i++) expect((await end()).isError).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toHaveLength(1);
+    expect((await end()).text).toContain("runaway breaker");
+  });
+
   const E = (over: Record<string, unknown> = {}) => ({
     runId: "r-g",
     basis: "its ticket needs a docs note the planning lane wrote",
@@ -2810,20 +2739,9 @@ describe("end_run", () => {
     expect(endCalls).toEqual([]);
   });
 
-  it("caps ends at 4 an hour", async () => {
+  it("has no hourly cap on ends", async () => {
     parked();
     for (let i = 0; i < 4; i++) addDecision({ at: NOW - 1000, kind: "end", seatId: "guido-1" });
-    expect(await call("end_run", E())).toEqual(
-      refused(
-        "Not done: you ended runs 4 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(endCalls).toEqual([]);
-  });
-
-  it("does not count an end older than the hour", async () => {
-    parked();
-    for (let i = 0; i < 4; i++) addDecision({ at: NOW - 61 * 60_000, kind: "end" });
     expect((await call("end_run", E())).isError).toBeUndefined();
   });
 
@@ -2906,7 +2824,7 @@ describe("accept_ruling", () => {
     expect(await call("accept_ruling", A())).toEqual({
       text: "Re-running failed CI on aaaaaaa for GUIDO-1; call accept_ruling again when it finishes. Recorded in Decided without you.",
     });
-    expect(rulingCalls).toEqual([{ runId: "r-g", mayRerun: true }]);
+    expect(rulingCalls).toEqual([{ runId: "r-g" }]);
     expect(decisions()).toMatchObject([
       {
         kind: "rerun",
@@ -2943,6 +2861,10 @@ describe("accept_ruling", () => {
       text: "The re-run on aaaaaaa is still going.",
     });
     expect(decisions()).toEqual([]);
+    // waiting on a ruling is a read: it is not a write for the runaway breaker
+    for (let i = 0; i < 8; i++) await call("accept_ruling", A());
+    expect(store.flightDecisions(0, 5).filter((d) => d.kind === "hub")).toEqual([]);
+    expect(store.getSetting("flight.runaway-events")).toBeNull();
   });
 
   it("passes the engine's refusals on", async () => {
@@ -2953,18 +2875,12 @@ describe("accept_ruling", () => {
     expect(decisions()).toEqual([]);
   });
 
-  it("re-runs at most 4 times an hour: the engine is told when the cap is used", async () => {
+  it("has no hourly limit on re-runs", async () => {
     for (let i = 0; i < 3; i++) addDecision({ at: NOW - 1000, kind: "rerun" });
-    await call("accept_ruling", A());
-    expect(rulingCalls.at(-1)?.mayRerun).toBe(true);
-    // (the call above filed the 4th)
-    rulingImpl = async (mayRerun) => (mayRerun ? { kind: "rerun", sha: SHA } : { kind: "capped" });
-    expect(await call("accept_ruling", A())).toEqual(
-      refused(
-        "Not done: you re-ran CI 4 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(rulingCalls.at(-1)?.mayRerun).toBe(false);
+    expect(await call("accept_ruling", A())).toMatchObject({
+      text: expect.stringContaining("Re-running failed CI"),
+    });
+    expect(rulingCalls.at(-1)).toEqual({ runId: "r-g" });
   });
 
   it("refuses with the engine off, a run that is not a developer's, and another seat's token", async () => {
@@ -2990,6 +2906,15 @@ describe("accept_ruling", () => {
 });
 
 describe("sync_main", () => {
+  it("five identical sync_main calls trip the runaway breaker", async () => {
+    engineOn = true;
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    const sync = () => call("sync_main", { runId: "r-g", basis: "conflicts with main" });
+    for (let i = 0; i < 5; i++) expect((await sync()).isError).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toHaveLength(1);
+    expect((await sync()).text).toContain("runaway breaker");
+  });
+
   const S = (over: Record<string, unknown> = {}) => ({
     runId: "r-g",
     basis: "the PR conflicts with main and the author is not needed",
@@ -3122,14 +3047,10 @@ describe("sync_main", () => {
     expect(decisions()).toEqual([]);
   });
 
-  it("merges at most 6 times an hour", async () => {
+  it("has no hourly cap on merges of main", async () => {
     for (let i = 0; i < 6; i++) addDecision({ at: NOW - 1000, kind: "sync" });
-    expect(await call("sync_main", S())).toEqual(
-      refused(
-        "Not done: you merged main 6 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(syncCalls).toEqual([]);
+    expect((await call("sync_main", S())).isError).toBeUndefined();
+    expect(syncCalls).toHaveLength(1);
   });
 
   it("refuses a run that is not a developer's, and with the engine off", async () => {
@@ -3511,7 +3432,7 @@ describe("flight_state", () => {
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
       ],
-      limits: { startsLeft: 8, messagesLeft: 29 },
+      breaker: { tripped: false, reason: null },
       headlineAgeMin: null,
       headline: "",
       ledger: [],
@@ -3540,10 +3461,11 @@ describe("flight_state", () => {
     expect(s.tickets).toMatchObject([{ laneLabel: "lane:home", assignees: ["me"] }]);
   });
 
-  it("counts starts left against the per-developer-seat cap", async () => {
+  it("carries the runaway breaker, and no per-hour limits", async () => {
     for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
-    const s = (await state()) as { limits: { startsLeft: number } };
-    expect(s.limits.startsLeft).toBe(4);
+    const s = (await state()) as { limits?: unknown; breaker: { tripped: boolean } };
+    expect(s.limits).toBeUndefined();
+    expect(s.breaker.tripped).toBe(false);
   });
 
   it("reports the transferred run's destination quota", async () => {
@@ -3739,14 +3661,8 @@ describe("promote", () => {
     );
   });
 
-  it("refuses at the hourly cap", async () => {
+  it("has no hourly cap on moves", async () => {
     for (let i = 0; i < 10; i++) addDecision({ kind: "promote" });
-    expect(await call("promote", P())).toEqual(
-      refused(
-        "Not done: you moved tickets 10 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    nowMs += 61 * 60_000;
     expect((await call("promote", P())).isError).toBeUndefined();
   });
 
@@ -3897,11 +3813,9 @@ describe("promote", () => {
       ]);
     });
 
-    it("holds a Refinement card too, and counts under the promote cap", async () => {
+    it("holds a Refinement card too", async () => {
       board(backlog({ status: "Refinement" }));
       expect((await call("promote", H())).isError).toBeUndefined();
-      for (let i = 0; i < 9; i++) addDecision({ kind: "promote" });
-      expect((await call("promote", H())).text).toContain("moved tickets 10 times");
     });
 
     it("refuses a hold on a card with a run", async () => {
@@ -3996,6 +3910,21 @@ describe("create_ticket", () => {
     okGh();
   });
 
+  it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
+    let n = 40;
+    ghImpl = async (a) => {
+      if (a[0] === "issue" && a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      if (a[0] === "issue" && a[1] === "create")
+        return { code: 0, stdout: `https://github.com/o/mc/issues/${++n}\n`, stderr: "" };
+      if (a[0] === "project") return { code: 1, stdout: "", stderr: "no project scope" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    for (let i = 0; i < 3; i++)
+      expect((await call("create_ticket", C({ title: `Server: filed ${i}` }))).isError).toBe(true);
+    expect(ghCalls.filter((a) => a[0] === "issue" && a[1] === "create")).toHaveLength(3);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(3);
+  });
+
   it("does not claim Backlog in a draft repo, where no card moves", async () => {
     const mc = cfg.repos[0];
     if (mc === undefined) throw new Error("no repo");
@@ -4021,8 +3950,7 @@ describe("create_ticket", () => {
     expect(ghCalls[0]?.some((a) => a.startsWith("--search"))).toBe(false);
   });
 
-  it("serialises calls, so the cap holds when two are in flight together", async () => {
-    for (let i = 0; i < 9; i++) addDecision({ kind: "ticket", at: NOW - 60_000 });
+  it("serialises calls, so the duplicate check sees the earlier call's issue", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -4038,10 +3966,8 @@ describe("create_ticket", () => {
     ]);
     release();
     const results = await both;
-    expect(results.filter((r) => r.isError === undefined)).toHaveLength(1);
-    expect(results.filter((r) => r.isError === true)).toHaveLength(1);
-    expect(results.find((r) => r.isError === true)?.text).toContain("filed tickets 10 times");
-    expect(ghCalls.filter((a) => a[1] === "create")).toHaveLength(1);
+    expect(results.filter((r) => r.isError === undefined)).toHaveLength(2);
+    expect(ghCalls.filter((a) => a[1] === "create")).toHaveLength(2);
   });
 
   it("writes nothing while the engine is off", async () => {
@@ -4149,23 +4075,11 @@ describe("create_ticket", () => {
     expect(decisions()).toEqual([]);
   });
 
-  it("refuses at 10 an hour, and again once the hour has passed", async () => {
-    for (let i = 0; i < 10; i++) addDecision({ kind: "ticket", at: NOW - 60_000 });
-    expect(await call("create_ticket", C())).toEqual(
-      refused(
-        "Not done: you filed tickets 10 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(ghCalls).toEqual([]);
-    nowMs = NOW + 3_600_000;
-    expect((await call("create_ticket", C())).isError).toBeUndefined();
-  });
-
-  it("holds the cap across calls", async () => {
-    for (let i = 0; i < 10; i++) {
+  it("has no hourly cap on filed tickets", async () => {
+    for (let i = 0; i < 10; i++) addDecision({ kind: "ticket", about: `t${i}`, at: NOW - 60_000 });
+    for (let i = 0; i < 4; i++) {
       expect((await call("create_ticket", C({ title: `T${i}` }))).isError).toBeUndefined();
     }
-    expect((await call("create_ticket", C({ title: "T10" }))).isError).toBe(true);
   });
 
   it("refuses a mention, an issue reference, and a secret, without calling gh", async () => {
@@ -4429,14 +4343,9 @@ describe("comment_ticket", () => {
     expect(ghCalls).toEqual([]);
   });
 
-  it("refuses at 20 an hour", async () => {
+  it("has no hourly cap on comments", async () => {
     for (let i = 0; i < 20; i++) addDecision({ kind: "comment", at: NOW - 60_000 });
-    expect(await call("comment_ticket", K())).toEqual(
-      refused(
-        "Not done: you posted comments 20 times in the last hour, the most allowed. Wait, or ask the operator.",
-      ),
-    );
-    expect(ghCalls).toEqual([]);
+    expect((await call("comment_ticket", K())).isError).toBeUndefined();
   });
 
   it("lets a #n of the repo's own issues through", async () => {
@@ -4945,18 +4854,8 @@ describe("brief_item", () => {
     expect(store.briefs().get(KEY)?.recommendation).toBe("Leave it.");
   });
 
-  it("allows a full triage workload per hour, then enforces the cap", async () => {
-    expect(FLIGHT_BRIEFS_PER_HOUR).toBeGreaterThan(20);
-    for (let i = 0; i < FLIGHT_BRIEFS_PER_HOUR; i++)
-      expect((await call("brief_item", B())).isError).toBeUndefined();
-    expect(await call("brief_item", B())).toEqual(
-      refused(
-        `Not done: you briefed items ${FLIGHT_BRIEFS_PER_HOUR} times in the last hour, the most allowed. Wait, or ask the operator.`,
-      ),
-    );
-    nowMs = NOW + 61 * 60_000;
-    raise("blocked:r1:0", { at: nowMs });
-    expect((await call("brief_item", B())).isError).toBeUndefined();
+  it("has no hourly limit on briefs of its own", async () => {
+    for (let i = 0; i < 4; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
   });
 
   it("refuses a key that is not the operator's item", async () => {
@@ -5030,9 +4929,8 @@ describe("update_brief", () => {
     expect(briefDecisions()).toEqual([]);
   });
 
-  it("updates plans and watches without spending a brief edit, even at the section cap", async () => {
-    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++)
-      await save("operator", "Keep these notes");
+  it("updates plans and watches without touching the brief sections", async () => {
+    for (let i = 0; i < 3; i++) await save("operator", `Keep these notes ${i}`);
     const before = store.flightBrief("s1");
     nowMs += 1000;
     expect(
@@ -5069,7 +4967,7 @@ describe("update_brief", () => {
     expect(store.flightPlans("s1")).toHaveLength(1);
     expect(store.flightWatch("s1")).toHaveLength(1);
     expect(store.flightBrief("s1")).toEqual(before);
-    expect(briefDecisions()).toHaveLength(FLIGHT_BRIEF_EDITS_PER_HOUR);
+    expect(briefDecisions()).toHaveLength(3);
   });
 
   it("replaces one section and leaves the others", async () => {
@@ -5139,15 +5037,11 @@ describe("update_brief", () => {
     expect(briefDecisions()).toEqual([]);
   });
 
-  it("allows 30 edits an hour", async () => {
-    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++) {
+  it("has no hourly limit on edits", async () => {
+    for (let i = 0; i < 4; i++) {
       expect(await save("project", `v${i}`)).not.toHaveProperty("isError");
     }
-    expect(await save("project", "one more")).toEqual(
-      refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
-    );
-    nowMs = NOW + 61 * 60_000;
-    expect(await save("project", "later")).not.toHaveProperty("isError");
+    expect(await save("project", "one more")).not.toHaveProperty("isError");
   });
 
   it("is carried by flight_state", async () => {
@@ -5325,16 +5219,13 @@ describe("read_pr", () => {
     expect(await call("read_pr", { pr: 9 })).toEqual(refused(READ_NO_GITHUB));
   });
 
-  it("shares the hourly cap with the other two", async () => {
+  it("has no hourly limit on the three readers", async () => {
     ghImpl = async () => json(prView());
-    for (let i = 0; i < FLIGHT_GH_READS_PER_HOUR; i++) {
+    for (let i = 0; i < 70; i++) {
       expect((await call(i % 2 === 0 ? "read_pr" : "read_ci_log", { pr: 9 })).text).not.toContain(
         "most allowed",
       );
     }
-    const text = capText("read GitHub", FLIGHT_GH_READS_PER_HOUR);
-    expect(await call("read_pr", { pr: 9 })).toEqual(refused(text));
-    expect(await call("list_tickets", { limit: 5 })).toEqual(refused(text));
     nowMs += 61 * 60_000;
     expect((await call("read_pr", { pr: 9 })).isError).toBeUndefined();
   });
@@ -6223,11 +6114,7 @@ describe("scheduled FLIGHT work", () => {
     expect(store.flightWatch("s1")).toEqual(before.watch);
     expect(store.flightBrief("s1")).toEqual(before.brief);
     expect(decisions()).toEqual(before.decisions);
-    for (let i = 1; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++)
-      expect((await save([plan])).isError).toBeUndefined();
-    expect(await save([plan])).toEqual(
-      refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
-    );
+    expect((await save([plan])).isError).toBeUndefined();
   });
 
   it("bounds stored plans across calls and rolls back a batch that exceeds the limit", async () => {
@@ -6411,7 +6298,7 @@ describe("superuser housekeeping", () => {
       expect(engineCalls).toEqual([]);
     },
   );
-  it("lift only settles stuck parks and shares message_seat's run cap", async () => {
+  it("lift only settles stuck parks, as often as it judges right", async () => {
     elevated();
     runPr();
     const park = (kind: string) =>
@@ -6427,21 +6314,18 @@ describe("superuser housekeeping", () => {
     );
     park("stuck");
     addDecision({ kind: "unpark", targetRunId: "r-pr" });
-    expect(await call("settle_park", { runId: "r-pr", action: "lift" })).not.toHaveProperty(
-      "isError",
-      true,
-    );
-    expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
-      "isError",
-      true,
-    );
-    expect(engineCalls).toHaveLength(1);
+    addDecision({ kind: "unpark", targetRunId: "r-pr" });
+    for (let i = 0; i < 3; i++)
+      expect(await call("settle_park", { runId: "r-pr", action: "lift" })).not.toHaveProperty(
+        "isError",
+        true,
+      );
+    expect(engineCalls).toHaveLength(3);
   });
   it.each([
     ["head-moved", "the pushed head moved"],
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
-    ["round-granted", "already granted on this head"],
     ["floor-enforced", "only the controller can merge it"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
     elevated();
@@ -6457,7 +6341,7 @@ describe("superuser housekeeping", () => {
     expect(result).toHaveProperty("isError", true);
     expect(JSON.stringify(result)).toContain(text);
   });
-  it("grants capped review reworks with a fix list: more per head and run, never unlimited", async () => {
+  it("grants review reworks with a fix list, as many as it judges right on one head", async () => {
     elevated();
     runPr();
     const park = (flightReworks?: Record<string, number>) =>
@@ -6488,22 +6372,44 @@ describe("superuser housekeeping", () => {
       ],
     ]);
 
-    // a head that already had one round may have more, up to the raised cap
-    park({ [SHA]: FLIGHT_REWORKS_PER_HEAD - 1 });
+    // a head that already had rounds may have more: three on one head, and many over the run
+    for (const n of [1, 2, 3]) {
+      park({ [SHA]: n });
+      expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual({
+        text: "Settled r-pr: rework.",
+      });
+    }
+    park({ a: 3, b: 3, c: 3 });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual({
       text: "Settled r-pr: rework.",
     });
-    park({ [SHA]: FLIGHT_REWORKS_PER_HEAD });
+    expect(engineCalls).toHaveLength(5);
+  });
+  it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "budget", reason: "tokens", ended: false },
+    });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
-      refused(reworkCapText(FLIGHT_REWORKS_PER_HEAD, FLIGHT_REWORKS_PER_HEAD)),
+      refused("Run is held."),
     );
-    // the whole run is capped too, over its heads
-    park({ a: 3, b: 3, c: 3 });
-    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
-      "isError",
-      true,
+    runPr();
+    store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
+    expect(await call("merge_pr", { pr: 12 })).toEqual(
+      refused("No awaiting-flight run PR in your lane."),
     );
-    expect(engineCalls).toHaveLength(2);
+    store.setSeatSession(row("guido-1", "r-pr"));
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      mergeHold: { by: "CAPCOM", reason: "veto", at: NOW },
+    });
+    expect(await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" })).toEqual(
+      refused("The controller set this hold; only the controller can release it."),
+    );
+    expect(store.getSetting("flight.runaway")).toBeNull();
   });
   it("keeps budget, ruling and operator-held parks out of rework", async () => {
     elevated();
@@ -6678,14 +6584,11 @@ describe("superuser housekeeping", () => {
     expect(clearanceCalls).toEqual([]);
     expect(ghCalls.some((a) => a[1] === "comment")).toBe(false);
   });
-  it("rerun_ci shares accept_ruling's four-an-hour budget", async () => {
+  it("rerun_ci has no hourly budget", async () => {
     elevated();
     runPr();
     for (let i = 0; i < 4; i++) addDecision({ kind: "rerun" });
-    expect(await call("rerun_ci", { pr: 12 })).toMatchObject({
-      isError: true,
-      text: expect.stringContaining("budget"),
-    });
+    expect(await call("rerun_ci", { pr: 12 })).toEqual({ text: "Reran CI." });
   });
   it("sets fields and assigns only configured GitHub accounts", async () => {
     elevated();
@@ -7068,16 +6971,11 @@ describe("track", () => {
     expect(store.flightLedger("s1")).toEqual(closed);
   });
 
-  it("shares an hourly edit cap with untrack, without recording decisions", async () => {
-    for (let n = 0; n < FLIGHT_LEDGER_EDITS_PER_HOUR; n++) await call("track", entry);
-    const capped = refused(capText("changed your ledger", FLIGHT_LEDGER_EDITS_PER_HOUR));
-    expect(await call("track", entry)).toEqual(capped);
-    expect(await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).toEqual(
-      capped,
-    );
-    nowMs += 61 * 60_000;
-    expect(await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).toEqual({
-      text: untrackedText(entry.key),
+  it("has no hourly edit cap on track or untrack, and records no decisions", async () => {
+    for (let n = 0; n < 70; n++)
+      expect((await call("track", { ...entry, key: `w-${n}` })).isError).toBeUndefined();
+    expect(await call("untrack", { key: "w-69", outcome: "done", basis: "ticket" })).toEqual({
+      text: untrackedText("w-69"),
     });
     expect(decisions()).toEqual([]);
   });
@@ -7254,14 +7152,12 @@ describe("repo memory", () => {
       expect(store.countFlightDecisions({ kinds: ["memory"], since: 0 })).toBe(count);
       expect(emit).not.toHaveBeenCalled();
       remove.mockClear();
-      const edits = vi
-        .spyOn(store, "countFlightDecisions")
-        .mockReturnValue(FLIGHT_MEMORY_EDITS_PER_HOUR);
+      const edits = vi.spyOn(store, "countFlightDecisions").mockReturnValue(1000);
       try {
         expect(await call("forget", { topic: note.topic, basis: "obsolete" })).toEqual(
-          refused(capText("memory edits", FLIGHT_MEMORY_EDITS_PER_HOUR)),
+          refused(`No note named ${note.topic}.`),
         );
-        expect(remove).not.toHaveBeenCalled();
+        expect(remove).toHaveBeenCalledTimes(1);
       } finally {
         edits.mockRestore();
       }
@@ -7301,22 +7197,19 @@ describe("repo memory", () => {
     expect(store.flightMemory("mc")).toEqual([]);
   });
 
-  it("shares a memory edit cap without spending log_decision's cap", async () => {
-    for (let n = 0; n < FLIGHT_NOTES_PER_HOUR - 1; n++)
+  it("has no hourly cap on memory edits or notes", async () => {
+    for (let n = 0; n < 35; n++) {
       expect(
-        (await call("log_decision", { about: "day", decision: "measure", basis: "report" }))
+        (await call("log_decision", { about: `day ${n}`, decision: "measure", basis: "report" }))
           .isError,
       ).not.toBe(true);
-    for (let n = 0; n < FLIGHT_MEMORY_EDITS_PER_HOUR / 2; n++) {
-      expect((await call("remember", note)).isError).not.toBe(true);
-      expect((await call("forget", { topic: note.topic, basis: "obsolete" })).isError).not.toBe(
+    }
+    for (let n = 0; n < 16; n++) {
+      expect((await call("remember", { ...note, topic: `${note.topic} ${n}` })).isError).not.toBe(
         true,
       );
     }
-    expect((await call("remember", note)).isError).toBe(true);
-    expect(
-      (await call("log_decision", { about: "day", decision: "summary", basis: "report" })).isError,
-    ).not.toBe(true);
+    expect((await call("remember", note)).isError).not.toBe(true);
   });
 
   it("state exposes titles only, recall includes author, and state marks the retrospective shown", async () => {
@@ -7591,19 +7484,10 @@ describe("gh_read", () => {
     );
   });
 
-  it("does not spend the hourly cap on refused paths", async () => {
-    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
-      expect(await call("gh_read", { path: "repos/o/mc/pulls?head=x:owner" })).toEqual(
-        refused(GH_READ_BAD_PATH),
-      );
-    }
-    expect(ghCalls).toEqual([]);
-    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
+  it("has no hourly limit on gh_read", async () => {
+    for (let i = 0; i < 130; i++) {
       expect((await call("gh_read", { path })).isError).toBeUndefined();
     }
-    expect(await call("gh_read", { path })).toEqual(
-      refused(capText("read GitHub", FLIGHT_GH_API_READS_PER_HOUR)),
-    );
   });
 
   it("tells FLIGHT when GitHub returns not found", async () => {
@@ -7656,18 +7540,12 @@ describe("gh_read", () => {
     expect(auths).toBe(3);
   });
 
-  it("caps attempts at 120 per hour, counts failures, and expires the cap", async () => {
+  it("has no limit on attempts, failed ones included", async () => {
     ghImpl = async () => ({ code: 1, stdout: "", stderr: "private auth failure" });
-    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
+    for (let i = 0; i < 130; i++) {
       expect(await call("gh_read", { path })).toEqual(refused(READ_NO_GITHUB));
     }
-    expect(await call("gh_read", { path })).toEqual(
-      refused(capText("read GitHub", FLIGHT_GH_API_READS_PER_HOUR)),
-    );
-    expect(ghCalls).toHaveLength(FLIGHT_GH_API_READS_PER_HOUR);
-    nowMs += 3600_000;
-    expect(await call("gh_read", { path })).toEqual(refused(READ_NO_GITHUB));
-    expect(ghCalls).toHaveLength(FLIGHT_GH_API_READS_PER_HOUR + 1);
+    expect(ghCalls).toHaveLength(130);
   });
 });
 
@@ -7726,15 +7604,13 @@ describe("queue-reorder cap and failures", () => {
       basis: "b",
     });
 
-  it("shares the hourly move cap with promotes", async () => {
-    for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR; i++)
+  it("has no hourly move cap", async () => {
+    for (let i = 0; i < 12; i++)
       addDecision({ kind: i % 2 ? "promote" : "reorder", at: NOW - 1000 });
-    expect(await reorder()).toEqual(refused(capText("moved tickets", FLIGHT_PROMOTES_PER_HOUR)));
+    expect((await reorder()).isError).toBeUndefined();
   });
 
-  it("lets only one of two parallel reorders by different seats through at cap minus one", async () => {
-    for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR - 1; i++)
-      addDecision({ kind: "reorder", at: NOW - 1000 });
+  it("lets two parallel reorders by different seats both through", async () => {
     const seen: string[] = [];
     reorderImpl = async (seat, move, above) => {
       seen.push(`${seat}:${move}>${above}`);
@@ -7757,9 +7633,9 @@ describe("queue-reorder cap and failures", () => {
         basis: "b",
       }),
     ]);
-    expect(results.filter((r) => r.isError).length).toBe(1);
-    expect(seen).toHaveLength(1);
-    expect(decisions().filter((d) => d.kind === "reorder").length).toBe(FLIGHT_PROMOTES_PER_HOUR);
+    expect(results.filter((r) => r.isError).length).toBe(0);
+    expect(seen).toHaveLength(2);
+    expect(decisions().filter((d) => d.kind === "reorder").length).toBe(2);
   });
 
   it("records an unconfirmed swap and answers with an error", async () => {
@@ -7962,12 +7838,12 @@ describe("close_ticket", () => {
     await refusedNothingWritten(closeCall(), /GitHub is unreachable/);
   });
 
-  it("stops at the hourly cap", async () => {
-    for (let i = 0; i < FLIGHT_CLOSES_PER_HOUR; i++)
+  it("has no hourly cap on closes", async () => {
+    for (let i = 0; i < 6; i++)
       addDecision({ kind: "close", decision: "Closed as duplicate: u", at: NOW - 1000 });
     const r = await closeCall();
-    expect(r).toEqual(refused(capText("closed tickets", FLIGHT_CLOSES_PER_HOUR)));
-    expect(ghCalls).toEqual([]);
+    expect(r).not.toEqual(refused(expect.stringContaining("most allowed")));
+    expect(r.isError).toBeUndefined();
   });
 
   it("logs the redacted error and records an unconfirmed close when gh fails and the issue stays open", async () => {
@@ -7998,6 +7874,10 @@ describe("close_ticket", () => {
       expect(r.isError).toBe(true);
       expect(r.text).toMatch(/unconfirmed/);
       expect(decisions()[0]).toMatchObject({ kind: "close", decision: CLOSE_UNCONFIRMED_DECISION });
+      // the comment may have landed, so the failed-looking call still counts as a write
+      expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]").length).toBeGreaterThan(
+        0,
+      );
     }
   });
 
@@ -8066,10 +7946,12 @@ describe("close_ticket", () => {
     await refusedNothingWritten(closeCall(), /could not search/);
   });
 
-  it("refuses before any write when too many waiting tickets mention it to read", async () => {
+  it("reads every waiting ticket that mentions it, however many, and closes when none depend on it", async () => {
     board(card(7), card(8), ...Array.from({ length: 61 }, (_, i) => card(100 + i)));
     mentions(...Array.from({ length: 61 }, (_, i) => 100 + i));
-    await refusedNothingWritten(closeCall(), /too many open tickets mention it/);
+    const r = await closeCall();
+    expect(r.text).not.toMatch(/too many open tickets/);
+    expect(r.isError).toBeUndefined();
   });
 
   it("reads the waiting tickets' bodies at most four at a time", async () => {
@@ -8683,19 +8565,15 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields counts a status move with promote's against the hourly cap", async () => {
+    it("set_fields records a status move under its own kind, with no hourly cap", async () => {
       board(card(7));
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
-      // its own kind, not promote's, but counted with promote's against the hourly cap
       expect(decisions().filter((d) => d.kind === "status")).toHaveLength(1);
       expect(decisions().filter((d) => d.kind === "promote")).toHaveLength(0);
-      for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR - 1; i++) addDecision({ kind: "promote" });
+      for (let i = 0; i < 12; i++) addDecision({ kind: "promote" });
       moveCalls.length = 0;
-      expect(await call("set_fields", { issue: 7, status: "Blocked" })).toHaveProperty(
-        "isError",
-        true,
-      );
-      expect(moveCalls).toEqual([]);
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
+      expect(moveCalls).toHaveLength(1);
     });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
       liveLabels = ["lane:home"];
@@ -9121,6 +8999,13 @@ describe("FLIGHT's full access (#1214)", () => {
       expect(decisions()).toEqual([]);
     });
 
+    it("counts a GET as a read and a POST as a write for the runaway breaker", () => {
+      expect(isReadCall("operator", { method: "GET", path: "/api/runs" })).toBe(true);
+      expect(isReadCall("operator", { method: "POST", path: "/api/runs/r/resume" })).toBe(false);
+      expect(isReadCall("gh_write", { action: "close" })).toBe(false);
+      expect(isReadCall("crew_tidy", { action: "prune_branches" })).toBe(false);
+    });
+
     it("reads any other /api path with GET, leaving no decision", async () => {
       await call("operator", { method: "GET", path: "/api/runs?limit=5" });
       expect(operatorCalls).toHaveLength(1);
@@ -9429,5 +9314,229 @@ describe("FLIGHT's full access (#1214)", () => {
       expect(r.text).toContain("mc:mc/old");
       expect(decisions()[0]).toMatchObject({ kind: "tidy" });
     });
+  });
+});
+
+describe("the runaway breaker", () => {
+  const msg = { seat: "guido-1", text: "Please push", basis: "idle" };
+  const same = () => call("message_seat", msg);
+  const flags = () => store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY);
+  const entry = { kind: "work", key: "k", title: "t", status: "active", basis: "b" };
+
+  it("trips on 5 identical calls in 30 minutes, then refuses writes with its text and raises one brief", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      expect((await same()).isError).toBeUndefined();
+    const reason = runawaySameReason(
+      "message_seat",
+      canonicalArgs(msg).slice(0, 80),
+      FLIGHT_RUNAWAY.sameActionLimit,
+    );
+    expect(await same()).toEqual(refused(runawayRefusedText(reason)));
+    // any other write is stopped too, and still no second brief
+    expect(await call("track", entry)).toEqual(refused(runawayRefusedText(reason)));
+    expect(flags()).toHaveLength(1);
+    expect(flags()[0]?.text).toBe(runawayNoteText(reason));
+    expect(JSON.parse((await call("flight_state", {})).text).breaker).toEqual({
+      tripped: true,
+      reason,
+    });
+  });
+
+  it("does not trip on the same tool with different arguments, such as messages with different text", async () => {
+    for (let i = 0; i < 8; i++)
+      expect((await call("message_seat", { ...msg, text: `push ${i}` })).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+  });
+
+  it("six moves of one ticket above different tickets do not trip; five identical ones do", async () => {
+    reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
+    const reorder = (above: string) =>
+      call("promote", {
+        action: "queue-reorder",
+        seat: "guido-1",
+        move: "mc#2",
+        above,
+        basis: "b",
+      });
+    for (let i = 0; i < 6; i++) expect((await reorder(`mc#${10 + i}`)).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await reorder("mc#99");
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("still lets FLIGHT read while tripped, including a focus read", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
+    fetchImpl = async (n) => ticket(n);
+    expect((await call("read_ticket", { issue: 1 })).isError).toBeUndefined();
+    expect((await call("recall", { query: "" })).isError).toBeUndefined();
+    expect(
+      (await call("message_seat", { seat: "guido-1", read_focus: true, basis: "b" })).isError,
+    ).toBeUndefined();
+  });
+
+  it("does not count focus reads", async () => {
+    for (let i = 0; i < 8; i++)
+      await call("message_seat", { seat: "guido-1", read_focus: true, basis: "b" });
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
+  });
+
+  it("leaves bookkeeping out of the repeat rule: five track calls on one key do not trip it", async () => {
+    for (let i = 0; i < 8; i++) expect((await call("track", entry)).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+  });
+
+  it("counts bookkeeping toward the hourly total, with no decision rows", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.writesPerHour; i++)
+      recordWrite(store, { at: NOW - 60_000, action: "track", target: `k${i}` });
+    expect((await call("track", { ...entry, key: "x" })).isError).toBeUndefined();
+    expect(await call("track", { ...entry, key: "y" })).toEqual(
+      refused(runawayRefusedText(runawayWritesReason(FLIGHT_RUNAWAY.writesPerHour + 1))),
+    );
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("counts screenshot_hud, failed attempts too", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    screenshotImpl = async () => {
+      throw new Error("Chrome refused");
+    };
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      await call("screenshot_hud", { page: "/" });
+    expect(flags()).toHaveLength(1);
+    expect((await call("screenshot_hud", { page: "/" })).text).toContain("runaway breaker");
+  });
+
+  it("stays clear after a lift, even with an unrelated write straight after", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
+    expect(liftRunaway(store, bus, nowMs)).toBe(true);
+    expect((await call("message_seat", { ...msg, text: "other" })).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+    expect(JSON.parse((await call("flight_state", {})).text).breaker.tripped).toBe(false);
+  });
+
+  it("does not count refused calls: six refused merge_pr calls do not trip", async () => {
+    // an operator stop: merge_pr refuses, and a refusal writes nothing
+    store.upsertRun(run("r-pr", "guido-1"));
+    store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
+    for (let i = 0; i < 6; i++) {
+      expect((await call("merge_pr", { pr: 12, basis: "ready" })).isError).toBe(true);
+    }
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
+  });
+
+  it("counts a loop of unconfirmed queue reorders, which record a decision and return an error", async () => {
+    reorderImpl = async () => ({ ok: false, text: "Priority swap incomplete." });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      expect(
+        (
+          await call("promote", {
+            action: "queue-reorder",
+            seat: "guido-1",
+            move: "mc#2",
+            above: "mc#3",
+            basis: "b",
+          })
+        ).isError,
+      ).toBe(true);
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("does not count refused edit_card, edit_issue or set_fields calls, which write nothing", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    const refusals = [
+      ["edit_card", { issue: 7, assignees: ["nobody"], basis: "b" }],
+      ["edit_issue", { issue: 7, basis: "b" }],
+      ["set_fields", { issue: 7, labels: ["lane:other"], basis: "b" }],
+    ] as const;
+    for (const [name, args] of refusals)
+      for (let i = 0; i < 6; i++) expect((await call(name, args)).isError).toBe(true);
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
+  });
+
+  it("counts a loop of edit_card calls whose card edit lands and whose label write then fails", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    ghImpl = async () => ({ code: 1, stdout: "", stderr: "refused" });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) {
+      const r = await call("edit_card", {
+        issue: 7,
+        size: "S",
+        labels: ["area:server"],
+        basis: "b",
+      });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("then stopped");
+    }
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("counts a loop of field edits that land part-way and then fail", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(card(7));
+    moveImpl = async () => ({ ok: false, reason: "no Status option" });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) {
+      const r = await call("set_fields", {
+        issue: 7,
+        size: "M",
+        status: "Blocked",
+        basis: "b",
+      });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("then stopped");
+    }
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("does not trip on six identical headline updates", async () => {
+    const headline = () =>
+      call("update_brief", { section: FLIGHT_HEADLINE, text: "H", basis: "wake" });
+    for (let i = 0; i < 6; i++) expect((await headline()).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+  });
+
+  it("lets writes through again once the operator lifts it, and logs the lift", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
+    expect((await same()).isError).toBe(true);
+    nowMs += 31 * 60_000;
+    expect((await same()).isError).toBe(true); // time alone does not lift it
+    expect(liftRunaway(store, bus, nowMs)).toBe(true);
+    expect((await same()).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+    expect(decisions().filter((d) => d.kind === "hub")).toHaveLength(2);
+  });
+
+  it("keeps its own flag out of FLIGHT's hands", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
+    expect(
+      (await call("dismiss_item", { key: `note:${FLIGHT_RUNAWAY_NOTE_KEY}`, basis: "b" })).isError,
+    ).toBe(true);
+    expect(flags()).toHaveLength(1);
+    expect(isOperatorCall({ key: `note:${FLIGHT_RUNAWAY_NOTE_KEY}`, kind: "flag" }, store)).toBe(
+      true,
+    );
+  });
+
+  it("leaves a stopped account in force", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW,
+      pct: 96,
+      resetAt: NOW + 1000,
+      source: "t",
+    });
+    expect(await call("start_seat", { seat: "guido-1", issue: 7, basis: "ready" })).toEqual(
+      refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
+    );
   });
 });
