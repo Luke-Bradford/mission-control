@@ -1975,7 +1975,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token

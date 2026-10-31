@@ -2,7 +2,8 @@
  * The guard hook's logic: each seat's CLI runs `hook-cli.ts` (`HOOK_ENTRY`) before every tool call
  * (PreToolUse) and after the calls that can hold the test lock (PostToolUse, PostToolUseFailure).
  * It asks the hub for a verdict, and the output is one of two fixed forms: `{}` (no objection; the
- * CLI's rules still apply) or the deny form.
+ * CLI's rules still apply) or the deny form. A Stop (the seat ends a turn) is asked too, and may be
+ * answered with the block form: the seat carries on.
  *
  * It never fails open: anything but an HTTP 200 carrying `{}` or the deny form, and any failure of
  * its own, is the "unreachable" deny with exit 2 (spike 2026-10-21: exit 2 blocks the tool). The
@@ -25,6 +26,7 @@ import {
   GUARD_UNREACHABLE_TEXT,
   type GuardHookEvent,
   guardDenyOutput,
+  guardStopOutput,
   HOOK_DEADLINE_MS,
   HOOK_RETRY_EVERY_MS,
   HOOK_RETRY_MS,
@@ -69,6 +71,8 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
   const tool = e.tool_name;
   const id = e.tool_use_id;
   if (!(GUARD_HOOK_EVENTS as readonly unknown[]).includes(event)) throw new Unusable();
+  // a Stop names no tool: the hub knows the run from the token
+  if (event === "Stop") return { event, body: JSON.stringify({ hook_event_name: event }) };
   if (typeof tool !== "string" || tool === "" || typeof id !== "string" || id === "") {
     throw new Unusable();
   }
@@ -108,8 +112,11 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
   return { event: event as GuardHookEvent, body: JSON.stringify(out) };
 }
 
-/** The hub's answer, rebuilt as one of the two fixed forms; null for anything else. */
-function verdict(status: number, text: string): string | null {
+/**
+ * The hub's answer, rebuilt as one of the fixed forms; null for anything else. The deny form
+ * answers a PreToolUse and the block form a Stop, never the other way round.
+ */
+function verdict(status: number, text: string, event: GuardHookEvent): string | null {
   if (status !== 200) return null;
   let v: unknown;
   try {
@@ -120,6 +127,19 @@ function verdict(status: number, text: string): string | null {
   if (!isObject(v)) return null;
   const keys = Object.keys(v);
   if (keys.length === 0) return GUARD_ALLOW_OUTPUT;
+  if (event === "Stop") {
+    const why = v.reason;
+    if (
+      keys.length !== 2 ||
+      v.decision !== "block" ||
+      typeof why !== "string" ||
+      why === "" ||
+      why.length > MAX_REASON
+    ) {
+      return null;
+    }
+    return guardStopOutput(why);
+  }
   if (keys.length !== 1 || !isObject(v.hookSpecificOutput)) return null;
   const h = v.hookSpecificOutput;
   const reason = h.permissionDecisionReason;
@@ -170,7 +190,7 @@ async function decide(
       await new Promise((resolve) => setTimeout(resolve, HOOK_RETRY_EVERY_MS));
       continue;
     }
-    const out = verdict(res.status, res.body);
+    const out = verdict(res.status, res.body, event);
     return out === null ? FAILED : { out, exit: 0 };
   }
 }

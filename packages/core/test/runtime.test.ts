@@ -1103,6 +1103,7 @@ describe("crew sandbox and scoped edits", () => {
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        Stop: [{ hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }

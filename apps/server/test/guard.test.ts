@@ -23,6 +23,7 @@ import {
   lockBusyText,
   MC_TOOLS,
   MCP_PATH,
+  NEW_LOOP,
   REREAD_MIN_BYTES,
   type RunDigest,
   TEST_LOCK_UNAVAILABLE_TEXT,
@@ -449,6 +450,88 @@ describe("POST /api/guard/check", () => {
   const reason = (body: string) =>
     (JSON.parse(body) as { hookSpecificOutput: { permissionDecisionReason: string } })
       .hookSpecificOutput.permissionDecisionReason;
+
+  describe("a Stop with the run's report missing", () => {
+    const stop = { hook_event_name: "Stop" };
+    const tasks = (...status: ("done" | "in_progress" | "pending")[]) =>
+      store.setDigest("run-a", {
+        toolCalls: 0,
+        turns: 0,
+        lastEventAt: null,
+        model: null,
+        contextTokens: null,
+        contextWindow: null,
+        liveTool: null,
+        tools: {},
+        subagents: [],
+        minuteTokens: [],
+        turnUsage: [],
+        background: [],
+        compactions: 0,
+        tasks: status.map((st, i) => ({ id: `t${i}`, text: `item ${i}`, status: st })),
+      });
+    beforeEach(() => {
+      store.upsertRun({
+        id: "run-a",
+        agentId: "guido-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: null,
+        status: "running",
+        sessionId: null,
+        model: null,
+        branch: null,
+        ticket: "mc#42",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+        loopKind: "build",
+        loop: NEW_LOOP,
+      });
+    });
+    const block = (body: string) => JSON.parse(body) as { decision?: string; reason?: string };
+
+    it("blocks with the open items, three times, then lets the stop stand", async () => {
+      tasks("done", "in_progress", "pending");
+      for (let i = 0; i < 3; i++) {
+        const b = block((await check(tokA, stop)).body);
+        expect(b.decision).toBe("block");
+        expect(b.reason).toContain("item 1");
+        expect(b.reason).toContain("item 2");
+        expect(b.reason).not.toContain("item 0");
+      }
+      expect((await check(tokA, stop)).body).toBe("{}");
+      expect((await check(tokA, stop)).body).toBe("{}");
+    });
+
+    it("lets it stand once every item is done, or when there are none", async () => {
+      expect((await check(tokA, stop)).body).toBe("{}");
+      tasks("done", "done");
+      expect((await check(tokA, stop)).body).toBe("{}");
+    });
+
+    it("lets it stand once the run has reported, and gives a later round a fresh three", async () => {
+      tasks("pending");
+      for (let i = 0; i < 4; i++) await check(tokA, stop);
+      store.addEvidence("run-a", "done", NOW);
+      expect((await check(tokA, stop)).body).toBe("{}");
+      // the loop took that report in: the next round owes a new one
+      store.setRunLoop("run-a", { ...NEW_LOOP, reportedEvidenceId: 1 });
+      for (let i = 0; i < 3; i++) {
+        expect(block((await check(tokA, stop)).body).decision).toBe("block");
+      }
+      expect((await check(tokA, stop)).body).toBe("{}");
+    });
+
+    it("lets it stand while the seat waits on an answer to its question", async () => {
+      tasks("pending");
+      store.addQuestion({ runId: "run-a", agentId: "guido-1", text: "q?", at: NOW });
+      expect((await check(tokA, stop)).body).toBe("{}");
+    });
+  });
 
   it("confines git paths using the authenticated seat's worktree", async () => {
     execFileSync("git", ["init", "-q", dir]);
@@ -1116,6 +1199,28 @@ describe("hookMain", () => {
     });
   });
 
+  it("posts a Stop as the event alone, and rebuilds the block answer in code", async () => {
+    const block = JSON.stringify({ decision: "block", reason: "Open items:\n- item 1" });
+    const r = await hookMain(
+      stdinFor({ hook_event_name: "Stop", tool_name: undefined, tool_use_id: undefined }),
+      [tokenFile, URL_OK],
+      answer(200, JSON.stringify(JSON.parse(block), null, 2)),
+    );
+    expect(r).toEqual({ out: block, exit: 0 });
+    expect(posts.map((p) => p.body)).toEqual([JSON.stringify({ hook_event_name: "Stop" })]);
+  });
+
+  it("refuses a block answer to a tool event, and a Stop answer in the deny form", async () => {
+    const block = JSON.stringify({ decision: "block", reason: "x" });
+    expect((await hookMain(stdinFor(), [tokenFile, URL_OK], answer(200, block))).exit).toBe(2);
+    const stop = stdinFor({ hook_event_name: "Stop" });
+    expect(
+      (await hookMain(stop, [tokenFile, URL_OK], answer(200, guardDenyOutput("x")))).exit,
+    ).toBe(2);
+    const extra = JSON.stringify({ decision: "block", reason: "x", continue: false });
+    expect((await hookMain(stop, [tokenFile, URL_OK], answer(200, extra))).exit).toBe(2);
+  });
+
   it("sends run_in_background, timeout and file_path when the call has them, and drops other fields", async () => {
     await hookMain(
       stdinFor({
@@ -1364,7 +1469,7 @@ describe("hookMain", () => {
       "a non-string Read pages",
       stdinFor({ tool_name: "Read", tool_input: { file_path: "/w/a", pages: 3 } }),
     ],
-    ["an unknown event", stdinFor({ hook_event_name: "Stop" })],
+    ["an unknown event", stdinFor({ hook_event_name: "SessionStart" })],
   ])("fails closed, without posting, on stdin with %s", async (_n, stdin) => {
     expect(await hookMain(stdin, [tokenFile, URL_OK], answer(200, "{}"))).toEqual({
       out: DENY_UNREACHABLE,

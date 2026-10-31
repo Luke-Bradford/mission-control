@@ -978,15 +978,20 @@ const POST_HOOK_MATCHER = "Bash";
 
 /**
  * The `hooks` block (spike 2026-10-21): the guard before every tool call
- * (PreToolUse, matcher `*`), and after each Bash call ends (PostToolUse, PostToolUseFailure), when
- * a call that holds the test lock releases it.
+ * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
+ * a call that holds the test lock releases it, and when the seat stops (Stop), which may carry it on.
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
-  const entry = (matcher: string) => [
-    { matcher, hooks: [{ type: "command", command: hook.command, timeout: hook.timeoutS }] },
-  ];
+  const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
   const out = {} as Record<GuardHookEvent, unknown[]>;
-  for (const e of GUARD_HOOK_EVENTS) out[e] = entry(e === "PreToolUse" ? "*" : POST_HOOK_MATCHER);
+  for (const e of GUARD_HOOK_EVENTS) {
+    // a Stop has no tool to match: the CLI ignores a matcher there, so none is written
+    out[e] = [
+      e === "Stop"
+        ? { hooks: [run] }
+        : { matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] },
+    ];
+  }
   if (hook.trim !== undefined) {
     out.PostToolUse.push({
       matcher: "*",
