@@ -53,7 +53,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
       snapshots.push(to);
       writeFileSync(to, "live-db");
     },
-    startSide: async ({ sha, db }) => {
+    startSide: async ({ sha }) => {
       started.push({ sha, db, dbBytes: readFileSync(db, "utf8") });
       return {
         origin: `http://side/${sha}`,
@@ -237,7 +237,7 @@ describe("PrEvidence gate", () => {
   it("ends a capture whose step hangs at the deadline, and the next PR is not stuck behind it", async () => {
     const t = setup({
       captureMs: 30,
-      startSide: async ({ sha, db }) => {
+      startSide: async ({ sha }) => {
         if (sha === HEAD) return new Promise(() => {}); // never answers
         return { origin: `http://side/${sha}`, stop: async () => {} };
       },
