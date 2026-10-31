@@ -5920,9 +5920,16 @@ describe("the engine runs reviews", () => {
   it("a review run that ends after the PR head moved is superseded, not failed", async () => {
     await toReview();
     const one = first();
+    expect(one.state).toBe("running");
+    // let the pass that follows toReview settle, so the run's end is what superviseReviews sees first
+    await h.engine.tick();
+    await new Promise((r) => setTimeout(r, 20));
     setPr({ ci: "passing", headSha: SHA_B });
-    crash(need(one.runId));
-    await vi.waitFor(() => expect(first().state).toBe("superseded"));
+    store.setRunEnded(need(one.runId), clock, "failed", "exit");
+    seatIdle(null, RETRO);
+    emit({ kind: "idle", seatId: RETRO, runId: need(one.runId), resumed: false });
+    await vi.waitFor(() => expect(first().state).not.toBe("running"));
+    expect(first().state).toBe("superseded");
     expect(loopTexts()).not.toContain(
       reviewFailedText(CALL, SHA, "the review run ended (the process crashed)"),
     );

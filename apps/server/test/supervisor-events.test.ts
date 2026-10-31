@@ -559,6 +559,13 @@ describe("supervisor events (Plan 7a)", () => {
       await sup.startRun("guido-1", 42);
     });
 
+    it("ends the run endedBy superseded, with no missing report, when the engine says so", async () => {
+      const { sup, runId } = await idleRun();
+      await sup.endRunByEngine(runId, "superseded");
+      expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "superseded" });
+      expect(store.run(runId)?.noReport ?? null).toBeNull();
+    });
+
     it("is a no-op, with no event, for a run that has ended or does not exist", async () => {
       const { sup, seen, runId } = await idleRun();
       await sup.endRunByEngine(runId);
