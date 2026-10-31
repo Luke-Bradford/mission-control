@@ -3375,18 +3375,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.dismissItem,
-      "Dismiss any open attention item you can find, or settle a stale comms-open question or blocker with a reason. Operator approvals, guard, budget, account and Update holds, another lane's items and items you briefed for the operator remain protected.",
+      "Dismiss any open attention item you can find, or settle a resolved comms-open question or blocker from any seat in this repo with a basis. Operator approvals, guard, budget, account and Update holds, another lane's items and items you briefed for the operator remain protected.",
       z.strictObject({ key: text(200), basis: basisArg }),
       "dismiss",
       async (a, repo, ctx) => {
-        const unavailable = "This item is protected or unavailable.";
+        const notFound = "No open item with that key was found.";
+        const protectedItem =
+          "This item is protected: an operator approval, a guard, budget, account or Update hold, or a hold on the operator's rules.";
+        const otherRepo = "This item belongs to another repo.";
         /** The refusal for an item FLIGHT may not dismiss, or null: it must be found, and not another lane's or briefed for the operator. */
         const dismissProblem = (item: AttentionItem | undefined, own = false): string | null => {
-          if (
-            item === undefined ||
-            protectedDecisionItem(store, item, config, now(), { runFlags: true })
-          )
-            return unavailable;
+          if (item === undefined) return notFound;
+          if (protectedDecisionItem(store, item, config, now(), { runFlags: true }))
+            return protectedItem;
           if (item.owner?.startsWith("lane:")) return "This item belongs to another lane.";
           // a person's message is the operator's to answer, and FLIGHT's own question stays theirs
           if (item.kind === "person") return "This item is a person's message, for the operator.";
@@ -3410,17 +3411,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
             (candidate) => candidate.key === a.key,
           );
-          if (
-            message === undefined ||
-            message.from !== ctx.seatId ||
-            (ticketRepoId !== undefined && ticketRepoId !== repo.id)
-          )
-            return fail(unavailable);
-          // FLIGHT's own stalled item (the check above) is its to settle even when briefed up
+          if (message === undefined) return fail(notFound);
+          if (ticketRepoId !== undefined && ticketRepoId !== repo.id) return fail(otherRepo);
+          // only FLIGHT's own message or a seat's: the operator's own questions stay theirs
+          const senderRepoId = config.crew?.sessions.find((s) =>
+            s.seats.some((seat) => seat.id === message.from),
+          )?.repoId;
+          if (message.from !== ctx.seatId) {
+            if (senderRepoId === undefined)
+              return fail("This question is not from a seat in this repo.");
+            if (senderRepoId !== repo.id) return fail(otherRepo);
+          }
+          // a question on a ticket the repo's always_ask rules send to the operator stays theirs
+          const asked = /#(\d+)$/.exec(message.ticket ?? "")?.[1];
+          if (asked !== undefined && ticketRepoId === repo.id) {
+            const rules = await deps.rules(repo.id);
+            if (rules instanceof Error) return fail("Cannot read repo rules.");
+            const card = store.board(repo.id).find((c) => c.issueNumber === Number(asked));
+            if (
+              card &&
+              rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true)))
+            )
+              return fail(protectedItem);
+          }
+          // a question from any seat in this repo is FLIGHT's to settle once its subject is resolved,
+          // even when briefed up; the protected kinds are still refused
           const problem = dismissProblem(item, true);
           if (problem !== null) return fail(problem);
+          if (item?.repoId != null && item.repoId !== repo.id) return fail(otherRepo);
           if (!store.settleCommsItem(messageId, ctx.seatId, a.basis, now()))
-            return fail("This item is protected or unavailable.");
+            return fail("The item could not be settled; it may already be settled.");
           bus.emit("attention");
           return { text: `Settled ${a.key}.` };
         }
@@ -3432,7 +3452,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             (i) => i.key === a.key,
           );
           if (item !== undefined && item.repoId !== null && item.repoId !== repo.id)
-            return fail(unavailable);
+            return fail(otherRepo);
           const problem = dismissProblem(item);
           if (problem !== null) return fail(problem);
           store.ack([a.key], now());
@@ -3451,7 +3471,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           key === HUB_UPDATE_HELD_KEY ||
           note.kind === "ratelimit"
         )
-          return fail("This item is protected or unavailable.");
+          return fail(note ? protectedItem : notFound);
         const run = note.runId ? store.run(note.runId) : null;
         if (run && held(run)) return fail("This hold belongs to the operator.");
         const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
