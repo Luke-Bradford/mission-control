@@ -25,7 +25,7 @@ export const QA_FLOW_METRICS = {
     window: "now",
     unit: "state",
     definition:
-      "The newest review of the PR head that is not superseded: queued (waiting, with its place in the review seat\u0027s queue), checking (the seat and when it started; a starting review counts), sent (blocking findings reported and the developer fixing), ready (a clean report with nothing holding the merge), held (a controller check, the operator\u0027s acceptance, a merge hold, FLIGHT\u0027s clearance, or any other park). A failed attempt reads queued until the cap, then held.",
+      "The newest review of the PR that is not superseded: queued (waiting, with its place in the review seat's queue), checking (the seat and when it started; a starting review counts), sent (blocking findings reported and the developer fixing), ready (a clean report with nothing holding the merge), held (a controller check, the operator's acceptance, a merge hold, FLIGHT's clearance, or any other park). A failed attempt reads queued until the cap, then held.",
     source: "GET /api/repos/:repoId/prs (check) and GET /api/crew (review.check)",
     from: "server",
   },

@@ -39,7 +39,6 @@ const PR_EXPECTED: readonly HudColumn[] = ["In progress", "In review", "Ready fo
 
 /** The card's PR; the card's own header names the repo, so the PR does not. */
 function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec | null }) {
-  // An open, non-draft PR with a live review shows the review state instead of the GitHub one.
   // a crew PR stays a draft until the engine merges it: the review state is the open PR's pill
   const review = pr.state === "open" ? (checkPill ?? null) : null;
   const showState = review !== null || pr.state !== "open" || pr.isDraft || pr.review !== null;
