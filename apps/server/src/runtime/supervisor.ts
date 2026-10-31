@@ -65,10 +65,13 @@ import {
   errorText as errText,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
+  grantRefusedText,
+  grantUngrantableText,
   guardHookCommand,
   HUD_STATE_LABEL,
   hasPlanSection,
   inferTicket,
+  isProtectedPath,
   isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
@@ -85,6 +88,8 @@ import {
   PNPM_STORE_ENV,
   type Profile,
   type ProfileOverride,
+  pathGrantProblem,
+  pathInArea,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -112,6 +117,7 @@ import {
   TRIM_HOOK_TIMEOUT_S,
   ticketControllerCheck,
   ticketInReviewText,
+  ticketPathGrants,
   trimHookCommand,
   watchCheckoutName,
   watchStartRefusedText,
@@ -146,6 +152,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -1778,6 +1785,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
+          granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
           mode: def.mode,
@@ -1848,6 +1856,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       runId: run.id,
       mode: seatDef(info.seat).mode,
       area: info.seat.area,
+      granted: runPathGrants(store, run.id),
       cwd,
       lock: deps.lock,
       ...(deps.checks === undefined ? {} : { checks: deps.checks }),
@@ -3072,6 +3081,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         waits: waitReader(store, info.repo.id)(card),
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
+      // Files the ticket lists outside the seat's area (or that a protected-file rule covers) are
+      // written only on FLIGHT's logged approval; the run holds exactly those.
+      const grants: string[] = [];
+      if (def.mode === "writer" && !planner) {
+        const extra = info.repo.protectedFiles ?? [];
+        for (const p of ticketPathGrants(ticket.body)) {
+          const why = pathGrantProblem(p, extra);
+          if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
+          if (!pathInArea(info.seat.area, p) || isProtectedPath(p, extra)) grants.push(p);
+        }
+        const approved = approvedPaths(store, ref);
+        const unapproved = grants.filter((p) => !approved.includes(p));
+        if (unapproved.length > 0)
+          throw new SupervisorError(422, grantRefusedText(ref, unapproved));
+      }
       // only a build run works from the ticket's plan; planner and review runs record none
       const plan: RunPlan | undefined =
         def.loop !== "build"
@@ -3176,6 +3200,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      setRunPathGrants(store, runId, grants);
       // the lines report_evidence will hold the seat to, as the ticket words them now
       if (def.loop === "build" && !readOnly)
         store.setRunDoneWhen(runId, doneWhenItems(ticket.body));
@@ -3259,6 +3284,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
         area: info.seat.area,
+        granted: grants,
         commands:
           def.mode === "writer"
             ? (info.repo.commands?.writer ?? [])

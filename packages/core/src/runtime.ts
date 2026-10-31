@@ -803,9 +803,22 @@ export const crewAuthorName = (call: string): string => `${call} (Mission Contro
  * Edit and Write denies for every PROTECTED_FILES entry, at the worktree top and at any depth below
  * it (a nested `biome.json` could switch off lint for its folder), anchored to the worktree.
  */
-export function protectedFileRules(cwd: string, extra: readonly string[] = []): string[] {
+export function protectedFileRules(
+  cwd: string,
+  extra: readonly string[] = [],
+  granted: readonly string[] = [],
+): string[] {
+  for (const p of granted) {
+    if (p.includes("/") && isProtectedPath(p, extra)) {
+      throw new Error(`crew rules: ${p} is a protected file in a folder and cannot be granted`);
+    }
+  }
   return protectedGlobs(extra).flatMap((f) => {
-    const g = anchoredGlob(cwd, f);
+    // A granted file at the top leaves the glob that covers it: the top-level entry goes, and an
+    // any-depth one narrows to the folders below the top.
+    const open = granted.some((p) => !p.includes("/") && globMatches(f, foldForMatch(p), true));
+    if (open && !f.startsWith("**/")) return [];
+    const g = anchoredGlob(cwd, open ? `*/${f}` : f);
     return [`Edit(${g})`, `Write(${g})`];
   });
 }
@@ -1191,6 +1204,8 @@ export interface CrewCliInput {
   pluginDir?: string;
   /** Extra Edit and Write denies, on top of PROTECTED_FILES. Default []. */
   protectedFiles?: readonly string[];
+  /** Files outside the area that FLIGHT approved for this run (`grantedPath`). Default []. */
+  granted?: readonly string[];
 }
 
 /** What `guardHookCommand` builds the seat's hook command from. */
@@ -1266,7 +1281,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   const globs = i.area.length > 0 ? i.area : ["**"];
   const allowed = base.flatMap((t) =>
     t === "Edit" || t === "Write"
-      ? globs.map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`)
+      ? [...globs, ...(i.granted ?? [])].map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`)
       : [t],
   );
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
@@ -1318,7 +1333,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...allowed,
     "--disallowedTools",
     ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? []),
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
   );
   return args;
 }

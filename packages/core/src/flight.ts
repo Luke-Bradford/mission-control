@@ -74,6 +74,7 @@ export const FLIGHT_DECISION_KINDS = [
   "tidy",
   "approval",
   "shell",
+  "grant",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -539,7 +540,7 @@ export const smallNoPlanText = (ref: string, size: string): string =>
   `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
-  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. At most 4 starts an hour, and one start of a ticket a day, never while its PR is open.";
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. At most 4 starts an hour, and one start of a ticket a day, never while its PR is open. A ticket that lists files outside the seat's area in a Paths: line is started only with paths: you approve those files, a logged decision, and only this run may write them.";
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;
@@ -891,6 +892,8 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
+export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
@@ -918,6 +921,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
+  "idle_no_work",
   "chain_stalled",
   "github_budget",
   "hub_error",
@@ -1125,7 +1129,7 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
-export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 300_000;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1140,7 +1144,7 @@ export const freshStartLine = (handover: { body: string; updatedAt: number } | n
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
   }`;
-/** "context 142K · fresh session at 150K"; null while the context is unknown. */
+/** "context 142K · fresh session at 300K"; null while the context is unknown. */
 export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
   tokens === null
     ? null

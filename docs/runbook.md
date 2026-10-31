@@ -866,12 +866,38 @@ Seats cannot change them:
 - a commit that holds one is refused whole;
 - the hub won't install from a branch that changes an install input.
 
-When a ticket needs such a change, land it outside the crew, in one of two ways:
+When a ticket needs such a change, a seat can make it under a path grant (next section). Otherwise
+land it outside the crew, in one of two ways:
 - **by hand:** change it in your own checkout and open the PR yourself;
 - **a controller PR:** have the head agent, working outside the crew under your eye, open it.
 
 Once it is merged, start the seat's run, or a new one. A run branches from origin's default
 branch as it was when the run started.
+
+### A ticket that changes files outside every area: a path grant
+
+A ticket whose change sits outside every seat's area (the root `package.json`, `.gitignore`,
+`CLAUDE.md`), or in a protected file, lists the files in a `Paths:` line:
+
+```
+Paths: package.json, .gitignore
+```
+
+A start of that ticket is refused (422) until FLIGHT has approved the files: `mc start_seat { seat, issue,
+paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") and then starts the seat.
+Every start path checks it, FLIGHT's, the engine's and the operator's.
+
+- The run may write exactly the listed files that sit outside its area or are protected, for that
+  run only. Another run on the same seat holds nothing it was not given. The grant is fixed when
+  the run starts; editing the ticket later changes nothing.
+- It covers the Edit and Write tools, the `mc commit` check, the push's stray check and the Codex
+  write floor. Every other protected file and every other file outside the area stays refused.
+- Only a file at the repo's top can be granted when a protected-file rule covers it (`package.json`
+  yes, `apps/web/package.json` no). `.github/`, `.husky/`, `.claude/`, `.codex/`, `.npmrc`,
+  `.pnpmfile.cjs`, `.gitattributes`, `.gitmodules` and `.git` are never granted.
+- The merge gates do not change: a hard-rule path in the diff still needs FLIGHT's clearance (or the
+  operator's, on a repo that keeps it) before merge, and the hub still won't install from a branch
+  that changes an install input.
 
 ### Python dependencies in crew worktrees
 
@@ -1037,6 +1063,7 @@ by reason and by hour over the last day.
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
+| `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
@@ -1981,9 +2008,9 @@ The route only reads data the hub already stores.
 
 ## FLIGHT's fresh session
 
-FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
+FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (300K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
 
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
-- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
+- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).

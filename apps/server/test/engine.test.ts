@@ -4712,6 +4712,64 @@ describe("the engine runs reviews", () => {
           });
         });
 
+        const parkedStuck = async () => {
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          setLoop({
+            phase: "parked",
+            parked: { kind: "stuck", reason: "the push is not shown on GitHub", ended: false },
+          });
+        };
+
+        it("a stuck park behind main goes to CI after one syncMain", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
+          await parkedStuck();
+          const before = loopOf().epoch;
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "merged",
+            sha: SHA_B,
+            mainSha: MAIN,
+          });
+          expect(loopOf()).toMatchObject({
+            phase: "ci",
+            pushFor: SHA_B,
+            parked: null,
+            epoch: before + 1,
+            unparkedAt: clock,
+          });
+          expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(true);
+        });
+
+        it("a stuck park whose newest commit was never recorded as pushed still merges main", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
+          await parkedStuck();
+          commit("e".repeat(40));
+          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "merged" });
+        });
+
+        it("a stuck park's conflicting merge is refused to the author with the files", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+          await parkedStuck();
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "conflict",
+            files: ["apps/a.ts", "apps/b.ts"],
+          });
+          expect(loopOf()).toMatchObject({
+            phase: "working",
+            mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
+          });
+        });
+
+        it("a stuck park not behind main is current, and stays parked", async () => {
+          await parkedStuck();
+          expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
+          expect(h.updates).toEqual([]);
+          expect(loopOf().phase).toBe("parked");
+        });
+
         it("a branch that has main already is current, and nothing is merged", async () => {
           await parkedOnConflict();
           expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
@@ -4748,7 +4806,7 @@ describe("the engine runs reviews", () => {
           setLoop({ phase: "working", parked: null });
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "refused",
-            text: "the run is not in CI or review, or parked on a conflict",
+            text: "the run is not in CI or review, or parked on a conflict or a stuck push",
           });
         });
 

@@ -169,8 +169,13 @@ import {
   GH_READ_NOT_FOUND,
   GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
+  GRANT_NOT_LISTED_TEXT,
+  GRANT_PLANNER_TEXT,
   GUARD_ACK_PREFIX,
   globMatches,
+  grantDecisionText,
+  grantNotOnTicketText,
+  grantUngrantableText,
   HOLD_NOT_TRIAGING_REFUSED,
   HUD_COLUMNS,
   hasDoneWhenSection,
@@ -244,6 +249,7 @@ import {
   type ProfileOverride,
   parkNotYoursText,
   passNeedsBriefText,
+  pathGrantProblem,
   pauseWithout,
   planAlreadyText,
   plannerStartedDecision,
@@ -299,6 +305,7 @@ import {
   TICKET_SIZES,
   type TicketView,
   TRACK_DESCRIPTION,
+  ticketPathGrants,
   ticketReadText,
   trackedText,
   UNTRACK_DESCRIPTION,
@@ -721,12 +728,15 @@ const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
   pass_to_operator: z.literal(true),
 });
+const GRANT_PATH_MAX = 120;
+const GRANT_PATHS_MAX = 10;
 const StartSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
     issue: issueNumber,
     profile: z.string().regex(PROFILE_NAME).optional(),
     profile_reason: text(PROFILE_REASON_MAX).optional(),
+    paths: z.array(text(GRANT_PATH_MAX)).min(1).max(GRANT_PATHS_MAX).optional(),
     basis: basisArg,
   })
   .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
@@ -1392,6 +1402,29 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
     } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
       return fail(notReadyText(ref));
+    }
+    // Files outside the area: the approval is a logged decision, made before the start. The run
+    // then holds the ticket's `Paths:` files; the supervisor refuses a start without it.
+    const granted = c.args.paths ?? [];
+    if (granted.length > 0) {
+      if (planner) return fail(GRANT_PLANNER_TEXT);
+      const listed = ticketPathGrants(body);
+      if (listed.length === 0) return fail(GRANT_NOT_LISTED_TEXT);
+      const unlisted = granted.filter((p) => !listed.includes(p));
+      if (unlisted.length > 0) return fail(grantNotOnTicketText(ref, unlisted));
+      const extra = repo.protectedFiles ?? [];
+      for (const p of granted) {
+        const why = pathGrantProblem(p, extra);
+        if (why !== null) return fail(grantUngrantableText(p, why));
+      }
+      record(at, {
+        kind: "grant",
+        seatId: seat,
+        ref,
+        about: `${ref}: ${card.title}`,
+        decision: grantDecisionText(ref, granted),
+        basis,
+      });
     }
     // what a failed start puts back: the seat's row and the crew pause
     const priorPause = readCrewPause(store);
@@ -3764,6 +3797,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           issue: ISSUE_SCHEMA,
           profile: { type: "string", pattern: PROFILE_NAME.source },
           profile_reason: { type: "string", minLength: 1, maxLength: PROFILE_REASON_MAX },
+          paths: {
+            type: "array",
+            minItems: 1,
+            maxItems: GRANT_PATHS_MAX,
+            items: { type: "string", minLength: 1, maxLength: GRANT_PATH_MAX },
+          },
           basis: BASIS_SCHEMA,
         },
         ["seat", "issue", "basis"],
@@ -3841,7 +3880,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.syncMain,
-      description: `Merge main into a developer run's branch now (its PR conflicts with main, or the run is parked on a conflict). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
+      description: `Merge main into a developer run's branch now (its PR conflicts with main, the run is parked on a conflict, or its push is not shown on GitHub). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
       inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],

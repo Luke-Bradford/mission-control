@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BACKFILL_COLLECTOR,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   type CrewRow,
   ENGINE_TICK_MS,
   FLIGHT_LOOPS_SETTING,
@@ -167,6 +168,27 @@ const row = (collector: string) => store.status().find((s) => s.collector === co
 
 /** Sends the topics queued in the current coalescing window (needs fake timers). */
 const flushEmits = () => vi.advanceTimersByTime(EMIT_COALESCE_MS);
+
+/** A run of the ta loop, to make a crew row change. */
+const taRun = (seq: number): Run => ({
+  id: `ta-${seq}`,
+  agentId: "shop-app-ta",
+  repoId: "shop-app",
+  seq,
+  startedAt: NOW,
+  endedAt: null,
+  status: "running",
+  sessionId: null,
+  model: null,
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "/x/y.log",
+  prs: [],
+  summary: null,
+  reviewId: null,
+});
 
 describe("scheduler", () => {
   it("runs transcript maintenance with default retention", async () => {
@@ -1017,8 +1039,10 @@ describe("scheduler", () => {
   it("emits attention whenever it emits agents or escalations, and not otherwise", async () => {
     vi.useFakeTimers();
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+    let seq = 0;
     for (const job of ["ta", "studio", "github"] as const) {
       topics.length = 0;
+      store.upsertRun(taRun(++seq)); // each job finds the crew changed
       await s.tick(job);
       flushEmits();
       expect(topics, job).toContain("agents");
@@ -1046,10 +1070,77 @@ describe("scheduler", () => {
       expect(topics.filter((t) => t === "agents")).toHaveLength(1);
       expect(topics.filter((t) => t === "attention")).toHaveLength(1);
       expect(topics.filter((t) => t === "health")).toHaveLength(1);
-      // the next window starts afresh
-      await s.tick("ta");
+      // the next window starts afresh; this tick changes a run, so agents goes out again
+      const ta = vi.fn<Collectors["ta"]>(async () => {
+        store.upsertRun(taRun(2));
+      });
+      const s2 = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs({ ta }),
+      });
+      await s2.tick("ta");
       flushEmits();
       expect(topics.filter((t) => t === "agents")).toHaveLength(2);
+    });
+
+    it("an unchanged ta tick emits nothing; a changed one emits agents and attention once", async () => {
+      vi.useFakeTimers();
+      const ta = vi.fn<Collectors["ta"]>(async () => undefined);
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs({ ta }) });
+      await s.tick("ta");
+      flushEmits();
+      topics.length = 0;
+      await s.tick("ta");
+      flushEmits();
+      expect(topics).toEqual([]);
+      ta.mockImplementation(async () => {
+        store.upsertRun(taRun(1));
+      });
+      await s.tick("ta");
+      flushEmits();
+      expect(topics.filter((t) => t === "agents")).toHaveLength(1);
+      expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+    });
+
+    it("a Needs-you item that turns due with no crew row changing still sends attention", async () => {
+      vi.useFakeTimers();
+      const T = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 3_600_000;
+      let at = T;
+      const s = createScheduler({ config, store, bus, now: () => at, collectors: stubs() });
+      store.addComms({
+        at: T - 14 * 60_000,
+        from: "alpha",
+        to: "beta",
+        label: "question",
+        text: "which way?",
+        ticket: null,
+        mentions: [],
+      });
+      await s.tick("ta");
+      flushEmits();
+      topics.length = 0;
+      at = T + 2 * 60_000;
+      await s.tick("ta");
+      flushEmits();
+      expect(topics).toContain("attention");
+      expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+      expect(topics).not.toContain("agents");
+    });
+
+    it("an unchanged GitHub poll emits limits but not agents or health", async () => {
+      vi.useFakeTimers();
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+      await s.tick("github");
+      flushEmits();
+      topics.length = 0;
+      await s.tick("github");
+      flushEmits();
+      expect(topics).toContain("limits");
+      expect(topics).not.toContain("agents");
+      expect(topics).not.toContain("health");
     });
 
     it("a GitHub poll that changed no row emits no boards or escalations; one that did, does", async () => {

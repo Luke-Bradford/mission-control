@@ -446,6 +446,12 @@ export type PullRequestSummary = Pick<
   | "mergedAt"
 >;
 
+/** A stored pull request's number and title: what a PR link shows. */
+export interface PrTitle {
+  number: number;
+  title: string;
+}
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
