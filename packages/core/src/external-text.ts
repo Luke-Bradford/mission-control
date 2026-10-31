@@ -19,7 +19,7 @@ const TAG_FORM = new RegExp(`<(/?\\s*${EXTERNAL_TEXT_TAG})`, "gi");
  * (`<` becomes `&lt;`), so the text cannot close the block early or open a block of its own.
  */
 export const wrapExternalText = (text: string): string => {
-  const id = globalThis.crypto.randomUUID();
+  const id = (globalThis as { crypto: { randomUUID(): string } }).crypto.randomUUID();
   const body = text.replace(TAG_FORM, "&lt;$1");
   return `<${EXTERNAL_TEXT_TAG} id="${id}">\n${body}\n</${EXTERNAL_TEXT_TAG} id="${id}">`;
 };
