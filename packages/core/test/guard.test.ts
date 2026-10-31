@@ -285,6 +285,8 @@ describe("flightShellBreakerWrite", () => {
     "gh search issues stuck",
     "gh project item-list 1 --owner o",
     "gh project field-list 1 --owner o",
+    `bash -c "jq '.a > 1' f"`,
+    "bash -c 'git fetch origin'",
     "find . -name '*.log'",
     "gh -R o/r pr view 12",
     "gh pr list",
@@ -316,6 +318,13 @@ describe("flightShellBreakerWrite", () => {
     'echo a > "f x"',
     "echo 'a > b' > f",
     "echo a | tee f",
+    "bash -c 'echo x > f'",
+    "sh -c 'echo x > f'",
+    "zsh -c 'echo x > f'",
+    "eval 'echo x > f'",
+    "bash -c 'echo x | tee f'",
+    "bash -lc 'echo x >> f'",
+    `bash -c "bash -c 'echo x > f'"`,
   ])("counts %s", (command) => {
     expect(flightShellBreakerWrite(command)).toBe(true);
   });
@@ -323,6 +332,7 @@ describe("flightShellBreakerWrite", () => {
   it("a read is still a read behind -R in the audit classifier", () => {
     expect(flightShellWrite("gh -R o/r pr view 12")).toBe(false);
     expect(flightShellWrite("gh -R o/r pr close 12")).toBe(true);
+    expect(flightShellWrite("bash -c 'echo x > f'")).toBe(true);
   });
 });
 

@@ -3148,6 +3148,25 @@ export function rereadVerdict(
 const unquoted = (command: string): string =>
   command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''").replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
 
+/** A script handed to a shell wrapper: `bash -c '...'`, `sh -c`, `zsh -c`, or `eval '...'`. */
+const SHELL_WRAPPED =
+  /(?:\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c|\beval)\s+('[^']*'|"(?:[^"\\]|\\.)*"|\S+)/g;
+
+/**
+ * Whether a command redirects or tees to a file, outside quoted text and inside the script a shell
+ * wrapper runs (that script's own quoted text blanked in turn).
+ */
+function shellFileWrite(command: string, depth = 0): boolean {
+  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
+  if (depth >= 3) return false;
+  for (const m of command.matchAll(SHELL_WRAPPED)) {
+    const script = m[1] ?? "";
+    const inner = /^(['"])[\s\S]*\1$/.test(script) ? script.slice(1, -1) : script;
+    if (shellFileWrite(inner, depth + 1)) return true;
+  }
+  return false;
+}
+
 /** Whether `gh <args>` (global flags already stripped) only reads: search, auth, a view, a list, a status. */
 const ghReadVerb = (args: readonly string[]): boolean =>
   args[0] === "search" ||
@@ -3213,7 +3232,7 @@ const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "sea
  * A command the guard cannot read to the end counts as a write, as does any redirect to a file.
  */
 export function flightShellWrite(command: string): boolean {
-  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
+  if (shellFileWrite(command)) return true;
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...rawArgs] = argv;
     if (program === undefined) continue;
@@ -3350,7 +3369,7 @@ const BREAKER_GIT_WRITES = new Set(["push", "commit", "merge", "rebase", "reset"
  * counted, so a diagnostic repeated on every wake cannot trip it.
  */
 export function flightShellBreakerWrite(command: string): boolean {
-  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
+  if (shellFileWrite(command)) return true;
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...raw] = argv;
     if (program === undefined) continue;
