@@ -705,6 +705,7 @@ export async function main(): Promise<void> {
     updater,
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
     ...crewGuardDeps(config, tokens, lock, store),
+    repoRules: engineRules,
     checks: checkRecorder,
     mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],

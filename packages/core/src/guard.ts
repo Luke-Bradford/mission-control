@@ -2160,7 +2160,7 @@ const FILE_WRITERS = new Set([
 const GH_PROTECTED_ENDPOINT =
   /^\/?repos\/[^/]+\/[^/]+(?:$|\?|\/(?:branches\/.+\/protection|rulesets|collaborators|invitations|hooks|keys|environments|pages|transfer|actions\/(?:permissions|secrets|variables)|codespaces\/secrets|dependabot\/secrets)(?:\/|\?|$))/;
 /** A controller's act: FLIGHT neither reads the operator token nor records its own approvals. */
-const APPROVAL_PATHS = /operator-token|flight\/approvals/;
+const APPROVAL_PATHS = /operator-token|flight[/.]approvals/;
 
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
@@ -2171,6 +2171,19 @@ function pushRefusal(rest: readonly string[]): string | null {
     if (/^--delete$|^-d$/.test(w) && rest.some((x) => /(?:^|[:/])main$/.test(x)))
       return "git push deleting main";
     if (/(?:^|[:/])main$/.test(w)) return "git push to main";
+    if (w === "--all") return "git push --all (it includes main)";
+  }
+  // the checkout FLIGHT works in is on main: a push must name its branch, not push the current one
+  const positional: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const w = rest[i] ?? "";
+    if (/^(?:-o|--push-option|--receive-pack|--exec|--repo)$/.test(w)) i++;
+    else if (!w.startsWith("-")) positional.push(w);
+  }
+  if (positional.length < 2) return "git push needs an explicit branch: git push origin <branch>";
+  for (const ref of positional.slice(1)) {
+    if (ref.split(":").some((side) => side === "HEAD" || side === "@"))
+      return "git push needs an explicit branch: git push origin <branch>";
   }
   return null;
 }
@@ -3131,7 +3144,6 @@ const SHELL_READERS = new Set([
   "tree",
   "less",
   "more",
-  "sqlite3",
   "pgrep",
   "nl",
   "column",
@@ -3183,4 +3195,43 @@ export function flightShellWrite(command: string): boolean {
     return true;
   }
   return false;
+}
+
+const GH_ISSUE_WRITES = new Set([
+  "edit",
+  "close",
+  "reopen",
+  "delete",
+  "transfer",
+  "lock",
+  "unlock",
+  "pin",
+  "unpin",
+]);
+const GH_PROJECT_WRITES = new Set([
+  "item-edit",
+  "item-archive",
+  "item-delete",
+  "item-add",
+  "item-create",
+]);
+
+/**
+ * The tickets a shell command edits through `gh issue`, and whether it writes a project item
+ * (#1214): the guard holds `always_ask` tickets and the board to FLIGHT's tools.
+ */
+export function flightTicketWrites(command: string): { issues: number[]; project: boolean } {
+  const issues: number[] = [];
+  let project = false;
+  for (const { argv } of lineCommands(command, newWalk())) {
+    const [program, ...args] = argv;
+    if (program !== "gh") continue;
+    if (args[0] === "project" && GH_PROJECT_WRITES.has(args[1] ?? "")) project = true;
+    if (args[0] === "issue" && GH_ISSUE_WRITES.has(args[1] ?? "")) {
+      const ref = args.slice(2).find((a) => !a.startsWith("-"));
+      const n = /^(?:#)?(\d+)$/.exec(ref ?? "")?.[1] ?? /\/issues\/(\d+)$/.exec(ref ?? "")?.[1];
+      if (n !== undefined) issues.push(Number(n));
+    }
+  }
+  return { issues, project };
 }

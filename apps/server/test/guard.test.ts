@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  DEFAULT_REPO_RULES,
   GUARD_BODY_LIMIT,
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
@@ -527,6 +528,77 @@ describe("POST /api/guard/check", () => {
       );
       expect(reason(other.body)).toContain(GUARD_RULES["repo-rules"]);
       expect((await check(tokF, pre("f2", "Write", { file_path: file }), flight)).body).toBe("{}");
+    });
+
+    describe("always_ask tickets and the board", () => {
+      let ask: FastifyInstance;
+      beforeEach(async () => {
+        const cfg = config();
+        cfg.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "a",
+          model: "haiku",
+          area: [],
+        });
+        const item = (n: number, labels: string[]) => ({
+          repoId: "dev",
+          issueNumber: n,
+          title: `T${n}`,
+          status: "Ready",
+          state: "planned",
+          labels,
+          priority: null,
+          updatedAt: NOW,
+          url: "u",
+          stage: null,
+          owner: null,
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: NOW,
+          itemId: `I${n}`,
+          projectId: "P1",
+        });
+        store.replaceBoard("dev", [item(7, ["approval:x"]), item(8, [])] as never);
+        ask = await build({
+          config: cfg,
+          repoRules: async () => ({ ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] }),
+        });
+      });
+      afterEach(async () => {
+        await ask.close();
+      });
+
+      it("refuses an edit or close of an always_ask ticket, and allows an ordinary one", async () => {
+        for (const [i, command] of [
+          "gh issue edit 7 --add-label x",
+          "gh issue close 7",
+          "gh issue view 8 && gh issue close 7",
+        ].entries()) {
+          const r = await check(tokF, bash(`a${i}`, command), ask);
+          expect(reason(r.body)).toContain("always_ask");
+        }
+        expect((await check(tokF, bash("ok", "gh issue edit 8 --add-label x"), ask)).body).toBe(
+          "{}",
+        );
+        expect((await check(tokF, bash("rd", "gh issue view 7"), ask)).body).toBe("{}");
+      });
+
+      it("refuses a board item write in the shell, pointing to set_fields", async () => {
+        const r = await check(tokF, bash("p1", "gh project item-edit --id X --field-id Y"), ask);
+        expect(reason(r.body)).toContain("set_fields");
+      });
+
+      it("refuses a ticket edit when the repo's rules cannot be read", async () => {
+        // `flight` was built with no rules reader
+        const r = await check(tokF, bash("b1", "gh issue edit 8 --add-label x"), flight);
+        expect(reason(r.body)).toContain("could not be read");
+      });
     });
 
     it("never lets an approval open the operator token", async () => {

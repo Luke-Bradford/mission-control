@@ -57,6 +57,7 @@ import {
   FLIGHT_APPROVAL_RULES,
   fixesSent,
   flightShellWrite,
+  flightTicketWrites,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -66,8 +67,10 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
   GUARD_HOOK_EVENTS,
+  GUARD_RULES,
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
+  globMatches,
   guardAckKey,
   guardDenyOutput,
   guardStopOutput,
@@ -106,6 +109,7 @@ import {
   REVIEW_ROUNDS,
   type RepoId,
   type RepoProfile,
+  type RepoRules,
   type RepoView,
   type RunLoopView,
   type RunView,
@@ -382,6 +386,8 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
+  repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
@@ -2069,6 +2075,43 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             undefined,
             fullAccess,
           );
+          // FLIGHT's shell edits no always_ask ticket and no board item: those go through its tools
+          if (
+            fullAccess &&
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof body.data.tool_input?.command === "string"
+          ) {
+            const writes = flightTicketWrites(body.data.tool_input.command);
+            if (writes.project) {
+              verdict = {
+                kind: "deny",
+                rule: "repo-rules",
+                text: `${GUARD_RULES["repo-rules"]}: a board item write in the shell (use set_fields or edit_card)`,
+              };
+            } else if (writes.issues.length > 0) {
+              const rules = await deps.repoRules?.(seat.repoId);
+              const held =
+                rules === undefined || rules instanceof Error
+                  ? "the repo's rules could not be read"
+                  : writes.issues.some((n) =>
+                        store
+                          .board(seat.repoId)
+                          .find((c) => c.issueNumber === n)
+                          ?.labels.some((l) =>
+                            rules.alwaysAsk.some((g) => globMatches(g, l, true)),
+                          ),
+                      )
+                    ? "an always_ask ticket"
+                    : null;
+              if (held !== null)
+                verdict = {
+                  kind: "deny",
+                  rule: "repo-rules",
+                  text: `${GUARD_RULES["repo-rules"]}: ${held} is not edited from the shell`,
+                };
+            }
+          }
           // a controller's recorded approval lets the one matching call past a repo rule
           if (
             fullAccess &&

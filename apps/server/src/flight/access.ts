@@ -172,7 +172,14 @@ export function createAccessTools(h: PowerHelpers) {
       if (unfit !== null) return fail(unfit);
       // the card floor: an always_ask ticket and another lane's are not edited, labelled or closed
       if (target === "issue" && a.action !== "comment") {
-        const card = await deps.board.read?.(repo.id, n).catch(() => null);
+        let card: Awaited<ReturnType<NonNullable<typeof deps.board.read>>> = null;
+        try {
+          if (deps.board.read === undefined) throw new Error("no live read");
+          card = await deps.board.read(repo.id, n);
+        } catch {
+          // a failed read is not a card that is off the board: the labels are unchecked
+          return fail("Refused: the card could not be read live, so its labels are unchecked.");
+        }
         if (card) {
           const rules = await deps.rules(repo.id);
           if (rules instanceof Error) return fail("Cannot read repo rules.");

@@ -1134,14 +1134,14 @@ no Bash sandbox, every built-in tool allowed unscoped (shell, `git`, `gh` as the
 subagents) and no denied-tool list. Every other seat keeps its sandbox and denies unchanged. The guard hook
 still runs before each of FLIGHT's calls and holds it to the repo's rules only, naming the rule it refused:
 
-- `git push` to `main`, or with `--force`, `-f`, `--mirror` or a `+refspec`; `git commit` (FLIGHT's checkouts are not for commits);
+- `git push` to `main`, with `--force`, `-f`, `--mirror`, `--all` or a `+refspec`, or without an explicit branch (`git push`, `git push origin` and `git push origin HEAD` are refused, since FLIGHT's checkout may be on `main`; `git push origin <branch>` is allowed); `git commit` (FLIGHT's checkouts are not for commits);
 - `gh pr merge` and `PUT .../merge` (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
 - writes to `.github/**` or `CLAUDE.md` by Edit, Write, a redirect, `tee`, `cp`, `mv`, `rm` or `sed -i` (best effort for a shell; the whole `CLAUDE.md` file is held, not only its Mission Control block);
 - `gh api` with a writing method on branch protection, rulesets, repo settings, collaborators, hooks, keys, environments, pages or Actions secrets and variables;
-- reading or writing the operator token file, or touching `flight/approvals`: an approval is a controller's act.
+- reading or writing the operator token file, or naming `flight/approvals` or the `flight.approvals` setting: an approval is a controller's act;
+- `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (judged on the board the hub last read; refused when the repo's rules cannot be read), and any `gh project item-*` write (use `set_fields` or `edit_card`).
 
-`always_ask` tickets are held by the tools (`gh_write`, `set_fields`, `edit_issue`, `edit_card`) and not by
-the shell. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
+`gh_write` refuses an `always_ask` or other-lane ticket, and refuses when the card cannot be read live. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
 a `shell` decision, with credentials redacted, so the runaway breaker can count them when it lands. The
 operator token and `GH_TOKEN` are not added to FLIGHT's environment: `operator` and the operator's own `gh` login are its routes.
 

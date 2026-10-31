@@ -9254,6 +9254,26 @@ describe("FLIGHT's full access (#1214)", () => {
       expect(ghCalls).toEqual([]);
     });
 
+    it("refuses when the card could not be read live, so a rate limit does not open the floor", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7, { labels: ["approval:x"] }));
+      readImpl = () => {
+        throw new Error("rate limited");
+      };
+      const r = await call("gh_write", { action: "close", target: "issue", number: 7 });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("could not be read live");
+      expect(ghCalls).toEqual([]);
+    });
+
+    it("lets an issue that is not on the board through the card check", async () => {
+      readImpl = () => null;
+      expect(
+        (await call("gh_write", { action: "close", target: "issue", number: 99 })).isError,
+      ).toBeUndefined();
+      expect(ghCalls).toHaveLength(1);
+    });
+
     describe("delete_branch", () => {
       const del = (branch: string) => call("gh_write", { action: "delete_branch", branch });
       it.each(["main", "archive/old", "has space", "../x"])("refuses %s", async (branch) => {
