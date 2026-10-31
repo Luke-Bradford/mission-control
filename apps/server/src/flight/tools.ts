@@ -3194,7 +3194,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const superTools = [
     superTool(
       MC_TOOL_NAMES.resumeSeat,
-      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). Lifts the seat's stop or crew pause and names it; a failed resume ends the run. Refuses budget, account, Away-quota, machine-capacity and held runs.",
+      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). Lifts the seat's stop or crew pause and names it; a live seat that is only paused is let out of the pause. A failed resume puts the pause and stop back and says so. Refuses budget, account, Away-quota, machine-capacity and held runs.",
       ResumeSeatArgs,
       "pause",
       async (a) => {
@@ -3220,19 +3220,29 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           )
             return fail(AWAY_QUOTA_REFUSED);
         }
-        if (
-          run === null ||
-          run.endedAt !== null ||
-          row === null ||
+        const alive =
           deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
-          deps.supervisor.sessionAlive?.(a.seat) === true ||
-          row.state === "running"
-        )
-          return fail(
-            run === null || run.endedAt !== null || row === null
-              ? `${call} holds no unfinished run to resume.`
-              : `${call} is neither stopped, paused nor waiting to resume.`,
-          );
+          deps.supervisor.sessionAlive?.(a.seat) === true;
+        if (run === null || run.endedAt !== null || row === null)
+          return fail(`${call} holds no unfinished run to resume.`);
+        if (alive) {
+          const paused = pausedSeat(store, a.seat);
+          if (paused === null || held(run))
+            return fail(
+              held(run) ? "Run is held." : `${call} is already running, and is not paused.`,
+            );
+          unpauseSeat(a.seat, call, at);
+          const text = `${call} let out of the pause; its session was already live.`;
+          record(now(), {
+            kind: "pause",
+            about: MC_TOOL_NAMES.resumeSeat,
+            decision: text,
+            basis: a.basis,
+            seatId: a.seat,
+            targetRunId: run.id,
+          });
+          return { text };
+        }
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
         const capacity = machineCapacity(
           store.machineSamples(machineCapacitySince(at, capacityConfig)),
@@ -3249,17 +3259,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         }
         const pause = pausedSeat(store, a.seat);
         const pauseText = unpauseSeat(a.seat, call, at);
-        const lifted = [
-          pauseText,
-          row.state === "stopped" ? "the operator had stopped the seat" : null,
-        ]
-          .filter((t) => t !== null)
-          .join("; ");
+        const stopText = row.state === "stopped" ? "the operator had stopped the seat" : null;
+        const liftedText = (parts: (string | null)[]): string =>
+          parts.filter((t) => t !== null).join("; ");
         const filed = (outcome: string): void => {
           record(now(), {
             kind: "pause",
             about: MC_TOOL_NAMES.resumeSeat,
-            decision: `${outcome}${lifted === "" ? "" : `: ${lifted}`}.`,
+            decision: outcome,
             basis: a.basis,
             seatId: a.seat,
             targetRunId: run.id,
@@ -3273,27 +3280,47 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           // The supervisor records the failure and ends the run when recovery cannot start it.
         }
         const after = store.seatSession(a.seat);
-        const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
-        if (!live) {
-          if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
+        const isLive =
+          after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
+        if (!isLive) {
+          const pauseBack = pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter;
+          if (pauseBack) {
             writeCrewPause(store, pause, at);
+            bus.emit("settings");
+          }
           // Only a newer stop is the operator's; an error the failed resume left is not.
           const cur = row.state === "stopped" ? store.seatSession(a.seat) : null;
-          if (cur !== null && cur.state !== "stopped")
-            store.setSeatSession({ ...cur, state: "stopped", reason: row.reason, updatedAt: at });
+          const stopBack = cur !== null && cur.state !== "stopped";
+          if (stopBack) {
+            const ended = store.run(run.id)?.endedAt !== null;
+            store.setSeatSession({
+              ...cur,
+              state: "stopped",
+              reason: row.reason,
+              runId: ended ? null : cur.runId,
+              updatedAt: at,
+            });
+            bus.emit("agents");
+          }
+          const back = [
+            pauseBack ? `the crew pause on ${call} (${pause.reason})` : null,
+            stopBack ? "the operator's stop" : null,
+          ].filter((t) => t !== null);
+          const kept = liftedText([pauseBack ? null : pauseText, stopBack ? null : stopText]);
           const outcome =
             store.run(run.id)?.endedAt !== null
               ? "ended after the failed resume"
               : "is not running";
-          filed(`${call}'s run ${outcome}`);
-          return fail(`${call}'s run ${outcome}.`);
+          const text = `${call}'s run ${outcome}${back.length > 0 ? `; put back: ${back.join(", ")}` : ""}${kept === "" ? "" : `. Lifted and kept lifted: ${kept}`}.`;
+          filed(text);
+          return fail(text);
         }
         bus.emit("settings");
         bus.emit("agents");
-        filed(`Resume started for ${call}'s run`);
-        return {
-          text: `Resume started for ${call}'s run${lifted === "" ? "" : `: ${lifted}`}.`,
-        };
+        const lifted = liftedText([pauseText, stopText]);
+        const text = `Resume started for ${call}'s run${lifted === "" ? "" : `: ${lifted}`}.`;
+        filed(text);
+        return { text };
       },
       z.toJSONSchema(ResumeSeatArgs),
       { engine: false, records: false },
