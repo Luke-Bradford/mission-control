@@ -57,6 +57,7 @@ import {
   flightState,
   flightWake,
   flightWakes,
+  markItemsShown,
   markPrsShown,
   nextWakeAt,
   openReasonIds,
@@ -93,6 +94,8 @@ export interface FlightWatchDeps {
   /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
   login?: string | null;
   lockState?: () => TestLockState;
+  /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
+  areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
   /** True while the seat has a pending change; FLIGHT is not started until it settles. */
   blocked?: (seatId: string) => boolean;
   now?: () => number;
@@ -438,6 +441,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         now: t,
         hubLogin: deps.login ?? null,
         lock: deps.lockState?.(),
+        areas: await deps.areas?.(found.session.repoId),
       });
       if (!rotating) starts.push(t);
       rotating = false;
@@ -472,6 +476,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
+        markItemsShown(store, state);
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
@@ -550,6 +555,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       now: t,
       hubLogin: deps.login ?? null,
       lock: deps.lockState?.(),
+      areas: await deps.areas?.(found.session.repoId),
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
@@ -607,6 +613,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
+        markItemsShown(store, state);
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;

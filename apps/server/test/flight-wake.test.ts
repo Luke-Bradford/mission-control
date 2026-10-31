@@ -23,7 +23,13 @@ import {
   wakeLine,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { flightWake, nextWakeAt, wakeFacts, wakeReasons } from "../src/flight/state.ts";
+import {
+  deliveredFacts,
+  flightWake,
+  nextWakeAt,
+  wakeFacts,
+  wakeReasons,
+} from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
@@ -636,5 +642,71 @@ describe("wake reasons", () => {
       { id: "q:7", label: "q 7", targets: ["7", "ask:7"] },
     ]);
     expect(wakeReasons(after, after)).toEqual([]);
+  });
+});
+
+describe("wake facts that name a seat or tickets", () => {
+  const withFreeSeat = (): FlightState => {
+    const s = busyBoard();
+    const seat = s.seats[0];
+    if (!seat) throw new Error("missing seat");
+    seat.free = true;
+    return s;
+  };
+  const facts = (s: FlightState) => JSON.parse(wakeFacts(s)) as Record<string, unknown[]>;
+
+  it("names a free seat and the startable tickets when a Ready ticket is in its area", () => {
+    const s = { ...withFreeSeat(), wake: { fit: { "guido-0": ["mc#1"] }, fresh: [] } };
+    expect(facts(s).free).toEqual(["guido-0"]);
+    expect(facts(s).t).toEqual(["mc#1"]);
+  });
+
+  it("names neither when no Ready ticket is in the free seat's area", () => {
+    const s = { ...withFreeSeat(), wake: { fit: {}, fresh: [] } };
+    expect(facts(s).free).toEqual([]);
+    expect(facts(s).t).toEqual([]);
+  });
+
+  it("lists only the tickets a free seat could start", () => {
+    const s = withFreeSeat();
+    const other = s.seats[1];
+    if (!other) throw new Error("missing seat");
+    other.free = true;
+    s.wake = { fit: { "guido-0": ["mc#1"], "guido-1": ["mc#1", "mc#3"] }, fresh: [] };
+    expect(facts(s).t).toEqual(["mc#1", "mc#3"]);
+  });
+
+  it("keeps the older reading when the state carries no fit", () => {
+    expect(facts(withFreeSeat()).free).toEqual(["guido-0"]);
+  });
+
+  it("wakes on an item only while FLIGHT has not seen it", () => {
+    const s = busyBoard();
+    s.items = [
+      {
+        key: "note:a",
+        kind: "message",
+        ticket: null,
+        text: "one",
+        ageMin: 1,
+        triageRemainingMs: 0,
+      },
+      {
+        key: "note:b",
+        kind: "message",
+        ticket: null,
+        text: "two",
+        ageMin: 1,
+        triageRemainingMs: 0,
+      },
+    ];
+    expect(facts(s).items).toEqual(["note:a", "note:b"]);
+    expect(facts({ ...s, wake: { fit: {}, fresh: ["note:b"] } }).items).toEqual(["note:b"]);
+    expect(facts({ ...s, wake: { fit: {}, fresh: [] } }).items).toEqual([]);
+  });
+
+  it("clears fresh items from the delivered baseline", () => {
+    const s = { ...busyBoard(), wake: { fit: {}, fresh: ["note:b"] } };
+    expect(JSON.parse(deliveredFacts(s)).items).toEqual([]);
   });
 });

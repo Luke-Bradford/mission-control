@@ -710,7 +710,13 @@ export function flightSignals(i: {
       `FLIGHT asked the controller at ${new Date(d.at).toISOString()} and has no answer: ${d.about.slice(0, 200)}`,
     );
   }
-  for (const [target, wait] of Object.entries(flightWaits(store))) {
+  const waits = flightWaits(store);
+  for (const [target, wait] of Object.entries(waits)) {
+    // what it waited on has settled on its own: nothing to look at again
+    if (waitResolved(store, repo, target)) {
+      delete waits[target];
+      continue;
+    }
     if (wait.until > now) continue;
     raise(
       "wait_over",
@@ -718,6 +724,14 @@ export function flightSignals(i: {
       wait.until,
       `${target}: you waited on ${wait.on} until ${new Date(wait.until).toISOString()}; look again`,
     );
+  }
+  if (Object.keys(waits).length !== Object.keys(flightWaits(store)).length) {
+    store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
+  }
+  for (const [id, signal] of Object.entries(state.signals)) {
+    if (signal.kind === "wait_over" && signal.toldAt === null && !active.has(id)) {
+      delete state.signals[id];
+    }
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {
@@ -793,6 +807,34 @@ export function flightSignalHistory(
 const flightSeatId = (config: CcConfig): string | null =>
   config.crew?.sessions.flatMap((x) => x.seats).find((x) => seatDef(x).loop === "watch")?.id ??
   null;
+
+/**
+ * Whether what a wait is on has settled: a ticket or PR ref whose card is closed or whose PR has
+ * merged or closed, or a `note:blocked:<seat>:` target whose seat's run is no longer parked.
+ */
+function waitResolved(store: Store, repo: string, target: string): boolean {
+  const ref = /^([\w.-]+)#(\d+)$/.exec(target);
+  if (ref !== null) {
+    if (ref[1] !== repo) return false;
+    const n = Number(ref[2]);
+    return (
+      store.board(repo).some((b) => b.issueNumber === n && b.closed) ||
+      store
+        .pullRequests(repo)
+        .some(
+          (p) =>
+            (p.number === n && p.state !== "open") || (p.ticket === target && p.state === "merged"),
+        )
+    );
+  }
+  const blocked = /^note:blocked:([^:]+):/.exec(target);
+  if (blocked !== null) {
+    const runId = store.seatSession(blocked[1] ?? "")?.runId ?? null;
+    const run = runId === null ? null : store.run(runId);
+    return run === null || run.endedAt !== null || run.loop?.phase !== "parked";
+  }
+  return false;
+}
 
 /** The waits FLIGHT recorded with `wait_on`, by target. */
 export function flightWaits(store: Store): Record<string, FlightWait> {

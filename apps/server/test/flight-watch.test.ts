@@ -61,6 +61,7 @@ import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
+  flightWaits,
   markFlightSignalsShown,
   observeFlightChecks,
   observeFlightMain,
@@ -73,6 +74,8 @@ import {
   flightSeat,
   flightState,
   flightView,
+  flightWakeHistory,
+  markItemsShown,
   markPrsShown,
   ownReply,
   pending,
@@ -4794,5 +4797,151 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     const hours = view.wakeHistory?.perHour ?? [];
     expect(hours).toHaveLength(24);
     expect(hours.at(-1)).toEqual({ at: expect.any(Number), n: 1, byReason: { q: 1, items: 1 } });
+  });
+});
+
+describe("what wakes FLIGHT for a free seat or an item", () => {
+  const areas = { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] };
+  const card = (n: number, labels: string[]): BoardItem => ({
+    repoId: "mc",
+    issueNumber: n,
+    title: `Ticket ${n}`,
+    status: "Ready",
+    state: "planned",
+    labels,
+    priority: null,
+    updatedAt: T0,
+    url: "u",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: null,
+    closed: false,
+    prioritySource: null,
+    createdAt: T0 - n,
+    itemId: `I${n}`,
+    projectId: "P1",
+  });
+  const facts = (over: { areas?: Record<string, string[]>; now?: number } = {}) =>
+    JSON.parse(
+      wakeFacts(flightState({ config, store, busy: [], now: over.now ?? T0, areas: over.areas })),
+    ) as Record<string, unknown[]>;
+
+  it("names a free seat only when a Ready ticket is in its area", () => {
+    store.replaceBoard("mc", [card(1, ["area:server"])]);
+    const f = facts({ areas });
+    expect(f.free).toEqual(["guido-1"]);
+    expect(f.t).toEqual(["mc#1"]);
+  });
+
+  it("names no seat when no Ready ticket matches a free seat, and keeps the old reading without rules", () => {
+    store.replaceBoard("mc", [card(1, ["area:server", "area:web"])]);
+    expect(facts({ areas }).free).toEqual([]);
+    expect(facts({ areas }).t).toEqual([]);
+    expect(facts().free).toEqual(["guido-1", "inco-1"]);
+  });
+
+  it("leaves a seat or a ticket FLIGHT waits on out of the facts until the wait is due", () => {
+    store.replaceBoard("mc", [card(1, ["area:web"])]);
+    expect(facts({ areas }).free).toEqual(["guido-1", "inco-1"]);
+    recordFlightWait(store, "inco-1", { on: "a web P0", until: T0 + 30 * MIN, at: T0 });
+    expect(facts({ areas }).free).toEqual(["guido-1"]);
+    recordFlightWait(store, "mc#1", { on: "PR 7", until: T0 + 30 * MIN, at: T0 });
+    expect(facts({ areas })).toMatchObject({ free: [], t: [] });
+    expect(facts({ areas, now: T0 + 31 * MIN })).toMatchObject({
+      free: ["guido-1", "inco-1"],
+      t: ["mc#1"],
+    });
+  });
+
+  it("does not name a ticket another login holds", () => {
+    store.replaceBoard("mc", [{ ...card(1, ["area:server"]), assignees: ["someone-else"] }]);
+    expect(facts({ areas }).free).toEqual([]);
+  });
+
+  it("lists an item as new until FLIGHT has been shown it", () => {
+    liveCrew();
+    ask();
+    const read = () => flightState({ config, store, busy: [], now: T0 });
+    const first = read();
+    expect(first.items).toHaveLength(1);
+    expect(first.wake?.fresh).toEqual(first.items.map((x) => x.key));
+    expect(JSON.parse(wakeFacts(first)).items).toHaveLength(1);
+    markItemsShown(store, first);
+    const second = read();
+    expect(second.items).toHaveLength(1);
+    expect(second.wake?.fresh).toEqual([]);
+    expect(JSON.parse(wakeFacts(second)).items).toEqual([]);
+    expect(wakeFacts(second)).toBe(deliveredFacts(first));
+  });
+
+  it("lists a seen item again when its text changes, and forgets it once it is gone", () => {
+    liveCrew();
+    ask();
+    const read = () => flightState({ config, store, busy: [], now: T0 });
+    const state = read();
+    markItemsShown(store, {
+      ...state,
+      items: state.items.map((x) => ({ ...x, text: "Which repo?" })),
+    });
+    expect(read().wake?.fresh).toHaveLength(1);
+    markItemsShown(store, { ...state, items: [] });
+    markItemsShown(store, read());
+    expect(read().wake?.fresh).toEqual([]);
+  });
+
+  it("counts the wakes that led to no decision within four minutes", () => {
+    store.addFlightWake("r-flight", T0, ["items"]);
+    store.addFlightWake("r-flight", T0 + 10 * MIN, ["free"]);
+    store.addFlightWake("r-flight", T0 + 20 * MIN, ["q"]);
+    store.addFlightDecision({
+      at: T0 + 2 * MIN,
+      kind: "answer",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+    });
+    store.addFlightDecision({
+      at: T0 + 20 * MIN + 5 * MIN,
+      kind: "answer",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+    });
+    expect(flightWakeHistory(store, T0 + 30 * MIN)).toMatchObject({ total: 3, idle: 2 });
+  });
+
+  it("clears a wait whose PR has merged instead of raising wait_over", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + MIN, at: T0 });
+    const read = (now: number) => flightState({ config, store, busy: [], now });
+    expect(read(T0 + 2 * MIN).signals.map((x) => x.kind)).toContain("wait_over");
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    const after = read(T0 + 2 * MIN);
+    expect(after.signals.map((x) => x.kind)).not.toContain("wait_over");
+    expect(Object.keys(flightWaits(store))).not.toContain("mc#7");
+  });
+
+  it("keeps a wait on a PR that is still open, and clears one on a seat no longer parked", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + 30 * MIN, at: T0 });
+    recordFlightWait(store, "note:blocked:guido-1:x", {
+      on: "a park",
+      until: T0 + 30 * MIN,
+      at: T0,
+    });
+    flightState({ config, store, busy: [], now: T0 + MIN });
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
   });
 });
