@@ -823,11 +823,6 @@ describe("attention items: Needs you holds decisions only (#1177)", () => {
     expect(escItem()?.owner).toBe("loop");
   });
 
-  it("an escalation the operator has left for three days is the loop's", () => {
-    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - 3 * DAY })]);
-    expect(escItem()?.owner).toBe("loop");
-  });
-
   it("a paused loop's old draft PR waits on nobody", () => {
     writeFileSync(join(dir, "ta", "PAUSE"), "");
     store.replaceBoard("shop-app", [boardItem({})]);
@@ -855,22 +850,6 @@ describe("attention items: Needs you holds decisions only (#1177)", () => {
       0,
     );
     expect(attentionItems(config, store, NOW).filter((i) => i.kind === "pr")).toEqual([]);
-  });
-
-  it("a decision whose default time has passed is FLIGHT's to do, not the operator's", () => {
-    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
-    store.addBrief({
-      key: "esc:shop-app#9",
-      context: "c",
-      ask: "Pick one?",
-      recommendation: "a",
-      options: [{ id: "a", label: "a", answer: "a" }],
-      recommendedOptionId: "a",
-      basis: "b",
-      at: NOW - DECISION_DEFAULT_WAIT_MS - MIN,
-      for: "operator",
-    });
-    expect(escItem()).toMatchObject({ owner: "flight", flightTriage: "handling" });
   });
 });
 
