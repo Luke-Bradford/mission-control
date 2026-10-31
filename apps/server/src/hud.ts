@@ -178,7 +178,7 @@ function readStop(store: Store, loopId: string): DriverStop | null {
 
 /**
  * What turns a row's state with no run behind it: each loop's collector status and note, pause
- * flag and driver stop, the escalations, and each crew seat's session. Two equal signals mean no
+ * flag, driver stop and newest run, the escalations, and each crew seat's session. Two equal signals mean no
  * such input changed between them. Reads what `loopViews` reads.
  */
 export function stateInputs(config: CcConfig, store: Store): string {
@@ -198,6 +198,8 @@ export function stateInputs(config: CcConfig, store: Store): string {
         status.get(noteCollectorName(loop.kind, loop.id))?.error,
         loop.kind === "ta-loop" ? isPaused(loop) : false,
         loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
+        // a late line can turn the newest ended run blocked
+        store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
       ];
     }),
     store.escalations().map((e) => [e.repoId, e.source, e.id]),

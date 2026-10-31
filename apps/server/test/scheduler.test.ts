@@ -869,6 +869,42 @@ describe("scheduler", () => {
           expect(store.agentEvents(0).filter((e) => e.to === "error")).toHaveLength(1);
         });
 
+        it("records a loop's ended run turning blocked while no browser is connected", async () => {
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          store.upsertRun({
+            id: "short",
+            agentId: "shop-app-ta",
+            repoId: "shop-app",
+            seq: 9,
+            startedAt: NOW + 1000,
+            endedAt: NOW + 5000,
+            status: "blocked",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: null,
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/z.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          states["shop-app-ta"] = "blocked";
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(store.agentEvents(0).filter((e) => e.to === "blocked")).toHaveLength(1);
+        });
+
         it("ignores topics other than agents", async () => {
           const s = await started();
           const before = crewCalls();
