@@ -3784,6 +3784,31 @@ describe("ops review regressions", () => {
     },
   );
 
+  it("raises a hub_error for a blocking review that holds no finding text", () => {
+    live("guido-1", "r-guido");
+    const reviewId = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "head1234",
+      epoch: 1,
+      attempt: 1,
+      round: 2,
+      at: T0,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "reported", { at: T0 });
+    expect(signalState().signals).toEqual([]);
+    store.db.prepare("UPDATE reviews SET blocking = 1 WHERE id = ?").run(reviewId);
+    expect(signalState().signals).toContainEqual(
+      expect.objectContaining({
+        kind: "hub_error",
+        key: `findings:r-guido:${reviewId}`,
+        evidence: expect.stringContaining("no finding text is stored"),
+      }),
+    );
+  });
+
   it("keeps watch errors stable across updates and restart, and keys a new error after recovery", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);

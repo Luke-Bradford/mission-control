@@ -1859,6 +1859,22 @@ describe("review decisions", () => {
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
+  it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");
+    expect(send).toMatchObject({
+      kind: "send",
+      text: expect.stringContaining(`a.ts:3 — ${finding.summary}`),
+    });
+    expect((send as { text: string }).text).toContain(`Suggested fix: ${finding.fix}`);
+  });
+
+  it("a blocking review with no stored finding text wakes the author with nothing", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const r = reconcile(inReview(withReview(rows, [])));
+    expect(kinds(r.actions, "send")).toEqual([]);
+  });
+
   it("sends an answered finding back to RETRO on the same head", () => {
     const rows = [fact({ id: 5, blocking: 1 })];
     const replied = inReview(

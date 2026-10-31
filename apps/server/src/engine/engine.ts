@@ -1009,12 +1009,11 @@ export function createEngine(deps: EngineDeps): Engine {
       .reviewsOfRun(runId)
       .filter((r) => r.state === "reported")
       .at(-1);
-    return review
-      ? fixText({
-          retro: seatCallSign(review.seatId),
-          sha: review.sha,
-          findings: store.findingsOf(review.id),
-        })
+    const findings = review
+      ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+      : [];
+    return review && findings.length > 0
+      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
       : `FLIGHT requests rework: ${reason}`;
   }
 
