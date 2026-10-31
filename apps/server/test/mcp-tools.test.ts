@@ -18,12 +18,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  alreadyOnOriginText,
   ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  alreadyOnOriginText,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
