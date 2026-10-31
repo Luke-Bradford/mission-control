@@ -3551,7 +3551,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 13; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",

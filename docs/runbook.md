@@ -983,7 +983,16 @@ to hold, or the hold is the controller's and the caller is FLIGHT.
 
 The watch checks every 5 minutes (and 20 seconds after a change) and wakes FLIGHT when a reason is new.
 Besides the older reasons (questions, items, free or stopped seats, parks FLIGHT may lift, PRs awaiting
-it, red main, flaky checks, hub errors), the sweep raises these signals, each told once:
+it, red main, flaky checks, hub errors), the sweep raises these signals, each told once.
+
+Routine pipeline steps do not wake FLIGHT: a PR's CI turning green, a review queued or finished, a
+merge queued or done, a PR ready to merge, a park the engine clears alone, and a review that has waited
+under 10 minutes for its seat. They stay in `flight_state` (prs, mergeQueue, seats, reviewQueue) and
+wake FLIGHT only when a timed rule below says they have stood still (`old_park`, `merge_stalled`,
+`idle_seat`, or idle review seats with a review queued 10 minutes). The hourly re-wake fires only while a
+fact FLIGHT must act on is still open, never for a digest change. Each wake stores its reasons (the fact
+categories, e.g. `q`, `signals`, `reminder`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
+by reason and by hour over the last day.
 
 | Signal | Raised when |
 |---|---|
