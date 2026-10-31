@@ -8,6 +8,8 @@ export const QA_ASK_DAILY_LIMIT = 5;
 /** Tokens one answer run may use. */
 export const QA_ASK_TOKEN_CAP = 100_000;
 export const QA_ASK_TEXT_MAX = 1_000;
+/** The "Used:" line is cut to this many characters so the answer always fits one Comms message. */
+export const QA_ASK_SOURCES_MAX = 300;
 /** The only tools the answer run gets: read-only. */
 export const QA_ASK_TOOLS: readonly string[] = ["Read", "Grep", "Glob"];
 
@@ -108,9 +110,21 @@ export async function askQa(
       error: `QA could not answer: ${e instanceof Error ? e.message : "the run failed"}`,
     };
   }
-  const used = result.sources.length > 0 ? `\nUsed: ${result.sources.join(", ")}` : "";
+  const used =
+    result.sources.length > 0
+      ? cut(`\nUsed: ${result.sources.join(", ")}`, QA_ASK_SOURCES_MAX)
+      : "";
   const head = `Q: ${cut(text, 200)}\nA: `;
   const body = cut(result.answer, COMMS_MESSAGE_MAX - Array.from(head + used).length);
-  const message = await deps.send(seatId, `${head}${body}${used}`, `PR ${pr}`);
+  let message: CommsMessage;
+  try {
+    message = await deps.send(seatId, `${head}${body}${used}`, `PR ${pr}`);
+  } catch (e) {
+    return {
+      ok: false,
+      status: 502,
+      error: `QA answered but the answer could not be posted: ${e instanceof Error ? e.message : "Comms refused it"}`,
+    };
+  }
   return { ok: true, message, remaining: QA_ASK_DAILY_LIMIT - asked - 1 };
 }

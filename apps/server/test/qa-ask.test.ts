@@ -1,4 +1,4 @@
-import { COMMS_CAPCOM, type PullRequestView } from "@mc/core";
+import { COMMS_CAPCOM, COMMS_MESSAGE_MAX, type PullRequestView } from "@mc/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sendComms } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -168,6 +168,37 @@ describe("askQa", () => {
     busy.add("RETRO-1").add("RETRO-2");
     expect(await ask()).toMatchObject({ ok: false, status: 503 });
     expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("keeps a long answer and 80 sources inside one Comms message", async () => {
+    runner.mockResolvedValue({
+      answer: "a".repeat(2000),
+      sources: Array.from({ length: 80 }, (_, i) => `test/some/long/path/file-${i}.test.ts`),
+      tokens: 1,
+    });
+    const out = await ask();
+    expect(out.ok).toBe(true);
+    const text = store.commsMessage(out.ok ? out.message.id : "")?.text ?? "";
+    expect(Array.from(text).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+  });
+
+  it("answers 502 when the answer cannot be posted", async () => {
+    runner.mockResolvedValue({ answer: "the key is hunter2-secret-0123456789abcdef-xyz", sources: [], tokens: 1 });
+    deps.send = (from, text, ref) =>
+      sendComms(
+        {
+          store,
+          crew: () => ["guido-1", "RETRO-1", "RETRO-2"],
+          knownSecrets: async () => ["hunter2-secret-0123456789abcdef-xyz"],
+          now: () => DAY + 3600e3,
+          seatSender: false,
+        },
+        from,
+        { to: COMMS_CAPCOM, text, ref },
+      );
+    const out = await ask();
+    expect(out).toMatchObject({ ok: false, status: 502 });
+    expect(!out.ok && out.error).toContain("could not be posted");
   });
 
   it("answers 502 when the run fails", async () => {
