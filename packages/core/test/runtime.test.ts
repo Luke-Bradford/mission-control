@@ -1099,10 +1099,14 @@ describe("crew sandbox and scoped edits", () => {
       const entry = (matcher: string) => [
         { matcher, hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
       ];
+      const stopCommand = base.hook.command.replace(/ \|\| exit 2$/, " || true");
+      expect(stopCommand).not.toBe(base.hook.command);
       expect(j.hooks).toEqual({
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        // exit 2 from a Stop blocks the stop: its command ends `|| true`, not `|| exit 2`
+        Stop: [{ hooks: [{ type: "command", command: stopCommand, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
