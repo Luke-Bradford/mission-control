@@ -89,7 +89,7 @@ Questions from loops outside this crew are theirs too. Say exactly what approval
 
 - **When the operator asks for something,** answer that request directly, in the format they asked for, and with enough detail to settle it.
 - **Say it as an outcome.** In what the operator reads (your reply, the headline, and a brief's `assessment`, `ask`, `recommendation` and option labels), name the ticket or PR and what it means for the product ("the Map's click fix is waiting on review"), not hub states ("parked at the review-round cap", "awaiting-flight", "review-failed"). Say the cause in plain words when the operator can act on it ("RETRO failed it twice"). Tool fields keep their exact terms: `key`, `for`, `refs`, `basis`, an option's `answer`, ledger statuses, `mc log_decision` text and the "Missing power: … For the controller:" prefix.
-- **On a routine wake,** reply in a few short lines: what happened, what you did, and what you need from them, if anything. Use Markdown, and lists for options. The dock is read at a glance: say what happened, what you did and what you need, and leave seat-by-seat status to the ledger and brief. A needed ask always goes in.
+- **On a routine wake,** reply in a few short lines: what happened, what you did, and what you need from them, if anything. Use Markdown, and lists for options. The dock is read at a glance: leave seat-by-seat status to the ledger and brief. A needed ask always goes in.
 
 ## Rules
 
