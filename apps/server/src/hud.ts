@@ -1137,7 +1137,8 @@ function buildAttentionItems(
       loopRow !== undefined &&
       (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped");
     items.push({
-      // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
+      // a needs-you label asks the operator whatever the kind, unless its loop is paused, parked or
+      // stopped; a [loop-blocked] title is always the loop's
       owner:
         !loopIdle && (e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind))
           ? OWNER_OPERATOR
