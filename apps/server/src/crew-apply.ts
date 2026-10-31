@@ -225,6 +225,7 @@ export function restartNeeded(applied: CcConfig, target: CcConfig): string[] {
   if (!isDeepStrictEqual(a.worktrees, b.worktrees)) out.push("crew.worktrees");
   if (!isDeepStrictEqual(a.node, b.node)) out.push("crew.node");
   if (!isDeepStrictEqual(a.denyRead, b.denyRead)) out.push("crew.deny_read");
+  if (!isDeepStrictEqual(a.allowRead, b.allowRead)) out.push("crew.allow_read");
   if (!isDeepStrictEqual(a.runTokenBudget, b.runTokenBudget)) out.push("crew.run_token_budget");
   if (!isDeepStrictEqual(lists(a), lists(b))) out.push("crew.sessions");
   return out;
@@ -362,7 +363,8 @@ export function createCrewReloader(deps: {
         target.crew &&
         isDeepStrictEqual(config.loops, target.loops) &&
         config.crew.worktrees === target.crew.worktrees &&
-        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead)
+        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead) &&
+        isDeepStrictEqual(config.crew.allowRead, target.crew.allowRead)
       ) {
         for (const session of target.crew.sessions) {
           if (

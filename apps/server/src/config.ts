@@ -38,6 +38,7 @@ import {
   ROLE_PROMPT_DIR,
   type RoleDef,
   resolveSeatDef,
+  SANDBOX_DENY_READ_HOME,
   type SeatCommands,
   type SeatDef,
   type SeatInput,
@@ -158,6 +159,11 @@ export interface CrewConfig {
    * Loaded: always set (default []).
    */
   denyRead?: string[];
+  /**
+   * Absolute paths code a seat runs may read inside the operator's home folder, which its sandbox
+   * denies whole (a global npm or pip config, say). Loaded: always set (default []).
+   */
+  allowRead?: string[];
   /** Input + output tokens one run may use. Loaded: always set (default DEFAULT_RUN_TOKEN_BUDGET). */
   runTokenBudget?: number;
   /** Unfinished runs (set aside, not done) a writer seat may hold before it takes no new ticket. Loaded: always set (default DEFAULT_MAX_OPEN_RUNS_PER_SEAT). */
@@ -607,6 +613,7 @@ const fileSchema = z
           }),
         node: nonEmpty.default(DEFAULT_CREW_NODE),
         deny_read: z.array(nonEmpty).default([]),
+        allow_read: z.array(nonEmpty).default([]),
         run_token_budget: z.number().int().positive().default(DEFAULT_RUN_TOKEN_BUDGET),
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
@@ -728,6 +735,7 @@ const fileSchema = z
               },
               node: expandHome(f.crew.node),
               denyRead: f.crew.deny_read.map(expandHome),
+              allowRead: f.crew.allow_read.map(expandHome),
               runTokenBudget: f.crew.run_token_budget,
               maxOpenRunsPerSeat: f.crew.max_open_runs_per_seat,
               ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
@@ -1207,6 +1215,32 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
     }
     if (crewDirs.some((dir) => isInside(real, dir))) {
       throw new ConfigError("crew.deny_read", `${p} is inside the crew's own folders`);
+    }
+  }
+  // A re-allow beats a deny in the seat's sandbox, so one over home itself or a credential folder
+  // would hand a seat what the sandbox keeps from it.
+  const home = lower(homedir());
+  const tempDirs = ["/tmp", "/private/tmp"].map(lower);
+  const dataDir = lower(join(homedir(), ".local", "share", "mission-control"));
+  const credentialDirs = SANDBOX_DENY_READ_HOME.map((d) => lower(join(homedir(), d)));
+  for (const p of crew.allowRead ?? []) {
+    if (!isAbsolute(p)) throw new ConfigError("crew.allow_read", `${p} is not an absolute path`);
+    const real = lower(p);
+    if (isInside(home, real))
+      throw new ConfigError("crew.allow_read", `${p} is or holds the home folder`);
+    if (credentialDirs.some((c) => isInside(c, real) || isInside(real, c))) {
+      throw new ConfigError("crew.allow_read", `${p} holds or is inside a credential folder`);
+    }
+    // the default data dir (a MC_DB elsewhere is checked when a seat starts) and crew.deny_read
+    // the temp folders: the seat's own temp root lives under them, and a seat's siblings with it
+    // (not for a path inside home, which a home under /tmp would otherwise put there)
+    const denied = [
+      dataDir,
+      ...(isInside(real, home) ? [] : tempDirs),
+      ...(crew.denyRead ?? []).map(lower),
+    ];
+    if (denied.some((x) => isInside(x, real) || isInside(real, x))) {
+      throw new ConfigError("crew.allow_read", `${p} holds or is inside a denied folder`);
     }
   }
   if (seatCount > crew.maxSeats) {

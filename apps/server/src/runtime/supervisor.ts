@@ -98,6 +98,7 @@ import {
   START_NO_RULES,
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
+  sandboxReadDenies,
   scratchName,
   scratchStartRefusedText,
   seatBusyText,
@@ -215,6 +216,7 @@ import {
   startSession,
 } from "./session.ts";
 import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
+import { seatToolchainDirs } from "./toolchain.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
 export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
@@ -1571,7 +1573,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
-      const sandbox = {
+      const sandboxBase = {
         cwd,
         ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
         gitCommonDir,
@@ -1586,6 +1588,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? [`/tmp/claude-${process.getuid?.()}`, `/private/tmp/claude-${process.getuid?.()}`]
             : []),
         ],
+      };
+      const sandbox = {
+        ...sandboxBase,
+        toolchainDirs: seatToolchainDirs(
+          process.execPath,
+          process.env.PATH ?? "",
+          homedir(),
+          sandboxReadDenies(sandboxBase),
+        ),
+        allowRead: crew?.allowRead ?? [],
       };
       if (run.vendor === "codex") {
         addMcTmpExclude(gitCommonDir);
