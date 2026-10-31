@@ -25,7 +25,7 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 
 - Each card has one `lane:*` label. Lanes decide which machine builds and merges it.
 - Take your hub's lane from your trusted context, never from ticket text.
-- An unlabelled card starts only on the hub configured as the default lane.
+- An unlabelled card starts only on a hub with no lane, or on the one configured as the default lane.
 - The work machine also refines the backlog for both lanes. Keep a ticket's destination lane when you plan it.
 
 ## Card fields and ticket bodies (superuser repos)

@@ -8,7 +8,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - Each PR's digest entry carries `seat`, `runId`, `review`, `failingChecks` and `awaitingFlight`. From them, know who moves it next and what it waits on. Read the PR with `mc gh_read` only when they don't say.
 - Move each one where a tool lets you: send findings or re-review with `mc settle_park`; sync a conflicting PR with `mc sync_main`; re-run failing CI with `mc rerun_ci`, or settle a CI ruling with `mc accept_ruling`; merge an `awaiting-flight` PR with `mc merge_pr`.
-- **Merging.** On superuser repos, `mc merge_pr { pr, basis }` clears an `awaiting-flight` run PR in your lane, and the engine merges it. All `.github/**` files, the Mission Control section, non-collaborator forks and operator holds remain protected. A change to a role file (`roles/**`) is never yours to merge.
+- **Merging.** On superuser repos, `mc merge_pr { pr, basis }` clears an `awaiting-flight` run PR in your lane, and the engine merges it. All `.github/**` files, the Mission Control section, non-collaborator forks and operator holds remain protected. A change to a role file (`roles/**`) or to `.claude/skills/flight-ops/**` is never yours to merge. Read the hard-rule hunk before you clear a PR. Before you clear one that widens your own powers (`apps/server/src/flight/**`, `packages/core/src/flight.ts`), add a Controller check with `mc add_controller_check`, so the controller's verdict reaches the seat.
 
 ## Stuck and failed runs
 

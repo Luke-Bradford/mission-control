@@ -6,7 +6,7 @@ Read this before you fold work into a ticket or file one. Where this file and `r
 
 - Fold it into an open ticket in the same area that hasn't started (Backlog, Refinement or Ready).
 - Use `mc comment_ticket` to ask its planner to merge it into the body. A seat's brief is the body, not the comments.
-- A minor review finding is one line on the open rolling minor-findings ticket: `- PR #N, file:line: finding`. Its title starts `Tech debt: the rolling list of minor review findings`; find it with `mc list_tickets`.
+- A minor review finding is one line on the open rolling minor-findings ticket: `- PR #N, file:line: finding`. Its title starts `Tech debt: the rolling list of minor review findings`; find it with `mc list_tickets { label: "chore" }`.
 - In the basis, name the tickets you checked (`mc list_tickets` by area and column).
 
 ## Otherwise, file one

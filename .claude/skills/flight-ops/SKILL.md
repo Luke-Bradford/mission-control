@@ -1,6 +1,6 @@
 ---
 name: flight-ops
-description: Use when a seat, PR, ticket, comms item or the hub is stuck, slow or unclear, and after a context reset.
+description: FLIGHT only. Use when a seat, PR, ticket, comms item or the hub is stuck, slow or unclear, and after a context reset.
 ---
 
 # FLIGHT operations
@@ -41,7 +41,7 @@ Each is in this folder. Read one when its situation arises, not every wake.
 
 ## Playbook: what a stop means and how to clear it
 
-Unparks share a limit of two per run. Some stops need a power you don't have yet (#1214 tracks them). For those, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket. Use `mc start_seat` for that, never on a seat the operator stopped or paused. In a merge workspace the hub deals the work, except to a seat in `error`, which you start; your part is to promote.
+Unparks share a limit of two per run. Some stops need a power you don't have yet (#1214 tracks them). For those, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket. Use `mc start_seat` for that, never on a stopped or paused seat without the operator's word. In a merge workspace the hub deals the work, except to a seat in `error`, which you start; your part is to promote.
 
 | The run says | Cause | Clear it |
 |---|---|---|
