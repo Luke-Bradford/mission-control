@@ -41,7 +41,7 @@ Each is in this folder. Read one when its situation arises, not every wake.
 
 ## Playbook: what a stop means and how to clear it
 
-Unparks share a limit of two per run. Some stops need a power you don't have yet (#1214 tracks them). For those, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket. Use `mc start_seat` for that in a draft workspace only, and never on a seat the operator stopped or paused. In a merge workspace the hub deals the work; your part is to promote.
+Unparks share a limit of two per run. Some stops need a power you don't have yet (#1214 tracks them). For those, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket. Use `mc start_seat` for that, never on a seat the operator stopped or paused. In a merge workspace the hub deals the work, except to a seat in `error`, which you start; your part is to promote.
 
 | The run says | Cause | Clear it |
 |---|---|---|
@@ -55,7 +55,7 @@ Unparks share a limit of two per run. Some stops need a power you don't have yet
 | `run ended (the process crashed)` / interrupted | a crash | the run has ended: its park can't be lifted or unparked, and no tool resumes it. Record `Missing power: resume PR #N on <seat>. For the controller:` once (with no PR: `re-queue #N (run crashed)`), and move the seat on. On a second failure of the same seat or ticket, read why first |
 | `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
 | a ticket In review or In progress with no run | its run ended with a PR open | record `Missing power: resume PR #N on <seat>. For the controller:` once. Never start a different seat on it while that PR is open |
-| a PR that widens your own powers (`apps/server/src/flight/**`, `roles/FLIGHT.md`, this skill) | it needs the controller's eyes, not a hold | read the hard-rule hunk and clear it, then add `## Controller check` to its ticket with `mc add_controller_check` so the controller's verdict reaches the seat. A merge hold blocks that verdict (PRs 1033 and 1213 needed a two-step workaround) |
+| a PR that widens your own powers (`apps/server/src/flight/**`, `packages/core/src/flight.ts`) | it needs the controller's verdict, not a hold | first add an item under `## Controller check` with `mc add_controller_check`, so the engine parks the PR for the controller. Then read the hard-rule hunk and clear it with `mc merge_pr`. A merge hold blocks the verdict from reaching the seat. A `roles/**` PR, or one that changes this skill, is never yours to clear |
 | a PR green and reviewed, not merging | it waits on clearance | `mc merge_pr` for an `awaiting-flight` PR in your lane, after reading the hard-rule hunk. Not yours: `roles/**`, `.github/**`, the Mission Control block in CLAUDE.md, operator holds, controller checks |
 | merged, not live | auto-Update held (hard-rule change) or a stale version cache | not yours to Update. A held Update is already in Needs you. Otherwise record `Missing power: Update the hub to <sha>. For the controller:` once |
 

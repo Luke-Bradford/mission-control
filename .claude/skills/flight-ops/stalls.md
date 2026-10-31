@@ -14,12 +14,12 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - **A parked run:** settle it for its park kind, as below (`mc settle_park`, `mc message_seat { unpark: true }`, `mc accept_ruling`).
 - **An open PR from a crew run that ended or crashed:** its `prs[].seat` is empty. A crew seat worked its ticket (your start decision, or the seat's activity).
-  - If that seat's run is unfinished (a stop, pause, error or hub restart), `mc resume_seat` resumes it. For a stopped or paused seat, the role's rule on stopped and paused seats applies.
-  - If the run ended, no tool resumes it. Record `Missing power: resume PR #N on <seat>. For the controller:` once, and track it.
+  - No tool resumes it: record `Missing power: resume PR #N on <seat>. For the controller:` once, and track it.
   - A PR the controller or a person opened has no seat either; it is not a failed run.
 - **A seat in `error` with no PR:** its crashed ticket stays In progress with no run, and no tool re-queues it.
   - Record `Missing power: re-queue #N (run crashed). For the controller:` once.
-  - Then move the seat on: in a draft workspace, start it on its next Ready ticket with `mc start_seat`; in a merge workspace the hub deals it.
+  - Then start the seat on its next Ready ticket with `mc start_seat`; the hub never deals to a seat in `error`.
+- **A seat with `seats[].runId` set and no live session** after an error or a hub restart: `mc resume_seat`. A stopped or paused seat follows the role's step 4.
 - **A repeat failure** of the same seat or ticket: read why (the error, signals, `mc read_ci_log`) before acting.
 
 ## CI ruling parks

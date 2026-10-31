@@ -5,7 +5,7 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 ## Free developer seats
 
 - **Draft workspace:** start eligible tickets with `mc start_seat`.
-- **Merge workspace:** the hub deals Ready work to idle seats. Your part is to promote complete tickets (`mc promote`), and to start an idle planner on complete Size M, L or XL tickets that have no plan.
+- **Merge workspace:** the hub deals Ready work to idle seats. It never deals to a seat in `error`, stopped or paused; an errored seat is yours to start. Your part is to promote complete tickets (`mc promote`), and to start an idle planner on complete Size M, L or XL tickets that have no plan.
 - **Triage the board:** triage the digest's `triage` list (new Backlog and Refinement tickets, finished plans, resolved dependencies), including when Ready is empty.
 - **Choosing work:** go in Priority order, oldest first within a Priority. Match the ticket's one area label to the seat's area. Keep `research` tickets out of developer seats.
 - **Readiness:** a `## Plan` heading or a Ready column is not enough. Check the requirements, size and done-when.
