@@ -1,4 +1,4 @@
-import { COMMS_CAPCOM } from "@mc/core";
+import { COMMS_CAPCOM, type PullRequestView } from "@mc/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sendComms } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -12,29 +12,28 @@ import {
 import { Store } from "../src/store.ts";
 
 const DAY = Date.parse("2026-10-30T00:00:00Z");
-const pr = (number: number) =>
-  ({
-    repoId: "shop-app",
-    number,
-    title: "t",
-    url: "https://github.com/o/shop-app/pull/4",
-    branch: "fix/9-x",
-    ticket: "shop-app#9",
-    state: "open",
-    isDraft: false,
-    review: null,
-    ci: "pending",
-    createdAt: 1,
-    updatedAt: 2,
-    mergedAt: null,
-    mergeCommitSha: null,
-    headSha: null,
-    mergeable: null,
-    author: null,
-    assignees: [],
-    checks: [],
-    closingIssues: [],
-  }) as const;
+const pr = (number: number): PullRequestView => ({
+  repoId: "shop-app",
+  number,
+  title: "t",
+  url: "https://github.com/o/shop-app/pull/4",
+  branch: "fix/9-x",
+  ticket: "shop-app#9",
+  state: "open",
+  isDraft: false,
+  review: null,
+  ci: "pending",
+  createdAt: 1,
+  updatedAt: 2,
+  mergedAt: null,
+  mergeCommitSha: null,
+  headSha: null,
+  mergeable: null,
+  author: null,
+  assignees: [],
+  checks: [],
+  closingIssues: [],
+});
 
 const seat = (id: string, role: string) => ({
   id,
