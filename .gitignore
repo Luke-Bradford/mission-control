@@ -9,3 +9,6 @@ dist-prev/
 .pnpm-store/
 CLAUDE.local.md
 apps/web/.vite-guard-test-*/
+
+# TypeScript incremental caches (packages write theirs under node_modules/.cache/tsc)
+*.tsbuildinfo
