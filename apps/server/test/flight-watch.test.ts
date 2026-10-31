@@ -2238,7 +2238,7 @@ describe("the FLIGHT watcher", () => {
     const idle = () =>
       listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
 
-    it("sends one handover wake at 151K, then rotates once that turn ends", async () => {
+    it("sends one handover wake just past the limit, then rotates once that turn ends", async () => {
       liveCrew();
       watch.start();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
