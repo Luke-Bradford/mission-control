@@ -101,6 +101,7 @@ import {
   FLIGHT_CI_LOG_MAX,
   FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
   FLIGHT_CLOSE_DEPENDENT_READS_MAX,
+  FLIGHT_CLOSE_SEARCH_LIMIT,
   FLIGHT_CLOSES_PER_HOUR,
   FLIGHT_COMMENTS_PER_HOUR,
   FLIGHT_DECISION_MAX,
@@ -2264,20 +2265,43 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         c.issueNumber !== a.issue &&
         (["Backlog", "Ready", "Refinement", "Blocked"] as string[]).includes(hudColumnOf(c)),
     );
-    if (waiting.length > FLIGHT_CLOSE_DEPENDENT_READS_MAX)
-      return refuse("too many open tickets to check dependents; ask the operator");
+    // one search for the tickets that mention the number; only those are read
+    const searched = await ghRead("close_ticket", [
+      "search",
+      "issues",
+      String(a.issue),
+      `--repo=${repo.github}`,
+      "--state=open",
+      "--match=body",
+      "--json=number",
+      `--limit=${String(FLIGHT_CLOSE_SEARCH_LIMIT)}`,
+    ]);
+    let mentioning: Set<number> | null = null;
+    if (searched.ok) {
+      try {
+        const found: unknown = JSON.parse(searched.stdout);
+        if (Array.isArray(found) && found.length < FLIGHT_CLOSE_SEARCH_LIMIT)
+          mentioning = new Set(found.map((f) => asNum(asRecord(f).number)));
+      } catch {
+        // unreadable: fails closed below
+      }
+    }
+    if (mentioning === null) return refuse("could not search the open tickets for dependents");
+    const candidates = waiting.filter((c) => mentioning.has(c.issueNumber));
+    if (candidates.length > FLIGHT_CLOSE_DEPENDENT_READS_MAX)
+      return refuse("too many open tickets mention it to check dependents; ask the operator");
     const bodies: (TicketView | null)[] = [];
-    for (let i = 0; i < waiting.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
+    for (let i = 0; i < candidates.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
       bodies.push(
         ...(await Promise.all(
-          waiting.slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH).map((c) => read(c.issueNumber)),
+          candidates.slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH).map((c) => read(c.issueNumber)),
         )),
       );
     const dependents: string[] = [];
     for (const [i, t] of bodies.entries()) {
       if (t === null || t.bodyTruncated) return refuse("a waiting ticket's body could not be read");
       if (dependsOn(t.body).includes(a.issue))
-        dependents.push(`${repo.id}#${waiting[i]?.issueNumber}`);
+        dependents.push(`${repo.id}#${candidates[i]?.issueNumber}`);
     }
     if (dependents.length > 0)
       return refuse(
