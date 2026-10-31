@@ -506,7 +506,11 @@ What each seat's process starts with:
     missing (`report_evidence`, `report_findings` or `report_plan`, by the run's loop kind), no
     open question, and unfinished items in its live checklist (the run digest's tasks), the hook
     answers `{"decision":"block","reason":"…"}` with those items, and the seat carries on without
-    a new hub turn. At most three Stops per run are blocked, counted from the last report the loop
+    a new hub turn. Only a run whose loop is still working is blocked: one in review, in CI, parked
+    (a budget hold included) or done owes the seat no work now. A Stop with no verdict from the hub
+    (hub down, a 401 or 500, the hook's deadline) lets the stop stand: its command ends `|| true`
+    and the hook prints `{}` and exits 0, because exit 2 from a Stop hook would block the stop for
+    as long as the hub is away. At most three Stops per run are blocked, counted from the last report the loop
     took in (a rework round gets its own three); the fourth stands, and the hub's carry-on resume
     and its "stopped after 3 carry-on resumes" park apply as before. The count is in the hub's
     memory, so a hub restart gives a run three more. Codex seats have no Stop hook and keep the

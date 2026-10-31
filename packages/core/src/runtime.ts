@@ -983,12 +983,14 @@ const POST_HOOK_MATCHER = "Bash";
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
+  // exit 2 from a Stop hook blocks the stop: a Stop that gets no verdict must let the stop stand
+  const stopCommand = hook.command.replace(/ \|\| exit 2$/, " || true");
   const out = {} as Record<GuardHookEvent, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
     // a Stop has no tool to match: the CLI ignores a matcher there, so none is written
     out[e] = [
       e === "Stop"
-        ? { hooks: [run] }
+        ? { hooks: [{ ...run, command: stopCommand }] }
         : { matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] },
     ];
   }

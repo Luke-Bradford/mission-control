@@ -1964,6 +1964,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return GUARD_ALLOW_OUTPUT;
         }
         if (runReported(store, run, loop)) return GUARD_ALLOW_OUTPUT;
+        // a run in review, in CI, parked or done owes no work now: a budget or operator hold is not
+        // for the seat to push through, and its report would be refused
+        if (run.loop != null && run.loop.phase !== "working") return GUARD_ALLOW_OUTPUT;
         // the seat asked a question and waits for the answer: that stop is not an early one
         if (store.openQuestions().some((q) => q.runId === runId)) return GUARD_ALLOW_OUTPUT;
         const open = (store.digest(runId)?.tasks ?? [])

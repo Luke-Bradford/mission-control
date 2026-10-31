@@ -526,6 +526,21 @@ describe("POST /api/guard/check", () => {
       expect((await check(tokA, stop)).body).toBe("{}");
     });
 
+    it.each(["parked", "ci", "review", "done"] as const)(
+      "lets it stand when the run's loop is in %s, even over its budget",
+      async (phase) => {
+        tasks("pending");
+        store.setRunLoop("run-a", {
+          ...NEW_LOOP,
+          phase,
+          ...(phase === "parked"
+            ? { parked: { kind: "budget", reason: "x", ended: false } as const }
+            : {}),
+        });
+        expect((await check(tokA, stop)).body).toBe("{}");
+      },
+    );
+
     it("lets it stand while the seat waits on an answer to its question", async () => {
       tasks("pending");
       store.addQuestion({ runId: "run-a", agentId: "guido-1", text: "q?", at: NOW });
@@ -1210,15 +1225,40 @@ describe("hookMain", () => {
     expect(posts.map((p) => p.body)).toEqual([JSON.stringify({ hook_event_name: "Stop" })]);
   });
 
-  it("refuses a block answer to a tool event, and a Stop answer in the deny form", async () => {
+  it.each([
+    ["a 401", answer(401, '{"error":"unknown run"}')],
+    ["a 500", answer(500, "oops")],
+    [
+      "a refused connection",
+      async () => {
+        throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+      },
+    ],
+  ])("lets a Stop stand when the hub gives %s", async (_n, post) => {
+    const stop = stdinFor({ hook_event_name: "Stop" });
+    expect(await hookMain(stop, [tokenFile, URL_OK], post, 0)).toEqual({ out: "{}", exit: 0 });
+  });
+
+  it("lets a Stop stand when the hub does not answer by the deadline, and a tool call still fails closed", async () => {
+    vi.useFakeTimers();
+    const hang = () => new Promise<{ status: number; body: string }>(() => {});
+    const stop = hookMain(stdinFor({ hook_event_name: "Stop" }), [tokenFile, URL_OK], hang);
+    const tool = hookMain(stdinFor(), [tokenFile, URL_OK], hang);
+    await vi.advanceTimersByTimeAsync(HOOK_DEADLINE_MS + 1);
+    expect(await stop).toEqual({ out: "{}", exit: 0 });
+    expect((await tool).exit).toBe(2);
+  });
+
+  it("refuses a block answer to a tool event; a Stop answer in the wrong form lets the stop stand", async () => {
     const block = JSON.stringify({ decision: "block", reason: "x" });
     expect((await hookMain(stdinFor(), [tokenFile, URL_OK], answer(200, block))).exit).toBe(2);
     const stop = stdinFor({ hook_event_name: "Stop" });
-    expect(
-      (await hookMain(stop, [tokenFile, URL_OK], answer(200, guardDenyOutput("x")))).exit,
-    ).toBe(2);
+    const stands = { out: "{}", exit: 0 };
+    expect(await hookMain(stop, [tokenFile, URL_OK], answer(200, guardDenyOutput("x")))).toEqual(
+      stands,
+    );
     const extra = JSON.stringify({ decision: "block", reason: "x", continue: false });
-    expect((await hookMain(stop, [tokenFile, URL_OK], answer(200, extra))).exit).toBe(2);
+    expect(await hookMain(stop, [tokenFile, URL_OK], answer(200, extra))).toEqual(stands);
   });
 
   it("sends run_in_background, timeout and file_path when the call has them, and drops other fields", async () => {
@@ -1538,6 +1578,18 @@ describe("hook-cli.ts run as the CLI runs it", () => {
     expect(r.stdout).toBe(DENY_UNREACHABLE);
     expect(r.stderr.trim().split("\n")).toEqual(["mc-guard: no verdict from Mission Control"]);
     expect(r.stdout + r.stderr).not.toContain("b".repeat(64));
+  }, 30_000);
+
+  it("lets a Stop stand, printing {} and exiting 0, when the hub is not there", () => {
+    const tokenFile = join(dir, "t");
+    writeFileSync(tokenFile, "b".repeat(64), { mode: 0o600 });
+    const r = run(
+      [tokenFile, "http://127.0.0.1:1/api/guard/check"],
+      JSON.stringify({ hook_event_name: "Stop" }),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("{}");
+    expect(r.stderr).toBe("");
   }, 30_000);
 
   it("runs when imported as a module, not only as the main script (no main-module gate)", () => {
