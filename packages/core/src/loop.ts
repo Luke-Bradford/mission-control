@@ -1058,7 +1058,9 @@ function stateStep(s: LoopSnapshot): Step {
       }
       return {
         loop: { ...loop, phase: "working", pendingLine: { key, text: MERGE_MAIN_TEXT } },
-        actions: [{ kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` }],
+        actions: [
+          { kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` },
+        ],
       };
     }
     if (pr.ci === "passing") {

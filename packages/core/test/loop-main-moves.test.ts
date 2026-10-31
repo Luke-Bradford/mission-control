@@ -7,8 +7,8 @@ import {
   evidenceCanUnpark,
   MERGE_MAIN_TEXT,
   mainConflictText,
-  mergeMainKey,
   mergedMainText,
+  mergeMainKey,
   NEW_LOOP,
   reconcile,
 } from "../src/loop.ts";

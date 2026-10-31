@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
-  MERGE_MAIN_TEXT,
-  mergeMainKey,
   asideEventText,
   asideInCiEventText,
   CI_FAILED_TEXT,
@@ -25,7 +23,9 @@ import {
   LOOP_TEXT_REVIEW_PR,
   LOOP_TEXT_WORKING,
   loopText,
+  MERGE_MAIN_TEXT,
   MERGE_STEP_WORDS,
+  mergeMainKey,
   mergeStepFailedText,
   NEW_LOOP,
   NO_CI_AFTER_MS,
