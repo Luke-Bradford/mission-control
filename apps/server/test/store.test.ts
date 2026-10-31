@@ -2334,6 +2334,32 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
   });
 
+  it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
+    const aside = { worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));
+    expect(store.hasPendingStart()).toBe(false);
+    expect(store.hasActiveRun()).toBe(false);
+    store.upsertRun(run({ id: "live", seq: 2, ticket: "repo#2", loop: { ...NEW_LOOP } }));
+    expect(store.hasPendingStart()).toBe(true);
+    expect(store.hasActiveRun()).toBe(true);
+    store.upsertRun(
+      run({ id: "live", seq: 2, ticket: "repo#2", endedAt: 5, loop: { ...NEW_LOOP } }),
+    );
+    expect(store.hasPendingStart()).toBe(false);
+    store.requestReview({
+      authorRunId: "set-aside",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 1,
+      sha: "s",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    });
+    expect(store.hasPendingStart()).toBe(true);
+  });
+
   it("asideRuns: unended runs with an aside, oldest first", () => {
     const aside = { worktree: "/w/x", wake: false };
     store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));

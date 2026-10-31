@@ -255,7 +255,8 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       memUsedBytes = Math.max(0, memTotalBytes - deps.freemem());
     }
   } else {
-    memUsedBytes = Math.max(0, memTotalBytes - deps.freemem());
+    // os.freemem counts inactive pages as used, so keep the last vm_stat figure
+    memUsedBytes = prev?.memUsedBytes ?? Math.max(0, memTotalBytes - deps.freemem());
   }
 
   let diskFreeBytes = prev?.diskFreeBytes ?? null;

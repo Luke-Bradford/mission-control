@@ -252,7 +252,8 @@ describe("sampleMachine", () => {
     );
     expect(never).not.toHaveBeenCalled();
     expect(r.errors).toEqual([]);
-    expect(r.sample.memUsedBytes).toBe(TOTAL - 1024 ** 3);
+    // os.freemem counts inactive pages as used: the last vm_stat figure stands
+    expect(r.sample.memUsedBytes).toBe(prev.memUsedBytes);
     expect(r.sample).toMatchObject({
       load1: 1.25,
       diskFreeBytes: 250 * 4096,

@@ -11,6 +11,7 @@ import {
   GITHUB_SLOWED_PREFIX,
   githubCollector,
   type HudState,
+  hudColumnOf,
   MACHINE_COLLECTOR,
   type MachineSample,
   NOTABLE_STATES,
@@ -406,7 +407,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * waiting at the guard, or a held guard (to see it clear) spawns; an idle hub reads os values.
    */
   const machineSpawns = (): boolean =>
-    !noViewClients() || machineBlocked || (deps.startPending ?? (() => store.hasPendingStart()))();
+    !noViewClients() || machineBlocked || (deps.startPending ?? defaultStartPending)();
+  /** A queued ticket or review, an open run, or a Ready card on a repo with a crew session. */
+  const defaultStartPending = (): boolean =>
+    store.hasPendingStart() ||
+    (config.crew?.sessions ?? []).some((session) =>
+      store.board(session.repoId).some((card) => hudColumnOf(card) === "Ready"),
+    );
+  let lastSpawned = false;
   let machineStatus: { ok: boolean; error: string | null; at: number } | null = null;
   /** The last backfill left nothing to read: later ticks only count until something is left. */
   let backfillDone = false;
@@ -576,9 +584,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   const afterLoopTick = () => {
-    if (noViewClients()) return sweepAcks();
+    const quiet =
+      noViewClients() &&
+      !store.hasActiveRun() &&
+      [...lastStates.values()].every((s) => s === "idle" || s === "stopped");
+    // nothing can change state: no crew read
+    if (quiet) return sweepAcks();
     const at = now();
-    const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK).rows;
+    // with no browser the rows are the summary: state changes need no event timelines
+    const lock = deps.lockState?.() ?? NO_LOCK;
+    const rows = (
+      noViewClients()
+        ? crew(config, store, at, lock, undefined, true)
+        : crew(config, store, at, lock)
+    ).rows;
     recordStateChanges(rows, at);
     sweepAcks(rows);
   };
@@ -1066,12 +1085,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     machine: async () => {
       if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
+      const spawn = machineSpawns();
+      // the first fresh reading after an idle spell is stored at once, so the guard sees it
+      if (spawn && !lastSpawned) machineMinute = -1;
+      lastSpawned = spawn;
       const r = await c.machine(
         machineCpus,
         latestMachine,
         at,
         deps.lockState?.().holder?.command ?? null,
-        machineSpawns(),
+        spawn,
       );
       machineCpus = r.cpus;
       latestMachine = r.sample;
