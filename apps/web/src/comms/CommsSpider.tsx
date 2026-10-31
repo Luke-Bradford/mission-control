@@ -657,7 +657,11 @@ export function CommsSpider({
             // Every seat on this spoke is away: the spoke stays, dimmed and marked.
             const empty = spoke.ids.every((id) => !byId.has(id));
             return (
-              <g key={spoke.key} className={`comms-spoke${empty ? " away" : ""}`}>
+              <g
+                key={spoke.key}
+                data-spoke={spoke.key}
+                className={`comms-spoke${empty ? " away" : ""}`}
+              >
                 <line className="comms-spoke-line" x1={f.cx} y1={f.cy} x2={tip.x} y2={tip.y} />
                 {(name !== null || empty) && (
                   <text
