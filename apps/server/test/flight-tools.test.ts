@@ -6661,7 +6661,70 @@ describe("superuser housekeeping", () => {
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
   });
-  it("settles FLIGHT's own stale Comms item with its reason, but refuses a seat's", async () => {
+  it("settles a seat's Comms question to CAPCOM with a basis, and it leaves Needs you", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 50 * 60_000,
+      from: "guido-1",
+      to: "CAPCOM",
+      ticket: "mc#910",
+      text: "Which branch should this PR target?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(true);
+    expect(
+      await call("dismiss_item", { key, basis: "Main, as the ticket says." }),
+    ).not.toHaveProperty("isError", true);
+    expect(store.commsSettlement(message.id)).toMatchObject({
+      settledBy: "flight-1",
+      reason: "Main, as the ticket says.",
+    });
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
+  });
+  it("gives each Comms refusal its own text", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const add = (ticket: string) => {
+      const m = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from: "guido-1",
+        to: "CAPCOM",
+        ticket,
+        text: "A question",
+        label: "question",
+      });
+      if (m === null) throw new Error("message was not stored");
+      return `comms-open:${m.id}`;
+    };
+    const refusal = async (key: string) => {
+      const result = await call("dismiss_item", { key, basis: "Resolved." });
+      expect(result).toHaveProperty("isError", true);
+      return result.text;
+    };
+    store.raiseNote({
+      key: "x",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "Decision",
+      at: NOW,
+    });
+    const texts = [
+      await refusal("comms-open:999999"),
+      await refusal(add("other#5")),
+      await refusal("note:x"),
+    ];
+    expect(texts[0]).toMatch(/not found|No open/i);
+    expect(texts[1]).toMatch(/another repo/i);
+    expect(texts[2]).toMatch(/protected/i);
+    expect(new Set(texts).size).toBe(texts.length);
+    for (const text of texts) expect(text).not.toBe("This item is protected or unavailable.");
+  });
+  it("settles FLIGHT's own stale Comms item with its reason", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
     const message = store.addComms({
@@ -6692,22 +6755,6 @@ describe("superuser housekeeping", () => {
     expect(needsYouItems(attentionItems(cfg, store, nowMs)).some((item) => item.key === key)).toBe(
       false,
     );
-
-    const seatBlocker = store.addComms({
-      at: nowMs - 20 * 60_000,
-      from: "guido-1",
-      to: "flight-1",
-      ticket: "mc#909",
-      text: "The seat still needs a decision",
-      label: "blocker",
-    });
-    if (seatBlocker === null) throw new Error("message was not stored");
-    expect(
-      await call("dismiss_item", {
-        key: `comms-open:${seatBlocker.id}`,
-        basis: "Not FLIGHT's item.",
-      }),
-    ).toHaveProperty("isError", true);
   });
   it("settles FLIGHT's ticketless Comms blocker with its reason", async () => {
     elevated();
