@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
+  MERGE_MAIN_TEXT,
+  mergeMainKey,
   asideEventText,
   asideInCiEventText,
   CI_FAILED_TEXT,
@@ -455,9 +457,13 @@ describe("state step", () => {
     expect(r.loop.phase).toBe("ci");
   });
 
-  it("10: a conflicting PR parks", () => {
-    const r = reconcile(inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) }));
-    expect(r.loop.parked).toEqual({
+  it("10: a conflicting PR sends the seat to merge main; told once, it parks", () => {
+    const s = inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("working");
+    expect(r.loop.parked).toBeNull();
+    expect(r.loop.pendingLine).toEqual({ key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT });
+    expect(reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.parked).toEqual({
       kind: "conflict",
       reason: "PR #12 conflicts with main",
       ended: false,
@@ -1110,7 +1116,10 @@ describe("sequences", () => {
   });
 
   it("a crash after a park repeats the card move and the note", () => {
-    const s = inCi({ pr: pr({ mergeable: "CONFLICTING" }) });
+    const s = inCi({
+      pr: pr({ mergeable: "CONFLICTING" }),
+      claimed: { [mergeMainKey("r1", SHA)]: NOW },
+    });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("parked");
     const next = again(s, r.loop);

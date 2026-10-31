@@ -4,7 +4,10 @@ import {
   CI_PENDING_MAX_MS,
   conflictKey,
   conflictText,
+  evidenceCanUnpark,
+  MERGE_MAIN_TEXT,
   mainConflictText,
+  mergeMainKey,
   mergedMainText,
   NEW_LOOP,
   reconcile,
@@ -226,20 +229,71 @@ describe("main moves", () => {
     expect(r.actions).toContainEqual(update);
   });
 
-  it("a conflicting PR in ci still parks in a draft workspace, or with a merge under way", () => {
+  it("a conflicting PR in ci still parks with a merge under way", () => {
+    const ci = { phase: "ci" as const, cardFor: "ci:0", pushStartedAt: NOW - 120_000 };
+    const merging = { mainSha: MAIN, files: ["a.ts"] };
+    expect(
+      reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) }, { ...ci, mainMerge: merging }))
+        .loop.parked,
+    ).toEqual({ kind: "conflict", reason: "PR #12 conflicts with main", ended: false });
+  });
+
+  describe("a newly found conflict sends the seat to merge main", () => {
     const ci = { phase: "ci" as const, cardFor: "ci:0", pushStartedAt: NOW - 120_000 };
     const conflicting = pr({ mergeable: "CONFLICTING" });
-    const merging = { mainSha: MAIN, files: ["a.ts"] };
-    for (const s of [
-      behind({ autoMerge: false, pr: conflicting }, ci),
-      behind({ pr: conflicting }, { ...ci, mainMerge: merging }),
-    ]) {
+    const line = { key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT };
+
+    it("in a draft workspace: back to working with the line pending, no park", () => {
+      const r = reconcile(behind({ autoMerge: false, pr: conflicting }, ci));
+      expect(r.loop.phase).toBe("working");
+      expect(r.loop.parked).toBeNull();
+      expect(r.actions).toContainEqual({ kind: "send", ...line });
+    });
+
+    it("sends the line once per pushed sha", () => {
+      const s = behind({ autoMerge: false, pr: conflicting }, ci);
+      const first = reconcile(s);
+      const sent = reconcile({
+        ...s,
+        loop: first.loop,
+        claimed: { [line.key]: NOW },
+      });
+      expect(sends(sent.actions)).not.toContain(line.key);
+    });
+
+    it("parks when the seat was already sent the line for this sha", () => {
+      const s = behind({ autoMerge: false, pr: conflicting, claimed: { [line.key]: NOW } }, ci);
       expect(reconcile(s).loop.parked).toEqual({
         kind: "conflict",
         reason: "PR #12 conflicts with main",
         ended: false,
       });
-    }
+    });
+  });
+
+  describe("a run parked on a conflict", () => {
+    const parked = (over: Partial<LoopSnapshot> = {}): LoopSnapshot =>
+      behind(over, {
+        phase: "parked",
+        parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: false },
+        pushFor: SHA,
+      });
+
+    it("goes back to CI once the pushed head shows on a PR that no longer conflicts", () => {
+      const r = reconcile(parked({ pr: pr({ mergeable: "MERGEABLE" }) }));
+      expect(r.loop.phase).toBe("ci");
+      expect(r.loop.parked).toBeNull();
+      expect(r.loop.pushFor).toBe(SHA);
+    });
+
+    it("stays parked while the PR still conflicts", () => {
+      const r = reconcile(parked({ pr: pr({ mergeable: "CONFLICTING" }) }));
+      expect(r.loop.phase).toBe("parked");
+    });
+
+    it("lets the seat's report of a committed merge resume it", () => {
+      expect(evidenceCanUnpark({ kind: "conflict", reason: "x", ended: false })).toBe(true);
+    });
   });
 
   it("a conflicting PR in ci with no gate yet: stays in ci, no update", () => {
@@ -253,7 +307,7 @@ describe("main moves", () => {
     expect(kinds(r.actions)).not.toContain("update-branch");
   });
 
-  it("a conflicting PR in ci with no gate parks once CI could have stayed pending that long", () => {
+  it("a conflicting PR in ci with no gate sends the seat to merge main once CI could have stayed pending that long", () => {
     const s = behind(
       {
         pr: pr({ mergeable: "CONFLICTING" }),
@@ -261,11 +315,10 @@ describe("main moves", () => {
       },
       { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - CI_PENDING_MAX_MS - 1, gate: null },
     );
-    expect(reconcile(s).loop.parked).toEqual({
-      kind: "conflict",
-      reason: "PR #12 conflicts with main",
-      ended: false,
-    });
+    const r = reconcile(s);
+    expect(r.loop.parked).toBeNull();
+    expect(r.loop.phase).toBe("working");
+    expect(sends(r.actions)).toContain(mergeMainKey("r1", SHA));
   });
 
   describe("a conflicted merge waits on the seat", () => {
