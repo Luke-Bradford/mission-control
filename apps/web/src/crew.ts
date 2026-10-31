@@ -147,7 +147,7 @@ export const reviewingLine = (
   r: ReviewingPr,
   now: number,
 ): string => {
-  const seat = callSign(row);
+  const seat = seatCallSign(row.id);
   const since = row.run?.startedAt ?? row.stateSince;
   const checking = reviewCheckPill({ kind: "checking", seat, since }, now).label;
   return `${checking}${DOING_SEP}${prLabel(r.prNumber)}${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;

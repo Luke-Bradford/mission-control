@@ -25,7 +25,7 @@ export const QA_FLOW_METRICS = {
     window: "now",
     unit: "state",
     definition:
-      "One state per open pull request, from its newest review that is not superseded. Waiting for review: the review is queued or starting, shown with its place in the repo's queue. Checking: a reviewer is running it, shown with the seat and the minutes since it started. Findings sent: the review reported blocking findings and the developer is fixing. Ready to merge: it reported none, with no hold. Held: it reported none but FLIGHT or CAPCOM holds the merge, or the operator has not accepted it. A failed review or none shows no state.",
+      "The newest review of the PR head that is not superseded: queued (waiting, with its place in the review seat\u0027s queue), checking (the seat and when it started; a starting review counts), sent (blocking findings reported and the developer fixing), ready (a clean report with nothing holding the merge), held (a controller check, the operator\u0027s acceptance, a merge hold, FLIGHT\u0027s clearance, or any other park). A failed attempt reads queued until the cap, then held.",
     source: "GET /api/repos/:repoId/prs (check) and GET /api/crew (review.check)",
     from: "server",
   },

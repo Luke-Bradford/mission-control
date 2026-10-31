@@ -25,11 +25,10 @@ export function reviewCheckFor(
     const rows = store.reviewsOfPr(repoId, pr.number);
     const last = rows.findLast((r) => r.state !== "superseded");
     if (last === undefined) return null;
-    const ahead = waiting.findIndex((r) => r.id === last.id);
-    return reviewCheckOf(
-      rows,
-      ahead < 0 ? waiting.length : ahead,
-      store.run(last.authorRunId)?.loop ?? null,
-    );
+    // each review seat serves its own oldest queued row: the queue is the seat's, not the repo's
+    const ahead = waiting
+      .filter((r) => r.seatId === last.seatId)
+      .findIndex((r) => r.id === last.id);
+    return reviewCheckOf(rows, Math.max(0, ahead), store.run(last.authorRunId)?.loop ?? null);
   };
 }

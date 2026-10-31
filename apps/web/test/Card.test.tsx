@@ -43,3 +43,15 @@ it("the PR chip shows the same words for an open PR", () => {
   render(<PrChip pr={prView({ check: { kind: "queued", position: 3 } })} />);
   expect(screen.getByText("Waiting for review · 3rd in queue")).toBeTruthy();
 });
+
+it("a draft PR with a review state shows its words, not Draft, and no no-reviewer line", () => {
+  card(prView({ isDraft: true }), { label: "Waiting for review · 2nd in queue", tone: "plain" });
+  expect(screen.getByText("Waiting for review · 2nd in queue")).toBeTruthy();
+  expect(screen.queryByText("Draft")).toBeNull();
+  expect(screen.queryByText("No reviewer on it now")).toBeNull();
+});
+
+it("a draft PR chip with a review state shows the pill", () => {
+  render(<PrChip pr={prView({ isDraft: true, check: { kind: "ready" } })} />);
+  expect(screen.getByText("Ready to merge")).toBeTruthy();
+});

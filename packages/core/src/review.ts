@@ -602,7 +602,24 @@ export type ReviewCheckState =
   | { kind: "checking"; seat: string; since: number }
   | { kind: "sent" }
   | { kind: "ready" }
-  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" };
+  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" | "hub" };
+
+/** What of the author run's loop decides whether a reviewed PR can merge. */
+export type ReviewCheckLoop = Pick<
+  RunLoop,
+  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "parked"
+>;
+
+/** Who holds a reviewed PR back from merging, or null when nothing does. */
+function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
+  if (loop === null) return null;
+  if (loop.controllerCheck && !loop.controllerCheck.pass) return { kind: "held", by: "operator" };
+  if (loop.uat && !loop.uat.accepted) return { kind: "held", by: "operator" };
+  if (loop.mergeHold) return { kind: "held", by: loop.mergeHold.by };
+  if (loop.awaitingFlight) return { kind: "held", by: "FLIGHT" };
+  if (loop.phase === "parked") return { kind: "held", by: "hub" };
+  return null;
+}
 
 /** The review row fields the state reads. */
 export type ReviewCheckRow = Pick<
@@ -617,22 +634,28 @@ export type ReviewCheckRow = Pick<
 export function reviewCheckOf(
   rows: readonly ReviewCheckRow[],
   queueAhead: number,
-  loop: Pick<RunLoop, "mergeHold" | "uat"> | null,
+  loop: ReviewCheckLoop | null,
 ): ReviewCheckState | null {
   const row = rows.findLast((r) => r.state !== "superseded");
   if (row === undefined) return null;
   switch (row.state) {
     case "queued":
-    case "starting":
       return { kind: "queued", position: queueAhead + 1 };
+    // a starting review has its seat and a start time: it is being checked, not waiting
+    case "starting":
     case "running":
       return { kind: "checking", seat: row.seatId, since: row.startedAt ?? row.createdAt };
     case "reported": {
-      if (row.blocking > 0) return { kind: "sent" };
-      if (loop?.mergeHold) return { kind: "held", by: loop.mergeHold.by };
-      if (loop?.uat && !loop.uat.accepted) return { kind: "held", by: "operator" };
-      return { kind: "ready" };
+      // a park after findings is the hub's hold, not the developer fixing
+      if (row.blocking > 0)
+        return (loop?.phase === "parked" ? holdOf(loop) : null) ?? { kind: "sent" };
+      return holdOf(loop) ?? { kind: "ready" };
     }
+    case "failed":
+      // the engine re-requests a failed attempt at once; past the cap the run parks review-failed
+      return loop?.parked?.kind === "review-failed"
+        ? { kind: "held", by: "hub" }
+        : { kind: "queued", position: queueAhead + 1 };
     default:
       return null;
   }
