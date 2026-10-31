@@ -23,7 +23,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { LOOPBACK_HOST, type RepoId } from "@mc/core";
+import { LOOPBACK_HOST, QA_RETENTION_DAYS, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
 import { ChangeBus } from "./bus.ts";
@@ -78,9 +78,11 @@ import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { previewBrowserInHelper } from "./preview-browser.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -353,6 +355,24 @@ export async function main(): Promise<void> {
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);
+  // RETRO's screenshots on a review's preview are kept with the review for the QA retention window.
+  const reviewShots = hudShotStore(join(dirname(dbPath), "review-screenshots"), {
+    keep: 2_000,
+    maxAgeMs: QA_RETENTION_DAYS * 86_400_000,
+  });
+  // Only Mission Control's own branches can be previewed (the manager builds this repo's web app).
+  const reviewPreviews =
+    previews === undefined
+      ? undefined
+      : createReviewPreviews({
+          previews,
+          files: (repoId, pr) => store.prFilePaths(repoId, pr),
+          webGlobs: async (repoId) =>
+            repoId !== previewRepoId ? [] : ((await flightAreas(repoId))?.[WEB_AREA_LABEL] ?? []),
+          checkout: (repoId) =>
+            config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout ?? null,
+          log: (line) => log(line),
+        });
   const supervisor = createSupervisor({
     config,
     store,
@@ -372,6 +392,7 @@ export async function main(): Promise<void> {
     hubPort: port,
     hubRoot: hubRoot ?? "",
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
+    ...(reviewPreviews === undefined ? {} : { reviewPreviews }),
   });
   // a seat that frees up is about to take new work: read the boards first
   refreshOnSeatFree(
@@ -424,6 +445,15 @@ export async function main(): Promise<void> {
     },
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
+    ...(reviewPreviews === undefined
+      ? {}
+      : {
+          previewBrowser: {
+            origin: (runId) => reviewPreviews.origin(runId),
+            browse: (job, guard) => previewBrowserInHelper(job, guard),
+            saveShot: (png) => reviewShots.save(png),
+          },
+        }),
   };
   const mcTools = createMcTools(mcDeps);
 
@@ -665,6 +695,7 @@ export async function main(): Promise<void> {
     previewRepoId,
     previewActivity,
     hudShots,
+    reviewShots,
     queueReorder,
     mapRing,
     warmMap: true,

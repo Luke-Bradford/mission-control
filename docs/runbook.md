@@ -1396,6 +1396,20 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **Review previews and screenshots.** When a PR changes web files (paths under the repo's
+  `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
+  the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
+  copy of the live data with loop writes off. Its URL is in the review brief. The preview is
+  opened when the review run starts, closed when it ends, and a preview that cannot start
+  (capacity, the two-preview limit, a failed build) does not hold the review: the brief says there
+  is none. A preview the operator already started for that PR is used and left running. RETRO's
+  `preview_browser` tool opens a page of it, sets the width (320..3840) and theme, and runs up to
+  20 steps (click, type, read, measure, screenshot). Chrome runs behind a proxy that reaches only
+  the preview's `host:port`; every other request, the operator-token bootstrap and the live
+  stream included, is refused. Each call starts on a fresh page. A screenshot is kept in
+  `review-screenshots/` beside the database for 90 days (`QA_RETENTION_DAYS`) and listed under its
+  review round in `GET /api/qa/findings` (`reviews[].screenshots`: `id`, `label`, `width`,
+  `theme`, `at`). `GET /api/qa/review-shots/:id` serves one PNG, with the operator token.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
   window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
   - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`

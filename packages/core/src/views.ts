@@ -550,6 +550,16 @@ export interface QaFindingView {
   resolvedReviewId: number | null;
 }
 
+/** One screenshot RETRO took on a review's preview; `GET /api/qa/review-shots/:id` serves its PNG. */
+export interface ReviewShotView {
+  id: string;
+  label: string;
+  /** The viewport width in px. */
+  width: number;
+  theme: "dark" | "light";
+  at: number;
+}
+
 /** One completed RETRO review round, including clean rounds with no findings. */
 export interface QaReviewRoundView {
   reviewId: number;
@@ -562,6 +572,8 @@ export interface QaReviewRoundView {
   blocking: number;
   minor: number;
   endedAt: number;
+  /** The screenshots RETRO took on the PR's preview during this round, oldest first. */
+  screenshots: ReviewShotView[];
 }
 
 /** `GET /api/qa/findings`. */

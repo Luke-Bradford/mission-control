@@ -661,6 +661,60 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("a web PR's review brief names its preview, and the preview closes when the run ends", async () => {
+    const r = reviewOfPush();
+    const opened: unknown[] = [];
+    const closed: string[] = [];
+    const reviewPreviews = {
+      origin: () => "http://127.0.0.1:7431",
+      open: async (input: unknown) => {
+        opened.push(input);
+        return { origin: "http://127.0.0.1:7431", note: null };
+      },
+      close: async (runId: string) => {
+        closed.push(runId);
+      },
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(opened).toEqual([{ runId, repoId: "mc", pr: 9, branch: BRANCH }]);
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Preview: http://127.0.0.1:7431 runs this PR's head");
+    expect(brief).toContain("mc preview_browser");
+    await sup.endRun("retro");
+    await until(() => expect(closed).toContain(runId));
+  });
+
+  it("a review whose preview did not start goes ahead and says why", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = {
+      origin: () => null,
+      open: async () => ({ origin: null, note: "machine headroom is tight" }),
+      close: async () => {},
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("- Preview: none for this PR (machine headroom is tight)");
+  });
+
+  it("a PR that changes no web files gets no preview line", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = {
+      origin: () => null,
+      open: async () => ({ origin: null, note: null }),
+      close: async () => {},
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("- Preview:");
+  });
+
   it("a review brief carries the Done-when table from the author's report", async () => {
     const r = reviewOfPush();
     store.addEvidence(r.author.id, "done", 1, {
