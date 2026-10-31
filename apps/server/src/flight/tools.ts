@@ -61,6 +61,7 @@ import {
   commentTextText,
   controllerCheckOf,
   createBodyText,
+  createDependsText,
   createdDecision,
   createdDraftText,
   createdFieldsFailedText,
@@ -301,6 +302,7 @@ import {
   UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
+  undeclaredPrDependency,
   unknownLabelText,
   unparkCapText,
   untrackedText,
@@ -327,6 +329,7 @@ import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
+import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -1334,6 +1337,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       laneDefault: config.crew?.laneDefault ?? false,
       body,
       closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);
     if (planner) {
@@ -1796,12 +1800,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const areas = areaLabelsOf(rules, card);
       if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
       if (areas.length === 0) return fail(moveNoAreaText(ref));
-      const waits = new Set(card.blockedBy.filter((b) => !b.closed).map((b) => b.ref));
+      const waits = new Map(card.blockedBy.filter((b) => !b.closed).map((b) => [b.ref, b.ref]));
       for (const n of dependsOn(body)) {
         const dep = board.find((i) => i.issueNumber === n);
-        if (dep === undefined || !dep.closed) waits.add(`${repo.id}#${n}`);
+        if (dep === undefined || !dep.closed) waits.set(`${repo.id}#${n}`, `${repo.id}#${n}`);
       }
-      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits]));
+      for (const w of waitReader(store, repo.id)(card)) waits.set(w.ref, w.text);
+      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits.values()]));
     }
     if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     const result = await deps.board.move({
@@ -1909,6 +1914,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ...(hasDoneWhenSection(body) ? [] : ["## Done when"]),
     ];
     if (missing.length > 0) return fail(createBodyText(missing));
+    const builds = undeclaredPrDependency(body, repo.id, store.pullRequests(repo.id));
+    if (builds !== null) return fail(createDependsText(builds.pr, builds.line));
     const known = await readKnown(deps, "create_ticket");
     const unfit = await textProblem(
       ctx,
@@ -3729,7 +3736,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.createTicket,
-      description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. At most ${FLIGHT_TICKETS_PER_HOUR} an hour. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
+      description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. Work cut from or built on an open PR needs a Depends on line for that PR's ticket (or After PR N); without one the call is refused. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. At most ${FLIGHT_TICKETS_PER_HOUR} an hour. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
       inputSchema: objectSchema(
         {
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },

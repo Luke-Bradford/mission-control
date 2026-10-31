@@ -49,6 +49,7 @@ import {
   seatUnavailable,
 } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
+import { waitReader } from "../dependencies.ts";
 import { matchesFocus } from "../focus.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
@@ -265,6 +266,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       ...group.filter((s) => !seatMayTake(store, s.seat.id, maxOpen)),
     ];
     const board = store.board(repoId);
+    const waitsOf = waitReader(store, repoId);
     const repo = config.repos.find((r) => r.id === repoId);
     const cards: { issue: number; label: string; seats: string[] }[] = [];
     for (const card of readyCards(store, repoId)) {
@@ -298,6 +300,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
               laneDefault: config.crew?.laneDefault ?? false,
               body,
               closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+              waits: waitsOf(card),
             }) === null,
         );
       };

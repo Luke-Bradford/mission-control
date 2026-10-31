@@ -1000,6 +1000,27 @@ run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). I
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
 
+### What a ticket waits on
+
+The hub reads one list of waits per ticket (`ticketWaits` in `packages/core/src/dependencies.ts`) from
+three places: GitHub's "blocked by" links, `Depends on #N` and `After PR N` lines in the issue body (the
+poll stores them on the board card as `after`), and a PR whose base is another open PR's branch (the poll
+stores the base on the PR). A dependency ends its wait only
+when it merged: a closed issue counts when a merged PR carries it (or, with no PR row left, its card is in
+Done); one closed with its PR unmerged, or an `After PR` that closed unmerged, keeps the wait and shows as
+"closed without merging" for FLIGHT to re-plan. A named PR the PR pages left out is read by number on the
+board poll; until it is read it counts as a wait.
+Every start path applies it: the engine's deal, a hand Start, FLIGHT's `start_seat`, `promote` and the
+queue reorder. The refusal names the wait and where its PR is ("waits on mc#1015 (PR 1033 in CI)").
+
+When the last wait of a ticket ends, the engine (each tick, `engine/dependencies.ts`) moves it from Blocked
+to Ready if it is otherwise complete (one area label, Done when, Size) and tells each of its open PRs' runs to
+merge main, once each. A step that fails or is refused is tried again after five minutes, for a day. FLIGHT's
+wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and `flight_state` and
+`GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
+it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
+`Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
+
 ### FLIGHT's controller powers
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,

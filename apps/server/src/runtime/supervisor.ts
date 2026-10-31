@@ -131,6 +131,7 @@ import {
   seatUnavailable,
 } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
+import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -2985,6 +2986,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         laneDefault: config.crew?.laneDefault ?? false,
         body: ticket.body,
         closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+        waits: waitReader(store, info.repo.id)(card),
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
       // only a build run works from the ticket's plan; planner and review runs record none
