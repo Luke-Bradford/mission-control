@@ -16,12 +16,14 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_LIFTED_SETTING,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_TRIAGE_WAIT_MS,
   NEW_LOOP,
   needsYouItems,
   type Profile,
   type PullRequestView,
+  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
   type RunLoop,
@@ -2750,8 +2752,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       ),
     ).toEqual([]);
 
-  it("does not triage while the runaway breaker is tripped: a stuck run reaches the operator at once", () => {
-    flight();
+  const stuck = () =>
     store.raiseNote({
       key: "blocked:r-guido:0",
       kind: "blocked",
@@ -2761,17 +2762,47 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       text: "blocked",
       at: NOW - MIN,
     });
-    const item = () => all().find((i) => i.key === "note:blocked:r-guido:0");
-    expect(item()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
-    store.setSetting(
-      FLIGHT_RUNAWAY_SETTING,
-      JSON.stringify({ at: NOW - 30_000, reason: "a loop" }),
-    );
-    expect(item()).toMatchObject({ owner: "operator" });
-    expect(item()?.flightTriage).toBeUndefined();
-    expect(aggregate()?.text).toContain("runaway breaker");
+  const stuckItem = () => all().find((i) => i.key === "note:blocked:r-guido:0");
+  const trip = (at = NOW - 30_000) =>
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at, reason: "a loop" }));
+
+  it("does not triage while the runaway breaker is tripped: a stuck run reaches the operator at once", () => {
+    flight();
+    stuck();
+    expect(stuckItem()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+    trip();
+    expect(stuckItem()).toMatchObject({ owner: "operator" });
+    expect(stuckItem()?.flightTriage).toBeUndefined();
     store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
-    expect(item()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+    expect(stuckItem()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+  });
+
+  it("adds the not-triaging item for a tripped breaker only when items wait, with operator text", () => {
+    flight();
+    trip();
+    expect(aggregate()).toBeUndefined();
+    ask();
+    expect(aggregate()?.text).toBe(
+      `FLIGHT is not triaging: 1 waiting since ${aggregate()?.text.match(/since (\d\d:\d\d)/)?.[1]}. ${RUNAWAY_TRIAGE_DETAIL}`,
+    );
+  });
+
+  it("starts the triage window after a lift, so items raised during the trip are not missed at once", () => {
+    flight();
+    stuck();
+    store.raiseNote({
+      key: "blocked:r-old:0",
+      kind: "blocked",
+      runId: "r-guido",
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: "old",
+      at: NOW - 40 * MIN,
+    });
+    const old = () => all().find((i) => i.key === "note:blocked:r-old:0");
+    expect(old()).toMatchObject({ flightTriage: "missed" });
+    store.setSetting(FLIGHT_RUNAWAY_LIFTED_SETTING, String(NOW - MIN));
+    expect(old()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
   });
 
   it("is absent while FLIGHT is live and within its window; the question is FLIGHT's", () => {

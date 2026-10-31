@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   FLIGHT_HOUR_MS,
   FLIGHT_RUNAWAY,
+  FLIGHT_RUNAWAY_LIFTED_SETTING,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_RUNAWAY_SETTING,
   type FlightRunawayTrip,
@@ -121,6 +122,12 @@ export function recordWrite(store: Store, event: WriteEvent): void {
   store.setSetting(EVENTS_SETTING, JSON.stringify([...kept, event]));
 }
 
+/** When the operator last lifted the breaker; 0 if never. */
+export function runawayLiftedAt(store: Store): number {
+  const n = Number(store.getSetting(FLIGHT_RUNAWAY_LIFTED_SETTING));
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** The breaker's trip while it is tripped; null when FLIGHT may write. */
 export function runawayTrip(store: Store): FlightRunawayTrip | null {
   const raw = store.getSetting(FLIGHT_RUNAWAY_SETTING);
@@ -189,6 +196,7 @@ export function watchRunaway(store: Store, bus: ChangeBus, now: number): void {
 export function liftRunaway(store: Store, bus: ChangeBus, now: number): boolean {
   if (runawayTrip(store) === null) return false;
   store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+  store.setSetting(FLIGHT_RUNAWAY_LIFTED_SETTING, String(now));
   // the history that tripped it must not trip it again; the decision log is left as it was
   store.deleteSetting(EVENTS_SETTING);
   store.clearNote(FLIGHT_RUNAWAY_NOTE_KEY, now);

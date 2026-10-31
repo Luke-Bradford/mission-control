@@ -16,6 +16,7 @@ import {
   isReadCall,
   liftRunaway,
   recordWrite,
+  runawayLiftedAt,
   runawayReason,
   runawayTrip,
   type WriteEvent,
@@ -29,8 +30,10 @@ const MIN = 60_000;
 
 let store: Store;
 let bus: ChangeBus;
+let storePath: string;
 beforeEach(() => {
-  store = new Store(join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "mc.sqlite"));
+  storePath = join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "mc.sqlite");
+  store = new Store(storePath);
   bus = new ChangeBus();
 });
 
@@ -179,18 +182,15 @@ describe("the breaker", () => {
     expect(seen).toContain("attention");
   });
 
-  it("survives reopening the store", () => {
+  it("survives reopening the same store path after a trip through watchRunaway", () => {
     write(5);
     watchRunaway(store, bus, NOW);
-    const path = join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "again.sqlite");
+    const tripped = runawayTrip(store);
+    expect(tripped).not.toBeNull();
     store.close();
-    store = new Store(path);
-    expect(runawayTrip(store)).toBeNull();
-    const reopened = join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "kept.sqlite");
-    const first = new Store(reopened);
-    first.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: NOW, reason: "a loop" }));
-    first.close();
-    expect(runawayTrip(new Store(reopened))).toEqual({ at: NOW, reason: "a loop" });
+    store = new Store(storePath);
+    expect(runawayTrip(store)).toEqual(tripped);
+    expect(store.notes().some((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toBe(true);
   });
 
   it("treats an unreadable stored trip as tripped", () => {
@@ -203,6 +203,7 @@ describe("the breaker", () => {
     write(5);
     watchRunaway(store, bus, NOW);
     expect(liftRunaway(store, bus, NOW + 5)).toBe(true);
+    expect(runawayLiftedAt(store)).toBe(NOW + 5);
     expect(runawayTrip(store)).toBeNull();
     expect(store.notes().some((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toBe(false);
     expect(store.flightDecisions(0, 20).filter((d) => d.kind === "hub")[0]).toMatchObject({

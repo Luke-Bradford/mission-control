@@ -69,9 +69,9 @@ import {
   REVIEW_ROUNDS,
   type ReviewRow,
   type ReviewState,
+  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
-  runawayRefusedText,
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
@@ -101,7 +101,7 @@ import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
-import { runawayTrip } from "./flight/runaway.ts";
+import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
 import {
@@ -747,6 +747,8 @@ interface FlightTriage {
   liveSince: number;
   /** An "off" FLIGHT within FLIGHT_OFF_GRACE_MS: when the item will show, else null. */
   showsAt: number | null;
+  /** The runaway breaker is tripped: FLIGHT stands down but the item shows only if items wait. */
+  breaker?: boolean;
 }
 
 /**
@@ -819,6 +821,13 @@ function flightLiveSince(store: Store, flightId: string, run: Run): number {
 }
 
 function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage | null {
+  const triage = flightTriageNow(config, store, now);
+  if (triage === null) return null;
+  // items raised while the breaker held FLIGHT back get a fresh window after the lift
+  return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
+}
+
+function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
   const found = flightSeat(config);
   if (found === null) return null;
   const flightId = found.seat.id;
@@ -832,10 +841,11 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
       triaging: false,
       live: false,
       cause: "down",
-      detail: runawayRefusedText(tripped.reason),
+      detail: RUNAWAY_TRIAGE_DETAIL,
       since: tripped.at,
       liveSince: 0,
       showsAt: null,
+      breaker: true,
     };
   }
   const live = flightLive(config, store);
@@ -1320,6 +1330,8 @@ function withNotTriaging(
           (!triage.triaging && i.flightTriage === "waiting")),
     )
     .sort((a, b) => a.at - b.at);
+  // a tripped breaker is the flag's business: the item adds nothing unless something waits
+  if (triage.breaker === true && members.length === 0) return items;
   const cause: FlightNotTriagingCause | null =
     triage.cause ?? (triage.triaging && members.length > 0 ? "late" : null);
   if (cause === null) return items;

@@ -1265,6 +1265,11 @@ export const FLIGHT_RUNAWAY = {
 export const FLIGHT_RUNAWAY_SETTING = "flight.runaway";
 /** The key of the operator's Needs-you note for a tripped breaker. */
 export const FLIGHT_RUNAWAY_NOTE_KEY = "flight-runaway";
+/** The setting that holds when the operator last lifted the breaker (epoch milliseconds). */
+export const FLIGHT_RUNAWAY_LIFTED_SETTING = "flight.runaway-lifted-at";
+/** What the "FLIGHT is not triaging" item says while the breaker is tripped. */
+export const RUNAWAY_TRIAGE_DETAIL =
+  "FLIGHT's runaway breaker is tripped; dismiss its flag to lift it.";
 export interface FlightRunawayTrip {
   at: number;
   reason: string;

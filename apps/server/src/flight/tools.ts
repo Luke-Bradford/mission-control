@@ -3297,6 +3297,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
   ];
 
+  /** The tools that can write something and still return an error. */
+  const WRITES_BEFORE_FAILING: ReadonlySet<string> = new Set([
+    MC_TOOL_NAMES.createTicket,
+    MC_TOOL_NAMES.closeTicket,
+  ]);
   const flightTools: McTool[] = [
     {
       name: MC_TOOL_NAMES.logDecision,
@@ -3753,8 +3758,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         result.isError !== true
           ? tool.name !== MC_TOOL_NAMES.acceptRuling || rowAdded
           : // a call that recorded a decision before it failed wrote something (a filed ticket
-            // that then missed the project); so may an attempt that left no row
-            rowAdded ||
+            // that then missed the project); so may an attempt that left no row. A refused call
+            // wrote nothing, so only the tools that can write before they fail are looked at.
+            (rowAdded && WRITES_BEFORE_FAILING.has(tool.name)) ||
             tool.name === MC_TOOL_NAMES.screenshotHud ||
             (tool.name === MC_TOOL_NAMES.closeTicket &&
               (result.text.includes(closeUnconfirmedText()) ||

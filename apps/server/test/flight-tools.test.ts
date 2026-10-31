@@ -5877,7 +5877,7 @@ describe("superuser housekeeping", () => {
     });
     expect(engineCalls).toHaveLength(5);
   });
-  it("keeps a budget park, an operator stop and an operator hold in force next to the breaker", async () => {
+  it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
     elevated();
     runPr();
     store.setRunLoop("r-pr", {
@@ -5885,30 +5885,22 @@ describe("superuser housekeeping", () => {
       phase: "parked",
       parked: { kind: "budget", reason: "tokens", ended: false },
     });
-    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
-      "isError",
-      true,
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
+      refused("Run is held."),
     );
+    runPr();
     store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    store.raiseNote({
-      key: "blocked:r-pr:0",
-      kind: "blocked",
-      runId: "r-pr",
-      seatId: null,
-      repoId: null,
-      text: "check",
-      at: NOW - 1,
+    expect(await call("merge_pr", { pr: 12 })).toEqual(
+      refused("No awaiting-flight run PR in your lane."),
+    );
+    store.setSeatSession(row("guido-1", "r-pr"));
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      mergeHold: { by: "CAPCOM", reason: "veto", at: NOW },
     });
-    expect(
-      (
-        await call("hold_item", {
-          key: "note:blocked:r-pr:0",
-          reason: "Waiting",
-          condition: { kind: "manual" },
-        })
-      ).isError,
-    ).toBe(true);
+    expect(await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" })).toEqual(
+      refused("The controller set this hold; only the controller can release it."),
+    );
     expect(store.getSetting("flight.runaway")).toBeNull();
   });
   it("keeps budget, ruling and operator-held parks out of rework", async () => {
@@ -8470,7 +8462,18 @@ describe("the runaway breaker", () => {
     expect(JSON.parse((await call("flight_state", {})).text).breaker.tripped).toBe(false);
   });
 
-  it("does not trip on six headline updates, and trips on five identical end_run or sync_main calls", async () => {
+  it("does not count refused calls: six refused merge_pr calls do not trip", async () => {
+    // an operator stop: merge_pr refuses, and a refusal writes nothing
+    store.upsertRun(run("r-pr", "guido-1"));
+    store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
+    for (let i = 0; i < 6; i++) {
+      expect((await call("merge_pr", { pr: 12, basis: "ready" })).isError).toBe(true);
+    }
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
+  });
+
+  it("does not trip on six identical headline updates", async () => {
     const headline = () =>
       call("update_brief", { section: FLIGHT_HEADLINE, text: "H", basis: "wake" });
     for (let i = 0; i < 6; i++) expect((await headline()).isError).toBeUndefined();
