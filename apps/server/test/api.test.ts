@@ -1525,6 +1525,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
+  ["GET", "/api/qa/uat/:repoId/:number"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2344,6 +2345,11 @@ describe("local access", () => {
         continue;
       }
       if (url === "/api/attention/unknown") {
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url.startsWith("/api/qa/uat/")) {
+        // the placeholder PR is not in this fixture
         expect(r.statusCode).toBe(404);
         continue;
       }
