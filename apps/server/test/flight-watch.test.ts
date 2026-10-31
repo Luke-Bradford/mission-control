@@ -3799,7 +3799,7 @@ describe("ops review regressions", () => {
     }) as number;
     store.setReviewState(reviewId, ["queued"], "reported", { at: T0 });
     expect(signalState().signals).toEqual([]);
-    store.db.prepare("UPDATE reviews SET blocking = 1 WHERE id = ?").run(reviewId);
+    store["db"].prepare("UPDATE reviews SET blocking = 1 WHERE id = ?").run(reviewId);
     expect(signalState().signals).toContainEqual(
       expect.objectContaining({
         kind: "hub_error",
