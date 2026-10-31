@@ -47,9 +47,9 @@ import {
   NEW_LOOP,
   type PullRequestView,
   RULING_PARK,
-  STUCK_PARK,
   type Run,
   type SeatSessionRow,
+  STUCK_PARK,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

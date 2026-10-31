@@ -30,8 +30,8 @@ import {
   noReportExitReason,
   type PullRequestView,
   parkedEventText,
-  seatDef,
   STUCK_PARK,
+  seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
