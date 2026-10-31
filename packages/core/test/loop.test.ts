@@ -2326,6 +2326,20 @@ describe("set aside", () => {
     },
   );
 
+  it("a run that ruled on a CI failure is set aside, though CI failed on its pushed sha", () => {
+    const ruling = {
+      evidence: { id: 2, at: 3000, ruling: true },
+      evidenceCount: 2,
+      review: facts([]),
+    };
+    const ruled = reconcile(
+      base(ruling, { phase: "working", ciFailedSha: SHA, reportedEvidenceId: 1 }),
+    );
+    expect(ruled.loop.parked?.kind).toBe("ruling");
+    const next = reconcile(base(ruling, ruled.loop));
+    expect(kindsOf(next.actions)).toContain("set-aside");
+  });
+
   it("settling the wait brings the run back", () => {
     // the park lifted: the run is working again, and an aside one is woken
     const r = reconcile(off({}, { phase: "working", parked: null, ...asideOf(false) }));

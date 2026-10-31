@@ -1318,7 +1318,8 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     !seat.openQuestion &&
     pushed !== null &&
     s.headCommit === pushed.sha &&
-    loop.ciFailedSha !== pushed.sha &&
+    // a ruling on the failure waits on FLIGHT or the operator, not on a fix
+    (loop.ciFailedSha !== pushed.sha || loop.parked?.kind === RULING_PARK) &&
     pr?.state === "open" &&
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
