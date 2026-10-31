@@ -65,6 +65,7 @@ const RULES: RepoRules = freezeRules({
   hardRulesSet: true,
   hardRulesBy: "operator",
   alwaysAsk: [],
+  uat: { labels: [], paths: [] },
   checks: [],
 });
 

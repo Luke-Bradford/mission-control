@@ -126,6 +126,8 @@ import {
   type TicketView,
   type Topic,
   TYPE_LABELS,
+  UAT_PARK,
+  UAT_USE_ROUTE,
   UPDATE_LOG_UNREADABLE,
   UPDATE_UNAVAILABLE,
   type UpdateLog,
@@ -463,7 +465,7 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "holdMerge" | "releaseMergeHold">>;
+    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -545,6 +547,15 @@ const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
   z.strictObject({ action: z.literal("release") }),
 ]);
+const UatBody = z
+  .strictObject({
+    action: z.enum(["accept", "send_back"]),
+    note: z.string().max(COMMS_MESSAGE_MAX).optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.action === "send_back" && (b.note === undefined || b.note.trim() === ""))
+      ctx.addIssue({ code: "custom", path: ["note"], message: "a send back needs a note" });
+  });
 const ControllerCheckBody = z
   .strictObject({
     verdict: z.enum(["pass", "fail"]),
@@ -4090,6 +4101,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .code(409)
             .send({ error: `nothing to resume: ${CONTROLLER_CHECK_USE_ROUTE}` });
         }
+        if (run.loop.parked?.kind === UAT_PARK) {
+          return reply.code(409).send({ error: `nothing to resume: ${UAT_USE_ROUTE}` });
+        }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
         const lifted = reviewWaiver
@@ -4138,6 +4152,58 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!result.lifted) {
             return reply.code(409).send({
               error: `controller check not recorded: ${operatorRefusalText(result.reason)}`,
+            });
+          }
+          return { ok: true };
+        },
+      );
+      // The operator's acceptance (UAT) of a tested PR the repo's `uat` rule holds: accept lets it merge,
+      // send back gives the seat the note and a new round. FLIGHT has no tool for this.
+      // Reader: docs/runbook.md#accept-or-send-back-a-pr-at-uat
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/uat",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          const n = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (repo === undefined || n === 0) return reply.code(404).send({ error: "unknown PR" });
+          const body = UatBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          const run = store
+            .loopRuns(Date.now())
+            .find(
+              (r) =>
+                r.repoId === repo.id &&
+                r.endedAt === null &&
+                r.loop?.prNumber === n &&
+                r.loop.parked?.kind === UAT_PARK,
+            );
+          if (run === undefined || !run.loop?.uat)
+            return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          if (deps.engine?.uat === undefined || deps.engine.status().on !== true) {
+            return reply.code(409).send({ error: "the loop engine is off" });
+          }
+          if (body.data.note !== undefined) {
+            try {
+              await validateCommsText(deps.knownSecrets ?? (async () => []), body.data.note);
+            } catch (e) {
+              return crewFail(
+                new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+                reply,
+              );
+            }
+          }
+          const result = await deps.engine.uat(
+            run.id,
+            body.data.action,
+            run.loop.uat.sha,
+            body.data.note,
+          );
+          if (!result.lifted) {
+            return reply.code(409).send({
+              error: `acceptance not recorded: ${operatorRefusalText(result.reason)}`,
             });
           }
           return { ok: true };
