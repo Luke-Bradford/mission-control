@@ -1056,11 +1056,6 @@ export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
-/** The re-wake interval while any run is live: FLIGHT is owning live work, so it looks every 15 minutes. */
-export const FLIGHT_REWAKE_LIVE_MS = 15 * 60_000;
-/** The re-wake interval: FLIGHT_REWAKE_LIVE_MS while any run is live, else FLIGHT_REWAKE_MS. */
-export const flightRewakeMs = (runLive: boolean): number =>
-  runLive ? FLIGHT_REWAKE_LIVE_MS : FLIGHT_REWAKE_MS;
 /** What a re-wake says when FLIGHT left reasons of the last wake without a decision. */
 export const FLIGHT_LEFT_HEAD = "You left these:";
 /** The one Needs-you note raised when a second wake leaves the same reasons unhandled. */

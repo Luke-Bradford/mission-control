@@ -23,7 +23,6 @@ import {
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
-  FLIGHT_REWAKE_LIVE_MS,
   FLIGHT_REWAKE_MS,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
@@ -1147,14 +1146,14 @@ describe("FLIGHT's brief in the digest", () => {
       expect(startCalls).toHaveLength(1);
       expect(status()?.lastWakeAt).toBe(nowMs);
       expect(status()?.wokeOn).toContain("q (1)");
-      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_LIVE_MS);
+      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_MS);
     });
 
     it("keeps the last wake but drops a stale schedule across a restart", async () => {
       liveCrew();
       ask();
       await watch.check();
-      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_LIVE_MS);
+      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_MS);
       const woke = status();
       facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
       makeWatch();
@@ -1184,7 +1183,7 @@ describe("FLIGHT's brief in the digest", () => {
       nowMs += 11 * MIN;
       await watch.check();
       expect(status()?.wokeOn).toEqual(["signals (1)"]);
-      nowMs += FLIGHT_REWAKE_LIVE_MS + MIN;
+      nowMs += FLIGHT_REWAKE_MS + MIN;
       await watch.check();
       expect(sendCalls).toHaveLength(3);
       expect(status()?.wokeOn).toEqual(["reminder"]);
@@ -1205,7 +1204,7 @@ describe("FLIGHT's brief in the digest", () => {
       const woke = nowMs;
       nowMs += MIN;
       await watch.check();
-      expect(status()?.nextWakeAt).toBe(woke + FLIGHT_REWAKE_LIVE_MS);
+      expect(status()?.nextWakeAt).toBe(woke + FLIGHT_REWAKE_MS);
       store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
       idleCrew();
       await watch.check();
@@ -2135,7 +2134,7 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
-  it("re-wakes every 15 minutes while a run is live and something waits, and not otherwise", async () => {
+  it("re-wakes hourly while something waits, and not otherwise, even with a run live", async () => {
     liveCrew();
     ask();
     await watch.check();
@@ -2143,19 +2142,18 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     // the question went stale at 10 minutes: that is its own wake
     expect(sendCalls).toHaveLength(2);
-    nowMs = T0 + 25 * MIN;
+    nowMs = T0 + 70 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
-    nowMs = T0 + 27 * MIN;
+    nowMs = T0 + 72 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(3);
     expect(sendCalls[2]?.key.endsWith(":3")).toBe(true);
 
     store.answerQuestions("guido-1", nowMs);
-    idleCrew();
-    nowMs = T0 + 130 * MIN;
-    await watch.check();
     nowMs = T0 + 200 * MIN;
+    await watch.check();
+    nowMs = T0 + 300 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(3);
   });
@@ -3863,6 +3861,28 @@ describe("every wake ends with each reason handled", () => {
     expect(sendCalls.at(-1)?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} q 2`);
   });
 
+  it("keeps the operator item while the reason it lists is still undecided", async () => {
+    await wokeOnAQuestion();
+    const q2 = ask("inco-1", "r-inco", nowMs);
+    await watch.check();
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    expect(leftNotes()[0]?.text).toContain("q 1");
+    // the re-wake for the second question ends clean, but question 1 is still open
+    flightIdle();
+    decide({ questionId: q2 });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    expect(leftNotes()).toHaveLength(1);
+    // once question 1 is answered the item clears
+    store.answerQuestions("guido-1", nowMs);
+    await watch.check();
+    expect(leftNotes()).toEqual([]);
+  });
+
   it("raises one operator item when the second wake leaves them again, and none before", async () => {
     await wokeOnAQuestion();
     await watch.check();
@@ -4050,61 +4070,17 @@ describe("every wake ends with each reason handled", () => {
 });
 
 describe("the pace of FLIGHT's re-wake", () => {
-  const startFlight = async () => {
+  it("does not speed up while a run is live: nothing pending means no re-wake", async () => {
+    live("guido-1", "r-guido");
     noFlight();
     await watch.check();
     expect(startCalls).toHaveLength(1);
     facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
-  };
-
-  it("re-wakes every 15 minutes while a run is live, with nothing pending", async () => {
-    live("guido-1", "r-guido");
-    await startFlight();
-    const woke = nowMs;
-    nowMs = woke + FLIGHT_REWAKE_LIVE_MS - MIN;
-    await watch.check();
+    for (const later of [16 * MIN, FLIGHT_REWAKE_MS + MIN, 3 * FLIGHT_REWAKE_MS]) {
+      nowMs = T0 + later;
+      await watch.check();
+    }
     expect(sendCalls).toHaveLength(0);
-    nowMs = woke + FLIGHT_REWAKE_LIVE_MS;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]?.text.split("\n")[0]).toContain("woke on: reminder");
-    nowMs += FLIGHT_REWAKE_LIVE_MS;
-    await watch.check();
-    expect(sendCalls).toHaveLength(2);
-  });
-
-  it("stays at an hour, and only while something waits, when no run is live", async () => {
-    await startFlight();
-    const woke = nowMs;
-    nowMs = woke + FLIGHT_REWAKE_MS * 3;
-    await watch.check();
-    expect(sendCalls).toHaveLength(0);
-    expect(FLIGHT_REWAKE_LIVE_MS).toBe(15 * MIN);
-    expect(FLIGHT_REWAKE_MS).toBe(60 * MIN);
-  });
-
-  it("schedules the next wake by the live pace, and by the idle pace when idle", async () => {
-    live("guido-1", "r-guido");
-    ask();
-    await startFlight();
-    const status = () => flightView(config, store, nowMs, () => true).wake;
-    expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_LIVE_MS);
-    const woke = nowMs;
-    store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
-    store.setSeatSession(row("guido-1", null));
-    // the question's run ended: an unbriefed blocked item keeps work pending for the idle pace
-    store.raiseNote({
-      key: "blocked:r1:0",
-      kind: "blocked",
-      runId: null,
-      seatId: "guido-1",
-      repoId: "mc",
-      text: "mc#7 parked",
-      at: nowMs,
-    });
-    nowMs += MIN;
-    await watch.check();
-    expect(status()?.nextWakeAt).toBe(nowMs > woke ? woke + FLIGHT_REWAKE_MS : null);
   });
 });
 

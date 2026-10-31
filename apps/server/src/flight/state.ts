@@ -30,6 +30,7 @@ import {
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
+  FLIGHT_REWAKE_MS,
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_STATE_DECISION_MAX,
@@ -53,7 +54,6 @@ import {
   type FlightWake,
   type FlightWakeList,
   type FlightWakeStatus,
-  flightRewakeMs,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -288,17 +288,16 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 }
 
 /**
- * The next wake the state schedules: the re-wake backstop (every 15 minutes while a run is live,
- * else hourly while work is pending), or a planned entry.
+ * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
+ * planned entry.
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   lastWakeAt: number,
   now: number,
-  runLive = false,
 ): number | null {
   const times: number[] = [];
-  if (lastWakeAt > 0 && (runLive || pending(s))) times.push(lastWakeAt + flightRewakeMs(runLive));
+  if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }

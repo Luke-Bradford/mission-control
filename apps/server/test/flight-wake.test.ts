@@ -13,7 +13,6 @@ import {
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
-  FLIGHT_REWAKE_LIVE_MS,
   FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_WAKE_HEAD,
@@ -615,17 +614,14 @@ describe("the re-wake interval", () => {
   });
   const T = 1_000_000_000;
 
-  it("is 15 minutes while a run is live, and 60 when none is", () => {
-    expect(nextWakeAt(waiting(), T, T, true)).toBe(T + FLIGHT_REWAKE_LIVE_MS);
-    expect(nextWakeAt(waiting(), T, T, false)).toBe(T + FLIGHT_REWAKE_MS);
-    expect(FLIGHT_REWAKE_LIVE_MS).toBe(15 * 60_000);
+  it("is an hour from the last wake while something waits", () => {
+    expect(nextWakeAt(waiting(), T, T)).toBe(T + FLIGHT_REWAKE_MS);
     expect(FLIGHT_REWAKE_MS).toBe(60 * 60_000);
   });
 
-  it("schedules nothing for an idle crew with nothing waiting, and a live one still looks", () => {
+  it("schedules nothing with nothing waiting", () => {
     const quiet = { ...busyBoard(), questions: [], tickets: [], prs: [], seats: [] };
-    expect(nextWakeAt(quiet, T, T, false)).toBeNull();
-    expect(nextWakeAt(quiet, T, T, true)).toBe(T + FLIGHT_REWAKE_LIVE_MS);
+    expect(nextWakeAt(quiet, T, T)).toBeNull();
   });
 });
 
