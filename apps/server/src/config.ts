@@ -252,6 +252,8 @@ export interface CcConfig {
     rules?: RepoRules;
     /** Globs seats may not edit or commit, on top of core's PROTECTED_FILES. Loaded: always set (default []). */
     protectedFiles?: string[];
+    /** Branch names the hub never deletes, on top of the default branch and `archive/*`: exact names, or a prefix ending in `*`. Loaded: always set (default []). */
+    keepBranches?: string[];
     /** `draft`: the board is only read. `merge`: the hub moves cards between Status columns; needs a crew session. */
     autonomy: RepoAutonomy;
     /** What FLIGHT may do here; only config.yaml sets it. Loaded: always set (default `standard`). */
@@ -512,6 +514,7 @@ const fileSchema = z
           .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
           .optional(),
         protected: z.array(protectedGlob).default([]),
+        keep_branches: z.array(nonEmpty).default([]),
         rules: repoRulesSchema.optional(),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
         flight_powers: z.enum(FLIGHT_POWERS).default("standard"),
@@ -681,6 +684,7 @@ const fileSchema = z
         requiredChecks: r.required_checks,
         commands: r.commands ?? defaultSeatCommands(),
         protectedFiles: r.protected,
+        keepBranches: r.keep_branches,
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
         autonomy: r.autonomy,
         flightPowers: r.flight_powers,

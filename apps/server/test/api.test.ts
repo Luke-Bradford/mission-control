@@ -1630,6 +1630,7 @@ describe("add a repo (POST /api/repos)", () => {
       requiredChecks: [],
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
+      keepBranches: [],
       autonomy: "draft",
       flightPowers: "standard",
     });

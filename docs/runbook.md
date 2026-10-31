@@ -786,6 +786,9 @@ Setup's board action also creates the board's fields and the repo's type labels,
   - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
   - A CI failure or a long pending names the checks in the Activity line and the park note. Only
     the first 50 checks of a head are read. A change needs a hub restart.
+- **`repos[].keep_branches`** (default `[]`) lists branches the hub never deletes, on top of the
+  default branch and `archive/*`: an exact name, or a prefix ending in `*` (`release/*`). See
+  "Branch tidying". A change needs a hub restart.
 - **`repos[].full_suite`** (default `[]`) lists the commands that run a repo's whole suite, as
   prefixes, e.g. `["pnpm -s test"]`.
   - A seat's Bash call is a full suite when it starts with an entry's words, unless a later word
@@ -1880,6 +1883,30 @@ If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery
 Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. Remote plugins are off for seats, so Codex does not download its shared plugin catalog into each isolated home. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
+
+## Branch tidying
+
+GitHub's delete-on-merge removes a branch only when its PR merges, so the hub removes the rest. It
+runs wherever the engine runs (not in a preview, not with `MC_NO_LOOP_WRITES=1`). It tidies only a
+repo with a crew session and no observed loop; a repo that only lists an observed loop is never
+touched.
+
+- **No push after a merge.** `mc push` asks GitHub for the state of the PR the run records. A merged
+  or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
+  last PR on its branch merged; nothing is sent, so a merged branch is not
+  recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
+- **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
+  branch) that closed without merging. The PR page keeps its commits.
+- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes every
+  remote branch with no open PR, no live run, and no commit for 24 hours. A branch that is the base
+  of an open PR stays. A run parked on a closed PR does not hold its branch; any other unended run
+  does. Each deletion is a hub event on the Activity page.
+- **Never touched:** the default branch, `archive/*`, and `repos[].keep_branches`. If any read of
+  branches or PRs fails, nothing is deleted for that repo.
+- **Local.** Every 10 minutes the hub fetches each seat clone with `--prune` and drops the local
+  branches that are merged into the default branch or whose remote is gone. A branch checked out in
+  a worktree, or held by a live run, stays. The operator's own checkout is not touched.
+- The only GitHub write is `DELETE /repos/{repo}/git/refs/heads/{branch}`, over `gh`.
 
 ## Branch previews
 
