@@ -94,8 +94,10 @@ import {
   pace5h,
   percentile,
   projectAtReset,
+  QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
+  type QaFlowView,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type RepoId,
@@ -2121,6 +2123,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
           const since = now() - days * DAY_MS;
           return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (escaped defects, review queue age, rework ratio and tests per PR, each with its definition)
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/qa/flow",
+        async (req, reply): Promise<QaFlowView | FastifyReply> => {
+          const days = qaDays(req.query.days, 30);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          const since = now() - days * DAY_MS;
+          return { days, since, metrics: QA_FLOW_METRICS, ...store.qaFlow(since) };
         },
       );
 

@@ -19,6 +19,7 @@ export * from "./metrics.ts";
 export * from "./needs-you.ts";
 export * from "./plain-talk.ts";
 export * from "./profiles.ts";
+export * from "./qa-flow.ts";
 export * from "./repo-rules.ts";
 export * from "./repos.ts";
 export * from "./review.ts";

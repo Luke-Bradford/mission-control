@@ -8,10 +8,12 @@ import {
   COMMENTS_PAGE_SIZE,
   ciVerdict,
   controllerCheckOf,
+  type DefectRefs,
   type Escalation,
   type GithubRateLimit,
   githubCollector,
   inferTicket,
+  isBugLabelled,
   isObj,
   labelPriority,
   OWNER_FIELD,
@@ -20,7 +22,9 @@ import {
   PR_KEEP_MS,
   PR_MAX_PAGES,
   type PrCheck,
+  type PrFileInput,
   type PullRequestView,
+  parseDefectRefs,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
   type RepoGoal,
@@ -201,6 +205,9 @@ export async function fetchQueueCard(
 /** A longer issue body is cut here; the pane links to GitHub for the rest. */
 export const TICKET_BODY_MAX = 20_000;
 
+/** A PR's diff is read up to this many files; the QA board's tests-per-PR count is from them. */
+export const PR_FILES_MAX = 100;
+
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
@@ -210,6 +217,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 const PR_FIELDS = `
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
+        files(first: ${PR_FILES_MAX}) { nodes { path changeType } }
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
@@ -527,6 +535,13 @@ function option<T extends string>(v: unknown, known: readonly T[]): T | null {
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
 /** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
+/** What a bug's body names, for the QA board's escaped defects; nothing for other cards. */
+function defectRefsOf(repo: string, labels: string[], body: unknown): { defectRefs?: DefectRefs } {
+  if (!isBugLabelled(labels)) return {};
+  const refs = parseDefectRefs(str(body, ""), repo);
+  return refs.prs.length + refs.shas.length + refs.paths.length > 0 ? { defectRefs: refs } : {};
+}
+
 function afterOf(body: unknown): { after?: NonNullable<BoardItem["after"]> } {
   const after = bodyDependencies(str(body, ""));
   return after.issues.length > 0 || after.prs.length > 0 ? { after } : {};
@@ -747,6 +762,7 @@ function boardItem(
         : null,
     blockedBy: blockers(c.blockedBy),
     ...afterOf(c.body),
+    ...defectRefsOf(repo.github, labels, c.body),
     milestone:
       typeof path(c, "milestone", "title") === "string"
         ? str(path(c, "milestone", "title"), "")
@@ -1136,6 +1152,20 @@ function mapPr(
     additions: typeof n.additions === "number" ? n.additions : null,
     deletions: typeof n.deletions === "number" ? n.deletions : null,
     changedFiles: typeof n.changedFiles === "number" ? n.changedFiles : null,
+    ...prFiles(n.files),
+  };
+}
+
+/** The diff's files; nothing when the response had none, so a partial read never clears them. */
+function prFiles(raw: unknown): { files?: PrFileInput[] } {
+  const nodes = path(raw, "nodes");
+  if (!Array.isArray(nodes)) return {};
+  return {
+    files: nodes.flatMap((f) =>
+      typeof path(f, "path") === "string"
+        ? [{ path: str(path(f, "path"), ""), changeType: str(path(f, "changeType"), "") }]
+        : [],
+    ),
   };
 }
 
