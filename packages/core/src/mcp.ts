@@ -572,6 +572,26 @@ export function doneWhenCount(body: string): number {
   return (sectionLines(body, 2, /^done when$/i) ?? []).filter((l) => LIST_ITEM.test(l)).length;
 }
 
+/** The ticket's `## Done when` bullets, each with whether its task-list box is ticked. */
+export function doneWhenItems(body: string): { text: string; checked: boolean }[] {
+  return (sectionLines(body, 2, /^done when$/i) ?? [])
+    .filter((l) => LIST_ITEM.test(l))
+    .map((l) => {
+      const text = l.replace(/^ {0,1}(?:[-*+]|\d+[.)])[ \t]+/, "");
+      const box = /^\[([ xX])\][ \t]+(.*)$/.exec(text);
+      return box === null
+        ? { text: text.trim(), checked: false }
+        : { text: (box[2] ?? "").trim(), checked: box[1] !== " " };
+    });
+}
+
+/** The text under the ticket's `## Outcome` heading, trimmed; null when it has none. */
+export function ticketOutcome(body: string): string | null {
+  const lines = sectionLines(body, 2, /^outcome$/i);
+  const text = lines === null ? "" : lines.join("\n").trim();
+  return text === "" ? null : text;
+}
+
 /** How many entries the plan's `### Tests` part holds, or null when it has no such part. */
 export function planTestCount(plan: string): number | null {
   const lines = sectionLines(plan, 3, /^tests$/i);
