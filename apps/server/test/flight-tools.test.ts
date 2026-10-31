@@ -767,6 +767,8 @@ describe("resume_seat", () => {
 
     expect(result.text).toContain("ended after the failed resume");
     expect(result.text).not.toContain("nothing was changed");
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(store.seatSession("guido-1")?.reason).toBe("operator");
   });
 
   it("puts the crew pause back when a failed resume ended the run", async () => {

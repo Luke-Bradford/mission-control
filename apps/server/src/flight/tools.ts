@@ -3152,7 +3152,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         };
         // What this call wrote; a rollback leaves a newer change by the operator alone.
         const pauseAfter = JSON.stringify(readCrewPause(store));
-        const rowAfter = JSON.stringify(store.seatSession(a.seat));
         try {
           await deps.supervisor.resumeRun(run.id);
         } catch {
@@ -3163,8 +3162,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!live) {
           if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
             writeCrewPause(store, pause, at);
-          if (row.state === "stopped" && JSON.stringify(store.seatSession(a.seat)) === rowAfter)
-            store.setSeatSession(row);
+          // Only a newer stop is the operator's; an error the failed resume left is not.
+          const cur = row.state === "stopped" ? store.seatSession(a.seat) : null;
+          if (cur !== null && cur.state !== "stopped")
+            store.setSeatSession({ ...cur, state: "stopped", reason: row.reason, updatedAt: at });
           const outcome =
             store.run(run.id)?.endedAt !== null
               ? "ended after the failed resume"
