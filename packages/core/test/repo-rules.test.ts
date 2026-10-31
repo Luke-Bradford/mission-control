@@ -41,6 +41,7 @@ describe("DEFAULT_REPO_RULES", () => {
       hardRulesSet: false,
       hardRulesBy: "operator",
       alwaysAsk: [],
+      uat: { labels: [], paths: [] },
       checks: [],
     });
   });

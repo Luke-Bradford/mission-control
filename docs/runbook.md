@@ -325,6 +325,19 @@ merged-PR history remain available to Activity and Telemetry for one year. Repor
 unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
+### Ticket history
+
+`GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
+its fields (title, outcome, done-when items with their ticked state, size, priority, status,
+labels, GitHub URL), every run on it (seat, phase, times, tokens), its PRs with each review round's
+findings and how later rounds resolved them, the checks of each head, and one timeline, newest
+first, of runs, review rounds, CI results per head, FLIGHT decisions and Comms messages that name
+the ticket. The timeline is paged: `limit` (1 to 200, default 50) and `before`, the `nextBefore`
+cursor of the previous page; `nextBefore` is null on the last page. The body, outcome and
+done-when items are read live from GitHub; if GitHub does not answer, the rest still comes back
+with `body: null` and `githubError` saying why. Every lookup uses a ticket index, so a long
+history never scans a table. It is read-only and needs the operator token like the other reads.
+
 ### Page-load budget
 
 Every HUD page's first load stays under 500 KB gzipped, and no single response is over 300 KB
@@ -694,7 +707,9 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Git:** no git writes; a seat commits with `mc commit` and brings main in with `mc sync_main`,
   and the engine pushes and opens the draft PR after a report. Its sandbox cannot write the
   clone's git dirs either.
-- **GitHub:** no `gh` at all; GitHub goes through Mission Control.
+- **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
+  PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
+  minor-findings section is kept; refused for a PR that is not the run's).
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
@@ -1008,7 +1023,7 @@ This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
-The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that only the controller can merge past. FLIGHT's `settle_park` refusals name the same reasons.
+The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that only the controller can merge past. FLIGHT's `settle_park` refusals name the same reasons. Past that blocking review FLIGHT uses `second_review` (below), not the controller.
 
 ### Rework a parked run
 
@@ -1021,6 +1036,23 @@ curl -s -X POST localhost:7420/api/runs/<run id>/message -H 'content-type: appli
 The text waits for that run (it is not sent to a newer run on the same seat). The route resumes only
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
+
+### Accept or send back a PR at UAT
+
+A repo whose rules set `uat` (labels, paths or both) keeps the engine from merging a matching PR until
+you accept it. When the PR's review is clean and CI is green, the run parks as `uat`, "waiting for
+your acceptance on <head>" with the label or path that matched. It shows in Needs you, on the Board
+card and on the PR chip. If the diff cannot be read, the PR waits too. Look at the work, then:
+
+```sh
+curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept"}'
+```
+
+`accept` lets the engine merge on its next pass through the usual gates (hard-rule clearance, holds,
+the rest). It is tied to the head you looked at: a later head waits again. `send_back` needs a
+`"note"`; the seat gets it as the first line of a new rework round. After its next push passes review
+and CI, the PR waits again. FLIGHT cannot clear this wait: `merge_pr` and a plain resume refuse it.
+It applies to repos where the engine merges (`merge` workspaces).
 
 ### Record a controller check
 
@@ -1108,6 +1140,8 @@ every reason it lists is handled, not when some later audit is clean. The audit 
 `wait` decision on the target (handled) and wakes FLIGHT again at `until` (at most 7 days) with
 `wait_over`.
 
+**What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). A seat or ticket FLIGHT recorded a `wait_on` for stays out until the wait is due. An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`); the target is under 15% of `total`.
+
 **Pace.** FLIGHT re-wakes hourly from its last wake, and only while something waits on it; a live run does not speed that up. The sweep's signals above and a seat's call wake it sooner. The next wake time in `/api/flight` follows the same rule.
 
 ### FLIGHT adds a controller check to a ticket
@@ -1152,8 +1186,8 @@ hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controll
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat) |
-| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). Any FLIGHT write to the pause only edits the seats of a record someone else set: it never clears or replaces it, a refused write leaves the record and goes in the hub log, and a change is logged as FLIGHT's. A start that fails puts the stop and the pause back |
 | `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a superuser repo, a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
 | `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
@@ -1287,6 +1321,9 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 - `hard_rules_by`: `operator` (default) or `controller`; superuser FLIGHT powers remain a separate
   user-config setting.
 - `always_ask`: labels that require the operator.
+- `uat`: `{ labels: [...], paths: [...] }`. A tested PR waits for your acceptance when its ticket
+  has one of the labels or its diff touches one of the paths (see "Accept or send back a PR at
+  UAT"). Missing or empty means no UAT. A repo block's lists are unioned with user config's.
 
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
@@ -1296,7 +1333,7 @@ A repo block optionally tightens the rules in the first fenced `yaml` block unde
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
 worktree; a change takes effect once merged and fetched. `hard_rules` is unioned with an explicit
 user-config list (even `[]`); it replaces the defaults only when user config supplies no list.
-`always_ask` is unioned, and `hard_rules_by` is `operator` if either source says `operator`.
+`always_ask` and `uat` are unioned, and `hard_rules_by` is `operator` if either source says `operator`.
 The default counts as `operator`, so a block cannot set `controller` unless user config sets it.
 User-config `templates`, `promote_backlog` and `needs` win whenever supplied, including empty maps,
 empty lists and `false`; the block may fill omitted keys. The block may replace `pick_from` and

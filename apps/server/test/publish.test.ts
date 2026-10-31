@@ -1124,6 +1124,38 @@ describe("postMinorFindings", () => {
     expect(posted).toContain("Closes #7.");
   });
 
+  it("keeps a body the seat rewrote with pr_body, and swaps only the hub's section", async () => {
+    const seat = JSON.stringify({
+      headRefName: BRANCH,
+      state: "OPEN",
+      body: `Seat rewrite.\n\n${MINOR_HEADING}\n\nold intro\n\n- \`a.ts\` — old\n\nCloses #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+    });
+    answer(seat);
+    expect(await createPublisher(deps()).postMinorFindings(R, review([minor("first")]))).toEqual({
+      ok: true,
+    });
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("old intro");
+    expect(posted).not.toContain("Changed it.");
+    expect(posted?.match(/Closes #7\./g)).toHaveLength(1);
+    expect(posted?.match(/Opened by/g)).toHaveLength(1);
+    expect(posted?.indexOf("Seat rewrite.")).toBeLessThan(posted?.indexOf(MINOR_HEADING) ?? 0);
+  });
+
+  it("drops the hub's section from a seat's body when there are no minors", async () => {
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: `Seat rewrite.\n\n${MINOR_HEADING}\n\n- x\n\nCloses #7.\n`,
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([]));
+    expect(posted).toContain("Seat rewrite.");
+    expect(posted).not.toContain(MINOR_HEADING);
+  });
+
   it("edits nothing that is not the run's open PR", async () => {
     const rv = review([minor("s")]);
     for (const view of [

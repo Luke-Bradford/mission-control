@@ -336,6 +336,7 @@ describe("the allowlist in phase 2b", () => {
     expect(MC_TOOLS).toEqual({
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
+      prBody: "mcp__mc__pr_body",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",

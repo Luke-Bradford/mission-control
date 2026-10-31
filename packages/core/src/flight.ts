@@ -167,9 +167,14 @@ export interface FlightWakeRecord {
 export interface FlightWakeHistory {
   since: number;
   total: number;
+  /** Wakes after which FLIGHT recorded no decision within FLIGHT_WAKE_IDLE_MS. */
+  idle: number;
   byReason: { reason: string; n: number }[];
   perHour: { at: number; n: number; byReason: Record<string, number> }[];
 }
+
+/** A wake with no decision this soon after it led to nothing. */
+export const FLIGHT_WAKE_IDLE_MS = 4 * 60_000;
 
 /** How far back `GET /api/flight` lists decisions, and the most it lists. */
 export const FLIGHT_VIEW_MS = 24 * 60 * 60_000;
@@ -864,6 +869,8 @@ export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
 export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 /** The setting that keeps what FLIGHT waits on, by target. */
 export const FLIGHT_WAITS_SETTING = "flight.waits";
+/** The setting that keeps the items FLIGHT was last shown, so a seen item is not a new wake reason. */
+export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
 /** The furthest ahead a `wait_on` may look. */
 export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
@@ -1027,6 +1034,16 @@ export interface FlightState {
   planned?: FlightScheduleEntry[];
   /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
+  /** What the wake facts read that FLIGHT is not shown; the digest and `flight_state` drop it. */
+  wake?: FlightWakeInputs;
+}
+
+/** What decides which seats, tickets and items wake FLIGHT; absent: every Ready ticket and item counts. */
+export interface FlightWakeInputs {
+  /** Build seat id to the Ready tickets it could start now: its area, no claim by another, no live wait. */
+  fit: Record<string, string[]>;
+  /** The wake ids of the items FLIGHT has not seen (same key and text). */
+  fresh: string[];
 }
 
 export interface FlightWakeList<T> {
@@ -1040,7 +1057,16 @@ export interface FlightWakeList<T> {
 export interface FlightWake
   extends Omit<
     FlightState,
-    "brief" | "headline" | "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals" | "memory"
+    | "brief"
+    | "headline"
+    | "recent"
+    | "prs"
+    | "seats"
+    | "ledger"
+    | "tickets"
+    | "signals"
+    | "memory"
+    | "wake"
   > {
   memory: {
     heading: typeof FLIGHT_MEMORY_HEADING;

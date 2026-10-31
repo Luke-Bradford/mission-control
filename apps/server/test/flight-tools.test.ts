@@ -44,6 +44,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
+  FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
@@ -121,6 +122,7 @@ import {
   ticketHasRunText,
   trackedText,
   twoAreasText,
+  UAT_PARK,
   untrackedText,
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
@@ -741,7 +743,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.isError).toBe(true);
-    expect(result.text).toContain("neither stopped, paused nor waiting");
+    expect(result.text).toContain("is already running, and is not paused");
     expect(resumeCalls).toEqual([]);
   });
 
@@ -893,6 +895,175 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.isError).toBe(true);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("says what a failed resume put back, and lifts nothing in its account", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    resumeImpl = async () => {
+      // unpauseSeat has already emitted; only the rollback can emit from here
+      seen.length = 0;
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "error",
+        reason: "resume failed",
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    const text =
+      "GUIDO-1's run ended after the failed resume; put back: the crew pause on GUIDO-1 (ci), the operator's stop.";
+    expect(result).toEqual({ text, isError: true });
+    expect(store.flightDecisions(0, 10)[0]?.decision).toBe(text);
+    expect(store.flightDecisions(0, 10)[0]?.decision).not.toContain("lifted");
+    expect(seen).toEqual(expect.arrayContaining(["settings", "agents"]));
+  });
+
+  it("sets no run id on a stop it restores on an ended run", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "error",
+        reason: "resume failed",
+      });
+    };
+
+    await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+  });
+
+  it("does not claim the current state of what a newer operator change left alone", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    resumeImpl = async () => {
+      writeCrewPause(store, { seats: "all", reason: "later", at: NOW + 1, by: "op" }, NOW + 1);
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.text).toBe(
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
+    );
+  });
+
+  it("does not report a resume that started nothing on a stale running row, and keeps the pause", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+  });
+
+  it("does not say a stop is lifted when the operator stopped the seat again", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "stopped",
+        reason: "operator again",
+        updatedAt: NOW + 1,
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).not.toContain("kept lifted");
+    expect(result.text).toContain("Not put back, as the operator changed it since");
+  });
+
+  it("lets a live, paused seat out of its pause without resuming it", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    aliveNow = ["guido-1"];
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    seen.length = 0;
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({
+      text: "GUIDO-1 let out of the pause; its session was already live.",
+    });
+    expect(readCrewPause(store)).toBeNull();
+    expect(resumeCalls).toEqual([]);
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        kind: "pause",
+        decision: "GUIDO-1 let out of the pause; its session was already live.",
+      }),
+    ]);
+    expect(seen).toContain("settings");
+  });
+
+  it("resumes a row left running with no session", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    resumeImpl = async () => {
+      aliveNow = ["guido-1"];
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "Resume started for GUIDO-1's run." });
+    expect(resumeCalls).toEqual(["r-guido"]);
+  });
+
+  it("refuses a run in another lane", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.crew).lane = "home";
+    board(card(7, { labels: ["lane:work"] }));
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "Run is in another lane.", isError: true });
+    expect(resumeCalls).toEqual([]);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+  });
+
+  it("refuses a planner seat while Away is on", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("fao-1", "r-fao");
+    store.setSeatSession({ ...row("fao-1", "r-fao"), state: "stopped", reason: "operator" });
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+
+    const result = await call("resume_seat", { seat: "fao-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: AWAY_PLANNER_REFUSED, isError: true });
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("refuses a run held in another repo and leaves the operator's stop", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido", { repoId: "other" });
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "Run is held.", isError: true });
     expect(store.seatSession("guido-1")?.state).toBe("stopped");
     expect(resumeCalls).toEqual([]);
   });
@@ -3063,6 +3234,22 @@ describe("sync_main", () => {
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
 
+  it("keeps the wake inputs out of what FLIGHT reads, and marks its items seen", async () => {
+    live("guido-1", "r-guido");
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which lane?",
+      at: NOW,
+    });
+    expect(await state()).not.toHaveProperty("wake");
+    const seen = JSON.parse(store.getSetting(FLIGHT_ITEMS_SEEN_SETTING) ?? "{}") as Record<
+      string,
+      string
+    >;
+    expect(Object.keys(seen)).toEqual([`ask:${id}`]);
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3123,7 +3310,11 @@ describe("flight_state", () => {
 
   it("refreshes the delivered snapshot with the state returned to the calling run", async () => {
     const result = await state();
-    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", result);
+    // the baseline keeps the wake inputs FLIGHT is not shown
+    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", {
+      ...(result as object),
+      wake: expect.anything(),
+    });
     stateSeen.mockClear();
     await call("flight_state", { invalid: true });
     await call("flight_state", {}, ctx("guido-1", "r-guido"));
@@ -6327,6 +6518,8 @@ describe("superuser housekeeping", () => {
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
     ["floor-enforced", "only the controller can merge it"],
+    ["second-review-done", "second review was already requested"],
+    ["no-second-reviewer", "no reviewer on another account"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
     elevated();
     runPr();
@@ -6340,6 +6533,33 @@ describe("superuser housekeeping", () => {
     const result = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(result).toHaveProperty("isError", true);
     expect(JSON.stringify(result)).toContain(text);
+  });
+  it("second_review hands the engine FLIGHT's reason and reports the first verdict", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "review", reason: "Blocked", ended: false },
+    });
+    const result = await call("settle_park", {
+      runId: "r-pr",
+      action: "second_review",
+      basis: "the finding misreads the guard",
+    });
+    expect(result).not.toHaveProperty("isError", true);
+    expect(JSON.stringify(result)).toContain("second_review requested");
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling"],
+          action: "second_review",
+          note: "the finding misreads the guard",
+        },
+      ],
+    ]);
   });
   it("grants review reworks with a fix list, as many as it judges right on one head", async () => {
     elevated();
@@ -6536,6 +6756,21 @@ describe("superuser housekeeping", () => {
     expect(clearanceCalls).toEqual([]);
     expect(ghCalls).toEqual([]);
   });
+  it("merge_pr refuses a PR that waits for the operator's acceptance", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      uat: { sha: SHA, from: "review", accepted: false },
+    });
+    const refused = await call("merge_pr", { pr: 12, basis: "ready" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("acceptance");
+    expect(clearanceCalls).toEqual([]);
+    expect(ghCalls).toEqual([]);
+  });
   it("merge_pr refuses an operator stop and another lane", async () => {
     elevated();
     runPr();
@@ -6631,7 +6866,96 @@ describe("superuser housekeeping", () => {
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
   });
-  it("settles FLIGHT's own stale Comms item with its reason, but refuses a seat's", async () => {
+  it("settles a seat's Comms question to CAPCOM with a basis, and it leaves Needs you", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 50 * 60_000,
+      from: "guido-1",
+      to: "CAPCOM",
+      ticket: "mc#910",
+      text: "Which branch should this PR target?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(true);
+    expect(
+      await call("dismiss_item", { key, basis: "Main, as the ticket says." }),
+    ).not.toHaveProperty("isError", true);
+    expect(store.commsSettlement(message.id)).toMatchObject({
+      settledBy: "flight-1",
+      reason: "Main, as the ticket says.",
+    });
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
+  });
+  it("gives each Comms refusal its own text", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const add = (ticket: string | null, from = "guido-1") => {
+      const m = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from,
+        to: "CAPCOM",
+        ticket,
+        text: "A question",
+        label: "question",
+      });
+      if (m === null) throw new Error("message was not stored");
+      return `comms-open:${m.id}`;
+    };
+    const refusal = async (key: string) => {
+      const result = await call("dismiss_item", { key, basis: "Resolved." });
+      expect(result).toHaveProperty("isError", true);
+      return result.text;
+    };
+    store.raiseNote({
+      key: "x",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "Decision",
+      at: NOW,
+    });
+    // a held sender's question
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    const held = add("mc#910");
+    // the operator's own always_ask rule
+    rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+    board(card(911, { labels: ["approval:operator"] }));
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    const asked = add("mc#911");
+    // someone who is no seat of this repo, and a seat of another repo
+    const operator = add(null, "CAPCOM");
+    const otherSeat = add(null, "fao-2");
+    const texts = [
+      await refusal("comms-open:999999"),
+      await refusal(add("other#5")),
+      await refusal("note:x"),
+      await refusal(asked),
+      await refusal(operator),
+      await refusal(otherSeat),
+    ];
+    expect(texts[0]).toMatch(/not found|No open/i);
+    expect(texts[1]).toMatch(/another repo/i);
+    expect(texts[2]).toMatch(/protected/i);
+    expect(texts[3]).toMatch(/protected/i);
+    expect(texts[4]).toMatch(/not from a seat in this repo/i);
+    expect(texts[5]).toMatch(/another repo/i);
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    rulesNow = DEFAULT_REPO_RULES;
+    expect(await refusal(held)).toMatch(/protected/i);
+    const settle = vi.spyOn(store, "settleCommsItem").mockReturnValue(false);
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    const failed = await refusal(add("mc#912"));
+    settle.mockRestore();
+    expect(failed).toMatch(/could not be settled/i);
+    expect(new Set([texts[0], texts[1], texts[2], texts[4], failed]).size).toBe(5);
+    for (const text of texts) expect(text).not.toBe("This item is protected or unavailable.");
+  });
+  it("settles FLIGHT's own stale Comms item with its reason", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
     const message = store.addComms({
@@ -6662,22 +6986,6 @@ describe("superuser housekeeping", () => {
     expect(needsYouItems(attentionItems(cfg, store, nowMs)).some((item) => item.key === key)).toBe(
       false,
     );
-
-    const seatBlocker = store.addComms({
-      at: nowMs - 20 * 60_000,
-      from: "guido-1",
-      to: "flight-1",
-      ticket: "mc#909",
-      text: "The seat still needs a decision",
-      label: "blocker",
-    });
-    if (seatBlocker === null) throw new Error("message was not stored");
-    expect(
-      await call("dismiss_item", {
-        key: `comms-open:${seatBlocker.id}`,
-        basis: "Not FLIGHT's item.",
-      }),
-    ).toHaveProperty("isError", true);
   });
   it("settles FLIGHT's ticketless Comms blocker with its reason", async () => {
     elevated();
@@ -8425,6 +8733,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         by: "op",
         liftedBy: "FLIGHT",
       });
+      // and the log says FLIGHT changed the operator's pause, not that the crew was paused anew
+      expect(store.hubEvents(0).map((e) => e.text)).toContain(
+        "Crew pause by op changed by FLIGHT: all",
+      );
     });
     it("needs superuser to override a stop or a pause", async () => {
       need(cfg.repos[0]).flightPowers = "standard";

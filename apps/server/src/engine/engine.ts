@@ -132,6 +132,10 @@ import {
   TAKE_STALE_MS,
   type TicketView,
   ticketControllerCheck,
+  UAT_PARK,
+  UAT_USE_ROUTE,
+  uatParkText,
+  uatSendBackText,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -230,11 +234,14 @@ export type OperatorRefusal =
   | "not-permitted"
   | "head-moved"
   | "pr-not-open"
+  | "second-review-done"
+  | "no-second-reviewer"
   | "floor-enforced"
   | "before-lift"
   | "rework-undelivered"
   | "use-controller-check"
   | "use-merge-hold"
+  | "use-uat"
   | "engine-error";
 
 export type MergeHoldBy = "CAPCOM" | "FLIGHT";
@@ -251,12 +258,15 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "not-permitted": "this action is not allowed for the caller",
   "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
   "pr-not-open": "the PR is not open",
+  "second-review-done": "a second review was already requested on this head",
+  "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
   "use-merge-hold": MERGE_HOLD_USE_ROUTE,
+  "use-uat": UAT_USE_ROUTE,
   "engine-error": "the engine hit an error; see the hub log",
 };
 
@@ -284,10 +294,10 @@ export interface Engine {
     by?: "CAPCOM" | "FLIGHT",
     opts?: {
       kinds?: readonly string[];
-      action?: "lift" | "rereview" | "accept" | "rework";
+      action?: "lift" | "rereview" | "accept" | "rework" | "second_review";
       /** Stores operator work after lift guards pass but before the resumed run can wake. */
       beforeLift?: () => Promise<boolean>;
-      /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
+      /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
     },
   ): Promise<OperatorResult>;
@@ -299,6 +309,17 @@ export interface Engine {
   controllerCheck(
     runId: string,
     verdict: "pass" | "fail",
+    sha: string,
+    note?: string,
+  ): Promise<OperatorResult>;
+  /**
+   * The operator's verdict on a run parked for acceptance (UAT). `accept` (only while the PR head is
+   * still the parked head) lets the next pass merge through the usual gates; `send_back` sends the
+   * note to the seat as a new rework round and ends the park.
+   */
+  uat(
+    runId: string,
+    verdict: "accept" | "send_back",
     sha: string,
     note?: string,
   ): Promise<OperatorResult>;
@@ -360,11 +381,19 @@ export function reviewerOf(
   config: CcConfig,
   seatId: string,
   role?: string,
-  avail?: { store: Store; now: number; avoid?: ReadonlySet<string> },
+  avail?: {
+    store: Store;
+    now: number;
+    avoid?: ReadonlySet<string>;
+    /** Seats on this account are never chosen (a second review runs on another account). */
+    exceptAccount?: string;
+  },
 ): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
-  const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
+  const seats = (session?.seats ?? []).filter(
+    (x) => !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
+  );
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
   if (avail === undefined) return pool[0] ?? null;
@@ -432,12 +461,19 @@ export function createEngine(deps: EngineDeps): Engine {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
-  const reviewerFor = (run: Run): CrewSeatConfig | null =>
-    reviewerOf(config, run.agentId, reviewRoleOf(run), {
+  const reviewerFor = (run: Run): CrewSeatConfig | null => {
+    // while FLIGHT's second review of the head is the one wanted, it runs on another account
+    const sha = store.runPush(run.id)?.sha;
+    const second = sha === undefined ? undefined : run.loop?.flightSecondReview?.[sha];
+    return reviewerOf(config, run.agentId, reviewRoleOf(run), {
       store,
       now: now(),
       avoid: budgetFailedSeats(store, run),
+      ...(second !== undefined && second.epoch === run.loop?.epoch
+        ? { exceptAccount: second.firstAccountId }
+        : {}),
     });
+  };
   /** The input + output tokens a review run on this seat's account may use. */
   const reviewBudgetOf = (seatId: string): number => {
     const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
@@ -1076,6 +1112,76 @@ export function createEngine(deps: EngineDeps): Engine {
     return { park: controllerCheckParkText(sha, check ?? "") };
   }
 
+  /**
+   * Why the repo's `uat` rule makes this merge wait for the operator's acceptance: null merges.
+   * A ticket label or a touched path matches; a diff that cannot be read counts as a match, so the
+   * operator decides. Once the operator accepted this head it waits no more.
+   */
+  async function uatHold(run: Run, cur: RunLoop, sha: string): Promise<string | null> {
+    if (cur.uat?.sha === sha && cur.uat.accepted) return null;
+    const rules = await rulesFor(run.repoId);
+    const { labels, paths } = rules?.uat ?? { labels: [], paths: [] };
+    if (labels.length === 0 && paths.length === 0) return null;
+    const issue = issueOf(run);
+    const card = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    // without the ticket's labels the rule cannot be judged: the operator decides
+    if (labels.length > 0 && card === undefined) return "its ticket's labels could not be read";
+    const wanted = new Set(labels.map((l) => l.toLowerCase()));
+    const label = card?.labels.find((l) => wanted.has(l.toLowerCase()));
+    if (label !== undefined) return `ticket label ${label}`;
+    if (paths.length === 0) return null;
+    try {
+      const touched = await publisher.hardRuleTouches(run, sha, paths);
+      return touched.length === 0 ? null : `it changes ${touched[0]}`;
+    } catch (e) {
+      log(`${run.id}: could not read the diff for its uat rule: ${(e as Error).message}`);
+      return "its diff could not be read";
+    }
+  }
+
+  /**
+   * The operator's note to the author of a run that was sent back (a failed controller check, a
+   * send back at UAT). A run off its seat gets it through Comms and a pending line, and the engine
+   * wakes it; otherwise it goes straight to the seat. False when it could not be delivered.
+   */
+  async function sendBack(
+    run: Run,
+    loop: RunLoop,
+    next: RunLoop,
+    text: string,
+    key: string,
+    mirror: string,
+  ): Promise<boolean> {
+    const row = {
+      at: now(),
+      from: COMMS_CAPCOM,
+      to: run.agentId,
+      ticket: run.ticket ?? null,
+      ref: run.ticket ?? null,
+      targetRunId: run.id,
+      text: commsMirror(text, mirror),
+    };
+    if (loop.aside) {
+      // off its seat (the seat may hold another run now): the note waits in Comms for the
+      // run, and the engine wakes it, in working, once its seat is free
+      const stored = store.addComms(row);
+      if (stored === null) return false;
+      // the pending line below carries the note to the seat: the inbox must not repeat it
+      store.markCommsInboxRead(run.agentId, [stored.id]);
+      next.pendingLine = { key, text };
+      next.aside = { ...loop.aside, wake: true };
+      return true;
+    }
+    const sent = await supervisor.send(run.id, key, text);
+    // a paused seat reads it when it resumes: the verdict is recorded all the same
+    if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId)) return false;
+    const stored = store.addComms(row);
+    // delivered by the line above: not again from the inbox
+    if (stored !== null && (sent === "sent" || sent === "dup"))
+      store.markCommsInboxRead(run.agentId, [stored.id]);
+    return true;
+  }
+
   async function act(
     a: LoopAction,
     run: Run,
@@ -1512,6 +1618,23 @@ export function createEngine(deps: EngineDeps): Engine {
             `${run.id}:${cur.epoch}:parked:controller-check:${a.sha}`,
             run.id,
             parkedEventText(check.park),
+            at,
+          );
+          out.again = true;
+          return;
+        }
+        // the repo's `uat` rule holds the merge until the operator accepts this head
+        const uatWhy = await uatHold(run, cur, a.sha);
+        if (uatWhy !== null) {
+          const reason = uatParkText(a.sha, uatWhy);
+          out.parked = true;
+          cur.uat = { sha: a.sha, from: cur.phase, accepted: false };
+          cur.phase = "parked";
+          cur.parked = { kind: UAT_PARK, reason, ended: false };
+          store.addLoopEvent(
+            `${run.id}:${cur.epoch}:parked:uat:${a.sha}`,
+            run.id,
+            parkedEventText(reason),
             at,
           );
           out.again = true;
@@ -2399,6 +2522,29 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** A reported second review is logged as a FLIGHT decision with both verdicts. */
+  function logSecondReview(rv: ReviewRow): void {
+    const author = store.run(rv.authorRunId);
+    const second = author?.loop?.flightSecondReview?.[rv.sha];
+    const row = store.review(rv.id);
+    if (author === null || second === undefined || second.epoch !== rv.epoch) return;
+    if (row?.state !== "reported") return;
+    const first = store.review(second.firstReviewId);
+    const said = (r: ReviewRow | null): string =>
+      r?.verdict ? `spec ${r.verdict.spec}, quality ${r.verdict.quality}` : "no verdict";
+    store.addFlightDecision({
+      at: now(),
+      kind: "settle",
+      seatId: author.agentId,
+      targetRunId: author.id,
+      ref: null,
+      questionId: null,
+      about: "second_review",
+      decision: `Second review ${row.blocking > 0 ? "holds" : "passes"} (${said(row)}); the first held (${said(first)})`,
+      basis: second.reason,
+    });
+  }
+
   function kickReviews(): Promise<void> {
     if (!live()) return Promise.resolve();
     return onChain(REVIEWS_CHAIN, superviseReviews);
@@ -2421,6 +2567,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
           if (e.kind === "findings") {
+            logSecondReview(rv);
             // The author run (aside or not) is looked at now, so its rework is flagged before a
             // slow review start can let the seat take a new ticket; once is enough (a second
             // pass would only retry a transient step ahead of its tick).
@@ -2566,12 +2713,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         // only the controller's verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
+        if (kind === UAT_PARK) return refuse("use-uat");
         if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
           return refuse("wrong-action");
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
+        let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (
             (by === "CAPCOM" && opts.action !== "accept") ||
@@ -2594,6 +2743,32 @@ export function createEngine(deps: EngineDeps): Engine {
             !(kind === "review-failed" && opts.action === "rereview")
           )
             return refuse("wrong-action");
+          if (opts.action === "second_review") {
+            if (loop.flightSecondReview?.[pushed.sha] !== undefined)
+              return refuse("second-review-done");
+            const first = store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.sha === pushed.sha && r.state === "reported")
+              .at(-1);
+            // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
+            if (!first || first.blocking === 0) return refuse("wrong-action");
+            const paths = await publisher.hardRuleTouches(
+              run,
+              pushed.sha,
+              FLIGHT_FLOOR_ENFORCING_PATHS,
+            );
+            if (paths.length === 0) return refuse("wrong-action");
+            const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
+            if (
+              reviewerOf(config, run.agentId, reviewRoleOf(run), {
+                store,
+                now: now(),
+                exceptAccount: firstAccountId,
+              }) === null
+            )
+              return refuse("no-second-reviewer");
+            secondOf = { firstReviewId: first.id, firstAccountId };
+          }
           if (opts.action === "accept") {
             const review = store
               .reviewsOfRun(run.id)
@@ -2629,8 +2804,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
         if (kind === "review" || kind === "review-ruling") {
-          next.phase = opts?.action === "accept" ? "review" : "working";
-          if (opts?.action !== "accept") {
+          const staysInReview = opts?.action === "accept" || opts?.action === "second_review";
+          next.phase = staysInReview ? "review" : "working";
+          if (!staysInReview) {
             next.reviewWaivedSha = null;
             next.flightClearedSha = null;
           }
@@ -2649,6 +2825,14 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = pushed?.sha ?? null;
           next.flightClearedSha = pushed?.sha ?? null;
           next.phase = "review";
+        } else if (opts?.action === "second_review" && secondOf !== null && pushed) {
+          next.reviewWaivedSha = null;
+          next.flightClearedSha = null;
+          next.phase = "review";
+          next.flightSecondReview = {
+            ...loop.flightSecondReview,
+            [pushed.sha]: { epoch: next.epoch, ...secondOf, reason: opts.note ?? "" },
+          };
         } else if (opts?.action === "rereview" || opts?.action === "rework") {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
@@ -2771,46 +2955,105 @@ export function createEngine(deps: EngineDeps): Engine {
             flightClearedSha: null,
           };
           const text = controllerCheckFailText(held.sha, note);
-          const row = {
-            at,
-            from: COMMS_CAPCOM,
-            to: run.agentId,
-            ticket: run.ticket ?? null,
-            ref: run.ticket ?? null,
-            targetRunId: run.id,
-            text: commsMirror(text, "Controller check failed; the full note was sent to the seat."),
-          };
-          if (loop.aside) {
-            // off its seat (the seat may hold another run now): the note waits in Comms for the
-            // run, and the engine wakes it, in working, once its seat is free
-            const stored = store.addComms(row);
-            if (stored === null) return refuse("rework-undelivered");
-            // the pending line below carries the note to the seat: the inbox must not repeat it
-            store.markCommsInboxRead(run.agentId, [stored.id]);
-            next.pendingLine = {
-              key: `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+          const key = `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`;
+          if (
+            !(await sendBack(
+              run,
+              loop,
+              next,
               text,
-            };
-            next.aside = { ...loop.aside, wake: true };
-          } else {
-            const sent = await supervisor.send(
-              run.id,
-              `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
-              text,
-            );
-            // a paused seat reads it when it resumes: the verdict is recorded all the same
-            if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId))
-              return refuse("rework-undelivered");
-            const stored = store.addComms(row);
-            // delivered by the line above: not again from the inbox
-            if (stored !== null && (sent === "sent" || sent === "dup"))
-              store.markCommsInboxRead(run.agentId, [stored.id]);
-          }
+              key,
+              "Controller check failed; the full note was sent to the seat.",
+            ))
+          )
+            return refuse("rework-undelivered");
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
             run.id,
             `controller check failed on ${short}: sent back for rework`,
+            at,
+          );
+        }
+        lastTransient.delete(run.id);
+        bus.emit("agents");
+        bus.emit("attention");
+        result = { lifted: true };
+        await pass(run.id);
+      }).then(() => result);
+    },
+
+    uat(runId, verdict, sha, note) {
+      let result: OperatorResult = { lifted: false, reason: "engine-error" };
+      const refuse = (reason: OperatorRefusal): void => {
+        result = { lifted: false, reason };
+      };
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      return onChain(runId, async () => {
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run === null || !loop) return refuse("not-parked");
+        const held = loop.uat;
+        if (
+          run.endedAt !== null ||
+          loop.phase !== "parked" ||
+          loop.parked?.kind !== UAT_PARK ||
+          loop.parked.ended ||
+          !held
+        )
+          return refuse("not-parked");
+        // the verdict is for the head the operator looked at
+        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
+        const at = now();
+        const short = held.sha.slice(0, 7);
+        if (verdict === "accept") {
+          // an acceptance is for the head the operator looked at; a send back is allowed on a moved head
+          const pushed = store.runPush(run.id);
+          const pr = findPr(run, loop);
+          if (pr?.state !== "open") return refuse("pr-not-open");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
+          store.setRunLoop(run.id, {
+            ...loop,
+            phase: held.from,
+            parked: null,
+            uat: { ...held, accepted: true },
+          });
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:uat:${held.sha}:accept`,
+            run.id,
+            `accepted by the operator on ${short}`,
+            at,
+          );
+        } else {
+          const next: RunLoop = {
+            ...loop,
+            epoch: loop.epoch + 1,
+            phase: "working",
+            parked: null,
+            uat: null,
+            ciFails: 0,
+            transient: 0,
+            lastRefusal: null,
+            unparkedAt: at,
+            reviewWaivedSha: null,
+            flightClearedSha: null,
+          };
+          if (
+            !(await sendBack(
+              run,
+              loop,
+              next,
+              uatSendBackText(held.sha, note ?? ""),
+              `${run.id}:uat-send-back:${held.sha}:${loop.epoch}`,
+              "Sent back at acceptance; the full note was sent to the seat.",
+            ))
+          )
+            return refuse("rework-undelivered");
+          store.setRunLoop(run.id, next);
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
+            run.id,
+            `sent back by the operator on ${short}`,
             at,
           );
         }

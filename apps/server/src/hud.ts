@@ -82,6 +82,7 @@ import {
   strayText,
   type TestLockState,
   type TokenUsage,
+  UAT_PARK,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention } from "./attention-holds.ts";
@@ -806,7 +807,9 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.kind !== "blocked") return false;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-  return park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK;
+  return (
+    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
+  );
 }
 
 /**
