@@ -6600,6 +6600,55 @@ describe("the engine runs reviews", () => {
       expect(h.taken).toHaveLength(takesBefore);
     });
 
+    describe("a run stopped on someone else's call", () => {
+      const WAIT_AT_LIMIT = { kind: "review", reason: "review limit", ended: false };
+      /** A younger run of the seat with findings waiting, set aside in review. */
+      const waitingB = "guido-1:b";
+
+      /** A is in review on its seat, then stops at the review-round limit. */
+      async function stoppedAtLimit(): Promise<void> {
+        seatIdle(RUN);
+        store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: WT });
+        await toReview();
+        // (the mock records a refused attempt too: only the park's counts)
+        h.asides.length = 0;
+        h.asideOn = true;
+        store.upsertRun(
+          run({
+            id: waitingB,
+            startedAt: START + MIN,
+            seq: 3,
+            ticket: `${REPO}#8`,
+            loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/b", wake: true } },
+          }),
+        );
+        setLoop({ phase: "parked", parked: WAIT_AT_LIMIT });
+      }
+
+      it("is set aside, and the seat works its other run on the next pass", async () => {
+        await stoppedAtLimit();
+        await h.engine.reconcileRun(RUN);
+        expect(h.asides).toEqual([RUN]);
+        expect(asideRun()).toEqual({ worktree: WT, wake: false });
+        await vi.waitFor(() => expect(h.wakes).toEqual([waitingB]));
+        // the wait is still on: A is not woken
+        expect(loopOf().phase).toBe("parked");
+      });
+
+      it("rejoins its seat when the wait is settled", async () => {
+        await stoppedAtLimit();
+        await h.engine.reconcileRun(RUN);
+        store.setRunLoop(waitingB, { ...NEW_LOOP, phase: "review" });
+        store.setRunEnded(waitingB, clock, "ok", "engine");
+        store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+        h.wakes.length = 0;
+        expect(await operate(RUN, "CAPCOM", { kinds: ["review"] })).toBe(true);
+        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+        await vi.waitFor(() => expect(asideRun()).toBeNull());
+        expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      });
+    });
+
     it("the ticket being built is not set aside while its turn runs", async () => {
       await setAside();
       const b = "guido-1:b";
