@@ -78,10 +78,11 @@ const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``
  * (Mission Control pushes and opens the draft PR); a read-only seat reports in its reply. Either
  * asks FLIGHT with mc ask_flight; FLIGHT takes what is the operator's to them with its brief.
  */
-const WRITER_CLOSE =
-  "Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make.";
-const READONLY_CLOSE =
-  "You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. Reply with your findings, starting with DONE.";
+/** When a seat calls FLIGHT (mc call_flight), as the briefs tell it. */
+const CALL_FLIGHT_WHEN =
+  "Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes.";
+const WRITER_CLOSE = `Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make. ${CALL_FLIGHT_WHEN}`;
+const READONLY_CLOSE = `You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. ${CALL_FLIGHT_WHEN} Reply with your findings, starting with DONE.`;
 
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
 const PLANNER_CLOSE =
@@ -263,6 +264,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
     "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
     "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
+    "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
     "",
     `## Ticket ${i.repo}#${i.issue}`,
     "",

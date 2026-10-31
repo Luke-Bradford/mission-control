@@ -1016,7 +1016,8 @@ export async function createSession(
     (!isDeepStrictEqual(membership(current), membership(applied)) ||
       !isDeepStrictEqual(current.loops, applied.loops) ||
       crew.worktrees !== applied.crew?.worktrees ||
-      !isDeepStrictEqual(crew.denyRead, applied.crew?.denyRead))
+      !isDeepStrictEqual(crew.denyRead, applied.crew?.denyRead) ||
+      !isDeepStrictEqual(crew.allowRead, applied.crew?.allowRead))
   ) {
     throw new ConfigWriteError(
       "conflict",

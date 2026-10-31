@@ -46,6 +46,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
@@ -103,6 +104,7 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.askFlight,
+      MC_TOOL_NAMES.callFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsInbox,
@@ -114,6 +116,7 @@ export const MC_TOOL_GRANTS: Readonly<
   "read-only": {
     base: [
       MC_TOOL_NAMES.askFlight,
+      MC_TOOL_NAMES.callFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsInbox,
@@ -124,6 +127,7 @@ export const MC_TOOL_GRANTS: Readonly<
   },
   scratch: {
     base: [
+      MC_TOOL_NAMES.callFlight,
       MC_TOOL_NAMES.reportFindings,
       MC_TOOL_NAMES.restoreFile,
       MC_TOOL_NAMES.commsRead,
@@ -311,6 +315,7 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.askFlight,
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsInbox,
@@ -326,6 +331,7 @@ export const READONLY_TOOLS = [
   "Bash",
   "Skill",
   MC_TOOLS.askFlight,
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsInbox,
@@ -342,6 +348,7 @@ export const SCRATCH_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
   MC_TOOLS.commsRead,
@@ -876,6 +883,13 @@ export interface CrewSandboxInput {
   denyRead: string[];
   /** The hub-owned pnpm store seats may read but never write. */
   pnpmStoreDir: string;
+  /**
+   * The node and pnpm install folders the seat's tools run from, re-allowed for reads inside the
+   * home folder's deny. Default [].
+   */
+  toolchainDirs?: string[];
+  /** `crew.allow_read`: further absolute paths re-allowed for reads inside home. Default []. */
+  allowRead?: string[];
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
 }
@@ -917,6 +931,17 @@ export const SANDBOX_DENY_READ_HOME = [
   "Library/Keychains",
 ] as const;
 
+/**
+ * What a seat may read in the home folder (relative to home), which the sandbox otherwise denies
+ * whole: git's global config. Files, not `.config/git`, so the folder's `credentials` stays denied.
+ */
+export const SANDBOX_ALLOW_READ_HOME = [
+  ".gitconfig",
+  ".config/git/config",
+  ".config/git/ignore",
+  ".config/git/attributes",
+] as const;
+
 export const CODEX_MIN_VERSION = "0.154.0";
 export const CODEX_COMMAND = "codex";
 /** The shell the Codex process environment and command approvals must name. */
@@ -953,15 +978,22 @@ const POST_HOOK_MATCHER = "Bash";
 
 /**
  * The `hooks` block (spike 2026-10-21): the guard before every tool call
- * (PreToolUse, matcher `*`), and after each Bash call ends (PostToolUse, PostToolUseFailure), when
- * a call that holds the test lock releases it.
+ * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
+ * a call that holds the test lock releases it, and when the seat stops (Stop), which may carry it on.
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
-  const entry = (matcher: string) => [
-    { matcher, hooks: [{ type: "command", command: hook.command, timeout: hook.timeoutS }] },
-  ];
+  const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
+  // exit 2 from a Stop hook blocks the stop: a Stop that gets no verdict must let the stop stand
+  const stopCommand = hook.command.replace(/ \|\| exit 2$/, " || true");
   const out = {} as Record<GuardHookEvent, unknown[]>;
-  for (const e of GUARD_HOOK_EVENTS) out[e] = entry(e === "PreToolUse" ? "*" : POST_HOOK_MATCHER);
+  for (const e of GUARD_HOOK_EVENTS) {
+    // a Stop has no tool to match: the CLI ignores a matcher there, so none is written
+    out[e] = [
+      e === "Stop"
+        ? { hooks: [{ ...run, command: stopCommand }] }
+        : { matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] },
+    ];
+  }
   if (hook.trim !== undefined) {
     out.PostToolUse.push({
       matcher: "*",
@@ -991,6 +1023,48 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
   ];
 }
 
+/** The CLI's shared temp folders (`/tmp/claude-<uid>`), denied whole to a seat with its own temp root. */
+const TEMP_DENY_GLOBS = ["/tmp/claude-*", "/private/tmp/claude-*"] as const;
+
+const holds = (parent: string, path: string) =>
+  path === parent || path.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
+
+/**
+ * What a seat's sandbox re-allows for reads inside the denied home folder: the seat's own paths,
+ * its toolchain, git's global config and `crew.allow_read`. A re-allow beats a deny in the CLI, so
+ * one that holds a denied path (a credential folder, the data dir) or home itself is refused.
+ */
+function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
+  const own = [
+    ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
+    i.pnpmStoreDir,
+    i.cwd,
+    i.gitCommonDir,
+    i.worktreeGitDir,
+  ];
+  // The operator's and the toolchain's entries are refused inside a denied path too; the seat's
+  // own paths may sit in a denied parent on purpose.
+  const given = [...(i.toolchainDirs ?? []), ...(i.allowRead ?? [])];
+  const homeFiles = SANDBOX_ALLOW_READ_HOME.map((d) => `${i.home}/${d}`);
+  const allows = [...own, ...(i.toolchainDirs ?? []), ...homeFiles, ...(i.allowRead ?? [])];
+  for (const p of allows) {
+    if (!p.startsWith("/")) throw new Error(`crew sandbox: allowRead ${p} must be absolute`);
+    if (holds(p, i.home)) throw new Error(`crew sandbox: allowRead ${p} holds the home folder`);
+    const d = denied.find((x) => holds(p, x));
+    if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} holds denied ${d}`);
+  }
+  for (const p of given) {
+    const d = denied.find((x) => holds(x, p));
+    if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} is inside denied ${d}`);
+    // the CLI's shared temp folder is denied by a glob, which `holds` does not read
+    if (i.tempRoot !== undefined && TEMP_DENY_GLOBS.some((g) => p.startsWith(g.slice(0, -1))))
+      throw new Error(
+        `crew sandbox: allowRead ${p} is inside denied ${TEMP_DENY_GLOBS.join(", ")}`,
+      );
+  }
+  return [...new Set(allows)];
+}
+
 /**
  * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
  * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
@@ -1000,7 +1074,7 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
 export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
-  const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
+  const tempDenies = i.tempRoot === undefined ? [] : [...TEMP_DENY_GLOBS];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
   if (!i.pnpmStoreDir.startsWith("/"))
@@ -1026,17 +1100,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // config.worktree all fail; git reads and the full suite still work). That also covers
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.
         allowWrite: i.tempRoot === undefined ? [] : [i.tempRoot],
-        ...(i.tempRoot === undefined
-          ? {}
-          : {
-              allowRead: [
-                i.tempRoot,
-                i.pnpmStoreDir,
-                ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
-                  tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
-                ),
-              ],
-            }),
+        // Home is denied whole; the seat's own paths, toolchain and git config are re-allowed in it.
+        allowRead: sandboxReadAllows(i, [...denyRead, ...tempReadDenies]),
         // The worktree's `.git` pointer (a writer's worktree is otherwise writable), which
         // rewriting would send the host's own git calls elsewhere; the clone's whole git dir; and
         // the worktree's own git dir (inside it, named so the grant reads plainly). A read-only
@@ -1056,7 +1121,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
         // read: the hub, the loops, the other crew clones and the operator's own working folders.
-        denyRead: [...denyRead, ...tempDenies, ...tempReadDenies],
+        denyRead: [i.home, ...denyRead, ...tempDenies, ...tempReadDenies],
       },
     },
   });
@@ -1222,7 +1287,14 @@ export type SessionEvent =
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
   /** Codex sends its exit code; the Claude stream carries none and its Post hook does. */
-  | { kind: "tool-result"; toolUseId: string; ok?: boolean; exitCode?: number | null }
+  | {
+      kind: "tool-result";
+      toolUseId: string;
+      ok?: boolean;
+      exitCode?: number | null;
+      /** UTF-8 bytes of the result the model reads; Codex events carry none. */
+      bytes?: number;
+    }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }

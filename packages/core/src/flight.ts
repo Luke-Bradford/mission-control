@@ -1,6 +1,7 @@
 import { priorityRank } from "./board.ts";
 import type { AttentionKind, HudColumn, TicketSize } from "./hud.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
@@ -67,6 +68,7 @@ export const FLIGHT_DECISION_KINDS = [
   "status",
   "issue",
   "hub",
+  "wait",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -102,14 +104,20 @@ export interface FlightView {
     live: boolean;
     /** The turn FLIGHT's session is on, and the last before a fresh one; null when it has no run. */
     turns?: { n: number; max: number } | null;
+    /** The context of its last turn and the size at which it hands over; null with no run. */
+    context?: { tokens: number | null; rotateAt: number; text: string | null } | null;
   } | null;
   decisions: FlightDecision[];
   /** Last day's decisions that ask the controller, from the metrics scan rather than the view cap. */
   controllerDecisions?: FlightDecision[];
   /** The server always sets it with a seat; optional so older fixtures still type. */
   wake?: FlightWakeStatus;
+  /** The last day's wakes by reason and by hour, for the FLIGHT page. */
+  wakeHistory?: FlightWakeHistory;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
   blocked?: FlightBlocked[];
+  /** What each of FLIGHT's last-day prompts took by section, newest first. */
+  promptWakes?: PromptWakeCost[];
 }
 
 /** A ticket that waits on other work: what it waits on, the chain to the root, and the wait so far. */
@@ -146,6 +154,21 @@ export interface FlightWakeStatus {
   wokeOn: string[] | null;
   /** From a real schedule only: the re-wake backstop while work is pending, or the next planned entry. */
   nextWakeAt: number | null;
+}
+
+/** One wake stored on its run: when it fired and the fact categories that woke FLIGHT. */
+export interface FlightWakeRecord {
+  runId: string;
+  at: number;
+  reasons: string[];
+}
+
+/** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
+export interface FlightWakeHistory {
+  since: number;
+  total: number;
+  byReason: { reason: string; n: number }[];
+  perHour: { at: number; n: number; byReason: Record<string, number> }[];
 }
 
 /** How far back `GET /api/flight` lists decisions, and the most it lists. */
@@ -860,7 +883,21 @@ export interface FlightSeatState {
 }
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
-export const FLIGHT_IDLE_MS = 15 * 60_000;
+export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** A park this old, still unsettled, is a wake reason. */
+export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
+/** A PR green and reviewed that has not merged for this long is a wake reason. */
+export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
+export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
+/** An item not seen stale for this long, and then stale again, is told as a new reason. */
+export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
+/** FLIGHT's request to the controller, unanswered this long, is a wake reason. */
+export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
+/** The setting that keeps what FLIGHT waits on, by target. */
+export const FLIGHT_WAITS_SETTING = "flight.waits";
+/** The furthest ahead a `wait_on` may look. */
+export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
 export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
@@ -875,6 +912,13 @@ export const FLIGHT_SIGNAL_KINDS = [
   "chain_stalled",
   "github_budget",
   "hub_error",
+  "old_park",
+  "merge_stalled",
+  "item_stale",
+  "run_no_pr",
+  "controller_unanswered",
+  "wait_over",
+  "seat_call",
 ] as const;
 export interface FlightSignal {
   checks?: string[];
@@ -990,6 +1034,8 @@ export interface FlightState {
   reviewQueue?: {
     queued: number;
     running: number;
+    /** Minutes the oldest queued review has waited; 0 with none queued. */
+    waitMin?: number;
     seats: { seat: string; queued: number; running: number; idle: boolean }[];
   };
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
@@ -1056,6 +1102,10 @@ export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
+/** What a re-wake says when FLIGHT left reasons of the last wake without a decision. */
+export const FLIGHT_LEFT_HEAD = "You left these:";
+/** The one Needs-you note raised when a second wake leaves the same reasons unhandled. */
+export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
  * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every
@@ -1064,6 +1114,27 @@ export const FLIGHT_REWAKE_MS = 60 * 60_000;
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
+/** A run whose context passes this many tokens writes its handover and gets a fresh session. */
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/** The repo memory topic FLIGHT writes its handover to (with `remember`). */
+export const FLIGHT_HANDOVER_TOPIC = "handover";
+export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
+export const handoverKey = (runId: string): string => `flight:handover:${runId}`;
+/**
+ * The start brief's text for a fresh session: where to read what is going on, and the handover.
+ * One line, as the brief's digest stays on the lines after it.
+ */
+export const freshStartLine = (handover: { body: string; updatedAt: number } | null): string =>
+  `Fresh session: nobody will tell you what is going on. Read mc flight_state first, then your tracked items, plans, memory (recall) and the latest handover.${
+    handover === null
+      ? " No handover is on file."
+      : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
+  }`;
+/** "context 142K · fresh session at 150K"; null while the context is unknown. */
+export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
+  tokens === null
+    ? null
+    : `context ${Math.round(tokens / 1000)}K · fresh session at ${Math.round(rotateAt / 1000)}K`;
 /** Starts of FLIGHT itself per hour, rotations not counted. */
 export const FLIGHT_STARTS_MAX = 3;
 export const FLIGHT_WAKE_HEAD = "[Mission Control] Wake:";
@@ -1186,6 +1257,7 @@ export function wakeLine(
   s: FlightState,
   digest: FlightWake | FlightState = s,
   causes: string[] = ["initial"],
+  preface = "",
 ): string {
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
@@ -1194,7 +1266,7 @@ export function wakeLine(
     (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
       ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}\n${JSON.stringify(digest)}`;
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

@@ -60,6 +60,7 @@ import {
   type PrCheck,
   type PullRequestView,
   projectAtReset,
+  QA_FLOW_METRICS,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type ReloadResult,
@@ -100,6 +101,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
+import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -1361,6 +1363,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
+  ["GET", "/api/repos/shop-app/map/tree"],
+  ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1480,6 +1484,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/hud-screenshots/:id"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
+  ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
 ];
 
@@ -2297,7 +2302,12 @@ describe("local access", () => {
         expect(r.json()).toEqual({ error: "map collector unavailable" });
         continue;
       }
-      if (url === "/api/repos/shop-app/map/conflicts" || url === "/api/repos/shop-app/map") {
+      if (
+        url === "/api/repos/shop-app/map/conflicts" ||
+        url === "/api/repos/shop-app/map" ||
+        url === "/api/repos/shop-app/map/tree" ||
+        url === "/api/repos/shop-app/map/live"
+      ) {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
@@ -4165,6 +4175,140 @@ describe("boards, escalations, health", () => {
     } finally {
       await a.close();
     }
+  });
+
+  describe("the map's tree is built once per default-branch head", () => {
+    const commitOnDefault = (checkout: string, file: string) => {
+      const git = (...args: string[]) =>
+        execFileSync("git", [
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ]);
+      writeFileSync(join(checkout, file), "export const added = 1;\n");
+      git("add", ".");
+      git("commit", "-qm", `add ${file}`);
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+    };
+    const openMap = (transcriptPath: string) => {
+      withCrew();
+      const session = config.crew?.sessions[0];
+      if (!session) throw new Error("fixture session missing");
+      const checkout = mapCheckout(dir);
+      session.checkout = checkout;
+      writeFileSync(transcriptPath, "");
+      store.upsertRun(run({ id: "tree-run", agentId: "guido-1", transcriptPath }));
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "tree-run",
+        cliSessionId: null,
+        vendor: "claude",
+        state: "running",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      const builds: string[] = [];
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        supervisor: stubSupervisor(),
+        // a slow build: a rebuild on every load would blow the 500 ms budget
+        mapTree: async (...args) => {
+          builds.push(args[0]);
+          await new Promise((r) => setTimeout(r, 600));
+          return await mapTree(...args);
+        },
+      });
+      return { a, builds, checkout };
+    };
+    const call = (name: string, input: Record<string, string>) =>
+      `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: name, name: "Read", input }] } })}\n`;
+
+    it("builds the tree once however often the map loads, and again when the head moves", async () => {
+      const { a, builds, checkout } = openMap(join(dir, "tree.jsonl"));
+      try {
+        for (let i = 0; i < 3; i++) {
+          clock += 5000;
+          const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+          expect(r.statusCode).toBe(200);
+        }
+        expect(builds).toHaveLength(1);
+        commitOnDefault(checkout, "added.ts");
+        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        expect(builds).toHaveLength(2);
+        expect(moved.json().tree).toContainEqual(expect.objectContaining({ path: "added.ts" }));
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("answers a repeat tree request with 304 and a seat's move rebuilds only the live part", async () => {
+      const transcriptPath = join(dir, "move.jsonl");
+      const { a, builds } = openMap(transcriptPath);
+      try {
+        const tree = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/tree" });
+        expect(tree.statusCode).toBe(200);
+        const etag = tree.headers.etag as string;
+        expect(etag).toBeTruthy();
+        expect(tree.json()).not.toHaveProperty("seats");
+        const repeat = await a.inject({
+          method: "GET",
+          url: "/api/repos/shop-app/map/tree",
+          headers: { "if-none-match": etag },
+        });
+        expect(repeat.statusCode).toBe(304);
+
+        const before = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(before.json()).not.toHaveProperty("tree");
+        expect(before.json().seats[0].recent).toEqual([]);
+        appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
+        clock += 5000;
+        const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
+          "packages/core/src/map.ts",
+        ]);
+        appendFileSync(transcriptPath, call("r2", { file_path: "packages/core/src/types.ts" }));
+        clock += 5000;
+        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(moved.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
+          "packages/core/src/map.ts",
+          "packages/core/src/types.ts",
+        ]);
+        const same = await a.inject({
+          method: "GET",
+          url: "/api/repos/shop-app/map/tree",
+          headers: { "if-none-match": etag },
+        });
+        expect(same.statusCode).toBe(304);
+        expect(builds).toHaveLength(1);
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("answers the map in under 500 ms once the tree is cached", async () => {
+      const { a, builds } = openMap(join(dir, "fast.jsonl"));
+      try {
+        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        // past the whole-payload cache, so only the tree cache can keep this load fast
+        clock += 16_000;
+        const start = performance.now();
+        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        expect(performance.now() - start).toBeLessThan(500);
+        expect(builds).toHaveLength(1);
+      } finally {
+        await a.close();
+      }
+    });
   });
 
   it("does not build the map until a viewer requests it", async () => {
@@ -6383,7 +6527,12 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
+      expect(r.json()).toEqual({
+        seat: null,
+        decisions: [],
+        controllerDecisions: [],
+        promptWakes: [],
+      });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6419,8 +6568,35 @@ describe("crew routes", () => {
         state: null,
         live: false,
         turns: null,
+        context: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("GET /api/flight returns FLIGHT's wakes by section", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1" }));
+      const now = Date.now();
+      const sections = (n: number) => [{ section: "digest" as const, bytes: n * 4, tokens: n }];
+      store.recordPromptSections("flight-run", 0, now - 3000, sections(100));
+      store.recordPromptSections("flight-run", 1, now - 1000, [
+        ...sections(50),
+        { section: "tool_results", bytes: 8, tokens: 2 },
+      ]);
+      store.recordPromptSections("flight-run", 2, now - 25 * 60 * 60_000, sections(1));
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.promptWakes?.map((w) => w.wake)).toEqual([1, 0]);
+      expect(body.promptWakes?.[0]?.sections.map((x) => x.section)).toEqual([
+        "digest",
+        "tool_results",
+      ]);
+      expect(body.promptWakes?.[1]?.sections).toEqual(sections(100));
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -7757,6 +7933,29 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/newer-run/loop")).json().endedAt).toBeNull();
   });
 
+  it("GET /api/runs/:id/loop returns the run's prompt sections", async () => {
+    store.upsertRun(run({ id: "costed", agentId: "guido-1" }));
+    store.upsertRun(run({ id: "uncosted", agentId: "guido-1" }));
+    // stored out of order: the answer follows PROMPT_SECTIONS
+    store.recordPromptSections("costed", 0, NOW, [
+      { section: "ticket", bytes: 40, tokens: 10 },
+      { section: "role", bytes: 400, tokens: 100 },
+    ]);
+    const body = (await get("/api/runs/costed/loop")).json();
+    expect(body.prompt).toEqual([
+      {
+        runId: "costed",
+        wake: 0,
+        at: NOW,
+        sections: [
+          { section: "role", bytes: 400, tokens: 100 },
+          { section: "ticket", bytes: 40, tokens: 10 },
+        ],
+      },
+    ]);
+    expect((await get("/api/runs/uncosted/loop")).json().prompt).toEqual([]);
+  });
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -7810,6 +8009,7 @@ describe("the first loop's engine", () => {
       round: null,
       budget: null,
       review: null,
+      prompt: [],
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
   });
@@ -7981,6 +8181,21 @@ describe("QA board data", () => {
         },
       ],
     });
+  });
+
+  it("serves the QA flow figures with the registry's definitions", async () => {
+    const flow = (await get("/api/qa/flow")).json();
+    expect(flow).toMatchObject({
+      days: 30,
+      escapedDefects: [],
+      reviewTimings: { heads: [], wait: { n: 0, medianMs: null } },
+      rework: { bySeat: [], byModel: [] },
+      testsPerPr: [],
+    });
+    expect(flow.metrics).toEqual(QA_FLOW_METRICS);
+    expect(flow.metrics.escapedDefects.definition).toContain("labelled bug");
+    expect((await get("/api/qa/flow?days=7")).json().days).toBe(7);
+    expect((await get("/api/qa/flow?days=91")).statusCode).toBe(400);
   });
 
   it("serves findings with category and resolution", async () => {

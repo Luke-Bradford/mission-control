@@ -4,6 +4,8 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
+import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
 import type { ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
@@ -292,6 +294,8 @@ export interface RunLoopView {
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
+  /** What each prompt the run was sent took, by section, oldest first; empty before any was recorded. */
+  prompt?: PromptWakeCost[];
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
@@ -385,6 +389,8 @@ export interface BoardItem {
    * Absent means none (a card stored before the field, or built by hand).
    */
   after?: { issues: number[]; prs: number[] };
+  /** What a `bug` card's body names (PRs, commits, files); absent when it names none. */
+  defectRefs?: DefectRefs;
   milestone: string | null;
   /** The project's single-select `Size` field; null when the project has none or the item has no value. */
   size: string | null;
@@ -475,6 +481,10 @@ export interface PullRequestView {
   additions?: number | null;
   deletions?: number | null;
   changedFiles?: number | null;
+  /** The diff's first files as GitHub reads them; set by the poll, never served from the store. */
+  files?: PrFileInput[];
+  /** Bugs recorded against this PR as escaped defects; absent when none. */
+  escapedDefects?: { issueNumber: number; via: DefectVia; filedAt: number }[];
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */

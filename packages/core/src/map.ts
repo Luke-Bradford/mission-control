@@ -97,8 +97,11 @@ export interface MapUnchecked {
   reason: (typeof MAP_UNCHECKED_REASONS)[number];
 }
 
-/** GET /api/repos/:repoId/map, including every delta up to seq. */
-export interface MapSnapshot {
+/**
+ * GET /api/repos/:repoId/map/tree: what only a new default-branch commit, merged PR or rules edit
+ * changes. The server builds it once per such change and answers a repeat with 304 (ETag).
+ */
+export interface MapTree {
   repoId: string;
   tree: { path: string; lines: number }[];
   imports: { from: string; to: string }[];
@@ -113,6 +116,12 @@ export interface MapSnapshot {
     /** [file index, file index, shared PR count, share of the less-frequently changed file]. */
     coupling: [number, number, number, number][];
   };
+  /** The repo's resolved rules, as globs (hardRules is the effective list the engine enforces): the Ownership lens colours files by area and marks hard-rule files. */
+  rules: { areas: Record<string, string[]>; hardRules: string[] };
+}
+
+/** GET /api/repos/:repoId/map/live: the crew's positions and overlays, built per request. */
+export interface MapLive {
   seats: MapSeat[];
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */
@@ -128,10 +137,11 @@ export interface MapSnapshot {
   }[];
   /** Open PR branches with a pair that went unchecked: unknown, never reported clean. */
   conflictsUnchecked: MapUnchecked[];
-  /** The repo's resolved rules, as globs (hardRules is the effective list the engine enforces): the Ownership lens colours files by area and marks hard-rule files. */
-  rules: { areas: Record<string, string[]>; hardRules: string[] };
   seq: number;
 }
+
+/** GET /api/repos/:repoId/map, including every delta up to seq: the tree and the live part together. */
+export type MapSnapshot = MapTree & MapLive;
 
 /** Repo-scoped event: map frames. Refetch the snapshot on reconnect or a gap in seq. */
 export type MapDelta = { seq: number } & (

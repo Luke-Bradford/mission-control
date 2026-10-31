@@ -5,7 +5,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "tsBuildInfoFile": "node_modules/.cache/tsc/tsbuildinfo"
   },
   "include": ["src", "test", "vite.config.ts"]
 }

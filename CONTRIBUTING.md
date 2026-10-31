@@ -18,7 +18,7 @@ agents share one queue.
 
 New tickets are the last resort.
 - **A review finding** is fixed in the PR where it was found. If it can't be (it is outside the PR's
-  area or scope), add one line to the open rolling minor-findings ticket (currently #321):
+  area or scope), add one line to the open rolling minor-findings ticket (currently #656):
   `- PR #N, file:line: finding`. There is no ticket per finding or per PR.
 - **A related gap** goes into an open ticket in the same area that hasn't started (Backlog,
   Refinement or Ready). Edit its body, or comment asking its planner to fold it in: a seat's brief

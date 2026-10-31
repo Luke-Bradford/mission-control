@@ -107,6 +107,15 @@ describe("session actions", () => {
     expect(git(source, "status", "--porcelain")).toBe("");
   });
 
+  it("refuses a session when crew.allow_read changed on disk since it was applied", async () => {
+    const applied = loadConfig(path);
+    if (applied.crew === undefined) throw new Error("no crew");
+    applied.crew.allowRead = ["/x"];
+    await expect(createSession(path, input("harbor-one"), now, applied)).rejects.toMatchObject({
+      kind: "conflict",
+    });
+  });
+
   it("preserves upstream HEAD when the source is on a feature branch", async () => {
     git(source, "update-ref", "refs/remotes/origin/main", "HEAD");
     git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
