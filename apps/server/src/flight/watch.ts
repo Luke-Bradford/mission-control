@@ -38,6 +38,7 @@ import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { wakePieces } from "../prompt-cost.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
@@ -439,6 +440,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
         const left = leftOf(state);
         const { runId } = await supervisor.startWatch(id, {
+          firstPieces: wakePieces(digest),
           first: wakeLine(
             state,
             digest,
@@ -560,8 +562,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       const causes = left === null ? changed : [leftLine(left), ...changed];
       const reasons = wakeReasons(lastFacts, wake, state.items);
       if (
-        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
-        "sent"
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
+          wake: n + 1,
+          pieces: wakePieces(digest),
+        })) === "sent"
       ) {
         audit = nextAudit(t, reasons, left);
         delivered = { runId, snapshot };

@@ -4109,6 +4109,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,
+          prompt: store.promptWakes(run.id),
         };
         return view;
       });

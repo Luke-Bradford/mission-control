@@ -4,6 +4,7 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
 import type { ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
@@ -293,6 +294,8 @@ export interface RunLoopView {
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
+  /** What each prompt the run was sent took, by section, oldest first; empty before any was recorded. */
+  prompt?: PromptWakeCost[];
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

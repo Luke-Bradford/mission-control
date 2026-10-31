@@ -2,7 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
-import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
+import type {
+  ItemChatMessage,
+  ItemDiscussion,
+  PersonMessage,
+  PersonSource,
+  PromptSection,
+  PromptSectionCost,
+  PromptWakeCost,
+} from "@mc/core";
 import {
   type AccountId,
   type AgentId,
@@ -40,6 +48,7 @@ import {
   type DefectRefs,
   type DefectVia,
   type Escalation,
+  estimateTokens,
   type FindingResolution,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
@@ -83,6 +92,8 @@ import {
   type MergedPrFacts,
   memoryTopicKey,
   overusePrevention,
+  PROMPT_BYTES_PER_TOKEN,
+  PROMPT_SECTIONS,
   type PrCheck,
   type PrFileInput,
   type ProfileOverride,
@@ -207,6 +218,12 @@ CREATE TABLE IF NOT EXISTS retrospectives (
 CREATE TABLE IF NOT EXISTS prompt_versions (
   hash TEXT PRIMARY KEY, path TEXT NOT NULL, first_seen INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS prompt_sections (
+  run_id TEXT NOT NULL, wake INTEGER NOT NULL, section TEXT NOT NULL,
+  bytes INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, wake, section)
+);
+CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
@@ -1636,6 +1653,89 @@ export class Store {
     this.db
       .prepare("INSERT OR IGNORE INTO prompt_versions (hash, path, first_seen) VALUES (?, ?, ?)")
       .run(hash, path, at);
+  }
+
+  /** What one prompt took, by section; a wake recorded twice keeps its first rows. */
+  recordPromptSections(
+    runId: string,
+    wake: number,
+    at: number,
+    sections: readonly PromptSectionCost[],
+  ): void {
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
+  }
+
+  /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
+  addToolResultBytes(runId: string, bytes: number, at: number): void {
+    const last = this.db
+      .prepare(
+        `SELECT wake, MIN(at) AS at FROM prompt_sections WHERE run_id = ?
+         AND wake = (SELECT MAX(wake) FROM prompt_sections WHERE run_id = ?)`,
+      )
+      .get(runId, runId) as { wake: number | null; at: number | null };
+    const wake = last.wake ?? 0;
+    const section: PromptSection = "tool_results";
+    this.db
+      .prepare(
+        `INSERT INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (run_id, wake, section) DO UPDATE SET bytes = bytes + excluded.bytes,
+           tokens = CAST(ROUND((bytes + excluded.bytes) / ${PROMPT_BYTES_PER_TOKEN}.0) AS INTEGER)`,
+      )
+      .run(runId, wake, section, bytes, estimateTokens(bytes), last.at ?? at);
+  }
+
+  private wakesOf(
+    rows: {
+      run_id: string;
+      wake: number;
+      section: PromptSection;
+      bytes: number;
+      tokens: number;
+      at: number;
+    }[],
+  ): PromptWakeCost[] {
+    const wakes = new Map<string, PromptWakeCost>();
+    for (const r of rows) {
+      const key = `${r.run_id}\0${r.wake}`;
+      let w = wakes.get(key);
+      if (w === undefined) {
+        w = { runId: r.run_id, wake: r.wake, at: r.at, sections: [] };
+        wakes.set(key, w);
+      }
+      w.at = Math.min(w.at, r.at);
+      w.sections.push({ section: r.section, bytes: r.bytes, tokens: r.tokens });
+    }
+    for (const w of wakes.values()) {
+      w.sections.sort(
+        (a, b) => PROMPT_SECTIONS.indexOf(a.section) - PROMPT_SECTIONS.indexOf(b.section),
+      );
+    }
+    return [...wakes.values()];
+  }
+
+  /** A run's prompts by section, oldest first. */
+  promptWakes(runId: string): PromptWakeCost[] {
+    return this.wakesOf(
+      this.db
+        .prepare("SELECT * FROM prompt_sections WHERE run_id = ? ORDER BY wake")
+        .all(runId) as never,
+    );
+  }
+
+  /** An agent's prompts since `since`, newest first, at most `limit` wakes. */
+  agentPromptWakes(agentId: string, since: number, limit: number): PromptWakeCost[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.* FROM prompt_sections p JOIN runs r ON r.id = p.run_id
+         WHERE r.agent_id = ? AND p.at >= ?`,
+      )
+      .all(agentId, since) as never;
+    return this.wakesOf(rows)
+      .sort((a, b) => b.at - a.at || b.wake - a.wake)
+      .slice(0, limit);
   }
 
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */

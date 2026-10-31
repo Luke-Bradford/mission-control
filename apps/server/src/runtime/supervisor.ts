@@ -144,6 +144,13 @@ import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
+import {
+  mergeSections,
+  type PromptPiece,
+  promptSections,
+  textBytes,
+  ticketPiece,
+} from "../prompt-cost.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
@@ -163,6 +170,9 @@ import {
   type Store,
 } from "../store.ts";
 import {
+  AGENTS_MD_HEADING,
+  CLAUDE_MD_HEADING,
+  cutNoteText,
   type RepoDocs,
   repoReferenceIndex,
   reviewBrief,
@@ -504,7 +514,12 @@ export interface Supervisor {
    * the key. `dup`: the key was used.
    * Allowed while the seat is rate-limited. Never answers questions.
    */
-  send(runId: string, key: string, text: string): Promise<SendResult>;
+  send(
+    runId: string,
+    key: string,
+    text: string,
+    cost?: { wake: number; pieces: readonly PromptPiece[] },
+  ): Promise<SendResult>;
   /**
    * Takes back a held run with no live CLI as at restart; a failed resume ends it once. Does
    * nothing while crew is off, stopping, during startup reattach, or while a start, attach or
@@ -570,7 +585,10 @@ export interface Supervisor {
    * Starts the watch seat (FLIGHT): no ticket and no branch, a detached worktree of the default
    * branch, and the watch brief as its one first line, then `opts.first` after a blank line.
    */
-  startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }>;
+  startWatch(
+    seatId: string,
+    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+  ): Promise<{ runId: string }>;
   /**
    * Starts a review run on a scratch seat: a detached worktree at the review's sha with the diff
    * files in `.mc-review/`, the CLI in scratch mode (its session-mates' worktrees, the author's
@@ -1101,6 +1119,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
         }
+        // a result replayed at an attach was counted by the keeper that first saw it
+        if (
+          e.bytes !== undefined &&
+          e.bytes > 0 &&
+          !(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)
+        ) {
+          try {
+            store.addToolResultBytes(l.run.id, e.bytes, now());
+          } catch (err) {
+            log(`${l.run.agentId}: could not count a tool result: ${errText(err)}`);
+          }
+        }
         break;
       case "result": {
         // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
@@ -1271,19 +1301,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
   /** The audit identity includes both generated developer instructions and the first user brief. */
-  function recordPromptVersion(run: Run, rolePath: string, brief: string): void {
-    const payload = [
-      "developer-instructions",
-      readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8"),
-      "first-brief",
-      brief,
-    ].join("\0");
+  function recordPromptVersion(
+    run: Run,
+    rolePath: string,
+    brief: string,
+    briefPieces: readonly PromptPiece[],
+    system: readonly PromptPiece[] | null,
+  ): void {
+    const instructions = readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8");
+    const payload = ["developer-instructions", instructions, "first-brief", brief].join("\0");
     store.setRunPromptVersion(
       run.id,
       createHash("sha256").update(payload).digest("hex"),
       rolePath,
       now(),
     );
+    // a launch that kept its prompt file (a resume, a transfer) sent nothing new
+    if (system === null) return;
+    try {
+      store.recordPromptSections(
+        run.id,
+        0,
+        now(),
+        mergeSections(
+          promptSections(instructions, system, "role"),
+          promptSections(brief, briefPieces, "orders"),
+        ),
+      );
+    } catch (e) {
+      log(`${run.agentId}: could not record the prompt's sections: ${errText(e)}`);
+    }
   }
 
   /**
@@ -1385,7 +1432,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     references = "",
     keepPrompt = false,
     beforeLaunch?: () => Run | undefined,
-    beforeSpawn?: () => void,
+    beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1441,7 +1488,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     repoDocs: RepoDocs | null,
     references = "",
     keepPrompt = false,
-    beforeSpawn?: () => void,
+    beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
   ): Live {
     const pause = pausedSeat(store, info.seat.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
@@ -1463,6 +1510,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       url: `${hub}${GUARD_CHECK_PATH}`,
     });
     const promptPath = crewPromptPath(deps.dbPath, run.id);
+    let system: PromptPiece[] | null = null;
     if ((!resume && !keepPrompt) || !existsSync(promptPath)) {
       if (resume) {
         log(
@@ -1512,8 +1560,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           mode: 0o600,
         },
       );
+      const block = (heading: string, body: string | null | undefined): number =>
+        body == null || body.trim() === "" ? 0 : textBytes(`\n\n${heading}\n\n${body}`);
+      system = [
+        { section: "orders", bytes: textBytes(advice) },
+        {
+          section: "rules",
+          bytes:
+            textBytes(references) +
+            block(CLAUDE_MD_HEADING, repoDocs?.claudeMd) +
+            block(AGENTS_MD_HEADING, repoDocs?.agentsMd),
+        },
+      ];
     }
-    beforeSpawn?.();
+    beforeSpawn?.(system);
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
@@ -3197,6 +3257,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
+      const briefPieces = [
+        ticketPiece(
+          ticket.body,
+          cutNoteText(ticket.body, ticket.bodyTruncated, ticket.bodyLength ?? ticket.body.length),
+        ),
+      ];
       const inbox = withInbox(seatId, runId, brief);
       brief = inbox.text;
       let l: Live;
@@ -3211,7 +3277,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           references,
           false,
           undefined,
-          () => recordPromptVersion(run, def.prompt, brief),
+          (system) => recordPromptVersion(run, def.prompt, brief, briefPieces, system),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3272,7 +3338,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  async function startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
+  async function startWatch(
+    seatId: string,
+    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+  ): Promise<{ runId: string }> {
     const info = need(seatId);
     const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
@@ -3362,7 +3431,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           references,
           false,
           undefined,
-          () => recordPromptVersion(run, def.prompt, firstBrief),
+          (system) =>
+            recordPromptVersion(run, def.prompt, firstBrief, opts?.firstPieces ?? [], system),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3579,6 +3649,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
       });
+      const briefPieces = [
+        ticketPiece(
+          ticket.body,
+          cutNoteText(ticket.body, ticket.bodyTruncated, ticket.bodyLength ?? ticket.body.length),
+        ),
+      ];
       const inbox = withInbox(seatId, runId, brief);
       brief = inbox.text;
       let l: Live;
@@ -3593,7 +3669,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           references,
           false,
           undefined,
-          () => recordPromptVersion(run, def.prompt, brief),
+          (system) => recordPromptVersion(run, def.prompt, brief, briefPieces, system),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -4001,7 +4077,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  async function send(runId: string, key: string, text: string): Promise<SendResult> {
+  async function send(
+    runId: string,
+    key: string,
+    text: string,
+    cost?: { wake: number; pieces: readonly PromptPiece[] },
+  ): Promise<SendResult> {
     if (!mayAct() || stopping) return "busy";
     const run = store.run(runId);
     if (run === null) return "gone";
@@ -4023,6 +4104,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const inbox = withInbox(seatId, runId, text);
         writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
+        if (cost !== undefined) {
+          try {
+            store.recordPromptSections(
+              runId,
+              cost.wake,
+              now(),
+              promptSections(inbox.text, cost.pieces, "orders"),
+            );
+          } catch (e) {
+            log(`${seatId}: could not record the wake's sections: ${errText(e)}`);
+          }
+        }
       } catch {
         store.dropLine(key);
         return l.session.alive ? "busy" : "no-session";

@@ -36,6 +36,7 @@ import {
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
+  estimateTokens,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -65,18 +66,22 @@ import {
   ticketHasRunText,
   twoAreasText,
   waitsOnText,
+  wakeKey,
+  wakeLine,
   wrongAreaText,
 } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
+import { flightState, flightWake } from "../src/flight/state.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
+import { textBytes, wakePieces } from "../src/prompt-cost.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
@@ -444,6 +449,28 @@ describe("startRun profiles", () => {
 });
 
 describe("startRun", () => {
+  it("records the start prompt's sections, adding up to the prompt file and brief", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const wakes = store.promptWakes(runId);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]?.wake).toBe(0);
+    const sections = wakes[0]?.sections ?? [];
+    expect(sections.map((x) => x.section)).toEqual(["role", "rules", "orders", "ticket"]);
+    for (const x of sections) expect(Object.keys(x).sort()).toEqual(["bytes", "section", "tokens"]);
+    const total =
+      textBytes(readFileSync(crewPromptPath(dbPath, runId), "utf8")) +
+      textBytes(userLines()[0] as string);
+    expect(sections.reduce((n, x) => n + x.bytes, 0)).toBe(total);
+    expect(sections.find((x) => x.section === "ticket")?.bytes).toBe(textBytes(TICKET.body));
+    const tokens = sections.reduce((n, x) => n + x.tokens, 0);
+    expect(Math.abs(tokens - estimateTokens(total))).toBeLessThanOrEqual(
+      estimateTokens(total) * 0.01,
+    );
+  });
+
   it("tells the seat in its first message when the collector cut the ticket body", async () => {
     const { sup } = make({
       fetchTicket: async () => ({
@@ -2367,6 +2394,63 @@ describe("repo guidance at launch", () => {
     };
   };
   const launches = () => recorded().filter((line) => Array.isArray(line.argv));
+
+  it("records FLIGHT's start and each wake by section, with tool results on the current wake", async () => {
+    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    sup.start();
+    const state = flightState({ config: cfg, store, busy: [], now: Date.now() });
+    const { digest } = flightWake(state);
+    const first = wakeLine(state, digest);
+    const { runId } = await sup.startWatch("flight-1", {
+      first,
+      firstPieces: wakePieces(digest),
+    });
+    await until(() => expect(userLines()).toHaveLength(1));
+    const start = store.promptWakes(runId)[0];
+    expect(start?.wake).toBe(0);
+    const names = start?.sections.map((x) => x.section) ?? [];
+    for (const name of ["role", "rules", "orders", "digest"]) expect(names).toContain(name);
+    const total =
+      textBytes(readFileSync(crewPromptPath(dbPath, runId), "utf8")) +
+      textBytes(userLines()[0] as string);
+    expect(start?.sections.reduce((n, x) => n + x.bytes, 0)).toBe(total);
+    const tokens = start?.sections.reduce((n, x) => n + x.tokens, 0) ?? 0;
+    expect(Math.abs(tokens - estimateTokens(total))).toBeLessThanOrEqual(
+      estimateTokens(total) * 0.01,
+    );
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+
+    const line = `${wakeLine(state, digest)} TOOLGAP`;
+    const cost = { wake: 1, pieces: wakePieces(digest) };
+    expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("sent");
+    const wake = store.promptWakes(runId).find((w) => w.wake === 1);
+    const kinds = wake?.sections.map((x) => x.section) ?? [];
+    expect(kinds).toContain("digest");
+    expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("dup");
+    expect(store.promptWakes(runId)).toHaveLength(2);
+
+    await until(() => expect(userLines()).toHaveLength(2));
+    expect(wake?.sections.reduce((n, x) => n + x.bytes, 0)).toBe(
+      textBytes(userLines()[1] as string),
+    );
+    await sup.message("flight-1", "cue: the call ends", { interrupt: false });
+    await until(() =>
+      expect(
+        store
+          .promptWakes(runId)
+          .find((w) => w.wake === 1)
+          ?.sections.map((x) => x.section),
+      ).toContain("tool_results"),
+    );
+    const after = store.promptWakes(runId);
+    expect(
+      after.find((w) => w.wake === 1)?.sections.find((x) => x.section === "tool_results"),
+    ).toMatchObject({ bytes: 2 });
+    expect(after.find((w) => w.wake === 0)?.sections.map((x) => x.section)).not.toContain(
+      "tool_results",
+    );
+    await sup.message("flight-1", "cue: the turn ends", { interrupt: false });
+  });
 
   it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
     const { sup, cfg } = make({ extraSeat: FLIGHT });
