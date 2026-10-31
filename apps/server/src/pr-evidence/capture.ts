@@ -23,6 +23,9 @@ import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
 /** A failed capture is tried again no sooner than this. */
 export const EVIDENCE_RETRY_MS = 10 * 60_000;
 
+/** A whole capture (two builds and every render) may take this long before it is a failure. */
+export const EVIDENCE_CAPTURE_MS = 15 * 60_000;
+
 /** A hub serving one commit's HUD on a loopback port. */
 export interface EvidenceSide {
   origin: string;
@@ -38,14 +41,16 @@ export interface PrEvidenceDeps {
   /** The hub's own address, for the links in the PR body. */
   baseUrl: string;
   /** The commit main points at now. */
-  mainSha(): Promise<string>;
+  mainSha(signal: AbortSignal): Promise<string>;
   /** Writes a consistent copy of the live database to `to`. */
   snapshot(to: string): Promise<void>;
   /** Serves `sha`'s HUD from the database at `db` until `stop`. */
-  startSide(input: { sha: string; db: string }): Promise<EvidenceSide>;
+  startSide(input: { sha: string; db: string; signal: AbortSignal }): Promise<EvidenceSide>;
   /** One screenshot of a page on a side, in a colour scheme. */
   render(origin: string, path: string, scheme: EvidenceScheme): Promise<Buffer>;
   retryMs?: number;
+  /** The deadline of one capture; default EVIDENCE_CAPTURE_MS. */
+  captureMs?: number;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -102,26 +107,32 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     dir: string,
     name: string,
     pages: EvidencePage[],
+    signal: AbortSignal,
   ): Promise<Map<string, Buffer>> {
     const db = join(dir, `${name}.sqlite`);
     await copyFile(snapshot, db);
-    const side = await deps.startSide({ sha, db });
+    const side = await deps.startSide({ sha, db, signal });
     try {
+      signal.throwIfAborted();
       return await render(side, pages);
     } finally {
       await side.stop().catch(() => {});
     }
   }
 
-  async function capture(t: EvidenceTarget, pages: EvidencePage[]): Promise<void> {
+  async function capture(
+    t: EvidenceTarget,
+    pages: EvidencePage[],
+    signal: AbortSignal,
+  ): Promise<void> {
     await mkdir(deps.workDir, { recursive: true, mode: 0o700 });
     const dir = await mkdtemp(join(deps.workDir, "capture-"));
     try {
-      const mainSha = await deps.mainSha();
+      const mainSha = await deps.mainSha(signal);
       const snapshot = join(dir, "snapshot.sqlite");
       await deps.snapshot(snapshot);
-      const before = await photograph(mainSha, snapshot, dir, "main", pages);
-      const after = await photograph(t.sha, snapshot, dir, "head", pages);
+      const before = await photograph(mainSha, snapshot, dir, "main", pages, signal);
+      const after = await photograph(t.sha, snapshot, dir, "head", pages, signal);
       const pairs: EvidencePair[] = [];
       const images: EvidenceImage[] = [];
       for (const page of pages) {
@@ -177,7 +188,14 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (going) return going;
       const job = queue.then(async () => {
         try {
-          await capture(t, pages);
+          // a step that hangs ends the capture at the deadline: the next one is not stuck behind it
+          const signal = AbortSignal.timeout(deps.captureMs ?? EVIDENCE_CAPTURE_MS);
+          const expired = new Promise<never>((_, reject) =>
+            signal.addEventListener("abort", () =>
+              reject(new Error("the capture ran past its deadline")),
+            ),
+          );
+          await Promise.race([capture(t, pages, signal), expired]);
           failedAt.delete(key);
           failedWhy.delete(key);
         } catch (e) {

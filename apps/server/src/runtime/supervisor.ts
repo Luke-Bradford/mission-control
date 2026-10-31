@@ -89,6 +89,7 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathInArea,
+  prEvidenceAffectedPages,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -416,6 +417,8 @@ export interface SupervisorDeps {
   profiles?: () => readonly Profile[] | ProfilesError;
   /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
   prEvidence?: PrEvidenceStore;
+  /** The repo whose web PRs carry screenshot pairs. */
+  prEvidenceRepo?: RepoId;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -3702,6 +3705,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
+        ...(screenshots === undefined &&
+        deps.prEvidenceRepo === info.repo.id &&
+        prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
+          ? {
+              evidenceMissing:
+                "none were made for this head (the capture failed or was skipped); judge the UI from the diff and say so.",
+            }
+          : {}),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(second === null

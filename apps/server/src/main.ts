@@ -332,8 +332,13 @@ export async function main(): Promise<void> {
           repoId: previewRepoId,
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
-          mainSha: async () => {
-            await runPreviewCommand("git", ["-C", evidenceCheckout, "fetch", "origin", "HEAD"]);
+          mainSha: async (signal) => {
+            await runPreviewCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", "HEAD"],
+              undefined,
+              signal,
+            );
             return await gitOutput(evidenceCheckout, ["rev-parse", "FETCH_HEAD"]);
           },
           snapshot: async (to) => {
@@ -349,7 +354,7 @@ export async function main(): Promise<void> {
             root: join(dirname(dbPath), "pr-evidence-work", "sides"),
             run: runPreviewCommand,
             freePort,
-            launch: async ({ worktree, port: sidePort, db }) => {
+            launch: async ({ worktree, port: sidePort, db, signal }) => {
               const child = spawn(
                 process.execPath,
                 ["--experimental-strip-types", "apps/server/src/main.ts"],
@@ -360,7 +365,7 @@ export async function main(): Promise<void> {
                 },
               );
               try {
-                await waitForPreview(child, sidePort);
+                await waitForPreview(child, sidePort, signal);
               } catch (e) {
                 await stopPreview(child).catch(() => {});
                 throw e;
@@ -427,7 +432,9 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
-    ...(prEvidence === undefined ? {} : { prEvidence: evidenceStore }),
+    ...(prEvidence === undefined
+      ? {}
+      : { prEvidence: evidenceStore, prEvidenceRepo: previewRepoId as RepoId }),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
   });
   // a seat that frees up is about to take new work: read the boards first

@@ -3003,7 +3003,7 @@ describe("the engine runs reviews", () => {
   describe("screenshot evidence for a web PR", () => {
     const WEB_FILES = [{ path: "apps/web/src/board/Card.tsx", changeType: "MODIFIED" }];
     /** A stand-in for PrEvidence: pairs exist for the heads in `have`. */
-    const evidence = (have: Set<string>) => {
+    const evidence = (have: Set<string>, failure = "") => {
       const ensured: { pr: number; sha: string; paths: readonly string[] }[] = [];
       return {
         ensured,
@@ -3016,7 +3016,7 @@ describe("the engine runs reviews", () => {
             const web = t.paths.some((p) => p.startsWith("apps/web/") && !p.includes("test"));
             return !web || have.has(t.sha)
               ? null
-              : "kept in draft until its screenshot evidence exists; missing pages: board";
+              : `kept in draft until its screenshot evidence exists; missing pages: board${failure === "" ? "" : `; ${failure}`}`;
           },
         },
       };
@@ -3027,22 +3027,49 @@ describe("the engine runs reviews", () => {
       h.engine.start();
       await h.engine.tick();
     };
-    async function toReviewed(files: typeof WEB_FILES | []): Promise<void> {
-      await toReview();
-      setPr({ ci: "passing", files: [...files] });
+    /** The run reaches review with the PR's files known from the first pass. */
+    async function toReviewed(files: typeof WEB_FILES | [], over: Partial<PullRequestView> = {}) {
+      report();
+      setPr({ files: [...files], ...over });
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "passing", files: [...files], ...over });
+      await h.engine.reconcileRun(RUN);
+    }
+    async function reportClean(): Promise<void> {
       reported(first().id, []);
       await h.engine.reconcileRun(RUN);
     }
 
-    it("holds mark-ready while a web PR's head has no pairs, names the missing pages, releases once they exist", async () => {
+    it("holds the review while a web PR's head has no pairs, and requests it once they exist", async () => {
       const have = new Set<string>();
       const ev = evidence(have);
       await withEvidence(ev);
       await toReviewed(WEB_FILES);
+      expect(reviewRows()).toHaveLength(0);
+      expect(ev.ensured.at(-1)).toMatchObject({ pr: 12, sha: SHA });
+      have.add(SHA);
+      clock += MIN;
+      await h.engine.reconcileRun(RUN);
+      expect(reviewRows()).toHaveLength(1);
+    });
+
+    it("lets the review go ahead once the head's capture has failed", async () => {
+      const ev = evidence(new Set(), "capture failed: no Chrome");
+      await withEvidence(ev);
+      await toReviewed(WEB_FILES);
+      expect(reviewRows()).toHaveLength(1);
+    });
+
+    it("holds mark-ready while a web PR's head has no pairs, names the missing pages, releases once they exist", async () => {
+      const have = new Set([SHA]);
+      const ev = evidence(have);
+      await withEvidence(ev);
+      await toReviewed(WEB_FILES);
+      have.delete(SHA);
+      await reportClean();
       expect(h.steps).not.toContain("ready");
       expect(h.steps).not.toContain("merge");
       expect(loopOf().phase).not.toBe("parked");
-      expect(ev.ensured.at(-1)).toMatchObject({ pr: 12, sha: SHA });
       expect(
         store
           .loopEventsOfRun(RUN)
@@ -3054,9 +3081,23 @@ describe("the engine runs reviews", () => {
       expect(h.steps).toContain("ready");
     });
 
+    it("holds the merge of a PR already out of draft, and releases it once the pairs exist", async () => {
+      const have = new Set([SHA]);
+      await withEvidence(evidence(have));
+      await toReviewed(WEB_FILES, { isDraft: false });
+      have.delete(SHA);
+      await reportClean();
+      expect(h.steps).not.toContain("merge");
+      have.add(SHA);
+      clock += MIN;
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toContain("merge");
+    });
+
     it("does not hold a PR that changes no HUD page", async () => {
       await withEvidence(evidence(new Set()));
       await toReviewed([]);
+      await reportClean();
       expect(h.steps).toContain("ready");
     });
 
@@ -3064,6 +3105,7 @@ describe("the engine runs reviews", () => {
       const have = new Set(["f".repeat(40)]);
       await withEvidence(evidence(have));
       await toReviewed(WEB_FILES);
+      expect(reviewRows()).toHaveLength(0);
       expect(h.steps).not.toContain("ready");
     });
   });

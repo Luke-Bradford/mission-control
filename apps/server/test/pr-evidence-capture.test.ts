@@ -234,6 +234,23 @@ describe("PrEvidence gate", () => {
     );
   });
 
+  it("ends a capture whose step hangs at the deadline, and the next PR is not stuck behind it", async () => {
+    const t = setup({
+      captureMs: 30,
+      startSide: async ({ sha, db }) => {
+        if (sha === HEAD) return new Promise(() => {}); // never answers
+        return { origin: `http://side/${sha}`, stop: async () => {} };
+      },
+    });
+    await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain(
+      "capture failed: the capture ran past its deadline",
+    );
+    // a second PR is captured: main's side answers, the other head's too
+    await t.evidence.ensure({ repoId: "mc", pr: 8, sha: NEXT, paths: WEB });
+    expect(t.store.manifest("mc", 8, NEXT)).not.toBeNull();
+  });
+
   it("does not release a head on the pairs of an older head", async () => {
     const t = setup();
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });

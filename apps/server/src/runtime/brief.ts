@@ -228,6 +228,8 @@ export interface ReviewBriefInput {
   fullSuite: readonly string[];
   /** The screenshot pairs of a web PR's head, with the directory in the scratch copy holding them. */
   evidence?: { dir: string; mainSha: string; pairs: readonly EvidencePair[] };
+  /** Set instead of `evidence` when a web PR's pairs could not be made: the reviewer is told. */
+  evidenceMissing?: string;
   /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
   second?: { reason: string; findings: readonly StoredFinding[] };
 }
@@ -288,6 +290,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
           `- ${i.evidence.dir}/: screenshots of the HUD pages this PR changes, main against this head, with a pixel diff. Read them (the Read tool shows an image); the list is below.`,
         ]
       : []),
+    ...(i.evidenceMissing ? [`- ${EVIDENCE_HEADING.slice(3)}: ${i.evidenceMissing}`] : []),
     ...(i.touches.length > 0
       ? [
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,

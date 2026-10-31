@@ -538,6 +538,11 @@ describe("reviewBrief", () => {
     expect(reviewBrief(review)).not.toContain("Screenshot evidence");
   });
 
+  it("tells the reviewer when a web PR has no pairs", () => {
+    const out = reviewBrief({ ...review, evidenceMissing: "none were made for this head" });
+    expect(out).toContain("- Screenshot evidence: none were made for this head");
+  });
+
   it("tells a scratch reviewer that a whole suite waits for the test lock", () => {
     const out = reviewBrief({ ...review, fullSuite: ["pnpm -s test"] });
     expect(out).toContain(

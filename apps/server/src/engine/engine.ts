@@ -1199,6 +1199,33 @@ export function createEngine(deps: EngineDeps): Engine {
     return true;
   }
 
+  /**
+   * Whether the PR's evidence hold applies to `sha`: a web PR without the pairs of this head. It
+   * records why (once per text), asks for the capture, and the caller stops its pass. `failedOk`
+   * lets a head through once its capture has failed: nobody is made to wait on a capture that
+   * will not come.
+   */
+  function evidenceHeld(
+    run: Run,
+    cur: RunLoop,
+    sha: string,
+    at: number,
+    failedOk = false,
+  ): boolean {
+    if (!deps.evidence || cur.prNumber === null) return false;
+    const target = evidenceTarget(run, cur.prNumber, sha);
+    const held = deps.evidence.gate(target);
+    if (held === null || (failedOk && held.includes("capture failed"))) return false;
+    store.addLoopEvent(
+      `${run.id}:evidence:${sha}:${createHash("sha1").update(held).digest("hex").slice(0, 8)}`,
+      run.id,
+      `#${cur.prNumber} ${held}`,
+      at,
+    );
+    void deps.evidence.ensure(target);
+    return true;
+  }
+
   async function act(
     a: LoopAction,
     run: Run,
@@ -1456,6 +1483,11 @@ export function createEngine(deps: EngineDeps): Engine {
           log(`${run.id}: no PR number to review`);
           return;
         }
+        // the reviewer reads the pairs: wait for them, unless their capture has failed
+        if (evidenceHeld(run, cur, a.sha, at, true)) {
+          out.parked = true;
+          return;
+        }
         const round =
           1 +
           store
@@ -1591,18 +1623,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const sha = checkedSha ?? store.runPush(run.id)?.sha;
         if (sha === undefined) return;
         // a web PR stays in draft until the pairs for this head exist; the merge step waits too
-        const held =
-          deps.evidence && cur.prNumber !== null
-            ? deps.evidence.gate(evidenceTarget(run, cur.prNumber, sha))
-            : null;
-        if (held !== null && deps.evidence && cur.prNumber !== null) {
-          store.addLoopEvent(
-            `${run.id}:evidence:${sha}:${createHash("sha1").update(held).digest("hex").slice(0, 8)}`,
-            run.id,
-            `#${cur.prNumber} ${held}`,
-            at,
-          );
-          void deps.evidence.ensure(evidenceTarget(run, cur.prNumber, sha));
+        if (evidenceHeld(run, cur, sha, at)) {
           out.parked = true;
           return;
         }
@@ -1671,6 +1692,11 @@ export function createEngine(deps: EngineDeps): Engine {
             at,
           );
           out.again = true;
+          return;
+        }
+        // a PR already out of draft (a conflict made a new head) still needs this head's pairs
+        if (evidenceHeld(run, cur, a.sha, at)) {
+          out.parked = true;
           return;
         }
         const r = await publisher.merge(live(), a.sha);
