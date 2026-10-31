@@ -914,6 +914,15 @@ describe("crew sandbox home-folder reads (#487)", () => {
     }
   });
 
+  it("refuses a re-allow inside the data dir or a denied path", () => {
+    const inside = `${base.sandbox.dataDir}/crew`;
+    expect(() => fsOf({ ...sandbox, allowRead: [inside] }, "writer")).toThrow(/denied/);
+    expect(() => fsOf({ ...sandbox, toolchainDirs: [inside] }, "writer")).toThrow(/denied/);
+    expect(() =>
+      fsOf({ ...sandbox, denyRead: ["/home/you/work"], allowRead: ["/home/you/work/x"] }, "writer"),
+    ).toThrow(/inside denied/);
+  });
+
   it("refuses a re-allow of the whole home folder, or of a parent of it", () => {
     expect(() => fsOf({ ...sandbox, toolchainDirs: ["/home/you"] }, "writer")).toThrow(/home/);
     expect(() => fsOf({ ...sandbox, allowRead: ["/home"] }, "writer")).toThrow(/home/);

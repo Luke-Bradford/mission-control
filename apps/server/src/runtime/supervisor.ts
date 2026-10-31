@@ -1571,7 +1571,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
-      const sandbox = {
+      const sandboxBase = {
         cwd,
         ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
         gitCommonDir,
@@ -1579,8 +1579,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
         pnpmStoreDir: pnpmStore,
-        toolchainDirs: seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir()),
-        allowRead: crew?.allowRead ?? [],
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),
@@ -1588,6 +1586,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? [`/tmp/claude-${process.getuid?.()}`, `/private/tmp/claude-${process.getuid?.()}`]
             : []),
         ],
+      };
+      const sandbox = {
+        ...sandboxBase,
+        toolchainDirs: seatToolchainDirs(
+          process.execPath,
+          process.env.PATH ?? "",
+          homedir(),
+          sandboxReadDenies(sandboxBase),
+        ),
+        allowRead: crew?.allowRead ?? [],
       };
       if (run.vendor === "codex") {
         addMcTmpExclude(gitCommonDir);

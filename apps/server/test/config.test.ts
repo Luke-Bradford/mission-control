@@ -1284,6 +1284,15 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     });
   });
 
+  it("refuses allow_read over or inside the data dir or a deny_read entry", () => {
+    const share = join(homedir(), ".local/share");
+    for (const p of [share, join(share, "mission-control/crew")]) {
+      expect(fails(crewText({ allowRead: [p] })).message).toContain("denied folder");
+    }
+    const e = fails(crewText({ allowRead: ["~/Work/cfg"], denyRead: ["~/Work"] }));
+    expect(e.path).toBe("crew.allow_read");
+  });
+
   describe("deny_read", () => {
     const holds = (p: string) => `crew.deny_read: ${p} holds the crew's own folders`;
 

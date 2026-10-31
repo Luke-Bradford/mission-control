@@ -1018,21 +1018,27 @@ const holds = (parent: string, path: string) =>
  * one that holds a denied path (a credential folder, the data dir) or home itself is refused.
  */
 function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
-  const allows = [
+  const own = [
     ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
     i.pnpmStoreDir,
     i.cwd,
     i.gitCommonDir,
     i.worktreeGitDir,
-    ...(i.toolchainDirs ?? []),
-    ...SANDBOX_ALLOW_READ_HOME.map((d) => `${i.home}/${d}`),
-    ...(i.allowRead ?? []),
   ];
+  // The operator's and the toolchain's entries are refused inside a denied path too; the seat's
+  // own paths may sit in a denied parent on purpose.
+  const given = [...(i.toolchainDirs ?? []), ...(i.allowRead ?? [])];
+  const homeFiles = SANDBOX_ALLOW_READ_HOME.map((d) => `${i.home}/${d}`);
+  const allows = [...own, ...(i.toolchainDirs ?? []), ...homeFiles, ...(i.allowRead ?? [])];
   for (const p of allows) {
     if (!p.startsWith("/")) throw new Error(`crew sandbox: allowRead ${p} must be absolute`);
     if (holds(p, i.home)) throw new Error(`crew sandbox: allowRead ${p} holds the home folder`);
     const d = denied.find((x) => holds(p, x));
     if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} holds denied ${d}`);
+  }
+  for (const p of given) {
+    const d = denied.find((x) => holds(x, p));
+    if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} is inside denied ${d}`);
   }
   return [...new Set(allows)];
 }

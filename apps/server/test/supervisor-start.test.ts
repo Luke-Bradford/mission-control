@@ -856,7 +856,7 @@ describe("startRun", () => {
         common,
         `${common}/worktrees/guido-1-42`,
         join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
-        ...seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir()),
+        ...seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir(), fs.denyRead),
         join(homedir(), ".gitconfig"),
         join(dir, "tools-config"),
       ]),

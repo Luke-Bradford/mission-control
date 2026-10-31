@@ -30,9 +30,16 @@ function onPath(tool: string, path: string): string | undefined {
  * The folders a seat's sandbox re-allows for reads so its node and pnpm still run once the home
  * folder is denied: the install folder of the hub's own `execPath` and of `node` and `pnpm` found
  * on `path`, each both as found and with symlinks resolved. A folder that is or holds `home`, or
- * holds a credential folder in it, is left out: re-allowing it would beat the deny.
+ * holds or lies inside a path in `denied` (the credential folders, the data dir, the rest of the
+ * seat's read denies), would beat the deny: the binary's own folder is used instead, and none if that holds
+ * one too.
  */
-export function seatToolchainDirs(execPath: string, path: string, home: string): string[] {
+export function seatToolchainDirs(
+  execPath: string,
+  path: string,
+  home: string,
+  denied: string[],
+): string[] {
   const found = [
     execPath,
     ...PATH_TOOLS.flatMap((t) => {
@@ -40,15 +47,17 @@ export function seatToolchainDirs(execPath: string, path: string, home: string):
       return file === undefined ? [] : [file];
     }),
   ];
+  const bad = [...SANDBOX_DENY_READ_HOME.map((d) => join(home, d)), ...denied];
+  const ok = (d: string) =>
+    d !== "/" && !isInside(home, d) && !bad.some((x) => isInside(x, d) || isInside(d, x));
   const dirs = found.flatMap((f) => {
+    const files = [f];
     try {
-      return [installDir(f), installDir(realpathSync(f))];
+      files.push(realpathSync(f));
     } catch {
-      return [installDir(f)];
+      // not resolvable: use it as found
     }
+    return files.flatMap((x) => [installDir(x), dirname(x)].find(ok) ?? []);
   });
-  const credentials = SANDBOX_DENY_READ_HOME.map((d) => join(home, d));
-  return [...new Set(dirs)]
-    .filter((d) => d !== "/" && !isInside(home, d) && !credentials.some((c) => isInside(c, d)))
-    .sort();
+  return [...new Set(dirs)].sort();
 }
