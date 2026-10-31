@@ -198,6 +198,7 @@ import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
   CREW_GIT_SLOW_MS,
+  gitIdentity,
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
@@ -2068,7 +2069,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             "--cleanup=whitespace",
             `--message=${message}`,
           ],
-          { env: { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name }, timeoutMs: CREW_GIT_SLOW_MS },
+          { env: gitIdentity(name), timeoutMs: CREW_GIT_SLOW_MS },
         );
         committed = true;
         return recordCommit((await g(["rev-parse", "--verify", "HEAD"])).trim());

@@ -56,6 +56,20 @@ async function checkSeatGitConfig(path: string): Promise<void> {
 export const CREW_GIT_SLOW_MS = 120_000;
 /** The author and committer of the merge commit the hub makes. */
 export const MC_MERGE_AUTHOR = "Mission Control";
+/**
+ * The email git falls back to when no git config sets `user.email`. Git reads the identity from
+ * `GIT_*_EMAIL`, then `user.email` in any config (local, global, system), then `EMAIL`, then the
+ * hostname; the clone's config wins in production, and a bare checkout (the tests, a fresh
+ * machine) gets this instead of a hostname guess or "Committer identity unknown". Only `GIT_*`
+ * variables are stripped from git's environment.
+ */
+export const MC_FALLBACK_EMAIL = "mission-control@localhost";
+/** The environment for a commit or merge the hub makes under `name`. */
+export const gitIdentity = (name: string): NodeJS.ProcessEnv => ({
+  GIT_AUTHOR_NAME: name,
+  GIT_COMMITTER_NAME: name,
+  EMAIL: MC_FALLBACK_EMAIL,
+});
 export const mainMergeArgs = (branch: string, mainSha: string): string[] => [
   "-c",
   "commit.gpgsign=false",
@@ -1400,10 +1414,7 @@ async function syncReused(
     if (status !== "") return { kind: "skipped", why: "dirty" };
     const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
     try {
-      await w(mainMergeArgs(branch, baseSha), {
-        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-      });
+      await w(mainMergeArgs(branch, baseSha), gitIdentity(MC_MERGE_AUTHOR));
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code === 1) {
         const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
