@@ -3552,6 +3552,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           const asked = /#(\d+)$/.exec(message.ticket ?? "")?.[1];
           if (asked !== undefined && ticketRepoId === repo.id) {
             const rules = await deps.rules(repo.id);
+            if (rules instanceof Error) return fail("Cannot read repo rules.");
             const card = store.board(repo.id).find((c) => c.issueNumber === Number(asked));
             if (
               card &&
