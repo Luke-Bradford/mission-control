@@ -57,6 +57,7 @@ import {
   pending,
   recordFlightWake,
   recordNextFlightWake,
+  recordWakeReasons,
   unhandledReasons,
   type WakeReason,
   wakeFacts,
@@ -460,7 +461,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
+        const woke = causes.length > 0 ? causes : ["initial"];
+        recordFlightWake(store, found.session.repoId, t, woke);
+        recordWakeReasons(store, runId, t, left === null ? woke : [leftLine(left), ...causes]);
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -567,12 +570,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        recordFlightWake(
-          store,
-          found.session.repoId,
-          t,
-          causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER],
-        );
+        const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
+        recordFlightWake(store, found.session.repoId, t, woke);
+        recordWakeReasons(store, runId, t, woke);
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {

@@ -61,6 +61,7 @@ import {
   type FlightMemoryTitle,
   type FlightPlanInput,
   type FlightPlanOperation,
+  type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
   type FlowIssue,
@@ -462,6 +463,10 @@ CREATE TABLE IF NOT EXISTS flight_watch (
 CREATE TABLE IF NOT EXISTS flight_plans (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
+);
+-- One row per FLIGHT wake: the run it woke and the fact categories that woke it.
+CREATE TABLE IF NOT EXISTS flight_wakes (
+  run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, PRIMARY KEY (run_id, at)
 );
 CREATE TABLE IF NOT EXISTS flight_incoming (
   id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,
@@ -2269,6 +2274,7 @@ export class Store {
       ],
       ["guard_hits", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["flight_wakes", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
@@ -6328,6 +6334,25 @@ export class Store {
           .prepare("INSERT INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
           .run(session, entry.id, JSON.stringify(entry));
     };
+  }
+
+  /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
+  addFlightWake(runId: string, at: number, reasons: string[]): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons) VALUES (?, ?, ?)")
+      .run(runId, at, JSON.stringify(reasons));
+  }
+
+  /** FLIGHT's wakes at or after `since`, oldest first. */
+  flightWakes(since: number): FlightWakeRecord[] {
+    const rows = this.db
+      .prepare("SELECT run_id, at, reasons FROM flight_wakes WHERE at >= ? ORDER BY at, run_id")
+      .all(since) as { run_id: string; at: number; reasons: string }[];
+    return rows.map((r) => ({
+      runId: r.run_id,
+      at: r.at,
+      reasons: JSON.parse(r.reasons) as string[],
+    }));
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {

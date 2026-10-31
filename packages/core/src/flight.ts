@@ -109,6 +109,8 @@ export interface FlightView {
   controllerDecisions?: FlightDecision[];
   /** The server always sets it with a seat; optional so older fixtures still type. */
   wake?: FlightWakeStatus;
+  /** The last day's wakes by reason and by hour, for the FLIGHT page. */
+  wakeHistory?: FlightWakeHistory;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
   blocked?: FlightBlocked[];
 }
@@ -147,6 +149,21 @@ export interface FlightWakeStatus {
   wokeOn: string[] | null;
   /** From a real schedule only: the re-wake backstop while work is pending, or the next planned entry. */
   nextWakeAt: number | null;
+}
+
+/** One wake stored on its run: when it fired and the fact categories that woke FLIGHT. */
+export interface FlightWakeRecord {
+  runId: string;
+  at: number;
+  reasons: string[];
+}
+
+/** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
+export interface FlightWakeHistory {
+  since: number;
+  total: number;
+  byReason: { reason: string; n: number }[];
+  perHour: { at: number; n: number; byReason: Record<string, number> }[];
 }
 
 /** How far back `GET /api/flight` lists decisions, and the most it lists. */
@@ -1012,6 +1029,8 @@ export interface FlightState {
   reviewQueue?: {
     queued: number;
     running: number;
+    /** Minutes the oldest queued review has waited; 0 with none queued. */
+    waitMin?: number;
     seats: { seat: string; queued: number; running: number; idle: boolean }[];
   };
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
