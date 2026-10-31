@@ -143,7 +143,7 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { observeFlightMain } from "../src/flight/signals.ts";
+import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
@@ -508,6 +508,55 @@ beforeEach(() => {
   live("flight-1", "r-flight");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("wait_on", () => {
+  const waitArgs = (over: Record<string, unknown> = {}) => ({
+    target: "mc#7",
+    on: "its PR merging",
+    until: new Date(NOW + 30 * 60_000).toISOString(),
+    basis: "the PR is in CI",
+    ...over,
+  });
+
+  it("is a FLIGHT tool, granted to the read-only watch role", () => {
+    expect(named("wait_on")).toMatchObject({ modes: [], grantable: ["read-only"] });
+  });
+
+  it("records a wait decision on the target, and keeps the time for the wake that ends it", async () => {
+    const r = await call("wait_on", waitArgs());
+    expect(r.isError).toBeUndefined();
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        kind: "wait",
+        ref: "mc#7",
+        about: "mc#7: waiting on its PR merging",
+        decision: `waiting until ${new Date(NOW + 30 * 60_000).toISOString()}`,
+        basis: "the PR is in CI",
+      }),
+    ]);
+    expect(flightWaits(store)["mc#7"]).toEqual({
+      on: "its PR merging",
+      until: NOW + 30 * 60_000,
+      at: NOW,
+    });
+  });
+
+  it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
+    expect(
+      (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
+    ).toBe(true);
+    expect(
+      (await call("wait_on", waitArgs({ until: new Date(NOW + 8 * 86_400_000).toISOString() })))
+        .isError,
+    ).toBe(true);
+    live("guido-1", "r-guido");
+    expect(await call("wait_on", waitArgs(), ctx("guido-1", "r-guido"))).toEqual({
+      text: MC_FLIGHT_ONLY,
+      isError: true,
+    });
+    expect(store.flightDecisions(0, 10)).toEqual([]);
+  });
+});
 
 describe("log_decision", () => {
   it("is shown only to a role that is granted it", () => {
@@ -944,6 +993,7 @@ describe("tool list", () => {
   it("lists each tool and shows it only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
+      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",

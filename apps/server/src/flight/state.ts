@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import {
+  ATTENTION_KINDS,
   type AttentionItem,
   type BoardItem,
   carriedFrom,
@@ -17,6 +18,7 @@ import {
   FLIGHT_ITEMS_LISTED,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
   FLIGHT_MEMORY_KINDS,
@@ -76,7 +78,14 @@ import { type CcConfig, seatUnavailable } from "../config.ts";
 import { readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
+import {
+  attentionItems,
+  crew,
+  NO_CLI_VERSION,
+  NO_LOCK,
+  NOTE_KEY,
+  questionWithOperator,
+} from "../hud.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -125,7 +134,10 @@ export function operatorItems(
     hubLogin,
   ).filter(
     (i) =>
-      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) && i.key !== FLIGHT_NOT_TRIAGING_KEY,
+      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) &&
+      i.key !== FLIGHT_NOT_TRIAGING_KEY &&
+      // what FLIGHT left undecided is the operator's to read, never FLIGHT's to triage
+      i.key !== `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`,
   );
 }
 
@@ -277,7 +289,10 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
   store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify({ ...r, next }));
 }
 
-/** The next wake the state schedules: the re-wake backstop while work is pending, or a planned entry. */
+/**
+ * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
+ * planned entry.
+ */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   lastWakeAt: number,
@@ -982,7 +997,8 @@ export function flightState(i: {
     ];
   });
 
-  const items = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
+  const triageAll = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock);
+  const items = triageAll
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -997,7 +1013,23 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   return {
-    ...flightSignals({ config, store, session, seats, now }),
+    ...flightSignals({
+      config,
+      store,
+      session,
+      seats,
+      aside,
+      triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
+      readyPrs: prs.flatMap((p) => {
+        const at = store
+          .notes()
+          .find((n) => n.kind === "ready" && n.runId === p.runId && p.runId !== "")?.at;
+        return p.state === "open" && p.ready && at !== undefined
+          ? [{ ref: p.ref, pr: p.pr, at }]
+          : [];
+      }),
+      now,
+    }),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
@@ -1299,4 +1331,158 @@ export function pending(
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );
+}
+
+/** One thing a wake woke FLIGHT for: its fact id, a label, and what a decision on it would name. */
+export interface WakeReason {
+  id: string;
+  label: string;
+  targets: string[];
+}
+
+type Facts = Record<string, unknown[]>;
+/** Reasons that stay open until FLIGHT decides, because nothing in the state shows them settled. */
+const decisionOnly = (id: string): boolean =>
+  id.startsWith("triage:") || id.startsWith('signals:"seat_call:');
+/** A fact that is only a name for what a decision names, not a target. */
+const NOT_A_TARGET = new Set(["true", "false", "open", "merged", "closed", "null"]);
+
+/** Words that name a kind of fact, not the thing it is about: never a target of their own. */
+const GENERIC = new Set<string>([
+  "report",
+  "watch",
+  "loop",
+  "ask",
+  "note",
+  "controller",
+  ...ATTENTION_KINDS,
+]);
+
+/**
+ * What a decision on this fact would name. A signal's kind and its times are not targets (two
+ * signals of one kind share them); a park's kind is not either. What is left is the seat, run, ref,
+ * question or item key the fact is about.
+ */
+const factTargets = (category: string, item: unknown): string[] => {
+  const first = Array.isArray(item) ? item[0] : item;
+  // a question's decision may name it as its item key, ask:<id>
+  if (typeof first !== "string")
+    return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  let parts = first.split(":");
+  if (category === "signals") parts = parts.slice(1);
+  if (category === "parked") parts = parts.slice(0, -1);
+  const whole = parts.join(":");
+  return [whole, ...parts].filter(
+    (t, i, all) =>
+      t !== "" &&
+      !NOT_A_TARGET.has(t) &&
+      !GENERIC.has(t) &&
+      !/^\d{10,}$/.test(t) &&
+      all.indexOf(t) === i,
+  );
+};
+
+/** The words of a decision's text, lower-cased, trailing punctuation off: a target matches a whole word. */
+const wordsOf = (text: string): Set<string> =>
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[\s,;()"'`]+/)
+      .map((w) => w.replace(/[.:]+$/, ""))
+      .filter((w) => w !== "")
+      // #12 and repo#12 both name 12, kept as "#12"
+      .flatMap((w) => (w.includes("#") ? [w, w.slice(w.lastIndexOf("#"))] : [w])),
+  );
+
+/** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
+const accountable = (category: string, item: unknown): boolean => {
+  if (category === "t") return false;
+  if (category === "prs") {
+    const [, , ready, state, awaiting, away] = String(item).split(":");
+    return (ready === "true" && state === "open") || !!awaiting || !!away;
+  }
+  if (category === "parked") {
+    const kind = String(item).split(":").at(-1) ?? "";
+    return flightParkKind(kind);
+  }
+  return true;
+};
+
+/** What a wake newly lists, as reasons: the facts in `current` that `previous` did not have. */
+/** The tickets of the item a fact is about: the item itself, or the item an item_stale signal names. */
+const itemTickets = (
+  category: string,
+  item: unknown,
+  itemRefs: readonly { key: string; ticket: string | null }[],
+): string[] => {
+  const stale = typeof item === "string" && item.startsWith("item_stale:");
+  const key = stale ? item.slice("item_stale:".length) : item;
+  if (category !== "items" && !(category === "signals" && stale)) return [];
+  return itemRefs.flatMap((x) =>
+    x.ticket !== null && (stale ? x.key.replace(/:\d+$/, "") : x.key) === key ? [x.ticket] : [],
+  );
+};
+
+export function wakeReasons(
+  previous: string,
+  current: string,
+  itemRefs: readonly { key: string; ticket: string | null }[] = [],
+): WakeReason[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return Object.entries(after).flatMap(([category, items]) => {
+    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+    return items
+      .filter((item) => !old.has(JSON.stringify(item)) && accountable(category, item))
+      .map((item) => ({
+        id: `${category}:${JSON.stringify(item)}`,
+        label: `${category} ${typeof item === "string" ? item : JSON.stringify(item)}`.slice(
+          0,
+          200,
+        ),
+        // an item's ticket is a target too: a brief or wait on the ticket handles the item
+        targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
+      }));
+  });
+}
+
+/** The ids of the reasons still open in this state; a delivered signal stays open while it holds. */
+export function openReasonIds(
+  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+): Set<string> {
+  const facts = JSON.parse(wakeFacts(s)) as Facts;
+  facts.signals = s.signals.filter((x) => x.kind !== "seat_call").map((x) => `${x.kind}:${x.key}`);
+  return new Set(
+    Object.entries(facts).flatMap(([category, items]) =>
+      items.map((item) => `${category}:${JSON.stringify(item)}`),
+    ),
+  );
+}
+
+/**
+ * The reasons of a wake that FLIGHT left alone: not settled in the state, and with no decision since
+ * the wake that names one of their targets (a ref, seat, run, question, or the target in its text).
+ */
+export function unhandledReasons(
+  store: Store,
+  reasons: readonly WakeReason[],
+  wokeAt: number,
+  open: ReadonlySet<string>,
+): WakeReason[] {
+  const decisions = store.flightDecisions(wokeAt, 500);
+  const words = decisions.map((d) => wordsOf(`${d.about} ${d.decision}`));
+  return reasons.filter((r) => {
+    if (!decisionOnly(r.id) && !open.has(r.id)) return false;
+    return !decisions.some((d, i) =>
+      r.targets.some(
+        (t) =>
+          d.ref === t ||
+          d.seatId === t ||
+          d.targetRunId === t ||
+          (d.questionId !== null && String(d.questionId) === t) ||
+          (t.length >= 2 && words[i]?.has(t.toLowerCase()) === true) ||
+          (/^\d+$/.test(t) && words[i]?.has(`#${t}`) === true),
+      ),
+    );
+  });
 }

@@ -67,6 +67,7 @@ export const FLIGHT_DECISION_KINDS = [
   "status",
   "issue",
   "hub",
+  "wait",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -860,7 +861,21 @@ export interface FlightSeatState {
 }
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
-export const FLIGHT_IDLE_MS = 15 * 60_000;
+export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** A park this old, still unsettled, is a wake reason. */
+export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
+/** A PR green and reviewed that has not merged for this long is a wake reason. */
+export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
+export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
+/** An item not seen stale for this long, and then stale again, is told as a new reason. */
+export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
+/** FLIGHT's request to the controller, unanswered this long, is a wake reason. */
+export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
+/** The setting that keeps what FLIGHT waits on, by target. */
+export const FLIGHT_WAITS_SETTING = "flight.waits";
+/** The furthest ahead a `wait_on` may look. */
+export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
 export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
@@ -875,6 +890,13 @@ export const FLIGHT_SIGNAL_KINDS = [
   "chain_stalled",
   "github_budget",
   "hub_error",
+  "old_park",
+  "merge_stalled",
+  "item_stale",
+  "run_no_pr",
+  "controller_unanswered",
+  "wait_over",
+  "seat_call",
 ] as const;
 export interface FlightSignal {
   checks?: string[];
@@ -1056,6 +1078,10 @@ export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
+/** What a re-wake says when FLIGHT left reasons of the last wake without a decision. */
+export const FLIGHT_LEFT_HEAD = "You left these:";
+/** The one Needs-you note raised when a second wake leaves the same reasons unhandled. */
+export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
  * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every

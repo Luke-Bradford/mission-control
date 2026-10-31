@@ -231,6 +231,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).not.toContain("mcp__mc__draft_pr");
     expect(allowed).toContain("mcp__mc__report_evidence");
     expect(allowed).toContain("mcp__mc__ask_flight");
+    expect(allowed).toContain("mcp__mc__call_flight");
   });
 
   it("a read-only seat may ask FLIGHT and send Comms, with no git writes", () => {
@@ -240,6 +241,7 @@ describe("the allowlist in phase 2b", () => {
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_flight",
+      "mcp__mc__call_flight",
       "mcp__mc__report_evidence",
       "mcp__mc__comms_read",
       "mcp__mc__comms_inbox",
@@ -278,6 +280,8 @@ describe("the allowlist in phase 2b", () => {
       releaseHold: "mcp__mc__release_hold",
       screenshotHud: "mcp__mc__screenshot_hud",
       askFlight: "mcp__mc__ask_flight",
+      callFlight: "mcp__mc__call_flight",
+      waitOn: "mcp__mc__wait_on",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
@@ -613,6 +617,7 @@ describe("crew constants", () => {
         loop: "watch",
         tools: [
           "log_decision",
+          "wait_on",
           "read_ticket",
           "answer_question",
           "start_seat",
@@ -716,6 +721,8 @@ describe("mc tool grants", () => {
     expect(MC_TOOL_GRANTS["read-only"].base).toContain("ask_flight");
     // a scratch review answers with report_findings alone
     expect(MC_TOOL_GRANTS.scratch.base).not.toContain("ask_flight");
+    // every seat but FLIGHT may call it
+    for (const mode of Object.values(MC_TOOL_GRANTS)) expect(mode.base).toContain("call_flight");
     expect(Object.values(MC_TOOL_NAMES)).not.toContain("ask_operator");
     for (const g of Object.values(MC_TOOL_GRANTS)) {
       expect([...g.base, ...g.grantable] as string[]).not.toContain("ask_operator");
@@ -735,6 +742,7 @@ describe("mc tool grants", () => {
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
       "log_decision",
+      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",
@@ -841,6 +849,7 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",

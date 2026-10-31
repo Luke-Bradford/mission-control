@@ -12,6 +12,8 @@ export const MC_TOOL_NAMES = {
   push: "push",
   draftPr: "draft_pr",
   askFlight: "ask_flight",
+  callFlight: "call_flight",
+  waitOn: "wait_on",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
   restoreFile: "restore_file",
@@ -74,6 +76,8 @@ export const MC_TOOLS = {
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askFlight: mcTool(MC_TOOL_NAMES.askFlight),
+  callFlight: mcTool(MC_TOOL_NAMES.callFlight),
+  waitOn: mcTool(MC_TOOL_NAMES.waitOn),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
   restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
@@ -250,6 +254,10 @@ export const MC_COMMIT_TOO_BIG =
 
 export const ASKED_FLIGHT =
   "Asked FLIGHT. It answers, or takes the question to the operator with its brief; the answer arrives as a message. Carry on with what you can meanwhile.";
+export const CALLED_FLIGHT =
+  "Called FLIGHT. It wakes within 5 minutes with your reason and decides; an answer arrives as a message. Carry on with what you can meanwhile.";
+/** call_flight from FLIGHT itself. */
+export const CALL_FLIGHT_SELF = "Not called: you are FLIGHT.";
 /** The Comms mirror of an ask_flight question; the full question is kept in the question record. */
 export const ASK_FLIGHT_COMMS_POINTER =
   "Question recorded for FLIGHT.\nFull question is in the structured question record.";
