@@ -1787,6 +1787,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
+          maxBudgetUsd: run.profile?.profile.budgetUsd,
           mode: def.mode,
           mcTools: def.mcTools,
           runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(

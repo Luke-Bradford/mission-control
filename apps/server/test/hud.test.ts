@@ -1313,14 +1313,23 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.reviewing).toBeNull();
   });
 
-  it("carries the CLI version and the seat's configured effort; a loop has neither", () => {
+  it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
     const c = withCrew();
     const seatCfg = c.crew?.sessions[0]?.seats[0];
     if (seatCfg) seatCfg.effort = "max";
+    store.upsertRun(
+      crewRun({
+        profile: {
+          profile: { ...(DEFAULT_PROFILES[0] as Profile), budgetUsd: 12.5 },
+          route: { by: "label", label: "type:feature" },
+          hash: "profile-hash",
+        },
+      }),
+    );
     const rows = crew(c, store, NOW, NO_LOCK, () => "2.1.302").rows;
     const by = (id: string) => rows.find((r) => r.id === id);
-    expect(by("GUIDO-1")?.cli).toEqual({ version: "2.1.302", effort: "max" });
-    expect(by("RETRO-1")?.cli).toEqual({ version: "2.1.302", effort: null });
+    expect(by("GUIDO-1")?.cli).toEqual({ version: "2.1.302", effort: "max", budgetUsd: 12.5 });
+    expect(by("RETRO-1")?.cli).toEqual({ version: "2.1.302", effort: null, budgetUsd: null });
     expect(by("shop-app-ta")?.cli).toEqual({ version: null, effort: null });
     expect(
       crew(c, store, NOW, NO_LOCK, () => null).rows.find((r) => r.id === "GUIDO-1")?.cli.version,

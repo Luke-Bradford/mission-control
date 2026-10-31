@@ -683,7 +683,11 @@ function buildCrew(
         sessionId: view.sessionId,
         cli:
           agent.kind === "crew"
-            ? { version: cliVersionOnce(), effort: agent.seat.effort ?? null }
+            ? {
+                version: cliVersionOnce(),
+                effort: agent.seat.effort ?? null,
+                budgetUsd: latest?.profile?.profile.budgetUsd ?? null,
+              }
             : { version: null, effort: null },
         review:
           agent.kind === "crew"

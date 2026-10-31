@@ -1525,6 +1525,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
+  ["GET", "/api/qa/uat/:repoId/:number"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2344,6 +2345,11 @@ describe("local access", () => {
         continue;
       }
       if (url === "/api/attention/unknown") {
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url.startsWith("/api/qa/uat/")) {
+        // the placeholder PR is not in this fixture
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -5004,7 +5010,7 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([{ ...pr, check: null, preview: null }]);
+    expect(r.json()).toEqual([{ ...pr, check: null, preview: null, previewable: false }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
@@ -5034,11 +5040,11 @@ describe("boards, escalations, health", () => {
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
-      { ...pr(4, "shop-app#9"), check: null, preview: null },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      { ...pr(5, null), check: null, preview: null },
-      { ...pr(4, "shop-app#9"), check: null, preview: null },
+      { ...pr(5, null), check: null, preview: null, previewable: false },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
@@ -5120,6 +5126,7 @@ describe("boards, escalations, health", () => {
         "mergedAt",
         "check",
         "preview",
+        "previewable",
       ].sort(),
     );
     expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
@@ -9548,6 +9555,55 @@ it("starts, lists and closes an operator-only PR preview", async () => {
       (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
         .statusCode,
     ).toBe(404);
+    // No preview manager (a preview hub), or no crew checkout for the repo: the start route would
+    // answer 409, so the row must say false.
+    const noManager = buildApp({ config, store, bus, previewRepoId: "shop-app" });
+    try {
+      expect((await noManager.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noManager.close();
+    }
+    const crew = config.crew;
+    if (!crew) throw new Error("crew missing");
+    const noCheckout = buildApp({
+      config: { ...config, crew: { ...crew, sessions: [] } },
+      store,
+      bus,
+      previews,
+      previewRepoId: "shop-app",
+    });
+    try {
+      expect((await noCheckout.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noCheckout.close();
+    }
+    // A repo with preview support: an open PR can start one, a closed PR cannot. Another repo cannot.
+    const rowOf = async (repoId: string, number: number, query = "") =>
+      (await a.inject(`/api/repos/${repoId}/prs${query}`))
+        .json()
+        .find((pr: { number: number }) => pr.number === number);
+    for (const query of ["?all=1", "?all=1&shape=summary", "?all=1&detail=1"]) {
+      expect(await rowOf("shop-app", 41, query)).toMatchObject({
+        previewable: true,
+        preview: null,
+      });
+      expect(await rowOf("shop-app", 42, query)).toMatchObject({ previewable: false });
+      expect(await rowOf("site-builder", 41, query)).toMatchObject({
+        previewable: false,
+        preview: null,
+      });
+    }
+    expect((await a.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+      previewable: true,
+      preview: null,
+    });
+    expect((await a.inject("/api/repos/site-builder/prs/41")).json()).toMatchObject({
+      previewable: false,
+    });
     const started = await a.inject({
       method: "POST",
       url: "/api/previews",
@@ -9556,6 +9612,10 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect(await rowOf("shop-app", 41)).toMatchObject({
+      previewable: true,
+      preview: { port: 7431 },
+    });
     expect(
       (await a.inject("/api/repos/shop-app/prs"))
         .json()

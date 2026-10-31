@@ -35,6 +35,8 @@ export interface Profile {
   trigger?: string;
   /** Catalogue token budget, for description only; execution keeps its configured budget. */
   budget?: number | null;
+  /** Optional hard dollar cap passed to Claude for each run using this template. */
+  budgetUsd?: number | null;
   orchestrationOnly?: boolean;
   nodes?: ProfileStep[];
   name: string;

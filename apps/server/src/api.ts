@@ -91,7 +91,9 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
+  type PrUatView,
   type PullRequestListRow,
+  type PullRequestPreviewFacts,
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
@@ -280,6 +282,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -729,7 +732,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts();
+  const mapConflicts = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const sources: RingSource[] = [];
@@ -1328,6 +1335,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
+  /** The checkout a preview of this repo would run from; the start route and the PR rows both ask. */
+  const previewCheckout = (repo: (typeof config.repos)[number]) =>
+    config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+  /**
+   * What a repo's PR rows say about previews: `previewable` is whether `POST /api/previews` could
+   * start one now (a preview hub, this repo, a checkout, an open PR); `preview` is the running one.
+   */
+  const prPreviewFor = (repo: (typeof config.repos)[number]) => {
+    const supported =
+      deps.previews !== undefined &&
+      repo.id === deps.previewRepoId &&
+      previewCheckout(repo) !== undefined;
+    return (pr: { number: number; state: string }): PullRequestPreviewFacts => ({
+      previewable: supported && pr.state === "open",
+      preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+    });
+  };
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
@@ -2258,6 +2282,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: docs/runbook.md#qa-board-data (a PR's Comms, rework rounds and try-it commands, for the QA readiness card)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/qa/uat/:repoId/:number",
+        async (req, reply): Promise<PrUatView | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return prUat({
+            store,
+            pr,
+            runCommand: repo.runCommand,
+            previewUrl:
+              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number)?.url ?? null) : null,
+            singleRepo: config.repos.length === 1,
+            repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+          });
+        },
+      );
+
       // Reader: docs/runbook.md#qa-board-data (milestones with due dates and progress)
       api.get(
         "/qa/milestones",
@@ -2844,22 +2890,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const prPreview = prPreviewFor(repo);
         const listed = store.pullRequestsSince(
           repo.id,
           all === "1" ? null : now() - window * 86_400_000,
         );
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
-        const previewFor = (number: number) =>
-          repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
         const checkOf = reviewCheckFor(store, repo.id, now());
         if (shape === "summary")
-          return prs.map((pr) => ({
-            ...prSummaryRow(pr, checkOf(pr)),
-            preview: previewFor(pr.number),
-          }));
+          return prs.map((pr) => ({ ...prSummaryRow(pr, checkOf(pr)), ...prPreview(pr) }));
         return detail === "1"
-          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), preview: previewFor(pr.number) }))
-          : prs.map((pr) => ({ ...prSummary(pr, checkOf(pr)), preview: previewFor(pr.number) }));
+          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), ...prPreview(pr) }))
+          : prs.map((pr) => ({ ...prSummary(pr, checkOf(pr)), ...prPreview(pr) }));
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
       api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
@@ -2890,11 +2932,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            ...pr,
-            preview:
-              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
-          };
+          return { ...pr, ...prPreviewFor(repo)(pr) };
         },
       );
 
@@ -2930,11 +2968,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .pullRequests(repo.id)
           .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
         if (!pr) return reply.code(404).send({ error: "open PR not found" });
-        const match = {
-          repo,
-          pr,
-          checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
-        };
+        const match = { repo, pr, checkout: previewCheckout(repo) };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
         try {
           return await deps.previews.start({
