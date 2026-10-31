@@ -402,6 +402,7 @@ export async function main(): Promise<void> {
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     profiles,
     checks: runChecks,
+    checkDrops: (runId) => checkRecorder.drops(runId),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
