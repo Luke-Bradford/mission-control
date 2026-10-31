@@ -980,8 +980,8 @@ export interface CrewRow {
   model: string | null;
   /** Crew: the config session id; null for a loop. */
   sessionId: string | null;
-  /** Crew: the `claude --version` read at the server and the seat's configured effort; null for a loop. */
-  cli: { version: string | null; effort: string | null };
+  /** Crew: the `claude --version` read at the server, configured effort, and current run's dollar cap; null for a loop. */
+  cli: { version: string | null; effort: string | null; budgetUsd?: number | null };
   /** The open PR on the latest run's branch (in the seat's repo), else null. */
   review: {
     prNumber: number;

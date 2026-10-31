@@ -33,6 +33,13 @@ Claude seats and HTTP remain available. A successful catalog is cached for confi
 edits and reloads. Config writes refuse unvalidated Codex models and efforts with
 400. Existing Claude model identifiers and effort options keep loading.
 
+A Claude seat (FLIGHT's included) can state its `effort` (`low`, `medium`, `high` or
+`max`); the hub passes it as `--effort`, and the Agent page shows it beside the model.
+Omit it and the CLI picks its own default, which changes between CLI versions, so set it
+for any seat whose cost or quality matters. Pair it with a template's `budget_usd` (see
+Template profiles) for a hard per-run dollar cap. Choose `max` only where a comparison
+shows a quality gain.
+
 `updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
 binary they started on. Update Codex manually between runs. Resuming a run uses
 the run's saved model.
@@ -155,12 +162,14 @@ profiles:
     checks: []                  # CI checks named in the brief
     tries: 2                    # CI failures before the run parks (1 to 10)
     rounds: 2                   # blocking reviews before the run parks (1 to 10)
+    budget_usd: 12.50           # optional Claude spend cap per run; omit until you choose one
 ```
 
 - **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
+- **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
 ## Moving from Control Centre
