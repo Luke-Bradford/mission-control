@@ -869,6 +869,45 @@ describe("scheduler", () => {
           expect(store.agentEvents(0).filter((e) => e.to === "error")).toHaveLength(1);
         });
 
+        describe("a blocked loop or a removed agent's old event, with no browser", () => {
+          const quietCalls = async (seed?: () => void) => {
+            seed?.();
+            const s = createScheduler({
+              config,
+              store,
+              bus,
+              now: () => at,
+              collectors: stubs(),
+              hasViewClients: () => false,
+            });
+            states["shop-app-ta"] = "blocked";
+            await s.tick("ta");
+            await s.tick("ta");
+            const quiet = crewCalls();
+            for (let i = 1; i <= 4; i++) {
+              at = NOW + 15_000 * i;
+              await s.tick(i % 2 ? "ta" : "studio");
+            }
+            expect(crewCalls()).toBe(quiet);
+          };
+
+          it("builds no crew view on later ticks for a blocked loop", async () => {
+            await quietCalls();
+          });
+
+          it("builds no crew view on later ticks for an agent no longer in config", async () => {
+            await quietCalls(() =>
+              store.addAgentEvent({
+                agentId: "gone-loop",
+                at: 1,
+                from: "idle",
+                to: "error",
+                text: "x",
+              }),
+            );
+          });
+        });
+
         it("records a loop's ended run turning blocked while no browser is connected", async () => {
           const s = createScheduler({
             config,

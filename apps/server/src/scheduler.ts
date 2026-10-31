@@ -86,7 +86,7 @@ import {
 } from "./collectors/usage-sources.ts";
 import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
-import { TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
+import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
@@ -591,13 +591,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   let lastInputs: string | null = null;
+  /** States that turn with the clock; the others turn only with the inputs `stateInputs` reads. */
+  const TIMED_STATES: readonly HudState[] = ["running", "stalled", "waiting"];
   const afterLoopTick = () => {
     const inputs = noViewClients() ? stateInputs(config, store) : null;
+    // an agent no longer configured keeps its last event, and no row of it changes
+    const configured = new Set(configuredAgents(config).map((a) => a.id));
     const quiet =
       inputs !== null &&
       inputs === lastInputs &&
       !store.hasActiveRun() &&
-      [...lastStates.values()].every((s) => s === "idle" || s === "stopped");
+      ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
     // nothing can change state: no crew read
     if (quiet) return sweepAcks();
     lastInputs = inputs;
