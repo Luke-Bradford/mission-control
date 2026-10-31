@@ -33,6 +33,13 @@ Claude seats and HTTP remain available. A successful catalog is cached for confi
 edits and reloads. Config writes refuse unvalidated Codex models and efforts with
 400. Existing Claude model identifiers and effort options keep loading.
 
+A Claude seat (FLIGHT's included) can state its `effort` (`low`, `medium`, `high` or
+`max`); the hub passes it as `--effort`, and the Agent page shows it beside the model.
+Omit it and the CLI picks its own default, which changes between CLI versions, so set it
+for any seat whose cost or quality matters. Pair it with a template's `budget_usd` (see
+Template profiles) for a hard per-run dollar cap. Choose `max` only where a comparison
+shows a quality gain.
+
 `updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
 binary they started on. Update Codex manually between runs. Resuming a run uses
 the run's saved model.
