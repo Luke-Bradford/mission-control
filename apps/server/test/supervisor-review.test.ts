@@ -661,6 +661,65 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("a review brief carries the Done-when table from the author's report", async () => {
+    const r = reviewOfPush();
+    store.addEvidence(r.author.id, "done", 1, {
+      doneWhen: [{ line: 1, text: "Test: x", status: "met", evidence: "x.test.ts" }],
+    });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("## The author's Done-when table");
+    expect(brief).toContain('1. "Test: x" — met: x.test.ts');
+  });
+
+  it("a round-two review records the files changed since the last one, so a finding on an untouched file is late", async () => {
+    const r = reviewOfPush({ state: "queued" });
+    store.setReviewState(r.reviewId, ["queued"], "running", { at: 2, runId: "retro:round-1" });
+    const finding = {
+      severity: "Critical" as const,
+      file: "a.txt",
+      line: 1,
+      summary: "s",
+      scenario: "w",
+      fix: "f",
+    };
+    store.recordFindings(r.reviewId, "retro:round-1", {
+      verdict: { spec: "fail", quality: "fail" },
+      summary: "s",
+      findings: [finding],
+      at: 3,
+    });
+    const second = store.requestReview({
+      authorRunId: r.author.id,
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 9,
+      sha: r.sha,
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: 4,
+    }) as number;
+    store.setReviewState(second, ["queued"], "starting", { at: 5 });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", second);
+    // the engine marks it running; both reviews are of the same sha, so nothing changed between them
+    store.setReviewState(second, ["starting"], "running", { at: 6, runId });
+    expect(
+      store.recordFindings(second, runId, {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings: [finding],
+        at: 6,
+      }),
+    ).toBe(true);
+    expect(store.findingsOf(second)[0]?.late).toBe(true);
+  });
+
   it("a round-two brief names the prior review's id and its findings' positions", async () => {
     const r = reviewOfPush({ state: "queued" });
     store.setReviewState(r.reviewId, ["queued"], "running", { at: 2, runId: "retro:round-1" });

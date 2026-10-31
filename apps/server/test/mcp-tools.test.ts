@@ -3807,6 +3807,84 @@ describe("report_evidence", () => {
     });
   });
 
+  describe("the ticket's Done-when lines", () => {
+    const LINES = ["Test: a report missing a Done-when entry is refused", "Audit shows rounds"];
+    const answer = (line: number, status: "met" | "not_met" = "met", evidence = "a test") => ({
+      line,
+      status,
+      evidence,
+    });
+    const reportWith = (doneWhen?: unknown) =>
+      tool("report_evidence", ev).call(CTX, {
+        note: "done",
+        ...(doneWhen === undefined ? {} : { doneWhen }),
+      });
+
+    beforeEach(async () => {
+      store.setRunDoneWhen(RUN, LINES);
+      await committed();
+    });
+
+    it("refuses a report that leaves a line unaddressed, quoting the line", async () => {
+      const r = await reportWith([answer(1)]);
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('2. "Audit shows rounds"');
+      expect(r.text).not.toContain("a report missing");
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("refuses a report with no doneWhen, quoting every line", async () => {
+      const r = await reportWith();
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain(`1. "${LINES[0]}"`);
+      expect(r.text).toContain(`2. "${LINES[1]}"`);
+    });
+
+    it("refuses a line the ticket does not have, and a line named twice", async () => {
+      expect((await reportWith([answer(1), answer(2), answer(3)])).isError).toBe(true);
+      expect((await reportWith([answer(1), answer(1), answer(2)])).isError).toBe(true);
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("records a report that addresses every line, met or not met", async () => {
+      expect(
+        await reportWith([answer(1, "met", "mcp-tools.test.ts"), answer(2, "not_met", "web")]),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([
+        { line: 1, text: LINES[0], status: "met", evidence: "mcp-tools.test.ts" },
+        { line: 2, text: LINES[1], status: "not_met", evidence: "web" },
+      ]);
+    });
+
+    it("a Ruling: note on a fresh commit still owes the table", async () => {
+      const r = await tool("report_evidence", ev).call(CTX, { note: "Ruling: all done" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('1. "');
+    });
+
+    it("a Ruling: note on the sha CI failed, with no new commit, is recorded with no table", async () => {
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([]);
+    });
+
+    it("a Ruling: note with no new commit keeps the last table", async () => {
+      expect(await reportWith([answer(1), answer(2)])).toEqual({ text: EVIDENCE_RECORDED });
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toHaveLength(2);
+    });
+
+    it("needs no doneWhen from a run whose ticket lines were not recorded", async () => {
+      store.setRunDoneWhen(RUN, []);
+      expect(await reportWith()).toEqual({ text: EVIDENCE_RECORDED });
+    });
+  });
+
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
   });
@@ -4127,6 +4205,7 @@ describe("report_evidence", () => {
       at: clock,
       tests: [],
       testsAdded: [],
+      doneWhen: [],
     });
     expect(told).toEqual([["guido-1", RUN]]);
     expect(emitted).toContain("agents");

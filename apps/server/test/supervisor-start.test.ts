@@ -307,6 +307,21 @@ describe("startRun eligibility", () => {
     });
   });
 
+  it("records the ticket's Done-when lines for a build run, for report_evidence to hold it to", async () => {
+    onBoard(boardCard(42, { size: "M" }));
+    const { sup } = make({
+      fetchTicket: ticketWith({
+        body: "## Done when\n\n- [ ] Test: a report missing a line is refused\n- [x] Audit shows rounds\n",
+      }),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.runDoneWhen(runId)).toEqual([
+      "Test: a report missing a line is refused",
+      "Audit shows rounds",
+    ]);
+  });
+
   it("10: starts Size M with no plan so its seat can write it", async () => {
     onBoard(boardCard(42, { size: "M" }));
     const { sup } = make();
