@@ -1155,7 +1155,19 @@ export function crewSandboxSettings(
           allowRead: i.tempRoot === undefined ? [] : [i.tempRoot],
           // the hub's data folder, its own checkout (with node_modules: the hub runs that code, holding
           // the operator token, on its next start) and the launchd job that starts it
-          denyWrite: [i.dataDir, i.hubRoot, `${i.home}/Library/LaunchAgents`],
+          // and the git, npm and pnpm config in home, which the hub's own unsandboxed git and pnpm read
+          // (Update's fetch, pull, install and build): a url.insteadOf with an ext:: command, or a
+          // script-shell, would run as the hub. FLIGHT reads these; it never writes them.
+          denyWrite: [
+            i.dataDir,
+            i.hubRoot,
+            `${i.home}/Library/LaunchAgents`,
+            `${i.home}/.gitconfig`,
+            `${i.home}/.config/git`,
+            `${i.home}/.npmrc`,
+            `${i.home}/.config/pnpm`,
+            `${i.home}/Library/Preferences/pnpm`,
+          ],
           denyRead: [...new Set([i.dataDir, `${i.home}/.config/mission-control`])],
         },
       },

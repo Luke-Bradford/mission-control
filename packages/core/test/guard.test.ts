@@ -135,14 +135,15 @@ describe("FLIGHT's full profile", () => {
     "git worktree remove ../wt/guido-1-7",
     "git -C /clones/mission-control branch -D mc/7",
     "cd /clones/other && git log --oneline",
-    "git push origin mc/7",
-    "git push -u origin mc/7",
+    "git push origin mc/7:mc/7",
+    "git push -u origin mc/7:mc/7",
+    "git push origin --delete mc/7",
     "gh api repos/o/mc/git/refs/heads/mc/7",
     "gh api -X PATCH repos/o/mc/git/refs/heads/mc/7 -f sha=abc",
     "gh api graphql -f query='query{viewer{login}}'",
     'sqlite3 -readonly ~/.local/share/mission-control/mc.db "select 1"',
     'sqlite3 -readonly mc.db "select count(*) from runs"',
-    "git push -o ci.skip origin mc/7",
+    "git push -o ci.skip origin mc/7:mc/7",
     "curl -s -X POST http://127.0.0.1:7420/api/runs/r/resume",
     "gh api repos/o/r/issues -f title=x",
     "gh api repos/o/r/rulesets",
@@ -160,6 +161,41 @@ describe("FLIGHT's full profile", () => {
     ["git push origin HEAD", "merge-push"],
     ["git push origin HEAD:mc/7", "merge-push"],
     ["git push --all origin", "merge-push"],
+    ["gh api repos/o/mc/git/refs/heads/main -XPATCH -fsha=abc -Fforce=true", "merge-push"],
+    ["gh api repos/o/mc/merges -fbase=main -fhead=mc/9", "merge-push"],
+    ["gh api repos/o/mc/contents/CLAUDE.md -fmessage=x -fcontent=eA== -XPUT", "merge-push"],
+    [
+      "gh api /graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+      "merge-push",
+    ],
+    [
+      "gh api https://api.github.com/graphql -f query='mutation{updateRef(input:{}){clientMutationId}}'",
+      "merge-push",
+    ],
+    [
+      "gh api graphql -fquery='mutation{mergePullRequest(input:{}){clientMutationId}}'",
+      "merge-push",
+    ],
+    ["gh api /graphql --input q.json", "repo-rules"],
+    ["gh api https://api.github.com/graphql -F query=@m.graphql", "repo-rules"],
+    [
+      "gh api https://api.github.com/repos/o/mc/git/refs/heads/main -X PATCH -f sha=abc -F force=true",
+      "merge-push",
+    ],
+    ["gh api repos/o/mc/git/refs/heads/%6dain -X PATCH -f sha=abc", "merge-push"],
+    ["gh api repos/o/mc/git/refs/heads//main -X PATCH -f sha=abc", "merge-push"],
+    ["gh api repos/o/mc/git/refs/heads/./main -X PATCH -f sha=abc", "merge-push"],
+    ["gh api repos/o/mc/git/refs/heads/x/../main -X PATCH -f sha=abc", "merge-push"],
+    ["gh api repos/o/mc/merges/ -f base=main -f head=mc/9", "merge-push"],
+    ["gh api repos/o/mc/contents/%2Egithub/workflows/ci.yml -X PUT -f message=x", "merge-push"],
+    ["gh api -X PUT repos/o/mc/pulls/5/merge/", "merge-push"],
+    ["gh api -XPUT repos/o/mc/pulls/5/merge", "merge-push"],
+    ["git config --global REMOTE.origin.PUSH refs/heads/mc/7:refs/heads/main", "merge-push"],
+    ["git config --global Alias.fp x", "merge-push"],
+    ["git send-pack https://github.com/o/mc mc/7:main", "merge-push"],
+    ["git http-push https://github.com/o/mc mc/7:main", "merge-push"],
+    ["git push origin mc/7", "merge-push"],
+    ["git push -u origin mc/7", "merge-push"],
     ["gh api -X PATCH repos/o/mc/git/refs/heads/main -f sha=abc -F force=true", "merge-push"],
     ["gh api -X DELETE repos/o/mc/git/refs/heads/main", "merge-push"],
     ["gh api -X POST repos/o/mc/merges -f base=main -f head=mc/9", "merge-push"],
@@ -319,6 +355,16 @@ describe("flightTicketWrites", () => {
     expect(flightTicketWrites("gh --repo o/r issue edit 7 --add-label x").issues).toEqual([7]);
     expect(flightTicketWrites("gh --repo=o/r issue edit 7 --add-label x").issues).toEqual([7]);
     expect(flightTicketWrites('gh api graphql -f query="mutation{x}"').project).toBe(true);
+    // attached short flags, a leading slash and a full URL are the same call
+    expect(
+      flightTicketWrites('gh api graphql -fquery="mutation{closeIssue(input:{issueId:1}){x}}"')
+        .project,
+    ).toBe(true);
+    expect(flightTicketWrites('gh api /graphql -f query="mutation{x}"').project).toBe(true);
+    expect(
+      flightTicketWrites("gh api https://api.github.com/repos/o/r/issues/7 -XPATCH -fstate=closed")
+        .issues,
+    ).toEqual([7]);
     expect(flightTicketWrites('gh api graphql -f query="query{x}"').project).toBe(false);
     // a write whose ticket cannot be read is unreadable, and refused
     expect(flightTicketWrites("gh issue edit --add-label x").unreadable).toBe(true);

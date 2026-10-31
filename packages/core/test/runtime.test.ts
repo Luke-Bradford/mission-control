@@ -142,6 +142,11 @@ describe("crewCliArgs", () => {
           expect.arrayContaining([
             base.sandbox.hubRoot,
             `${base.sandbox.home}/Library/LaunchAgents`,
+            // git, npm and pnpm config the hub's own git and pnpm read when they update it
+            `${base.sandbox.home}/.gitconfig`,
+            `${base.sandbox.home}/.config/git`,
+            `${base.sandbox.home}/.npmrc`,
+            `${base.sandbox.home}/.config/pnpm`,
           ]),
         );
       }

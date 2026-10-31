@@ -1212,7 +1212,7 @@ denied-tool list. Every other seat keeps its sandbox and denies unchanged. Its s
 thing only, and that is the barrier that keeps the operator token out of FLIGHT's hands: the hub's data folder
 (the token file, the DB, every transcript) and `~/.config/mission-control` are denied to read, the data folder, the hub's own
 checkout (with its `node_modules`: the hub runs that code, holding the token, on its next start) and
-`~/Library/LaunchAgents` are denied to write, the rest of home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
+`~/Library/LaunchAgents` and the git, npm and pnpm config in home (`.gitconfig`, `.config/git`, `.npmrc`, `.config/pnpm`: the hub's own git and pnpm read them when it updates itself) are denied to write, the rest of home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
 loopback address, and with it the HUD's token route, is out of reach from its shell. `mc operator` is its way to the
 hub. The hub also refuses any request that carries a seat's run token on the token's bootstrap route, `flight/approvals`,
 `flight/runaway/lift` and the attention routes (the operator token is a second, separate key). The guard hook still

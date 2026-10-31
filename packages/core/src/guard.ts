@@ -2209,11 +2209,15 @@ function pushRefusal(rest: readonly string[]): string | null {
     if (/^(?:-o|--push-option|--receive-pack|--exec|--repo)$/.test(w)) i++;
     else if (!w.startsWith("-")) positional.push(w);
   }
-  if (positional.length < 2) return "git push needs an explicit branch: git push origin <branch>";
+  const hint = "git push needs an explicit branch on both sides: git push origin <branch>:<branch>";
+  if (positional.length < 2) return hint;
+  const deleting = rest.some((w) => w === "--delete" || w === "-d");
   for (const ref of positional.slice(1)) {
     // a literal HEAD, or a name built at run time, may be the checked-out branch (main in the hub checkout)
     if (ref.split(":").some((side) => side === "HEAD" || side === "@" || /[$`]|@\{/.test(side)))
-      return "git push needs an explicit branch: git push origin <branch>";
+      return hint;
+    // a bare name leaves the destination to remote.<name>.push, which a config file can point at main
+    if (!deleting && !/^[^:]+:[^:]+$/.test(ref)) return hint;
   }
   return null;
 }
@@ -2233,8 +2237,14 @@ function ghStripGlobal(args: readonly string[]): string[] {
 /** The method, endpoint and whether a `gh api ...` call writes (args start at `api`). */
 function ghApiCall(args: readonly string[]): {
   method: string;
+  /** The endpoint as the API reads it: no host, `%xx` decoded, `./`, `x/../` and `//` folded, no outer `/`. */
   endpoint: string | null;
+  /** The endpoint without its query string. */
+  path: string | null;
   writes: boolean;
+  /** Every -f/-F/--field/--raw-field value, as `key=value`, and whether --input gives the body. */
+  fieldValues: string[];
+  input: boolean;
 } {
   const valued = new Set([
     "-H",
@@ -2257,25 +2267,63 @@ function ghApiCall(args: readonly string[]): {
   ]);
   let method: string | null = null;
   let fields = false;
+  let input = false;
+  const fieldValues: string[] = [];
   let endpoint: string | null = null;
   for (let i = 1; i < args.length; i++) {
     const a = args[i] ?? "";
-    const [flag, inline] = a.startsWith("--") ? a.split(/=(.*)/s) : [a, undefined];
+    let flag: string | undefined = a;
+    let inline: string | undefined;
+    if (a.startsWith("--")) [flag, inline] = a.split(/=(.*)/s);
+    // pflag takes a short flag's value attached: -XPATCH, -fsha=abc, -Fforce=true
+    else if (/^-[XfFHqtp]./.test(a)) {
+      flag = a.slice(0, 2);
+      inline = a.slice(2);
+    }
     if (flag === "-X" || flag === "--method") method = (inline ?? args[++i] ?? "").toUpperCase();
     else if (["-f", "-F", "--field", "--raw-field", "--input"].includes(flag ?? "")) {
       fields = true;
-      if (inline === undefined) i++;
+      const value = inline ?? args[++i] ?? "";
+      if (flag === "--input") input = true;
+      else fieldValues.push(value);
     } else if (valued.has(flag ?? "")) {
       if (inline === undefined) i++;
     } else if (!a.startsWith("-") && endpoint === null) endpoint = a;
   }
   const used = method ?? (fields ? "POST" : "GET");
-  return { method: used, endpoint, writes: used !== "GET" };
+  const clean = endpoint === null ? null : normEndpoint(endpoint);
+  return {
+    method: used,
+    endpoint: clean,
+    path: clean === null ? null : (clean.split("?")[0] ?? clean),
+    writes: used !== "GET",
+    fieldValues,
+    input,
+  };
+}
+
+/** A `gh api` endpoint folded to the route the API serves: gh reads anything but the bare `graphql` as a path. */
+function normEndpoint(raw: string): string {
+  let x = decodePercent(raw).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\//i, "");
+  x = x.replace(/^\/*(?:api\/v3\/)?/i, "");
+  const q = x.indexOf("?");
+  let path = q === -1 ? x : x.slice(0, q);
+  const query = q === -1 ? "" : x.slice(q);
+  let prev: string;
+  do {
+    prev = path;
+    path = path
+      .replace(/(^|\/)\.(?=\/|$)/g, "$1")
+      .replace(/(^|\/)[^/]+\/\.\.(?=\/|$)/g, "$1")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\//, "");
+  } while (path !== prev);
+  return `${path.replace(/\/$/, "")}${query}`;
 }
 
 /** The REST routes that move main, merge without `merge_pr`, or commit a floor file to the repo. */
 const GH_FLOOR_ENDPOINT =
-  /^\/?repos\/[^/]+\/[^/]+\/(?:git\/refs\/heads\/main(?:$|[/?])|merges(?:$|\?)|contents\/(?:\.github\/|CLAUDE\.md)|branches\/main\/rename)/;
+  /^\/?repos\/[^/]+\/[^/]+\/(?:git\/refs\/heads\/main(?:$|[/?])|merges(?:$|\?)|contents\/(?:\.github(?:\/|$|\?)|CLAUDE\.md)|branches\/main\/rename)/i;
 /** The GraphQL mutations that do the same. */
 const GH_FLOOR_MUTATION =
   /createCommitOnBranch|updateRefs?\b|deleteRef|mergeBranch|mergePullRequest|enablePullRequestAutoMerge/;
@@ -2283,14 +2331,17 @@ const GH_FLOOR_MUTATION =
 /** Why `gh api ...` may not run (a writing call on protection, settings, access or main), or null. */
 function ghApiRefusal(args: readonly string[]): { rule: GuardRule; text: string } | null {
   const call = ghApiCall(args);
-  if (call.endpoint === "graphql") {
+  if (call.path === "graphql") {
     // a query read from a file, or sent as the whole body, cannot be read here
-    if (args.some((a) => /^[^=\s]+=@/.test(a) || a === "--input" || a.startsWith("--input=")))
+    if (call.input || call.fieldValues.some((v) => /^[^=]*=@/.test(v)))
       return {
         rule: "repo-rules",
         text: "a gh api graphql call whose query the guard cannot read",
       };
-    if (args.some((a) => GH_FLOOR_MUTATION.test(a)))
+    if (
+      call.fieldValues.some((v) => GH_FLOOR_MUTATION.test(v)) ||
+      args.some((a) => GH_FLOOR_MUTATION.test(a))
+    )
       return { rule: "merge-push", text: "a GraphQL mutation that commits, merges or moves a ref" };
     return null;
   }
@@ -2489,10 +2540,10 @@ export function guardDecision(
       // an alias or a push mapping can hide a force push or a push to main from the checks above
       if (
         ctx.fullAccess &&
-        (/(?:^|\s)(?:alias\.|remote\.[^.\s=]+\.(?:push|mirror)\b|push\.default)/.test(
+        (/(?:^|\s)(?:alias\.|remote\.[^.\s=]+\.(?:push|mirror)\b|push\.default)/i.test(
           args.join(" "),
         ) ||
-          (g !== null && !GIT_KNOWN.has(g.sub)))
+          (g !== null && (!GIT_KNOWN.has(g.sub) || g.sub === "send-pack" || g.sub === "http-push")))
       )
         return deny("merge-push", "a git alias, push mapping or unknown git subcommand");
       if (ctx.fullAccess && g?.sub === "push") {
@@ -2583,7 +2634,10 @@ export function guardDecision(
       if (ctx.fullAccess) {
         const ghArgs = ghStripGlobal(args);
         const gh = ghArgs.join(" ");
-        if (/^pr\s+merge(?:\s|$)/.test(gh) || /^api\s+.*\/merge(?:\s|\?|$)/.test(gh))
+        if (
+          /^pr\s+merge(?:\s|$)/.test(gh) ||
+          (ghArgs[0] === "api" && /(?:^|\/)merge$/.test(ghApiCall(ghArgs).path ?? ""))
+        )
           return deny("merge-push", "gh PR merge");
         const api = ghArgs[0] === "api" ? ghApiRefusal(ghArgs) : null;
         if (api !== null) return deny(api.rule, api.text);
@@ -3418,9 +3472,9 @@ export function flightTicketWrites(command: string): {
     if (args[0] === "api") {
       // the REST route to a ticket (`repos/o/r/issues/7...`) and any GraphQL mutation are ticket and board writes
       const call = ghApiCall(args);
-      const n = /^\/?repos\/[^/]+\/[^/]+\/issues\/(\d+)(?:[/?]|$)/.exec(call.endpoint ?? "")?.[1];
+      const n = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)(?:[/?]|$)/i.exec(call.endpoint ?? "")?.[1];
       if (call.writes && n !== undefined) issues.push(Number(n));
-      if (call.endpoint === "graphql" && args.some((a) => /\bmutation\b/.test(a))) project = true;
+      if (call.path === "graphql" && args.some((a) => /\bmutation\b/.test(a))) project = true;
     }
     if (args[0] === "issue" && GH_ISSUE_WRITES.has(args[1] ?? "")) {
       // gh takes its flags before or after the numbers, and several numbers: collect every positional
