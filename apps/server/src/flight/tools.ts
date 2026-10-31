@@ -2294,7 +2294,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     for (let i = 0; i < candidates.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
       bodies.push(
         ...(await Promise.all(
-          candidates.slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH).map((c) => read(c.issueNumber)),
+          candidates
+            .slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
+            .map((c) => read(c.issueNumber)),
         )),
       );
     const dependents: string[] = [];
