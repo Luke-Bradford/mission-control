@@ -61,6 +61,7 @@ import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
+  flightWaits,
   markFlightSignalsShown,
   observeFlightChecks,
   observeFlightMain,
@@ -4919,5 +4920,28 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       basis: "b",
     });
     expect(flightWakeHistory(store, T0 + 30 * MIN)).toMatchObject({ total: 3, idle: 2 });
+  });
+
+  it("clears a wait whose PR has merged instead of raising wait_over", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + MIN, at: T0 });
+    const read = (now: number) => flightState({ config, store, busy: [], now });
+    expect(read(T0 + 2 * MIN).signals.map((x) => x.kind)).toContain("wait_over");
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    const after = read(T0 + 2 * MIN);
+    expect(after.signals.map((x) => x.kind)).not.toContain("wait_over");
+    expect(Object.keys(flightWaits(store))).not.toContain("mc#7");
+  });
+
+  it("keeps a wait on a PR that is still open, and clears one on a seat no longer parked", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + 30 * MIN, at: T0 });
+    recordFlightWait(store, "note:blocked:guido-1:x", {
+      on: "a park",
+      until: T0 + 30 * MIN,
+      at: T0,
+    });
+    flightState({ config, store, busy: [], now: T0 + MIN });
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
   });
 });
