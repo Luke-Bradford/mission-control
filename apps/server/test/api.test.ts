@@ -482,6 +482,7 @@ describe("audit", () => {
         measured: false,
       })),
     },
+    reviewRounds: { prs: [], late: [] },
     surgeonProposals: [],
   });
 

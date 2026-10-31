@@ -702,8 +702,14 @@ Every writer run started while the engine is on (not a preview, `MC_NO_LOOP_WRIT
 hub holding the crew lock) carries a loop. A writer run started without one cannot publish: its
 `report_evidence` answers that Mission Control is not driving the run.
 
-- **Report.** The seat commits, then calls `report_evidence` with a note. The engine pushes and
-  opens the draft PR (or pushes to the run's PR on a later report), then waits for CI.
+- **Report.** The seat commits, then calls `report_evidence` with a note and one `doneWhen`
+  entry for each line of the ticket's `## Done when`: `met` with its evidence (a test name, a file,
+  a measurement) or `not_met` with the reason. The hub took those lines from the ticket when the
+  run started, and refuses a report that leaves one out, quoting it (a run started before this
+  rule has none and owes none; a `Ruling:` note owes none). RETRO's brief carries the latest
+  table and starts from it: lines marked met whose evidence does not hold, and lines marked not met
+  without an accepted reason. The engine pushes and opens the draft PR (or pushes to the run's PR
+  on a later report), then waits for CI.
 - **CI.** A failure goes back to the seat as a log excerpt, twice; the third failure parks the
   run. A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
   commits and reports again, and the engine pushes to the same PR.
@@ -1893,6 +1899,7 @@ repository checked out by the hub; PR numbers in another configured repository a
 - `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
 - `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
 - `tokenOveruse`: one finding per run started in range whose input + output tokens pass its ticket size's expected use. Expected use is 1.5 times the median of that size's build runs (only runs of build seats; watch, plan and review seats and observed loops are left out, as are runs of agents no longer configured) of the last `AUDIT_BASELINE_DAYS` (14) days, and `AUDIT_EXPECTED_TOKENS_DEFAULT` (400000) for a size with fewer than `AUDIT_BASELINE_MIN_RUNS` (5) of them or none. A finding carries review rounds, blocking findings by category, turns, uncached input, output, cache read and create, the expected use and a likely cause: `plan-gap` (scope or spec findings), `flaky-test-loop` (wrong or stale test findings), `rework-churn` (4 or more rounds, or 10 or more blocking findings), `wide-ticket` (Size L or XL with little rework) or `unexplained`. `groups` collects causes that repeat across two or more findings with a prevention to propose (`lesson`, `plan-rule` or `split-rule`); the proposal is text for the delegated path to take, nothing applies it. A finding never stops a run; only the `crew.run_token_budget` ceiling does.
+- `reviewRounds`: `prs` counts the PRs reviewed in range by their highest review round, and `late` counts, per reviewer seat and model, the findings reported in range and how many were late. A finding is late when it comes in round 2 or later on a file the author left unchanged since the previous review (the hub compares the files of `since-last-review.diff`; a review with no earlier round, or whose changed files are unknown, tags none). The tag is also on each stored finding.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.

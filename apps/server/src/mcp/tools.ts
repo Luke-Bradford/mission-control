@@ -38,7 +38,11 @@ import {
   commsCutMarker,
   crewAuthorName,
   DEFAULT_PROFILES,
+  DONE_WHEN_STATUSES,
+  type DoneWhenEntry,
+  doneWhenBadLineText,
   doneWhenCount,
+  doneWhenMissingText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -365,6 +369,16 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  doneWhen: z
+    .array(
+      z.strictObject({
+        line: z.int().min(1).max(REVIEW_FINDINGS_MAX),
+        status: z.enum(DONE_WHEN_STATUSES),
+        evidence: text(MC_TEXT_MAX),
+      }),
+    )
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
   tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
   testsAdded: z
     .array(z.strictObject({ file: text(FINDING_FILE_MAX), failedOnBase: z.boolean() }))
@@ -383,6 +397,22 @@ const ReportedTestSchema = {
     duration: { type: "integer", minimum: 0 },
   },
   required: ["command", "passed", "failed", "skipped", "duration"],
+  additionalProperties: false,
+};
+const DoneWhenAnswerSchema = {
+  type: "object",
+  properties: {
+    line: { type: "integer", minimum: 1, description: "The Done-when line's number, from 1." },
+    status: { type: "string", enum: [...DONE_WHEN_STATUSES] },
+    evidence: {
+      type: "string",
+      minLength: 1,
+      maxLength: MC_TEXT_MAX,
+      description:
+        "met: the test name, file or measurement that proves it. not_met: why you could not meet it.",
+    },
+  },
+  required: ["line", "status", "evidence"],
   additionalProperties: false,
 };
 const TestsAddedSchema = {
@@ -2034,7 +2064,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded } = parsed.data;
+    const { note, tests, testsAdded, doneWhen } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2113,6 +2143,25 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
+      // every Done-when line the run started with is answered, so a gap is the seat's to name
+      const lines = store.runDoneWhen(currentRun.id);
+      const answers: DoneWhenEntry[] = [];
+      if (lines.length > 0 && !ciRuling) {
+        const seen = new Set<number>();
+        for (const a of doneWhen ?? []) {
+          if (a.line > lines.length || seen.has(a.line)) {
+            return { text: doneWhenBadLineText(a.line, lines.length), isError: true };
+          }
+          seen.add(a.line);
+          answers.push({ ...a, text: lines[a.line - 1] ?? "" });
+        }
+        const missing = lines.flatMap((text, i) =>
+          seen.has(i + 1) ? [] : [{ line: i + 1, text }],
+        );
+        if (missing.length > 0) return { text: doneWhenMissingText(missing), isError: true };
+        answers.sort((a, b) => a.line - b.line);
+      }
+
       const problem = prTextProblem(note, {
         repo: repoOf(deps, currentRun),
         issue: issueOf(currentRun),
@@ -2133,7 +2182,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded });
+      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
@@ -2548,7 +2597,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note, optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note, one doneWhen entry for every line of the ticket's ## Done when (met with its evidence, or not met with the reason; Mission Control refuses a report that leaves one out), optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2559,6 +2608,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
+          doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
           testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: TestsAddedSchema },
         },

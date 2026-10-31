@@ -59,6 +59,7 @@ import {
   crewMcpConfig,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
+  doneWhenItems,
   eligibleToStart,
   errorText as errText,
   GUARD_CHECK_PATH,
@@ -3105,6 +3106,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      // the lines report_evidence will hold the seat to, as the ticket words them now
+      if (def.loop === "build" && !readOnly)
+        store.setRunDoneWhen(runId, doneWhenItems(ticket.body));
       if ((checkout.leftoverChanges?.length ?? 0) > 0) {
         store.addLoopEvent(
           `${runId}:leftover-changes`,
@@ -3548,6 +3552,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
       const prevReply =
@@ -3567,6 +3572,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         notes: evidence.map((e) => e.note),
+        doneWhen: evidence.at(-1)?.doneWhen ?? [],
         prevSha: prev?.sha ?? null,
         prevReviewId: prev?.id ?? null,
         prevFindings: prev

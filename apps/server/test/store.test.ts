@@ -2639,6 +2639,57 @@ describe("reviews", () => {
     );
   });
 
+  describe("late findings", () => {
+    const review = (round: number, runId: string, changed: string[] | null) => {
+      const id = store.requestReview(
+        request({ round, attempt: round, sha: String(round).repeat(40) }),
+      );
+      if (id === null) throw new Error("no id");
+      store.setReviewState(id, ["queued"], "starting", { at: 110 * round });
+      store.setReviewState(id, ["starting"], "running", { at: 120 * round, runId });
+      if (changed !== null) store.setReviewChangedSince(id, changed);
+      return id;
+    };
+    const report = (id: number, runId: string, findings: ReviewFinding[]) =>
+      store.recordFindings(id, runId, { verdict, summary: "s", findings, at: 500 });
+
+    it("tags a round 2 finding on a file unchanged since round 1, and not one on a changed file", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      const second = review(2, "rev-2", ["b.ts"]);
+      report(second, "rev-2", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", true],
+        ["b.ts", false],
+      ]);
+    });
+
+    it("tags nothing in round 1, or when the changed files are unknown", () => {
+      const first = review(1, "rev-1", []);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", null);
+      report(second, "rev-2", [finding()]);
+      expect(store.findingsOf(first).map((f) => f.late)).toEqual([false]);
+      expect(store.findingsOf(second).map((f) => f.late)).toEqual([false]);
+    });
+
+    it("audits PRs by round count and late findings per reviewer and model", () => {
+      const asRun = (id: string, model: string) =>
+        store.upsertRun(run({ id, agentId: "retro", model, startedAt: 100 }));
+      asRun("rev-1", "opus");
+      asRun("rev-2", "opus");
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", []);
+      report(second, "rev-2", [finding(), finding({ severity: "Minor" })]);
+      const { reviewRounds } = store.audit(0, 1000) as unknown as AuditView;
+      expect(reviewRounds).toEqual({
+        prs: [{ rounds: 2, count: 1 }],
+        late: [{ seatId: "retro", model: "opus", findings: 3, late: 2 }],
+      });
+    });
+  });
+
   describe("finding resolutions", () => {
     const round = (n: number, runId: string, findings: ReviewFinding[], resolutions = []) => {
       const id = store.requestReview(request({ round: n, attempt: n, sha: String(n).repeat(40) }));

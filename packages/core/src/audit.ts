@@ -112,6 +112,15 @@ export interface AuditView {
     /** Expected input + output tokens per size, from the last `AUDIT_BASELINE_DAYS` days; `""` is no size. */
     expected: { size: string | null; tokens: number; measured: boolean }[];
   };
+  /**
+   * Reviewed PRs in range by how many review rounds they took, and the late findings (round 2 or
+   * later, on a file unchanged since the previous review) per reviewer seat and model.
+   * The server always sets it; optional so web fixtures built before it type-check.
+   */
+  reviewRounds?: {
+    prs: { rounds: number; count: number }[];
+    late: { seatId: string; model: string | null; findings: number; late: number }[];
+  };
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
