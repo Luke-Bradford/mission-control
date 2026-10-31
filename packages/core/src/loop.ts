@@ -187,6 +187,17 @@ export const RULING_PARK = "ruling";
 export const CONTROLLER_CHECK_PARK = "controller-check";
 /** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
 export const MERGE_HOLD_PARK = "merge-hold";
+/** The park kind of a run that passed review and CI but waits for the operator's acceptance (UAT). */
+export const UAT_PARK = "uat";
+/** The park reason: the sha waiting and why the repo's `uat` rule matched. */
+export const uatParkText = (sha: string, why: string): string =>
+  `waiting for your acceptance on ${sha.slice(0, 7)} (${why})`;
+/** Why a plain resume or message cannot lift this park. */
+export const UAT_USE_ROUTE =
+  "this run waits for the operator's acceptance: POST /api/prs/:repo/:n/uat";
+/** The rework line for a PR the operator sent back at UAT; `note` is the operator's. */
+export const uatSendBackText = (sha: string, note: string): string =>
+  `The operator sent ${sha.slice(0, 7)} back at acceptance.\n\n${note}\n\nFix it, commit, and report again.`;
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
 /** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
@@ -1395,6 +1406,7 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
  */
 const isDecisionPark = (kind: string | undefined): boolean =>
   kind === CONTROLLER_CHECK_PARK ||
+  kind === UAT_PARK ||
   kind === MERGE_HOLD_PARK ||
   kind === RULING_PARK ||
   kind === "review" ||

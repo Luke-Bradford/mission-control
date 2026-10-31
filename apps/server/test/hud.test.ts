@@ -3338,6 +3338,19 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
     raise("blocked:r-cc:0", "blocked", "r-cc");
     expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(true);
+    // so is a PR waiting for the operator's acceptance
+    store.upsertRun(
+      run({
+        id: "r-uat",
+        agentId: "guido-1",
+        loop: {
+          ...(store.run("r-budget")?.loop as RunLoop),
+          parked: { kind: "uat", reason: "waiting for your acceptance", ended: false },
+        },
+      }),
+    );
+    raise("blocked:r-uat:0", "blocked", "r-uat");
+    expect(isOperatorCall({ key: "note:blocked:r-uat:0", kind: "blocked" }, store)).toBe(true);
     // an error a seat is stuck on stays raw too, so it still pings
     store.addCrewError({
       agentId: "guido-1",

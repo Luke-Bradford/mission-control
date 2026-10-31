@@ -281,6 +281,7 @@ import {
   ticketPathGrants,
   ticketReadText,
   trackedText,
+  UAT_PARK,
   UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
@@ -366,6 +367,7 @@ import {
   flightArrivalSource,
   flightSeat,
   flightState,
+  markItemsShown,
   markPrsShown,
   operatorItems,
   ownReply,
@@ -384,6 +386,8 @@ export interface FlightToolsDeps {
     move: string,
     above: string,
   ) => Promise<{ ok: boolean; text: string }>;
+  /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
+  areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
   seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
@@ -2308,14 +2312,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       now: now(),
       hubLogin: deps.login,
       lock: deps.lockState?.(),
+      areas: repo ? await deps.areas?.(repo.id) : undefined,
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
+    markItemsShown(store, state);
     markRetrospectiveShown(store, state);
     deps.seen?.(ctx.runId, state);
+    const { wake: _wake, ...shown } = state;
     return {
       text: JSON.stringify({
-        ...state,
+        ...shown,
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -3187,6 +3194,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       "merge",
       async (a, repo, ctx) => {
         const run = prRun(a.pr);
+        if (run?.loop?.parked?.kind === UAT_PARK)
+          return fail(
+            "This PR waits for the operator's acceptance; only the operator can clear it.",
+          );
         if (!run?.loop?.awaitingFlight || !deps.engine?.clearFlight)
           return fail("No awaiting-flight run PR in your lane.");
         if (flightFloorBlocked(run.loop))

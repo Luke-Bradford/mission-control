@@ -43,6 +43,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
+  FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
@@ -120,6 +121,7 @@ import {
   ticketHasRunText,
   trackedText,
   twoAreasText,
+  UAT_PARK,
   untrackedText,
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
@@ -3209,6 +3211,22 @@ describe("sync_main", () => {
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
 
+  it("keeps the wake inputs out of what FLIGHT reads, and marks its items seen", async () => {
+    live("guido-1", "r-guido");
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which lane?",
+      at: NOW,
+    });
+    expect(await state()).not.toHaveProperty("wake");
+    const seen = JSON.parse(store.getSetting(FLIGHT_ITEMS_SEEN_SETTING) ?? "{}") as Record<
+      string,
+      string
+    >;
+    expect(Object.keys(seen)).toEqual([`ask:${id}`]);
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3269,7 +3287,11 @@ describe("flight_state", () => {
 
   it("refreshes the delivered snapshot with the state returned to the calling run", async () => {
     const result = await state();
-    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", result);
+    // the baseline keeps the wake inputs FLIGHT is not shown
+    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", {
+      ...(result as object),
+      wake: expect.anything(),
+    });
     stateSeen.mockClear();
     await call("flight_state", { invalid: true });
     await call("flight_state", {}, ctx("guido-1", "r-guido"));
@@ -6708,6 +6730,21 @@ describe("superuser housekeeping", () => {
       touches: { sha: SHA, paths: [path] },
     });
     expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([]);
+    expect(ghCalls).toEqual([]);
+  });
+  it("merge_pr refuses a PR that waits for the operator's acceptance", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      uat: { sha: SHA, from: "review", accepted: false },
+    });
+    const refused = await call("merge_pr", { pr: 12, basis: "ready" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("acceptance");
     expect(clearanceCalls).toEqual([]);
     expect(ghCalls).toEqual([]);
   });

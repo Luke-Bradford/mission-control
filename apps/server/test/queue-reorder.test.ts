@@ -40,6 +40,7 @@ const rules = freezeRules({
   hardRulesSet: true,
   hardRulesBy: "operator",
   alwaysAsk: [],
+  uat: { labels: [], paths: [] },
   checks: [],
 });
 const card = (issue: number, priority: string): BoardItem => ({

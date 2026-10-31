@@ -1535,6 +1535,7 @@ describe("repo rules in user config", () => {
       hardRulesSet: true,
       hardRulesBy: "controller",
       alwaysAsk: ["deps"],
+      uat: { labels: [], paths: [] },
       checks: [],
       userSet: [
         "templates",
