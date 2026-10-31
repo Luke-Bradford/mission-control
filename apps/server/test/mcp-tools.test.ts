@@ -23,6 +23,7 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  alreadyOnOriginText,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
@@ -3017,6 +3018,57 @@ describe("push and draft_pr", () => {
           .map((l) => l.split(" ")[0]),
       ).toEqual([mine]);
       expect(store.runPush(second.runId)?.sha).toBe(mine);
+    });
+
+    it("a pushed head that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      // recorded under an earlier run of the branch, so the run's own newest is still `own`
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+      expect((await push()).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+      expect(store.runPush(RUN)?.sha).toBe(merge);
+    });
+
+    it("a head already on origin that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      git(wt, "push", "-q", "origin", `${merge}:refs/heads/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(merge));
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+    });
+
+    it("a commit someone else put on origin is not recorded as the run's, even when it descends from the newest", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      const foreign = operatorPushes("docs/operator.md");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--ff-only", `origin/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(foreign));
+      expect(store.branchCommits("mc", BRANCH).has(foreign)).toBe(false);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+    });
+
+    it("a pushed head that does not contain the run's newest commit leaves it as it was", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      git(wt, "reset", "-q", "--hard", `${own}^`);
+      write("apps/b.ts", "b\n");
+      git(wt, "add", "-A");
+      git(wt, "commit", "-qm", "feat: b");
+      const other = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: other, at: NOW });
+      expect((await push()).text).toBe(`Pushed ${other.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
     });
 
     it("a run that ended unpushed leaves its commits to the next run's push, which sends both", async () => {
