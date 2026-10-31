@@ -1,4 +1,10 @@
-import type { PrUatRound, PrUatView, PullRequestView } from "@mc/core";
+import {
+  COMMS_CAPCOM,
+  type PrUatRound,
+  type PrUatView,
+  type PullRequestView,
+  UAT_PARK,
+} from "@mc/core";
 import type { Store } from "./store.ts";
 
 /** Comms shown on a PR's readiness card. */
@@ -21,8 +27,33 @@ export interface PrUatInput {
 const shellWord = (b: string): string =>
   /^[A-Za-z0-9._/-]+$/.test(b) ? b : `'${b.replace(/'/g, "'\\''")}'`;
 
+const SEND_BACK =
+  /^The operator sent \w+ back at acceptance\.\n\n([\s\S]*)\n\nFix it, commit, and report again\.$/;
+
+/** Whether the PR waits for acceptance, since when, and the operator's newest send-back note. */
+function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
+  const run = store
+    .loopRuns(0)
+    .find((r) => r.repoId === pr.repoId && r.endedAt === null && r.loop?.prNumber === pr.number);
+  const loop = run?.loop;
+  if (run === undefined || !loop) return { waiting: false, since: null, note: null };
+  const waiting = loop.parked?.kind === UAT_PARK && !loop.uat?.accepted;
+  const since = waiting
+    ? (store
+        .loopEventsOfRun(run.id)
+        .filter((e) => e.key === `${run.id}:${loop.epoch}:parked:uat:${loop.uat?.sha}`)
+        .at(-1)?.at ?? null)
+    : null;
+  const sent = store
+    .commsFromToRun(COMMS_CAPCOM, run.id, 20)
+    .find((m) => SEND_BACK.test(m.text) || m.text.startsWith("Sent back at acceptance"));
+  const note = sent === undefined ? null : (SEND_BACK.exec(sent.text)?.[1] ?? sent.text);
+  return { waiting, since, note };
+}
+
 /** Comms, rework rounds and try-it commands for one PR. */
-export function prUat({ store, pr, runCommand, singleRepo, repoOfSender }: PrUatInput): PrUatView {
+export function prUat(input: PrUatInput): PrUatView {
+  const { store, pr, runCommand, singleRepo, repoOfSender } = input;
   const ticketNumber = pr.ticket === null ? null : /#(\d+)$/.exec(pr.ticket)?.[1];
   const all = store
     .commsOnTicket(
@@ -86,5 +117,6 @@ export function prUat({ store, pr, runCommand, singleRepo, repoOfSender }: PrUat
       ],
       previewUrl: null,
     },
+    uat: uatOf(input),
   };
 }

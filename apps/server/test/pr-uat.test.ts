@@ -1,7 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PrUatView, PullRequestView, Run } from "@mc/core";
+import {
+  COMMS_CAPCOM,
+  NEW_LOOP,
+  type PrUatView,
+  type PullRequestView,
+  type Run,
+  UAT_PARK,
+  uatSendBackText,
+} from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -208,6 +216,52 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     const body = (await get("/api/qa/uat/shop-app/41")).json() as PrUatView;
     expect(body.tryIt.branch).toBe(odd);
     expect(body.tryIt.commands[0]).toBe(`git fetch origin '${odd}' && git switch '${odd}'`);
+  });
+
+  it("says a PR is waiting for acceptance, since when, with the operator's last note", async () => {
+    store.upsertPullRequests("shop-app", [pr("shop-app", 50)], NOW);
+    store.upsertRun(
+      run("dev-5", {
+        endedAt: null,
+        status: "running",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          prNumber: 50,
+          epoch: 2,
+          parked: { kind: UAT_PARK, reason: "waiting", ended: false },
+          uat: { sha: "abc1234def", from: "ci", accepted: false },
+        },
+      }),
+    );
+    store.addLoopEvent("dev-5:2:parked:uat:abc1234def", "dev-5", "parked", NOW - 9 * MIN);
+    store.addComms({
+      at: NOW - 30 * MIN,
+      from: COMMS_CAPCOM,
+      to: "dev-2",
+      ticket: "shop-app#7",
+      targetRunId: "dev-5",
+      text: uatSendBackText("0000000aaa", "the button is the wrong colour"),
+    });
+    store.addComms({
+      at: NOW - 12 * MIN,
+      from: COMMS_CAPCOM,
+      to: "dev-2",
+      ticket: "shop-app#7",
+      targetRunId: "dev-5",
+      text: uatSendBackText("1111111bbb", "still wrong on mobile"),
+    });
+    const body = (await get("/api/qa/uat/shop-app/50")).json() as PrUatView;
+    expect(body.uat).toEqual({
+      waiting: true,
+      since: NOW - 9 * MIN,
+      note: "still wrong on mobile",
+    });
+  });
+
+  it("says a PR with no parked run is not waiting", async () => {
+    const body = (await get("/api/qa/uat/shop-app/30")).json() as PrUatView;
+    expect(body.uat).toEqual({ waiting: false, since: null, note: null });
   });
 
   it("omits the run command when the repo has none", async () => {

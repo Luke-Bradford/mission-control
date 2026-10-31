@@ -738,4 +738,9 @@ export interface PrUatView {
   /** Review rounds, newest first. */
   rounds: PrUatRound[];
   tryIt: { branch: string; commands: string[]; previewUrl: string | null };
+  /**
+   * Whether the PR waits for the operator's acceptance, since when (the park's time) and the note
+   * the operator last sent it back with; null where there is none.
+   */
+  uat: { waiting: boolean; since: number | null; note: string | null };
 }

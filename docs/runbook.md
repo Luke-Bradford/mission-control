@@ -1425,7 +1425,9 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   first branch commit before the next round (`fixSha`) and a `result` (`clean`, `resolved` or
   `open`); and `tryIt`, the branch name as the run pushed it, `git fetch origin <branch> && git
   switch <branch>` plus the repo's `run_command` from `config.yaml` when it sets one. `previewUrl`
-  is null until previews land (#985); the `uat` waiting state arrives with #1162.
+  is null until previews land (#985). `uat` says whether the PR's open run is parked for the
+  operator's acceptance (`waiting`), when it parked (`since`) and the note the operator last sent it
+  back with (`note`); a PR with no such run answers `{ waiting: false, since: null, note: null }`.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
   window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
   - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`

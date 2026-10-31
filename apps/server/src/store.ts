@@ -6314,6 +6314,17 @@ export class Store {
     ).map((r) => ({ sha: r.sha, at: r.at }));
   }
 
+  /** The newest `limit` messages `from` sent about one run, newest first. */
+  commsFromToRun(from: string, runId: string, limit: number): CommsRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM comms WHERE from_id = ? AND target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+        )
+        .all(from, runId, limit) as Row[]
+    ).map((r) => this.commsRow(r));
+  }
+
   /** The commits the commit tool made for a run, in the order it made them. */
   runCommits(runId: string): string[] {
     const rows = this.db
