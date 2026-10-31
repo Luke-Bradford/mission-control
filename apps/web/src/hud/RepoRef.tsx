@@ -5,6 +5,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
 import { repoColor } from "../repoColor.ts";
+import { followLink, ticketPath } from "../router.ts";
 import "./RepoRef.css";
 
 /**
@@ -12,6 +13,7 @@ import "./RepoRef.css";
  * GitHub from the repo's configured owner/name. `bare` leaves the chip out, for a page that shows
  * one repo. A repo that is not in the config gets a plain chip and, unless `url` is given, no link.
  * `url` is the fallback the server sent; it is only linked when it is a github.com URL.
+ * With `to`, the number opens that Mission Control page and GitHub is a second, marked link.
  */
 export function RepoRef({
   repoId,
@@ -20,6 +22,7 @@ export function RepoRef({
   bare = false,
   title,
   url,
+  to,
 }: {
   repoId: string;
   number: number;
@@ -27,6 +30,8 @@ export function RepoRef({
   bare?: boolean;
   title?: string;
   url?: string | null;
+  /** An in-app path for the number to open; GitHub stays beside it as a second link. */
+  to?: string;
 }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const repos = config?.repos ?? [];
@@ -47,7 +52,17 @@ export function RepoRef({
           </span>{" "}
         </>
       )}
-      {href ? (
+      {to ? (
+        <>
+          <a href={to} aria-label={`${repoId} ${label}`} onClick={(e) => followLink(e, to)}>
+            {label}
+          </a>
+          {href && (
+            // the ↗ is drawn by CSS, so the number's text stays what it was
+            <ExternalLink url={href} label={`${repoId} ${label} on GitHub`} className="rref-gh" />
+          )}
+        </>
+      ) : href ? (
         <ExternalLink url={href} label={`${repoId} ${label}`}>
           {label}
         </ExternalLink>
@@ -80,5 +95,14 @@ export function TicketRef({
 }) {
   const t = parseTicket(ticket);
   if (!t) return <span className="chipref">{ticket}</span>;
-  return <RepoRef repoId={t.repoId} number={t.number} bare={bare} kind={kind} url={url} />;
+  return (
+    <RepoRef
+      repoId={t.repoId}
+      number={t.number}
+      bare={bare}
+      kind={kind}
+      url={url}
+      to={kind === "pr" ? undefined : ticketPath(t.repoId, t.number)}
+    />
+  );
 }

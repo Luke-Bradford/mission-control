@@ -396,17 +396,23 @@ describe("cards", () => {
     expect(lane.querySelector(".rchip")).toBeNull();
   });
 
-  it("a card's issue number links to GitHub and does not also open the card", async () => {
+  it("a card's issue number opens the ticket page, GitHub is the link beside it, and neither also opens the card", async () => {
     stub({ shopApp: [todo(1)] });
     const { container } = await open();
     await screen.findByText("Ticket 1");
     const link = within(card(container, "shop-app#1") as HTMLElement).getByRole("link", {
       name: "shop-app #1",
     });
-    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/1");
+    expect(link.getAttribute("href")).toBe("/tickets/shop-app/1");
+    const gh = within(card(container, "shop-app#1") as HTMLElement).getByRole("link", {
+      name: "shop-app #1 on GitHub",
+    });
+    expect(gh.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/1");
     const before = window.location.pathname;
-    fireEvent.click(link);
+    fireEvent.click(gh);
     expect(window.location.pathname).toBe(before);
+    fireEvent.click(link);
+    expect(window.location.pathname).toBe("/tickets/shop-app/1");
   });
 
   it("Space on the focused title link opens the card, as Enter does", async () => {
@@ -422,7 +428,7 @@ describe("cards", () => {
     expect(window.location.pathname).toBe(before);
     // Space follows the link, and the page does not scroll
     expect(fireEvent.keyDown(title, { key: " " })).toBe(false);
-    expect(window.location.pathname).toBe("/board/shop-app/1");
+    expect(window.location.pathname).toBe("/tickets/shop-app/1");
   });
 
   it("Space with a modifier, or held down, does nothing on the title link", async () => {
@@ -459,10 +465,10 @@ describe("cards", () => {
       expect(window.location.pathname).toBe(before);
     }
     // the card's own shortcut must not take it either
-    expect(window.location.pathname).not.toBe("/board/shop-app/1");
+    expect(window.location.pathname).not.toBe("/tickets/shop-app/1");
     // a plain click does navigate in-app
     expect(fireEvent.click(title)).toBe(false);
-    expect(window.location.pathname).toBe("/board/shop-app/1");
+    expect(window.location.pathname).toBe("/tickets/shop-app/1");
   });
 
   it("every link in a card other than the title sits in a .rref, which the CSS lifts above the cover", async () => {
@@ -491,7 +497,14 @@ describe("cards", () => {
       [...(card(container, "shop-app#3349") as HTMLElement).querySelectorAll(".rref a")].map((a) =>
         a.getAttribute("aria-label"),
       ),
-    ).toEqual(["shop-app #3349", "shop-app PR #40", "shop-app #2"]);
+    ).toEqual([
+      "shop-app #3349",
+      "shop-app #3349 on GitHub",
+      "shop-app PR #40",
+      "shop-app PR #40 on GitHub",
+      "shop-app #2",
+      "shop-app #2 on GitHub",
+    ]);
   });
 
   it("a card is not a button around links: its title is the link that opens it", async () => {
@@ -506,9 +519,9 @@ describe("cards", () => {
     expect(idle.hasAttribute("tabindex")).toBe(false);
     // the ref link and the title link are both reachable by role
     const open1 = within(idle).getByRole("link", { name: "Ticket 1" });
-    expect(open1.getAttribute("href")).toBe("/board/shop-app/1");
+    expect(open1.getAttribute("href")).toBe("/tickets/shop-app/1");
     fireEvent.click(open1);
-    expect(window.location.pathname).toBe("/board/shop-app/1");
+    expect(window.location.pathname).toBe("/tickets/shop-app/1");
     // a worked card opens its agent
     const worked = card(container, "shop-app#3349") as HTMLElement;
     expect(within(worked).getByRole("link", { name: "Ticket 3349" }).getAttribute("href")).toBe(
@@ -877,7 +890,7 @@ describe("cards", () => {
     });
     await open();
     const link = await screen.findByRole("link", { name: "shop-app #2" });
-    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/2");
+    expect(link.getAttribute("href")).toBe("/tickets/shop-app/2");
     expect(link.closest(".warn-t")?.textContent).toMatch(/^Blocked: /);
   });
 
