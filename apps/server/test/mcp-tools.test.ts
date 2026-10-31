@@ -3870,6 +3870,15 @@ describe("report_evidence", () => {
       expect(store.latestEvidence(RUN)?.doneWhen).toEqual([]);
     });
 
+    it("a Ruling: note with no new commit keeps the last table", async () => {
+      expect(await reportWith([answer(1), answer(2)])).toEqual({ text: EVIDENCE_RECORDED });
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toHaveLength(2);
+    });
+
     it("needs no doneWhen from a run whose ticket lines were not recorded", async () => {
       store.setRunDoneWhen(RUN, []);
       expect(await reportWith()).toEqual({ text: EVIDENCE_RECORDED });
