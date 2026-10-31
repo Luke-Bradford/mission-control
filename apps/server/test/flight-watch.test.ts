@@ -2488,6 +2488,20 @@ describe("wakeSummary", () => {
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 
+    it("raises the idle-reviewers fact only once a queued review has waited 10 minutes", () => {
+      const queue = (queued: number, waitMin: number) =>
+        state({
+          reviewQueue: {
+            queued,
+            running: 0,
+            waitMin,
+            seats: [{ seat: "retro-1", queued, running: 0, idle: true }],
+          },
+        });
+      expect(wakeFacts(queue(1, 9))).toBe(wakeFacts(queue(0, 0)));
+      expect(wakeFacts(queue(1, 10))).not.toBe(wakeFacts(queue(0, 0)));
+    });
+
     it("ignores a free seat next to tickets that are not ready, until one is", () => {
       const seats = [s({ free: true }), s({ id: "b", free: true })];
       const notReady = { ...ticket, ref: "mc#2", column: "Backlog" as const, ready: false };
@@ -4433,6 +4447,45 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     nowMs += FLIGHT_REWAKE_MS;
     await tick();
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a merged PR that woke nothing rides in the next wake, even an hour later", async () => {
+    flightOnly();
+    await watch.check();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: nowMs })], nowMs);
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += 61 * MIN;
+    vi.setSystemTime(nowMs);
+    ask();
+    await watch.check();
+    const last = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(last.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+  });
+
+  it("idle review seats with a review queued for 10 minutes wake FLIGHT once", async () => {
+    flightOnly();
+    await watch.check();
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "sha7",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += FLIGHT_IDLE_MS - MIN;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += 2 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("reviews");
   });
 
   it("stores each wake's reasons on the run, and counts them per hour by reason", async () => {

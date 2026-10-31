@@ -791,7 +791,10 @@ export function flightState(i: {
   const prs = store
     .pullRequests(session.repoId)
     .filter(
-      (p) => p.state === "open" || (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_HOUR_MS),
+      // a merge no longer wakes FLIGHT, so an unshown one waits a day for the next wake to carry it
+      (p) =>
+        p.state === "open" ||
+        (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_METRICS_DAY_MS),
     )
     .sort((a, b) => a.number - b.number)
     .map((p) => {
