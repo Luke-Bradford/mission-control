@@ -1125,8 +1125,8 @@ run may use; the engine parks a run that goes over. A writer run leaves its seat
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. Rework on a set-aside run (review findings, a failed controller
 check, a CI failure) comes first, oldest first, ahead of any new ticket. If it lands while the seat is
-building a new ticket, that ticket is set aside at the seat's next turn end (its worktree and any
-uncommitted work stay as they are, nothing is pushed) and comes back after the rework; the rework's
+building a new ticket, that ticket is set aside at the seat's next turn end (its worktree, with its commits and any
+uncommitted work, is kept as it is; nothing is pushed) and comes back after the rework; the rework's
 wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
