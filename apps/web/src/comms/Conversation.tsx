@@ -12,7 +12,7 @@ import {
   type FlightView,
 } from "@mc/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { apiDelete, apiPost, apiPut } from "../api.ts";
+import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
@@ -673,7 +673,12 @@ function ModernConversation({
         setReadError(null);
         hub.refetchTopic("agents");
       })
-      .catch(() => setReadError("Could not mark this conversation read."))
+      .catch((error: unknown) => {
+        // Only an answer from the server is a failure to report. A request that got none (a
+        // read-only page such as the HUD screenshot, a dropped connection) is not: the stream
+        // status shows a lost hub, and the next message tries the read again.
+        if (error instanceof ApiError) setReadError("Could not mark this conversation read.");
+      })
       .finally(() => pendingRead.current.delete(key));
   }, [scope, messages, readRetry]);
   const to =

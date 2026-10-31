@@ -5,7 +5,13 @@
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { type RepoRules, splitCommands } from "@mc/core";
+import {
+  CHECK_BASH_TIMEOUT_DEFAULT_MS,
+  type CheckDrop,
+  type CheckDropReason,
+  type RepoRules,
+  splitCommands,
+} from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
 import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
@@ -57,16 +63,35 @@ export interface CallKey {
   toolUseId: string;
 }
 
+/** What the hook knows of a shell call's setup, which the recorder needs to say why a call was dropped. */
+export interface CallOptions {
+  /** The call asked to run in the background. */
+  background?: boolean;
+  /** The call's own Bash `timeout` (ms); Claude's default applies when it names none. */
+  timeoutMs?: number;
+}
+
 export interface CheckRecorder {
   /** A shell call is about to start: keep the head and cleanliness it starts on. */
-  begin(key: CallKey, command: string, aliases?: readonly CallKey[]): Promise<void>;
+  begin(
+    key: CallKey,
+    command: string,
+    aliases?: readonly CallKey[],
+    options?: CallOptions,
+  ): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
   /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
   lockedBy(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
+  /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
+  drops(runId: string): readonly CheckDrop[];
 }
+
+/** How many dropped calls the recorder keeps for one run, and for how many runs. */
+const DROPS_PER_RUN = 30;
+const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
   store: Pick<Store, "addCheckRun">;
@@ -78,15 +103,47 @@ export interface CheckRecorderDeps {
   log?: (line: string) => void;
 }
 
+interface StartedCall {
+  runId: string;
+  matched: string[];
+  command: string;
+  head: string;
+  startedAt: number;
+  timeoutMs: number;
+}
+
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
 
 export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
-  const started = new Map<
-    string,
-    { runId: string; matched: string[]; command: string; head: string }
-  >();
+  const started = new Map<string, StartedCall>();
+  /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
+  const dropped = new Map<string, CheckDrop[]>();
+  const noteDrop = (
+    runId: string,
+    reason: CheckDropReason,
+    commands: readonly string[],
+    head: string | null,
+    invoked: string,
+  ): void => {
+    const list = dropped.get(runId) ?? [];
+    for (const command of commands) list.push({ reason, command, head, invoked, at: now() });
+    dropped.delete(runId);
+    dropped.set(runId, list.slice(-DROPS_PER_RUN));
+    for (const old of dropped.keys()) {
+      if (dropped.size <= DROPPED_RUNS) break;
+      dropped.delete(old);
+    }
+  };
+  /** A check was counted: what was said earlier about why it was not no longer applies. */
+  const settle = (runId: string, command: string): void => {
+    const list = dropped.get(runId);
+    if (list === undefined) return;
+    const rest = list.filter((x) => x.command !== command);
+    if (rest.length === 0) dropped.delete(runId);
+    else dropped.set(runId, rest);
+  };
   return {
     async lockedBy(runId, command) {
       try {
@@ -96,14 +153,41 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
-    async begin(key, command, aliases = []) {
+    async begin(key, command, aliases = [], options = {}) {
       try {
-        const matched = checksRun(command, await d.checks(key.runId));
-        if (matched.length === 0) return;
+        const checks = await d.checks(key.runId);
+        const matched = checksRun(command, checks);
+        if (matched.length === 0) {
+          // a configured check inside a chain, a pipe or a list is not counted: say so
+          const inside = lockedCheck(command, checks);
+          if (inside === null) return;
+          const at = await d.state(key.runId).catch(() => null);
+          noteDrop(key.runId, "not-plain", [inside], at?.head ?? null, command);
+          return;
+        }
         const at = await d.state(key.runId);
+        if (at === null) {
+          noteDrop(key.runId, "unreadable", matched, null, command);
+          return;
+        }
         // a dirty tree: the check ran on something no commit holds
-        if (at === null || !at.clean) return;
-        const call = { runId: key.runId, matched, command, head: at.head };
+        if (!at.clean) {
+          noteDrop(key.runId, "dirty-start", matched, at.head, command);
+          return;
+        }
+        // a background call reports its end at once, long before the check has run
+        if (options.background) {
+          noteDrop(key.runId, "background", matched, at.head, command);
+          return;
+        }
+        const call = {
+          runId: key.runId,
+          matched,
+          command,
+          head: at.head,
+          startedAt: now(),
+          timeoutMs: options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
+        };
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
@@ -117,8 +201,20 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       try {
         const at = await d.state(key.runId);
         // the head moved, or the call left the tree dirty: it did not check the commit it started on
-        if (at === null || at.head !== call.head || !at.clean) return;
+        if (at === null) {
+          noteDrop(key.runId, "unreadable", call.matched, call.head, call.command);
+          return;
+        }
+        if (at.head !== call.head) {
+          noteDrop(key.runId, "head-moved", call.matched, call.head, call.command);
+          return;
+        }
+        if (!at.clean) {
+          noteDrop(key.runId, "dirty-end", call.matched, call.head, call.command);
+          return;
+        }
         for (const command of call.matched) {
+          settle(key.runId, command);
           d.store.addCheckRun({
             runId: key.runId,
             command,
@@ -129,12 +225,27 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             at: now(),
           });
         }
+        // a failure with no exit code after the Bash timeout is the CLI killing the call, not the check failing
+        if (!ok && exitCode === null && now() - call.startedAt >= call.timeoutMs - 1_000) {
+          noteDrop(key.runId, "timeout", call.matched, call.head, call.command);
+        }
       } catch (e) {
         d.log?.(`checks: could not record for ${key.runId}: ${(e as Error).message}`);
       }
     },
     dropRun(runId) {
-      for (const [id, call] of started) if (call.runId === runId) started.delete(id);
+      // a call can sit under two ids (Codex): it is one call
+      const calls = new Set<StartedCall>();
+      for (const [id, call] of started) {
+        if (call.runId !== runId) continue;
+        started.delete(id);
+        calls.add(call);
+      }
+      for (const call of calls)
+        noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+    },
+    drops(runId) {
+      return dropped.get(runId) ?? [];
     },
   };
 }
