@@ -725,7 +725,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts();
+  const mapConflicts = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const sources: RingSource[] = [];

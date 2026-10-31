@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import type { MapPersist } from "./snapshot.ts";
 
 const execFileP = promisify(execFile);
 type Tip = Pick<PullRequestView, "branch" | "headSha" | "state"> & { number?: number };
@@ -30,6 +31,8 @@ export interface PairFailure {
  * unrelated histories) is held until either head changes, which changes the pair's key.
  */
 export const RETRY_HOLD_MS = 10_000;
+/** The map cache kind for a checked pair: sha pair → conflicting files. */
+const CONFLICT_KIND = "conflict";
 
 type Held = { reason: string; until: number };
 
@@ -43,9 +46,23 @@ export class MapConflicts {
   private readonly missing = new Map<string, number>();
 
   private readonly now: () => number;
+  /** Pair results outlive the hub: a restart must not re-run every merge check on the first snapshot. */
+  private readonly persist: MapPersist | null;
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = Date.now, persist: MapPersist | null = null) {
     this.now = now;
+    this.persist = persist;
+  }
+
+  private persisted(key: string): string[] | undefined {
+    const raw = this.persist?.get(CONFLICT_KIND, "", key);
+    if (raw == null) return undefined;
+    try {
+      const files = JSON.parse(raw) as unknown;
+      return Array.isArray(files) && files.every((f) => typeof f === "string") ? files : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -88,7 +105,7 @@ export class MapConflicts {
           const shas = [a.headSha, b.headSha].sort();
           const key = shas.join(":");
           const failedKey = `${worktree}\0${key}`;
-          let files = this.cache.get(key);
+          let files = this.cache.get(key) ?? this.persisted(key);
           if (files === undefined) {
             const held = this.failed.get(failedKey);
             if (held && held.until > now) {
@@ -122,6 +139,7 @@ export class MapConflicts {
               continue;
             }
             this.cache.set(key, files);
+            this.persist?.put(CONFLICT_KIND, "", key, JSON.stringify(files), true);
             if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value as string);
           }
           checkedTips.add(a.branch);

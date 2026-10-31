@@ -265,3 +265,26 @@ it("names each branch's PR number in the order of the pair, null when the row ha
     { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [12, null] },
   ]);
 });
+
+it("a pair checked once is answered from the persisted cache by a fresh instance", async () => {
+  const stored = new Map<string, string>();
+  const persist = {
+    get: (kind: string, scope: string, key: string) =>
+      stored.get(`${kind}:${scope}:${key}`) ?? null,
+    put: (kind: string, scope: string, key: string, value: string) => {
+      stored.set(`${kind}:${scope}:${key}`, value);
+    },
+  };
+  const first = await new MapConflicts(undefined, persist).check(dir, [
+    pr("left", left),
+    pr("right", right),
+  ]);
+  expect(stored.size).toBe(1);
+  // a fresh instance has an empty memory cache: without the persisted pair it would merge again and write a second time
+  const again = await new MapConflicts(undefined, persist).check(dir, [
+    pr("left", left),
+    pr("right", right),
+  ]);
+  expect(again.conflicts).toEqual(first.conflicts);
+  expect(stored.size).toBe(1);
+});

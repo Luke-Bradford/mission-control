@@ -8,6 +8,7 @@ import {
   presenceOf,
   SpiderSim,
   spokeAnchors,
+  spokeName,
   spokesFor,
 } from "../src/comms/spider.ts";
 import { crewRow, seatRow } from "./fixtures.ts";
@@ -184,4 +185,16 @@ it("keeps links short: CAPCOM and #crew sit close above and below FLIGHT, inside
     expect(p.x).toBe(centre.x);
     expect(Math.abs(p.y - centre.y)).toBeLessThan(f.ry * 0.5);
   }
+});
+
+it("a spoke with one seat named after its role draws no rim name; two seats or another name keep it", () => {
+  const upper = (id: string) => id.toUpperCase();
+  const all = () => true;
+  expect(spokeName({ key: "GUIDO", ids: ["guido-1"] }, all, upper)).toBeNull();
+  expect(spokeName({ key: "GUIDO", ids: ["guido-1", "guido-2"] }, all, upper)).toBe("GUIDO");
+  expect(spokeName({ key: "LOOPS", ids: ["ebull-ta"] }, all, upper)).toBe("LOOPS");
+  // only present seats count: an away second seat leaves one, so the name goes
+  expect(
+    spokeName({ key: "RETRO", ids: ["retro-1", "retro-cx"] }, (id) => id === "retro-1", upper),
+  ).toBeNull();
 });

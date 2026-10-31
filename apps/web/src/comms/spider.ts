@@ -89,6 +89,26 @@ export function spokesFor(rows: readonly CrewRow[], flight: string, stretch = 1)
   }));
 }
 
+/**
+ * The role name drawn at a spoke's rim, or null when it would only repeat the one seat on it
+ * (GUIDO-1 under "GUIDO"): the seat's own name says the role, and the rail has no room for both.
+ */
+export function spokeName(
+  spoke: Pick<Spoke, "key" | "ids">,
+  present: (id: string) => boolean,
+  nameOf: (id: string) => string,
+): string | null {
+  const ids = spoke.ids.filter(present);
+  if (
+    ids.length === 1 &&
+    nameOf(ids[0] as string)
+      .toUpperCase()
+      .startsWith(spoke.key.toUpperCase())
+  )
+    return null;
+  return spoke.key;
+}
+
 /** Where seat `i` of `n` sits along a spoke, as a fraction of the spoke's reach. */
 export function spokeFraction(i: number, n: number): number {
   if (n <= 1) return 0.66;

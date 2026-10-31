@@ -21,6 +21,7 @@ import {
   phaseOf,
   SpiderSim,
   type Spoke,
+  spokeName,
 } from "./spider.ts";
 
 /** A link's newest message, for the hover card. */
@@ -636,7 +637,13 @@ export function CommsSpider({
           />
           {spokes.map((spoke) => {
             const tip = onSpoke(f, spoke.angle, 1);
-            const out = onSpoke(f, spoke.angle, 1 + 8 / Math.max(1, f.rx));
+            // the name sits clear of the outermost seat's own name, which hangs under its node
+            const out = onSpoke(f, spoke.angle, 1 + 22 / Math.max(1, f.rx));
+            const name = spokeName(
+              spoke,
+              (id) => byId.has(id),
+              (id) => byId.get(id)?.name ?? id,
+            );
             const cos = Math.cos((spoke.angle * Math.PI) / 180);
             const sin = Math.sin((spoke.angle * Math.PI) / 180);
             // Clear of the seat names, which hang under their nodes: lower spokes' names drop.
@@ -646,16 +653,18 @@ export function CommsSpider({
             return (
               <g key={spoke.key} className={`comms-spoke${empty ? " away" : ""}`}>
                 <line className="comms-spoke-line" x1={f.cx} y1={f.cy} x2={tip.x} y2={tip.y} />
-                <text
-                  className="comms-spoke-name"
-                  x={out.x}
-                  y={out.y + drop}
-                  dy="0.34em"
-                  textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
-                >
-                  {spoke.key}
-                  {empty && <tspan className="away-mark"> · away</tspan>}
-                </text>
+                {(name !== null || empty) && (
+                  <text
+                    className="comms-spoke-name"
+                    x={out.x}
+                    y={out.y + drop}
+                    dy="0.34em"
+                    textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
+                  >
+                    {name ?? spoke.key}
+                    {empty && <tspan className="away-mark"> · away</tspan>}
+                  </text>
+                )}
               </g>
             );
           })}
