@@ -812,8 +812,9 @@ describe("startReview", () => {
     const { sup } = make({ scratchRetro: true });
     sup.start();
     const { runId } = await sup.startReview("retro", secondId);
-    await until(() => expect(userLines()).toHaveLength(1));
+    // the run row, as written at the start (the transcript fold later replaces it)
     expect(store.run(runId)?.model).toBe(REVIEW_FULL_MODEL);
+    await until(() => expect(userLines()).toHaveLength(1));
     const argv = recorded()[0].argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe(REVIEW_FULL_MODEL);
     const brief = userLines()[0] as string;
