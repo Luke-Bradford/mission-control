@@ -15,6 +15,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -299,6 +300,150 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
       // the probe ran: the CLI reached the model and the allowed writes landed
       expect(api.bashCalls(), output).toBe(1);
       expectFloor(before, targets);
+    },
+    120_000,
+  );
+});
+
+/** A hub stand-in on loopback: counts every request a probe makes to it. */
+async function listenOnLoopback(): Promise<{ server: Server; port: number; hits: () => number }> {
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits += 1;
+    res.end("token");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  return { server, port, hits: () => hits };
+}
+
+/**
+ * The hub port the probes aim at: a hub answering on 7420 when there is one (a developer's sandboxed
+ * shell may allow only that port), else the test's own stand-in on loopback.
+ */
+async function hubTarget(): Promise<{
+  port: number;
+  close: () => void;
+  hits: () => number | null;
+}> {
+  try {
+    execFileSync("/usr/bin/curl", ["-s", "-m", "2", "-o", "/dev/null", "http://127.0.0.1:7420/"], {
+      stdio: "ignore",
+    });
+    return { port: 7420, close: () => {}, hits: () => null };
+  } catch {
+    const own = await listenOnLoopback();
+    return { port: own.port, close: () => own.server.close(), hits: own.hits };
+  }
+}
+
+/** curl the hub; a reached hub leaves its HTTP code in `marker`. */
+const loopbackProbe = (port: number, marker: string) =>
+  `( /usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/api/operator/bootstrap -H 'sec-fetch-site: same-origin' >> '${marker}' ) 2>/dev/null; true`;
+
+describe("the loopback probe itself", () => {
+  it("reaches the hub when run outside any sandbox", async () => {
+    const hub = await hubTarget();
+    const dir = mkdtempSync(join(tmpdir(), "mc-loop-ctl-"));
+    const marker = join(dir, "reached.txt");
+    try {
+      execFileSync("/bin/sh", ["-c", loopbackProbe(hub.port, marker)], {
+        stdio: "ignore",
+        timeout: 20_000,
+      });
+    } finally {
+      hub.close();
+    }
+    expect(existsSync(marker) ? readFileSync(marker, "utf8") : "", "the hub's HTTP code").toMatch(
+      /^\d{3}$/,
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// A Codex seat's network is off in its live sandbox state (thread/start reports `networkAccess:false`,
+// and `curl http://127.0.0.1:7420/` fails with exit 7: docs/spikes/2026-10-24-codex-seat-confinement.md).
+// `codex sandbox -P` applies the profile's filesystem rules but not that network state, so the
+// probe is not repeated here.
+
+describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopback (#956)", () => {
+  let l: Layout;
+  let tempRoot: string;
+  let api: FakeAnthropic | null = null;
+  beforeEach(() => {
+    l = makeLayout();
+    const parent = crewSandboxTmp(process.getuid?.() ?? 0);
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    tempRoot = realpathSync(mkdtempSync(join(parent, "mc-loop-")));
+  });
+  afterEach(async () => {
+    await api?.close();
+    api = null;
+    rmSync(tempRoot, { recursive: true, force: true });
+    rmSync(l.root, { recursive: true, force: true });
+  });
+  it.each(["writer", "read-only"] as const)(
+    "a %s seat's curl to 127.0.0.1 gets nothing",
+    async (mode: Exclude<CrewMode, "scratch">) => {
+      const input: CrewSandboxInput = {
+        ...l,
+        tempRoot,
+        denyRead: [],
+        pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+      };
+      const store = crewPnpmStoreDir(tempRoot, "seat");
+      mkdirSync(store, { recursive: true });
+      const hub = await hubTarget();
+      const marker = join(tempRoot, "reached.txt");
+      api = await startFakeAnthropic(loopbackProbe(hub.port, marker));
+      const settings = crewSandboxSettings(input, mode, { command: "/usr/bin/true", timeoutS: 5 });
+      const claude = spawn(
+        claudeCli as string,
+        [
+          "-p",
+          "run the probe",
+          "--output-format",
+          "json",
+          "--model",
+          "claude-fake",
+          ...CREW_ISOLATION_FLAGS,
+          "--tools",
+          "Bash",
+          "--settings",
+          settings,
+          "--allowedTools",
+          "Bash",
+        ],
+        {
+          cwd: l.cwd,
+          env: {
+            PATH: process.env.PATH,
+            HOME: l.home,
+            TMPDIR: tempRoot,
+            CLAUDE_CODE_TMPDIR: tempRoot,
+            [PNPM_STORE_ENV]: store,
+            ANTHROPIC_BASE_URL: api.url,
+            ANTHROPIC_API_KEY: "sk-ant-fake",
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          },
+        },
+      );
+      let output = "";
+      claude.stdout.on("data", (c) => {
+        output += c;
+      });
+      claude.stderr.on("data", (c) => {
+        output += c;
+      });
+      const timer = setTimeout(() => claude.kill(), 90_000);
+      await new Promise((resolve) => claude.on("close", resolve));
+      clearTimeout(timer);
+      hub.close();
+      // the probe ran (the CLI itself reached the model API), and the Bash curl got nothing
+      expect(api.bashCalls(), output).toBe(1);
+      expect(hub.hits() ?? 0, "requests that reached the hub").toBe(0);
+      expect(existsSync(marker) ? readFileSync(marker, "utf8") : "", "the probe's marker").toBe("");
     },
     120_000,
   );
