@@ -3089,9 +3089,11 @@ export class Store {
            FROM review_findings f JOIN reviews v ON v.id = f.review_id
            LEFT JOIN runs r ON r.id = v.run_id
            WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+             AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
            GROUP BY v.seat_id, r.model ORDER BY late DESC, v.seat_id, r.model`,
           since,
           until,
+          ...BLOCKING_SEVERITIES,
         ) as unknown as { seatId: string; model: string | null; findings: number; late: number }[],
       },
       refusalsByRule: rows(
@@ -4217,6 +4219,17 @@ export class Store {
         (row.round as number) >= 2 && row.changed_since !== null
           ? new Set(JSON.parse(row.changed_since as string) as string[])
           : null;
+      // a finding the reviewer holds from the last round was raised then, so it is carried, not late
+      const heldFile = this.db.prepare(
+        "SELECT file FROM review_findings WHERE review_id = ? AND pos = ?",
+      );
+      const held = new Set<string>();
+      for (const x of r.resolutions ?? []) {
+        if (x.outcome !== "held") continue;
+        const file = (heldFile.get(x.findingRef.reviewId, x.findingRef.pos) as Row | undefined)
+          ?.file;
+        if (typeof file === "string") held.add(file);
+      }
       const insert = this.db.prepare(
         `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
            scenario, fix, category, state, late)
@@ -4235,7 +4248,7 @@ export class Store {
           f.fix,
           f.category ?? null,
           isBlocking(f) ? "open" : "logged",
-          changed !== null && !changed.has(f.file) ? 1 : 0,
+          changed !== null && !changed.has(f.file) && !held.has(f.file) ? 1 : 0,
         );
       });
       const insertCheck = this.db.prepare(

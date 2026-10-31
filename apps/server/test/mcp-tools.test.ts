@@ -3856,6 +3856,20 @@ describe("report_evidence", () => {
       ]);
     });
 
+    it("a Ruling: note on a fresh commit still owes the table", async () => {
+      const r = await tool("report_evidence", ev).call(CTX, { note: "Ruling: all done" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('1. "');
+    });
+
+    it("a Ruling: note on the sha CI failed, with no new commit, is recorded with no table", async () => {
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([]);
+    });
+
     it("needs no doneWhen from a run whose ticket lines were not recorded", async () => {
       store.setRunDoneWhen(RUN, []);
       expect(await reportWith()).toEqual({ text: EVIDENCE_RECORDED });

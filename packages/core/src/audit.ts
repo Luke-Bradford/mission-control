@@ -114,7 +114,8 @@ export interface AuditView {
   };
   /**
    * Reviewed PRs in range by how many review rounds they took, and the late findings (round 2 or
-   * later, on a file unchanged since the previous review) per reviewer seat and model.
+   * later, on a file unchanged since the previous review) per reviewer seat and model. Only blocking
+   * findings (Critical, Important) count, and a finding the reviewer held from the last round is not late.
    * The server always sets it; optional so web fixtures built before it type-check.
    */
   reviewRounds?: {

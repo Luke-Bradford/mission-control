@@ -2683,10 +2683,28 @@ describe("reviews", () => {
       const second = review(2, "rev-2", []);
       report(second, "rev-2", [finding(), finding({ severity: "Minor" })]);
       const { reviewRounds } = store.audit(0, 1000) as unknown as AuditView;
+      // blocking findings only: the Minor one is not counted
       expect(reviewRounds).toEqual({
         prs: [{ rounds: 2, count: 1 }],
-        late: [{ seatId: "retro", model: "opus", findings: 3, late: 2 }],
+        late: [{ seatId: "retro", model: "opus", findings: 2, late: 1 }],
       });
+    });
+
+    it("does not tag a finding the reviewer holds from the last round", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" })]);
+      const second = review(2, "rev-2", []);
+      store.recordFindings(second, "rev-2", {
+        verdict,
+        summary: "s",
+        findings: [finding({ file: "a.ts" }), finding({ file: "c.ts" })],
+        resolutions: [{ findingRef: { reviewId: first, pos: 0 }, outcome: "held" }],
+        at: 500,
+      });
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", false],
+        ["c.ts", true],
+      ]);
     });
   });
 

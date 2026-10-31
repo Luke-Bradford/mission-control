@@ -2146,7 +2146,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       // every Done-when line the run started with is answered, so a gap is the seat's to name
       const lines = store.runDoneWhen(currentRun.id);
       const answers: DoneWhenEntry[] = [];
-      if (lines.length > 0 && !ciRuling) {
+      // only a ruling with no new commit owes no table; a report on a fresh commit always does
+      const rulingOnly = ciRuling && !fresh;
+      if (lines.length > 0 && !rulingOnly) {
         const seen = new Set<number>();
         for (const a of doneWhen ?? []) {
           if (a.line > lines.length || seen.has(a.line)) {
