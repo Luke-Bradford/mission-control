@@ -6642,7 +6642,7 @@ describe("the engine runs reviews", () => {
         store.setRunEnded(waitingB, clock, "ok", "engine");
         store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
         h.wakes.length = 0;
-        expect(await operate(RUN, "operator", { kinds: ["review"] })).toBe(true);
+        expect(await operate(RUN, "CAPCOM", { kinds: ["review"] })).toBe(true);
         await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
         await vi.waitFor(() => expect(asideRun()).toBeNull());
         expect(store.seatSession(SEAT)?.runId).toBe(RUN);
