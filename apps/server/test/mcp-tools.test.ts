@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  alreadyOnOriginText,
   ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
@@ -3032,6 +3033,30 @@ describe("push and draft_pr", () => {
       expect((await push()).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
       expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
       expect(store.runPush(RUN)?.sha).toBe(merge);
+    });
+
+    it("a head already on origin that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      git(wt, "push", "-q", "origin", `${merge}:refs/heads/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(merge));
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+    });
+
+    it("a commit someone else put on origin is not recorded as the run's, even when it descends from the newest", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      const foreign = operatorPushes("docs/operator.md");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--ff-only", `origin/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(foreign));
+      expect(store.branchCommits("mc", BRANCH).has(foreign)).toBe(false);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
     });
 
     it("a pushed head that does not contain the run's newest commit leaves it as it was", async () => {

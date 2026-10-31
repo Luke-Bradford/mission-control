@@ -771,11 +771,14 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       /**
        * The pushed head becomes the run's newest commit when it contains the one it had (a merge
        * recorded under an earlier run of the branch, say): the engine compares the push with the
-       * newest commit, and a descendant head would otherwise never match it.
+       * newest commit, and a descendant head would otherwise never match it. Only a head that is
+       * already one of the crew's commits on this branch: a commit someone else put on origin is
+       * never recorded as the crew's.
        */
       const adoptHead = async () => {
         const newest = store.newestRunCommit(runId)?.sha;
-        if (newest === undefined || newest === sha || !(await has(newest))) return;
+        if (newest === undefined || newest === sha) return;
+        if (!store.branchCommits(run.repoId, branch).has(sha) || !(await has(newest))) return;
         const contains = await g(["merge-base", "--is-ancestor", newest, sha]).then(
           () => true,
           (e: unknown) => {
