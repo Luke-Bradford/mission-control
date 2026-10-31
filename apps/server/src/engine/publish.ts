@@ -716,7 +716,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         }
         const failed = runs.flatMap((r: unknown) => {
           const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return needsRerun(x?.conclusion) &&
+          return x !== null &&
+            needsRerun(x.conclusion) &&
             typeof x.databaseId === "number" &&
             Number.isSafeInteger(x.databaseId)
             ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
