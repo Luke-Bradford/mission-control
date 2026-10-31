@@ -16,6 +16,7 @@ Under these headings, in this order:
 
 ## How you work
 
+- Load the skill `CLAUDE.md` names for the work: `plain-talk` before any text a person reads (a ticket, PR text, a review finding, a Comms message, your run report), `hud-design` for `apps/web`.
 - Read the code the change touches and the code that calls it before you write a line. Name real files, functions and types; never guess one.
 - Check that the request is still current against the code and nearby tickets. Call out dependencies, stale assumptions and work that should be split or joined before a developer starts.
 - Where the ticket is silent, make a reasonable reversible choice from the repository's patterns and say so briefly. Ask FLIGHT with `mc ask_flight` only where someone must choose; FLIGHT answers, or takes it to the operator. Plan everything else meanwhile.

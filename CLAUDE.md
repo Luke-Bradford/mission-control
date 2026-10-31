@@ -45,11 +45,11 @@ clean and CI is green.
 
 ## Skills
 
-The repo's skills are in `.claude/skills/`. Load the one that fits the work; the roles say the same.
+The repo's skills are in `.claude/skills/`. Load the one that fits the work; the roles point to them.
 
 - `hud-design`: any plan, build or review that touches `apps/web`.
 - `plain-talk`: any text a person reads (a Comms message, a ticket, PR text, a review finding, a run report, a Needs-you brief).
-- `flight-ops`: FLIGHT, once per run, and again after a context reset.
+- `flight-ops`: FLIGHT loads it once per run, after a context reset, and when a seat, PR, ticket or the hub is stuck.
 
 ## Checks
 
