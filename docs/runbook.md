@@ -1037,6 +1037,7 @@ by reason and by hour over the last day.
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
+| `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
