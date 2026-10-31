@@ -217,6 +217,15 @@ Server and web build against those types.
     accessed files, and badge data;
   - the current findings and computed conflicts;
   - the sequence number of the last delta it includes.
+- **The snapshot is two parts** (`MapTree` and `MapLive` in `packages/core`; `MapSnapshot` is both):
+  - **`GET /api/repos/:repoId/map/tree`**: the tree, imports, merged-PR history and rules. The hub
+    builds it once per default-branch head (also keyed by the merged PRs, bug-labelled tickets and
+    repo rules, and rebuilt hourly at the latest because the history window moves) and keeps it in
+    memory. It carries an `ETag`; a request with a matching `If-None-Match` answers 304.
+  - **`GET /api/repos/:repoId/map/live`**: seats, findings and conflicts, built per request from the
+    map ring and the crew summary rows (no event timelines). A seat moving between files changes
+    only this part.
+  - `GET /api/repos/:repoId/map` still returns both, so a page that has not moved over keeps working.
 - **Deltas** are a protocol extension. `/api/stream` today only pings `event: changed` with a topic,
   to every subscriber, with no payload, selection or ordering. The extension:
   - `GET /api/stream?map=<repo>` also sends `event: map` frames, carrying `{seq, …delta}` for that
