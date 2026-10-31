@@ -18,7 +18,7 @@
 .tk-head h1 {
   margin: 0;
   font-size: var(--fs-title);
-  line-height: 28px;
+  line-height: var(--lh-title);
   overflow-wrap: anywhere;
 }
 
