@@ -333,6 +333,10 @@ export async function main(): Promise<void> {
     for (const note of notes) log(`engine: ${note}`);
     return rules;
   };
+  const flightAreas = async (repoId: RepoId) => {
+    const rules = await engineRules(repoId);
+    return rules instanceof RepoRulesError ? undefined : rules.areas;
+  };
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
@@ -541,6 +545,7 @@ export async function main(): Promise<void> {
     },
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
+    areas: flightAreas,
     config,
     store,
     bus,
@@ -575,6 +580,7 @@ export async function main(): Promise<void> {
     enabled: engineOn,
     login: hubLogin,
     lockState: () => lock.state(),
+    areas: flightAreas,
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       pausedSeat(store, seatId) !== null ||

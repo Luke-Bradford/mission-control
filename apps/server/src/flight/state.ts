@@ -7,8 +7,11 @@ import { createHash } from "node:crypto";
 import {
   ATTENTION_KINDS,
   type AttentionItem,
+  areaLabelsFor,
+  areaLabelsOf,
   type BoardItem,
   carriedFrom,
+  claimedByOther,
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
@@ -18,6 +21,7 @@ import {
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_ITEMS_LISTED,
+  FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_LEFT_HEAD,
@@ -41,6 +45,7 @@ import {
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  FLIGHT_WAKE_IDLE_MS,
   FLIGHT_WAKE_SETTING,
   type FlightArrivalDisposition,
   type FlightArrivalOperation,
@@ -56,6 +61,7 @@ import {
   type FlightView,
   type FlightWake,
   type FlightWakeHistory,
+  type FlightWakeInputs,
   type FlightWakeList,
   type FlightWakeStatus,
   flightContextText,
@@ -105,7 +111,7 @@ import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
 import { flightSeat } from "./seat.ts";
-import { flightSignals } from "./signals.ts";
+import { flightSignals, flightWaits } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
 interface TeamsDigestState {
@@ -290,6 +296,10 @@ export function recordWakeReasons(store: Store, runId: string, at: number, cause
 export function flightWakeHistory(store: Store, now: number): FlightWakeHistory {
   const since = now - FLIGHT_METRICS_DAY_MS;
   const wakes = store.flightWakes(since).filter((w) => w.at <= now);
+  const decided = store.flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT).map((d) => d.at);
+  const idle = wakes.filter(
+    (w) => !decided.some((at) => at >= w.at && at - w.at <= FLIGHT_WAKE_IDLE_MS),
+  ).length;
   const total = new Map<string, number>();
   const perHour = Array.from({ length: 24 }, (_, i) => ({
     at: since + i * FLIGHT_HOUR_MS,
@@ -308,6 +318,7 @@ export function flightWakeHistory(store: Store, now: number): FlightWakeHistory 
   return {
     since,
     total: wakes.length,
+    idle,
     byReason: [...total]
       .map(([reason, n]) => ({ reason, n }))
       .sort((a, b) => b.n - a.n || a.reason.localeCompare(b.reason)),
@@ -565,11 +576,75 @@ export const deliveredFacts = (s: FlightState): string =>
   wakeFacts({
     ...s,
     signals: [],
+    // what it shows is seen: the next read lists no item as new
+    ...(s.wake === undefined ? {} : { wake: { ...s.wake, fresh: [] } }),
     retrospective: undefined,
     triage: [],
     prs: s.prs.filter((p) => p.state === "open"),
     holds: s.holds.map((h) => ({ ...h, told: true })),
   });
+
+/** The items FLIGHT was last shown, by key, each with a hash of its text. */
+const seenItems = (store: Store): Record<string, string> => {
+  try {
+    return JSON.parse(store.getSetting(FLIGHT_ITEMS_SEEN_SETTING) ?? "{}") as Record<
+      string,
+      string
+    >;
+  } catch {
+    return {};
+  }
+};
+
+const itemHash = (x: { text: string }): string => entryHash(x.text);
+
+/** FLIGHT has received `s`: its items are not new again until their text changes. */
+export function markItemsShown(store: Store, s: FlightState): void {
+  const seen = Object.fromEntries(wakeItems(s).map((x) => [itemFactId(x), itemHash(x)]));
+  if (JSON.stringify(seen) !== JSON.stringify(seenItems(store))) {
+    store.setSetting(FLIGHT_ITEMS_SEEN_SETTING, JSON.stringify(seen));
+  }
+}
+
+/** Whether a recorded wait still holds `target` (a seat id or a ticket ref) back. */
+const waitingOn = (waits: Record<string, { until: number }>, target: string, now: number) =>
+  Object.entries(waits).some(
+    ([name, w]) => w.until > now && name.toLowerCase() === target.toLowerCase(),
+  );
+
+/** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
+function wakeInputs(i: {
+  store: Store;
+  seats: FlightSeatState[];
+  tickets: FlightState["tickets"];
+  items: FlightState["items"];
+  areas: Record<string, string[]> | undefined;
+  hubLogin: string | null;
+  now: number;
+}): FlightWakeInputs {
+  const waits = flightWaits(i.store);
+  const rules = i.areas === undefined ? null : { areas: i.areas };
+  const fits = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
+    if (rules === null || Object.keys(rules.areas).length === 0) return true;
+    const label = areaLabelsOf(rules, t);
+    return (
+      label.length === 1 &&
+      areaLabelsFor(rules, seat.area).includes(label[0] ?? "") &&
+      !claimedByOther(t, i.hubLogin)
+    );
+  };
+  const ready = i.tickets.filter((t) => t.ready && !waitingOn(waits, t.ref, i.now));
+  const fit: Record<string, string[]> = {};
+  for (const seat of i.seats) {
+    if (seat.loop !== "build" || waitingOn(waits, seat.id, i.now)) continue;
+    fit[seat.id] = ready.filter((t) => fits(seat, t)).map((t) => t.ref);
+  }
+  const seen = seenItems(i.store);
+  const fresh = wakeItems({ items: i.items })
+    .filter((x) => seen[itemFactId(x)] !== itemHash(x))
+    .map(itemFactId);
+  return { fit, fresh };
+}
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
 export function flightState(i: {
@@ -579,6 +654,8 @@ export function flightState(i: {
   now: number;
   hubLogin?: string | null;
   lock?: TestLockState;
+  /** The repo's area labels and their globs; absent: any Ready ticket fits any build seat. */
+  areas?: Record<string, string[]>;
 }): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
@@ -1080,6 +1157,15 @@ export function flightState(i: {
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
     discussions,
+    wake: wakeInputs({
+      store,
+      seats,
+      tickets,
+      items,
+      areas: i.areas,
+      hubLogin: i.hubLogin ?? null,
+      now,
+    }),
     time: clockHm(now, tz),
     ...(digestMatches.length > 0
       ? {
@@ -1146,6 +1232,7 @@ export function flightWake(
     tickets,
     signals,
     memory = [],
+    wake: _wake,
     ...rest
   } = state;
   const briefHashes = new Map(
@@ -1290,11 +1377,7 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 export function wakeFacts(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): string {
-  const startable = s.tickets.filter((t) => t.ready);
-  const free =
-    startable.length > 0
-      ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
-      : [];
+  const { free, startable } = startableFor(s);
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
   const reviewFault =
     (s.reviewQueue?.queued ?? 0) > 0 &&
@@ -1314,7 +1397,7 @@ export function wakeFacts(
     teams: s.teamsDigest?.matches.map((m) => [m.arrival.arrivalId, m.arrival.version]) ?? [],
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
-    t: free.length > 0 ? startable.map((t) => t.ref) : [],
+    t: startable.sort(),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
       ...s.seats
@@ -1339,16 +1422,32 @@ export function wakeFacts(
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
       )
       .sort(),
-    items: wakeItems(s)
-      .map((x) => (x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key))
-      .sort(),
+    items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
 
+/** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
+export const itemFactId = (x: { kind: string; key: string; text: string }): string =>
+  x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key;
+
+/**
+ * The free build seats that have a Ready ticket to take, and those tickets. A seat or ticket with
+ * no fit, or one FLIGHT waits on, is not a reason to wake: nothing could start there.
+ */
+const startableFor = (s: FlightState): { free: string[]; startable: string[] } => {
+  const fit = s.wake?.fit;
+  const ready = s.tickets.filter((t) => t.ready).map((t) => t.ref);
+  const free = s.seats
+    .filter((x) => x.loop === "build" && x.free)
+    .filter((x) => (fit === undefined ? ready.length > 0 : (fit[x.id]?.length ?? 0) > 0));
+  const startable = new Set(free.flatMap((x) => fit?.[x.id] ?? ready));
+  return { free: free.map((x) => x.id), startable: [...startable] };
+};
+
 /** The items that wake FLIGHT: a PR ready to merge is a routine step, and merge_stalled says when it stands still. */
-const wakeItems = (s: FlightState): FlightState["items"] =>
+const wakeItems = (s: Pick<FlightState, "items">): FlightState["items"] =>
   s.items.filter((x) => x.kind !== "ready");
 
 /** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
@@ -1388,7 +1487,7 @@ export function pending(
     wakeItems(s).length > 0 ||
     releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
-    (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
+    startableFor(s).free.length > 0 ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );

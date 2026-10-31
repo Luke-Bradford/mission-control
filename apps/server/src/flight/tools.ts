@@ -366,6 +366,7 @@ import {
   flightArrivalSource,
   flightSeat,
   flightState,
+  markItemsShown,
   markPrsShown,
   operatorItems,
   ownReply,
@@ -384,6 +385,8 @@ export interface FlightToolsDeps {
     move: string,
     above: string,
   ) => Promise<{ ok: boolean; text: string }>;
+  /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
+  areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
   seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
@@ -2307,14 +2310,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       now: now(),
       hubLogin: deps.login,
       lock: deps.lockState?.(),
+      areas: repo ? await deps.areas?.(repo.id) : undefined,
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
+    markItemsShown(store, state);
     markRetrospectiveShown(store, state);
     deps.seen?.(ctx.runId, state);
+    const { wake: _wake, ...shown } = state;
     return {
       text: JSON.stringify({
-        ...state,
+        ...shown,
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
