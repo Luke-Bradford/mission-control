@@ -56,6 +56,7 @@ import { runPathGrants } from "../path-grants.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
+  gitIdentity,
   installAfterSync,
   MC_MERGE_AUTHOR,
   mainMergeArgs,
@@ -101,7 +102,7 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-export { MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
+export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
@@ -1041,10 +1042,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             return transient(UPDATE_UP_TO_DATE);
           }
           try {
-            await w(mainMergeArgs(branch, mainSha), {
-              GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-              GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-            });
+            await w(mainMergeArgs(branch, mainSha), gitIdentity(MC_MERGE_AUTHOR));
           } catch (e) {
             if ((e as { code?: unknown } | null)?.code === 1) {
               const files = await unmerged();
