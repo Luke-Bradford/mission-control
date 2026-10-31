@@ -65,6 +65,7 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_EMPTY,
   MC_PR_BODY_NO_PR,
   MC_PR_BODY_REFUSED,
   MC_PR_UNCLOSED,
@@ -119,7 +120,13 @@ import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
+import {
+  createMcTools,
+  type McToolsDeps,
+  openDraftPr,
+  pushRun,
+  seatWroteBody,
+} from "../src/mcp/tools.ts";
 import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
@@ -3514,6 +3521,25 @@ describe("push and draft_pr", () => {
       expect(body).toContain(MINORS.trimEnd());
       expect(body).toContain("Closes #42.");
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("#42 — T\n\nNew text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body.startsWith("New text.")).toBe(true);
+      expect(seatWroteBody(body, 42)).toBe(true);
+      // a body of the hub's own shape is not a seat's; #420 and a plain mention are
+      expect(seatWroteBody("#42 — T\n\n## What changed\n\nx", 42)).toBe(false);
+      expect(seatWroteBody("#420 is the follow-up.", 42)).toBe(true);
+      expect(seatWroteBody("#42 is the follow-up.", 42)).toBe(true);
+    });
+
+    it("refuses a body that is only the heading", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      expect(await edit("#42 — T\n")).toEqual({ text: MC_PR_BODY_EMPTY, isError: true });
+      expect(ghCalls()).toEqual([]);
     });
 
     it("refuses a PR that is not the run's, and edits nothing", async () => {

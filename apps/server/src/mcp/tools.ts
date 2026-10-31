@@ -94,6 +94,7 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_EMPTY,
   MC_PR_BODY_MAX,
   MC_PR_BODY_NO_PR,
   MC_PR_BODY_REFUSED,
@@ -1353,12 +1354,16 @@ export function minorSection(body: string): string | null {
   return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
 }
 
+/** The heading line every hub PR body opens with: `#<issue>`, then ` — <title>` when it fits. */
+const hubHeading = (issue: number): RegExp =>
+  new RegExp(`^#${issue}(?!\\d)(?: +[—-][^\\n]*)?[ \\t]*(?:\\n+|$)`);
+
 /**
- * A PR body a seat wrote with `pr_body`: it does not open with the hub's `#<issue>` heading.
- * An empty body is the hub's, not a seat's.
+ * A PR body a seat wrote with `pr_body`: it does not open with the hub's heading (`pr_body` drops
+ * one the seat copied). An empty body is the hub's, not a seat's.
  */
 export function seatWroteBody(body: string, issue: number): boolean {
-  return body.trim() !== "" && !body.startsWith(`#${issue}`);
+  return body.trim() !== "" && !hubHeading(issue).test(body);
 }
 
 /**
@@ -1708,10 +1713,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (run === null || run.endedAt !== null) return ENDED;
     const prNumber = run.loop?.prNumber ?? null;
     if (prNumber === null) return { text: MC_PR_BODY_NO_PR, isError: true };
+    // the PR title carries the heading, and a body that opened with it would read as the hub's own
+    const issue = issueOf(run);
+    const own = (
+      issue === null ? parsed.data.body : parsed.data.body.replace(hubHeading(issue), "")
+    ).trim();
+    if (own === "") return { text: MC_PR_BODY_EMPTY, isError: true };
     // the engine's own section outlives the seat's rewrite
     return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
       const section = minorSection(current);
-      return section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
+      return section === null ? own : `${own}\n\n${section}`;
     });
   }
 

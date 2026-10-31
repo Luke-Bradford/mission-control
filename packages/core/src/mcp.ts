@@ -705,6 +705,8 @@ export const prNotRunsText = (n: number): string =>
   `Not edited: PR #${n} is not this run's open PR.`;
 export const MC_PR_EDIT_FAILED =
   "Not edited: GitHub could not be reached through gh. Mission Control tries again on its next pass.";
+export const MC_PR_BODY_EMPTY =
+  "Not edited: the body is empty once the #<issue> heading is dropped. The PR title already carries it; write what the PR changes.";
 export const MC_PR_BODY_NO_PR =
   "Not edited: this run has no open PR yet. The PR opens when you report evidence.";
 export const prEditedText = (n: number): string => `Edited PR #${n}.`;
