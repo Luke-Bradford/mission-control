@@ -499,6 +499,17 @@ describe("POST /api/guard/check", () => {
       expect((await check(tokF, bash("r-read", "git status"), flight)).body).toBe("{}");
     });
 
+    it.each([
+      "git fetch origin",
+      'sqlite3 -readonly mc.sqlite "select 1"',
+      "find . -name x",
+      "gh -R o/r pr view 12",
+    ])("does not count %s toward the breaker", async (cmd) => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        await check(tokF, bash(`q${i}`, cmd), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
     it("does not count a read toward the breaker", async () => {
       for (let i = 0; i < 8; i++) await check(tokF, bash(`g${i}`, "gh pr view 12"), flight);
       expect(runawayTrip(store)).toBeNull();

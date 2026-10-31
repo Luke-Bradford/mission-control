@@ -9,6 +9,7 @@ import {
   firstCommitNotifier,
   firstNamedRef,
   firstPrNotifier,
+  flightShellBreakerWrite,
   flightShellWrite,
   flightTicketWrites,
   GUARD_RULES,
@@ -267,6 +268,53 @@ describe("flightTicketWrites", () => {
       project: false,
       unreadable: false,
     });
+  });
+});
+
+describe("flightShellBreakerWrite", () => {
+  it.each([
+    "git fetch origin",
+    "git status",
+    "git log --oneline",
+    "git tag",
+    "git branch -a",
+    'sqlite3 -readonly mc.sqlite "select 1"',
+    "find . -name '*.log'",
+    "gh -R o/r pr view 12",
+    "gh pr list",
+    "gh api repos/o/r/pulls",
+    "curl -s http://127.0.0.1:7420/api/flight",
+    "ls /nope 2>/dev/null",
+    "echo hi 2>&1",
+  ])("does not count %s", (command) => {
+    expect(flightShellBreakerWrite(command)).toBe(false);
+  });
+
+  it.each([
+    "git push origin mc/7",
+    "git commit -m x",
+    "git merge mc/7",
+    "git rebase main",
+    "git reset --hard",
+    "git tag v1",
+    "git branch -D mc/7",
+    "git worktree remove ../wt",
+    "git update-ref refs/heads/x HEAD",
+    "gh pr close 12",
+    "gh -R o/r issue comment 7 -b x",
+    "gh api -X POST repos/o/r/issues",
+    "gh api repos/o/r/issues -f title=x",
+    "curl -X POST http://127.0.0.1:7420/api/runs/r/resume",
+    "curl -d x http://h",
+    "echo a > f",
+    "echo a | tee f",
+  ])("counts %s", (command) => {
+    expect(flightShellBreakerWrite(command)).toBe(true);
+  });
+
+  it("a read is still a read behind -R in the audit classifier", () => {
+    expect(flightShellWrite("gh -R o/r pr view 12")).toBe(false);
+    expect(flightShellWrite("gh -R o/r pr close 12")).toBe(true);
   });
 });
 

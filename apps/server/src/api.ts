@@ -58,6 +58,7 @@ import {
   FLIGHT_APPROVAL_RULES,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
+  flightShellBreakerWrite,
   flightShellWrite,
   flightTicketWrites,
   fullAt5h,
@@ -2203,7 +2204,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
             typeof command === "string" &&
-            flightShellWrite(command)
+            flightShellBreakerWrite(command)
           ) {
             // the runaway breaker bounds the shell too: a tripped one holds every shell write
             const tripped = runawayTrip(store);
@@ -2240,7 +2241,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? "in the background"
                   : "in the foreground",
             });
-            noteFlightWrite(store, bus, now(), "shell", { command: shown });
+            // only the writes the breaker counts feed it; the audit above records every change
+            if (flightShellBreakerWrite(command))
+              noteFlightWrite(store, bus, now(), "shell", { command: shown });
           }
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
           if (

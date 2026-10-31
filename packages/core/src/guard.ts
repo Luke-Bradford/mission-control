@@ -3205,9 +3205,10 @@ export function flightShellWrite(command: string): boolean {
   const bare = command.replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
   if (/(?<![<>&])>|\btee\b/.test(bare)) return true;
   for (const { argv } of lineCommands(command, newWalk())) {
-    const [program, ...args] = argv;
+    const [program, ...rawArgs] = argv;
     if (program === undefined) continue;
     if (SHELL_READERS.has(program)) continue;
+    const args = program === "gh" ? ghStripGlobal(rawArgs) : rawArgs;
     if (program === "git") {
       const g = gitSubcommand(args);
       if (g !== null && gitReadOnly(g.sub, g.rest)) continue;
@@ -3327,4 +3328,46 @@ export function flightTicketWrites(command: string): {
     }
   }
   return { issues, project, unreadable };
+}
+
+const BREAKER_GIT_WRITES = new Set(["push", "commit", "merge", "rebase", "reset", "update-ref"]);
+
+/**
+ * Whether a shell command is a write the runaway breaker counts (#1214): a redirect or tee to a
+ * file; a git push, commit, merge, rebase, reset, ref update, tag, branch delete or worktree
+ * remove; a gh verb that writes (after `-R o/r`); a gh api call with a writing method; and a curl
+ * with a method, body or upload. Reads such as `git fetch`, `find` or `sqlite3 -readonly` are not
+ * counted, so a diagnostic repeated on every wake cannot trip it.
+ */
+export function flightShellBreakerWrite(command: string): boolean {
+  const bare = command.replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
+  if (/(?<![<>&])>|\btee\b/.test(bare)) return true;
+  for (const { argv } of lineCommands(command, newWalk())) {
+    const [program, ...raw] = argv;
+    if (program === undefined) continue;
+    if (program === "git") {
+      const g = gitSubcommand(raw);
+      if (g === null) continue;
+      if (BREAKER_GIT_WRITES.has(g.sub)) return true;
+      if (g.sub === "tag" && g.rest.some((a) => !a.startsWith("-")) && !g.rest.includes("-l"))
+        return true;
+      if (
+        g.sub === "branch" &&
+        g.rest.some((a) => /^-[a-zA-Z]*[dDmM]/.test(a) || /^--(?:delete|move)/.test(a))
+      )
+        return true;
+      if (g.sub === "worktree" && g.rest[0] === "remove") return true;
+    } else if (program === "gh") {
+      const args = ghStripGlobal(raw);
+      if (args[0] === "api") {
+        if (ghApiCall(args).writes) return true;
+      } else if (args.length > 1 && !SHELL_GH_READS.has(args[1] ?? "") && args[0] !== "auth") {
+        return true;
+      }
+    } else if (program === "curl") {
+      if (raw.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
+        return true;
+    }
+  }
+  return false;
 }
