@@ -3552,9 +3552,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
       const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
+      // the first review's findings and FLIGHT's reason
+      const secondOf = author.loop?.flightSecondReview?.[review.sha];
+      const second = secondOf?.epoch === review.epoch ? secondOf : null;
       // a Claude full-depth profile wins; a Codex seat always keeps its configured model
       const model =
-        author.profile?.profile.reviewer.depth === "full"
+        second !== null || author.profile?.profile.reviewer.depth === "full"
           ? isCodex(info)
             ? info.seat.model
             : REVIEW_FULL_MODEL
@@ -3662,6 +3666,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
+        ...(second === null
+          ? {}
+          : {
+              second: {
+                reason: second.reason,
+                findings: store
+                  .findingsOf(second.firstReviewId)
+                  .filter((f) => BLOCKING_SEVERITIES.includes(f.severity)),
+              },
+            }),
       });
       const briefPieces = [
         ticketPiece(

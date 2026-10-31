@@ -146,6 +146,14 @@ export interface RunLoop {
   flightReruns?: Record<string, number>;
   /** Fresh RETRO requests by FLIGHT, at most two per head. */
   flightRereviews?: Record<string, number>;
+  /**
+   * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
+   * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
+   */
+  flightSecondReview?: Record<
+    string,
+    { epoch: number; firstReviewId: number; firstAccountId: string; reason: string }
+  >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
   phase: LoopPhase;
