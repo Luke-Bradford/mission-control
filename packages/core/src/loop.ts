@@ -1299,6 +1299,9 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /** A FLIGHT rework grant permits exactly one more blocking RETRO outcome on that head. */
 function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
+  // FLIGHT's second review of this head always gets a fix round, whatever rework was granted before
+  if (loop.flightSecondReview?.[sha]?.epoch === loop.epoch)
+    return Math.max(2, s.limits?.rounds ?? REVIEW_ROUNDS);
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 

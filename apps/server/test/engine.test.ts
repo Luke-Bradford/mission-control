@@ -5275,6 +5275,19 @@ describe("the engine runs reviews", () => {
         ]);
       });
 
+      it("a holding second review still sends its findings after a granted rework", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        setLoop({ flightReworks: { [SHA]: 1 } });
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        reported(secondReview().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked).toBeNull();
+        expect(h.sent.some((l) => l.text.includes("a Important thing"))).toBe(true);
+      });
+
       it("refuses a second one on the same head", async () => {
         addSecondReviewer();
         await parkOnBlocking();
