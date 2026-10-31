@@ -1,5 +1,6 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  FLIGHT_CHAIN_STALL_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_IDLE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -21,6 +22,7 @@ import {
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
+import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import type { Store } from "../store.ts";
 
@@ -42,7 +44,6 @@ interface RecordState {
     }
   >;
   flakes: Record<string, { key: string; at: number; evidence: string }>;
-  dependencies: Record<string, { open: string[]; at: number }>;
 }
 export interface MainCi {
   sha: string;
@@ -73,7 +74,6 @@ function read(store: Store, repo: string, now: number): RecordState {
     triage: {},
     checks: {},
     flakes: {},
-    dependencies: {},
     ...stored<Partial<RecordState>>(store, `${FLIGHT_SIGNALS_SETTING}:${repo}`, {}),
   } as RecordState;
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
@@ -85,7 +85,7 @@ function read(store: Store, repo: string, now: number): RecordState {
     if (main?.ci === "failing" && (main.episode ?? main.sha) === entry.key) continue;
     if ((entry.lastSeen ?? entry.toldAt ?? entry.since) < cutoff) delete state.signals[key];
   }
-  for (const entries of [state.triage, state.checks, state.flakes, state.dependencies]) {
+  for (const entries of [state.triage, state.checks, state.flakes]) {
     for (const [key, entry] of Object.entries(entries)) if (entry.at < cutoff) delete entries[key];
   }
   return state;
@@ -313,13 +313,15 @@ export function flightSignals(i: {
     if (column === "Backlog" || column === "Refinement") {
       triage(ref, "new", now, `${ref} arrived in ${column}: ${card.title}`);
     }
-    const open = card.blockedBy.filter((d) => !d.closed).map((d) => d.ref);
-    const previous = state.dependencies[ref];
-    const resolved =
-      previous?.open.filter((dep) => card.blockedBy.some((d) => d.ref === dep && d.closed)) ?? [];
-    if (resolved.length > 0)
-      triage(ref, "dependency", now, `${ref}: dependencies resolved: ${resolved.join(", ")}`);
-    state.dependencies[ref] = { open, at: now };
+  }
+  // a wait that ended wakes FLIGHT once, naming what merged and the tickets it freed
+  const record = observeWaits(store, repo, now);
+  const verb = endedVerb(store, repo);
+  for (const line of releasedLines(
+    record.released.filter((r) => onBoard.has(r.ref)),
+    verb,
+  )) {
+    triage(line.ref, "dependency", line.at, line.text);
   }
 
   const parks = new Map<string, { at: number; evidence: string }[]>();
@@ -459,6 +461,30 @@ export function flightSignals(i: {
         since,
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
+    }
+  }
+  // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
+  // ended before FLIGHT heard of it is dropped, not told
+  const stalled = blockedWork(store, repo, now, (card) =>
+    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false),
+  ).filter((b) => b.waitedMin * 60_000 >= FLIGHT_CHAIN_STALL_MS);
+  for (const b of stalled) {
+    // a chain that is the tail of a longer one is told with the longer one
+    const tail = stalled.some(
+      (o) =>
+        o !== b && o.chain.length > b.chain.length && o.chain.join(">").endsWith(b.chain.join(">")),
+    );
+    if (tail) continue;
+    raise(
+      "chain_stalled",
+      b.chain.join(">"),
+      now - b.waitedMin * 60_000,
+      `${b.chain.join(" waits on ")} has stood still for ${b.waitedMin} min: ${b.ref} waits on ${b.waitsOn.join(", ")}`,
+    );
+  }
+  for (const [id, signal] of Object.entries(state.signals)) {
+    if (signal.kind === "chain_stalled" && signal.toldAt === null && !active.has(id)) {
+      delete state.signals[id];
     }
   }
   for (const seat of session.seats) {

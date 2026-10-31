@@ -80,6 +80,7 @@ import {
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
+  prCarries,
   QA_RETENTION_DAYS,
   type QaFindingView,
   type QaReviewRoundView,
@@ -1250,6 +1251,8 @@ export class Store {
     for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
     // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
     this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
+    // What the issue body waits on (`{ issues, prs }` JSON), null for none; the next poll fills it.
+    this.addColumn("board_items", "after_deps", "TEXT");
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
@@ -1346,6 +1349,8 @@ export class Store {
     this.addColumn("pull_requests", "additions", "INTEGER");
     this.addColumn("pull_requests", "deletions", "INTEGER");
     this.addColumn("pull_requests", "changed_files", "INTEGER");
+    // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
+    this.addColumn("pull_requests", "base", "TEXT");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -2471,8 +2476,8 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees, author)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees, author, after_deps)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -2482,7 +2487,8 @@ export class Store {
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
            item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees, author = excluded.author`,
+           assignees = excluded.assignees, author = excluded.author,
+           after_deps = excluded.after_deps`,
       );
       for (const i of items) {
         ins.run(
@@ -2510,6 +2516,9 @@ export class Store {
           i.projectId,
           JSON.stringify(i.assignees ?? []),
           i.author ?? null,
+          i.after && (i.after.issues.length > 0 || i.after.prs.length > 0)
+            ? JSON.stringify(i.after)
+            : null,
         );
       }
     });
@@ -2537,6 +2546,9 @@ export class Store {
       subIssues:
         r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
       blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
+      ...(typeof r.after_deps === "string"
+        ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
+        : {}),
       milestone: r.milestone as string | null,
       size: r.size as string | null,
       closed: r.closed === 1,
@@ -2580,9 +2592,10 @@ export class Store {
         ).map((r) => [r.number, r.read_at]),
       );
       const seen = new Set(prs.map((p) => p.number));
+      const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && at < readAt) del.run(repoId, number);
+        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
       }
       this.writePullRequests(
         repoId,
@@ -2592,12 +2605,28 @@ export class Store {
     });
   }
 
+  /**
+   * The PRs an open card waits on by name (`After PR N`) or through the issue they carry
+   * (`Depends on`): the sweep keeps them, or the wait would flicker each time it dropped one.
+   */
+  private namedPullRequests(repoId: RepoId): Set<number> {
+    const open = this.board(repoId).filter((c) => !c.closed);
+    const issues = new Set(open.flatMap((c) => c.after?.issues ?? []));
+    const named = new Set(open.flatMap((c) => c.after?.prs ?? []));
+    if (issues.size === 0) return named;
+    for (const p of this.pullRequests(repoId)) {
+      if ([...issues].some((n) => prCarries(p, repoId, n))) named.add(p.number);
+    }
+    return named;
+  }
+
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
+         base)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2607,7 +2636,7 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
     );
     const addHistory = this.db.prepare(
       "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
@@ -2696,6 +2725,7 @@ export class Store {
         p.additions ?? null,
         p.deletions ?? null,
         p.changedFiles ?? null,
+        p.base ?? null,
       );
       if (p.mergedAt !== null) {
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(p));
@@ -3187,6 +3217,7 @@ export class Store {
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
+      ...(r.base == null ? {} : { base: r.base as string }),
     }));
   }
 

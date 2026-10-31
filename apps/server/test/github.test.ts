@@ -847,6 +847,49 @@ describe("collectGithub board fields", () => {
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
   });
 
+  it("reads what the issue body waits on, and a PR's base branch", async () => {
+    const { gql } = stub({
+      pages: [
+        page([
+          item(1, "Todo", {
+            extra: { body: "## Outcome\nDepends on #12\nAfter PR 1033\n" },
+          }),
+          item(2, "Todo"),
+        ]),
+      ],
+      prPages: [prPage([pull(7, { baseRefName: "feature/15-x" })])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.after)).toEqual([
+      { issues: [12], prs: [1033] },
+      undefined,
+    ]);
+    expect(store.pullRequests("shop-app")[0]?.base).toBe("feature/15-x");
+  });
+
+  it("reads an After PR the PR pages left out, one by one", async () => {
+    const asked: number[] = [];
+    const base = stub({
+      pages: [page([item(1, "Todo", { extra: { body: "After PR 1033\n" } })])],
+      prPages: [prPage([pull(7)])],
+    }).gql;
+    const gql: Gql = async (query, vars) => {
+      if (query.includes("query PullRequest(")) {
+        asked.push(vars.number as number);
+        return {
+          repository: { pullRequest: pull(vars.number as number, { state: "OPEN" }) },
+        };
+      }
+      return base(query, vars);
+    };
+    await collectGithub(repo, store, gql, NOW);
+    expect(asked).toEqual([1033]);
+    expect(store.pullRequests("shop-app").map((p) => [p.number, p.state])).toContainEqual([
+      1033,
+      "open",
+    ]);
+  });
+
   it("reads each card's assignee logins", async () => {
     const assignees = { assignees: { nodes: [{ login: "luke" }, { login: "sam" }] } };
     const { gql } = stub({

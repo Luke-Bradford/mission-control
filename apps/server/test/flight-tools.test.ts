@@ -28,6 +28,7 @@ import {
   ciNotActionsText,
   ciNotFailedText,
   claimedText,
+  createDependsText,
   DEFAULT_AWAY,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_ARG_MAX,
@@ -1951,6 +1952,38 @@ describe("start_seat", () => {
       await nothingStarted(waitsOnText("mc#7", ["mc#6"]));
     });
 
+    it("7b: a Depends on line the card stores, naming the dependency and its PR", async () => {
+      board(
+        sc(7, { labels: ["area:server"], after: { issues: [3], prs: [] } }),
+        sc(3, { status: "In review" }),
+      );
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 1033,
+            title: "PR",
+            url: "u",
+            branch: "feature/3-x",
+            ticket: "mc#3",
+            closingIssues: [3],
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "pending",
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      await nothingStarted(waitsOnText("mc#7", ["mc#3 (PR 1033 in CI)"]));
+    });
+
     it("8: a research ticket", async () => {
       board(sc(7, { labels: ["area:server", "research"] }));
       await nothingStarted(researchText("mc#7"));
@@ -3193,6 +3226,17 @@ describe("flight_state", () => {
     expect(await state()).toEqual({
       signals: [],
       triage: [],
+      // mc#4 is blocked by an open mc#9
+      blocked: [
+        {
+          ref: "mc#4",
+          title: "Ticket 4",
+          column: "Ready",
+          waitsOn: ["mc#9"],
+          chain: ["mc#4", "mc#9"],
+          waitedMin: 0,
+        },
+      ],
       discussions: [],
       time: "13:00",
       repo: "mc",
@@ -4020,6 +4064,53 @@ describe("create_ticket", () => {
     const r = await call("create_ticket", C({ body: `${BODY}\nDepends on #12, #13\n` }));
     expect(r.isError).toBeUndefined();
     expect(ghCalls.some((a) => a[1] === "create")).toBe(true);
+  });
+
+  describe("work cut from an open PR", () => {
+    beforeEach(() => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 1033,
+            title: "PR",
+            url: "u",
+            branch: "feature/15-x",
+            ticket: "mc#15",
+            closingIssues: [15],
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "pending",
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+    });
+
+    it("is refused without a Depends on line, naming the line to add", async () => {
+      const r = await call(
+        "create_ticket",
+        C({ body: `${BODY}\nCut from PR 1033, which carries the base code.\n` }),
+      );
+      expect(r.isError).toBe(true);
+      expect(r.text).toBe(createDependsText(1033, "Depends on #15"));
+      expect(ghCalls.some((a) => a[1] === "create")).toBe(false);
+    });
+
+    it("is filed once it carries the Depends on line", async () => {
+      const declared = await call(
+        "create_ticket",
+        C({ body: `${BODY}\nCut from PR 1033.\nDepends on #15\n` }),
+      );
+      expect(declared.isError).toBeUndefined();
+    });
   });
 
   it("refuses bad arguments", async () => {
