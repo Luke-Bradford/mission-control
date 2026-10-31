@@ -68,6 +68,7 @@ import {
   type GuardHitsView,
   guardAckKey,
   guardDenyOutput,
+  guardStopOutput,
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   type LimitRow,
@@ -95,8 +96,10 @@ import {
   pace5h,
   percentile,
   projectAtReset,
+  QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
+  type QaFlowView,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type RepoId,
@@ -106,10 +109,12 @@ import {
   type RunLoopView,
   type RunView,
   reviewStatusOf,
+  STOP_BLOCK_TRIES,
   type StreamEvent,
   seatCallSign,
   seatDef,
   startOfLocalDay,
+  stopBlockReason,
   stopForecast,
   TELEMETRY_RANGES,
   TEST_LOCK_UNAVAILABLE_TEXT,
@@ -281,6 +286,7 @@ import {
 import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
+import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import {
   type BoardTitleCache,
@@ -551,6 +557,14 @@ const EndBody = z.strictObject({
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
  * event carries no input.
  */
+const isStopEvent = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  (body as { hook_event_name?: unknown }).hook_event_name === "Stop";
+
+/** A Stop: the event alone. */
+const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
+
 const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
@@ -1209,8 +1223,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return crewSummaryMemo.value;
   };
 
+  /**
+   * The rows the notification reconcile builds attention from: the full crew when one is already
+   * built for this moment (a browser's read), else the summary, which skips the event timelines
+   * attention never reads.
+   */
+  const attentionRows = (at: number): CrewRow[] => {
+    const lockKey = JSON.stringify(deps.lock?.state() ?? NO_LOCK);
+    if (
+      crewMemo?.bucket === Math.floor(at / HUD_MEMO_MS) &&
+      crewMemo.revision === crewRevision &&
+      crewMemo.lockKey === lockKey
+    )
+      return crewMemo.value.rows;
+    return sharedCrewSummary(at).rows;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
-  const sharedAttention = (): AttentionItem[] => {
+  const sharedAttention = (light = false): AttentionItem[] => {
     const at = now();
     if (!attentionMemo || at - attentionMemo.at >= HUD_MEMO_MS) {
       attentionMemo = {
@@ -1220,7 +1250,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          sharedCrew(at).rows,
+          light ? attentionRows(at) : sharedCrew(at).rows,
           deps.hubLogin?.() ?? null,
         ),
       };
@@ -1228,7 +1258,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return attentionMemo.items;
   };
   const notifications = new LocalNotifications(store, config, bus, now);
-  const reconcileNotifications = () => notifications.reconcile(sharedAttention());
+  const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   const scheduleNotifications = () => {
@@ -1942,6 +1972,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const checks = deps.checks;
       const seatMode = deps.seatMode ?? (() => "read-only");
       const caller = (req: FastifyRequest) => tokens?.resolve(bearer(req)) ?? null;
+      // Stops blocked so far, by run and the report the loop last took in: a report starts afresh
+      const stopBlocks = new Map<string, number>();
+      // A seat that stops with its report missing and checklist items open is sent back to them,
+      // up to STOP_BLOCK_TRIES times; Codex seats have no Stop hook and keep the hub's resume.
+      const stopVerdict = (runId: string): string => {
+        const run = store.run(runId);
+        const loop = run?.loopKind;
+        if (run === null || loop == null || loop === "none" || loop === "watch") {
+          return GUARD_ALLOW_OUTPUT;
+        }
+        if (runReported(store, run, loop)) return GUARD_ALLOW_OUTPUT;
+        // a run in review, in CI, parked or done owes no work now: a budget or operator hold is not
+        // for the seat to push through, and its report would be refused
+        if (run.loop != null && run.loop.phase !== "working") return GUARD_ALLOW_OUTPUT;
+        // the seat asked a question and waits for the answer: that stop is not an early one
+        if (store.openQuestions().some((q) => q.runId === runId)) return GUARD_ALLOW_OUTPUT;
+        const open = (store.digest(runId)?.tasks ?? [])
+          .filter((t) => t.status !== "done")
+          .map((t) => t.text);
+        if (open.length === 0) return GUARD_ALLOW_OUTPUT;
+        const key = `${runId}:${store.latestEvidence(runId)?.id ?? 0}`;
+        const used = stopBlocks.get(key) ?? 0;
+        if (used >= STOP_BLOCK_TRIES) return GUARD_ALLOW_OUTPUT;
+        stopBlocks.set(key, used + 1);
+        return guardStopOutput(stopBlockReason(open));
+      };
       // Reader: apps/server/src/guard/hook.ts (the guard hook each seat's CLI runs before every tool call)
       api.post(
         GUARD_CHECK_ROUTE,
@@ -1960,6 +2016,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           );
           if (who === null || seat === undefined) {
             return reply.code(401).send({ error: UNKNOWN_RUN });
+          }
+          // a Stop names no tool: it is the seat ending a turn, and may carry it on
+          if (isStopEvent(req.body)) {
+            const stop = GuardStopBody.safeParse(req.body);
+            if (!stop.success) return reply.code(400).send({ error: zodError(stop.error) });
+            return reply.type("application/json").send(stopVerdict(who.runId));
           }
           const body = GuardCheckBody.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -2124,6 +2186,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
           const since = now() - days * DAY_MS;
           return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (escaped defects, review queue age, rework ratio and tests per PR, each with its definition)
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/qa/flow",
+        async (req, reply): Promise<QaFlowView | FastifyReply> => {
+          const days = qaDays(req.query.days, 30);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          const since = now() - days * DAY_MS;
+          return { days, since, metrics: QA_FLOW_METRICS, ...store.qaFlow(since) };
         },
       );
 
@@ -4107,6 +4180,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,
+          prompt: store.promptWakes(run.id),
         };
         return view;
       });

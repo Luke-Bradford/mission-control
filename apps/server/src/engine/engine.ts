@@ -61,6 +61,7 @@ import {
   FLIGHT_FLOOR_ENFORCING_PATHS,
   fillLoopText,
   fixCommsText,
+  fixKey,
   fixSentText,
   fixText,
   gateView,
@@ -121,6 +122,7 @@ import {
   reviewStatusOf,
   reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
+  STUCK_PARK,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
   seatDef,
@@ -597,6 +599,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const woken = Object.keys(store.claimedKeys(run.id))
       .filter((key) => key.startsWith(`wake:${run.id}:`))
       .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
+    const claimed = store.claimedKeys(run.id);
+    const epoch = run.loop?.epoch ?? 0;
     const work = pendingSeatWork({
       lastTurnStartedAt: row.lastTurnStartedAt ?? null,
       reviews: store.reviewsOfRun(run.id),
@@ -606,7 +610,13 @@ export function createEngine(deps: EngineDeps): Engine {
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
-    });
+      // the fix line carries the findings' text and wakes the seat itself, so a findings item
+      // whose fix line is still unsent is left to it
+    }).filter(
+      (x) =>
+        x.kind !== "findings" ||
+        fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
+    );
     if (work.length === 0) return;
     const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
     await send(
@@ -821,6 +831,7 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
+        quietTurns: current ? (row?.quietTurns ?? 0) : 0,
         rateLimitedUntil: current ? (facts?.rateLimitedUntil ?? null) : null,
         openQuestion: store.openQuestions().some((q) => q.runId === run.id),
       },
@@ -1004,12 +1015,11 @@ export function createEngine(deps: EngineDeps): Engine {
       .reviewsOfRun(runId)
       .filter((r) => r.state === "reported")
       .at(-1);
-    return review
-      ? fixText({
-          retro: seatCallSign(review.seatId),
-          sha: review.sha,
-          findings: store.findingsOf(review.id),
-        })
+    const findings = review
+      ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+      : [];
+    return review && findings.length > 0
+      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
       : `FLIGHT requests rework: ${reason}`;
   }
 
@@ -1352,7 +1362,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const row = store.review(a.reviewId);
         if (row === null) return;
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
         await kickReviews();
         return;
       }
@@ -2023,9 +2033,9 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Ends the review's run when it has one that has not ended. */
-  async function endReviewRun(row: ReviewRow): Promise<void> {
+  async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
-    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId);
+    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId, reason);
   }
 
   /** Whether the review's author run is in review on the sha the hub pushed, its PR open at that head. */
@@ -2216,7 +2226,13 @@ export function createEngine(deps: EngineDeps): Engine {
       const phase = author?.loop?.phase;
       if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
+        continue;
+      }
+      // a run that ended while its review is no longer wanted (the head moved) was cut short by
+      // that, not a failure of its own
+      if (rrun.endedAt !== null && !reviewWanted(row)) {
+        dropReview(row);
         continue;
       }
       let seatRow: ReturnType<Supervisor["seat"]>;
@@ -3089,23 +3105,29 @@ export function createEngine(deps: EngineDeps): Engine {
         if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
           return refused("its repo is a draft workspace");
         }
-        const parkedOnConflict =
-          loop.phase === "parked" && loop.parked?.kind === "conflict" && !loop.parked.ended;
-        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict) {
-          return refused("the run is not in CI or review, or parked on a conflict");
+        const parkedOn = (kind: string) =>
+          loop.phase === "parked" && loop.parked?.kind === kind && !loop.parked.ended;
+        const parkedOnConflict = parkedOn("conflict");
+        // a push or PR GitHub does not show: the merge is the new push, so the old one need not match
+        const parkedStuck = parkedOn(STUCK_PARK);
+        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict && !parkedStuck) {
+          return refused("the run is not in CI or review, or parked on a conflict or a stuck push");
         }
         if (loop.mainMerge) return refused("a merge of main already waits on the seat");
+        const newest = store.newestRunCommit(run.id)?.sha;
         const pushed = store.runPush(run.id);
-        if (pushed === null || store.newestRunCommit(run.id)?.sha !== pushed.sha) {
+        if (!parkedStuck && (pushed === null || newest !== pushed.sha)) {
           return refused("the branch has unpushed commits");
         }
+        const tip = parkedStuck ? (newest ?? pushed?.sha) : pushed?.sha;
+        if (tip === undefined) return refused("the branch has no recorded commit");
         const worktree = worktreeOf(run, loop);
         if (worktree === null) return refused("the run has no worktree");
         const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
         if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
           return refused("its seat is in a turn");
         }
-        const g = await publisher.gateFacts(run, pushed.sha, null);
+        const g = await publisher.gateFacts(run, tip, null);
         if (!g.ok) return refused(g.text);
         const mainSha = g.facts.mainSha;
         if (g.facts.containsMain) return { kind: "current", mainSha };
@@ -3114,7 +3136,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
         if (!r.ok) return refused(r.text);
         if (r.kind === "wait") return refused("the worktree has uncommitted changes");
-        if (parkedOnConflict) {
+        if (parkedOnConflict || parkedStuck) {
           cur.epoch += 1;
           cur.parked = null;
           cur.unparkedAt = at;

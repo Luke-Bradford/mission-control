@@ -135,6 +135,7 @@ describe("addRepo", () => {
           requiredChecks: [],
           commands: DEFAULT_SEAT_COMMANDS,
           protectedFiles: [],
+          keepBranches: [],
           autonomy: "draft",
           flightPowers: "standard",
         },

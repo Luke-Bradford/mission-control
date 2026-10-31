@@ -47,6 +47,7 @@ import {
   pathInArea,
   protectedFileRules,
   READONLY_TOOLS,
+  SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
   SEAT_STATES,
   SKILL_FILE_MAX,
@@ -875,6 +876,80 @@ describe("scratch mode", () => {
   });
 });
 
+describe("crew sandbox home-folder reads (#487)", () => {
+  const sandbox = {
+    ...base.sandbox,
+    toolchainDirs: ["/opt/node/22", "/opt/pnpm"],
+    allowRead: ["/home/you/.config/pip"],
+  };
+  const fsOf = (s: CrewCliInput["sandbox"], mode: "writer" | "read-only" | "scratch") =>
+    JSON.parse(crewSandboxSettings(s, mode, base.hook)).sandbox.filesystem;
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "denies the home folder and re-allows exactly the listed paths for a %s seat",
+    (mode) => {
+      const f = fsOf({ ...sandbox, tempRoot: "/tmp/mc-runs/own" }, mode);
+      expect(f.denyRead).toContain("/home/you");
+      expect(f.allowRead).toEqual([
+        "/tmp/mc-runs/own",
+        base.sandbox.pnpmStoreDir,
+        "/mc/wt/guido-1",
+        "/mc/clone/.git",
+        "/mc/clone/.git/worktrees/guido-1",
+        "/opt/node/22",
+        "/opt/pnpm",
+        "/home/you/.gitconfig",
+        "/home/you/.config/git/config",
+        "/home/you/.config/git/ignore",
+        "/home/you/.config/git/attributes",
+        "/home/you/.config/pip",
+      ]);
+    },
+  );
+
+  it("keeps every credential and the data dir denied, and re-allows none of them", () => {
+    const f = fsOf(sandbox, "writer");
+    for (const d of SANDBOX_DENY_READ_HOME) expect(f.denyRead).toContain(`/home/you/${d}`);
+    expect(f.denyRead).toContain(base.sandbox.dataDir);
+    for (const allowed of f.allowRead as string[])
+      for (const denied of f.denyRead as string[])
+        if (denied !== "/home/you")
+          expect(denied === allowed || denied.startsWith(`${allowed}/`)).toBe(false);
+  });
+
+  it("refuses a re-allow that holds a credential folder or the data dir", () => {
+    for (const parent of ["/home/you/.config", "/home/you/.ssh", "/home/you/.local/share"]) {
+      expect(() => fsOf({ ...sandbox, allowRead: [parent] }, "writer")).toThrow(/holds denied/);
+    }
+  });
+
+  it("refuses a re-allow inside the data dir or a denied path", () => {
+    const inside = `${base.sandbox.dataDir}/crew`;
+    expect(() => fsOf({ ...sandbox, allowRead: [inside] }, "writer")).toThrow(/denied/);
+    expect(() => fsOf({ ...sandbox, toolchainDirs: [inside] }, "writer")).toThrow(/denied/);
+    expect(() =>
+      fsOf({ ...sandbox, denyRead: ["/home/you/work"], allowRead: ["/home/you/work/x"] }, "writer"),
+    ).toThrow(/inside denied/);
+  });
+
+  it("refuses a re-allow over or inside the shared temp folders", () => {
+    const tempRoot = "/tmp/mc-runs/own";
+    for (const p of ["/tmp", "/tmp/mc-runs", "/tmp/mc-runs/other", "/tmp/claude-501"]) {
+      expect(() => fsOf({ ...sandbox, tempRoot, allowRead: [p] }, "writer")).toThrow(/denied/);
+    }
+  });
+
+  it("refuses a re-allow of the whole home folder, or of a parent of it", () => {
+    expect(() => fsOf({ ...sandbox, toolchainDirs: ["/home/you"] }, "writer")).toThrow(/home/);
+    expect(() => fsOf({ ...sandbox, allowRead: ["/home"] }, "writer")).toThrow(/home/);
+  });
+
+  it("refuses a relative re-allow", () => {
+    expect(() => fsOf({ ...sandbox, allowRead: ["pip"] }, "writer")).toThrow(/absolute/);
+    expect(() => fsOf({ ...sandbox, toolchainDirs: ["bin"] }, "writer")).toThrow(/absolute/);
+  });
+});
+
 describe("crew sandbox and scoped edits", () => {
   it("denies the shared temp parent and sibling runs, allowing only the seat's own root", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
@@ -887,7 +962,7 @@ describe("crew sandbox and scoped edits", () => {
         expect(
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
-        expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
+        expect(f.allowRead.slice(0, 2)).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
         expect(f.denyRead).not.toContain("/tmp");
         expect(f.denyRead).not.toContain("/private/tmp");
       }
@@ -922,7 +997,7 @@ describe("crew sandbox and scoped edits", () => {
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
-      expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
+      expect(f.allowRead.slice(0, 2)).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
       expect(f.denyWrite).toContain(`${"/tmp/mc-runs/seat-test"}/tool-output`);
@@ -1024,10 +1099,14 @@ describe("crew sandbox and scoped edits", () => {
       const entry = (matcher: string) => [
         { matcher, hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
       ];
+      const stopCommand = base.hook.command.replace(/ \|\| exit 2$/, " || true");
+      expect(stopCommand).not.toBe(base.hook.command);
       expect(j.hooks).toEqual({
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        // exit 2 from a Stop blocks the stop: its command ends `|| true`, not `|| exit 2`
+        Stop: [{ hooks: [{ type: "command", command: stopCommand, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
@@ -1049,6 +1128,8 @@ describe("crew sandbox and scoped edits", () => {
       expect(
         JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox.filesystem.denyRead,
       ).toEqual([
+        // the whole home folder first (#487): re-allows come in allowRead
+        "/home/you",
         "/home/you/.ssh",
         "/home/you/.config/gh",
         "/home/you/.config/mission-control",

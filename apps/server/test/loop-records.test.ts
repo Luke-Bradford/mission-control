@@ -176,6 +176,7 @@ describe("evidence", () => {
       at: 20,
       tests: [],
       testsAdded: [],
+      doneWhen: [],
     });
     expect(store.evidenceCount("r1")).toBe(2);
   });
@@ -210,6 +211,7 @@ describe("evidence", () => {
         },
       ],
       testsAdded: [{ file: "a.test.ts", failedOnBase: true }],
+      doneWhen: [],
     });
   });
 });

@@ -487,9 +487,16 @@ What each seat's process starts with:
   (the hub's other worktrees) or any repo no loop runs in, stay readable until you list them under
   `crew.deny_read`.
 
+  Your whole home folder is denied to code a seat runs (#487), and only these paths inside it are
+  re-allowed for reads: the seat's worktree and its clone's git dirs, its temp dir and the pnpm
+  store, the install folders of the hub's node and of the `node` and `pnpm` on its `PATH`,
+  `~/.gitconfig`, git's `~/.config/git/{config,ignore,attributes}` and `crew.allow_read`. The
+  credential folders above stay denied even if an entry would cover them. Browser profiles and
+  `~/Library/Application Support` are unreadable. A repo whose tools read other files in home (a
+  global npm or pip config) lists them under `crew.allow_read`.
+
   The file tools are confined to the worktree already. What stays readable:
-  - the rest of your home, including other apps' data under `~/Library` (browser profiles,
-    Application Support);
+  - outside home: system folders such as `/usr` and `/opt`, and the folders above;
   - the other seats' worktrees, this session's and other sessions', since they all live in
     `crew.worktrees`, which no seat may deny;
   - the keychains as a service: the rule blocks only the keychain *file*. Security-framework
@@ -507,10 +514,23 @@ What each seat's process starts with:
   writes. A resume keeps the run's prompt file; if it is gone, the resume rebuilds it from the role
   brief alone and logs `<seat>: prompt file missing on resume; …`.
 - **The mc tools** over `--mcp-config`, at `http://127.0.0.1:<port>/mcp`.
-- **The guard hook** before every tool call, and after each Bash call ends:
+- **The guard hook** before every tool call, after each Bash call ends, and when the seat stops:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/hook-cli.ts' '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2`.
   `crew.node` defaults to `/opt/homebrew/bin/node`. A start is refused if one of those paths holds
   a `'` or a line break.
+  - **A Stop is continued in-process** (#1048). When a Claude seat ends a turn with its report
+    missing (`report_evidence`, `report_findings` or `report_plan`, by the run's loop kind), no
+    open question, and unfinished items in its live checklist (the run digest's tasks), the hook
+    answers `{"decision":"block","reason":"…"}` with those items, and the seat carries on without
+    a new hub turn. Only a run whose loop is still working is blocked: one in review, in CI, parked
+    (a budget hold included) or done owes the seat no work now. A Stop with no verdict from the hub
+    (hub down, a 401 or 500, the hook's deadline) lets the stop stand: its command ends `|| true`
+    and the hook prints `{}` and exits 0, because exit 2 from a Stop hook would block the stop for
+    as long as the hub is away. At most three Stops per run are blocked, counted from the last report the loop
+    took in (a rework round gets its own three); the fourth stands, and the hub's carry-on resume
+    and its "stopped after 3 carry-on resumes" park apply as before. The count is in the hub's
+    memory, so a hub restart gives a run three more. Codex seats have no Stop hook and keep the
+    hub's resume path.
 - **The trim hook** (#1045) after every tool call (`PostToolUse`, matcher `*`), for Claude seats:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/trim-cli.ts' '<run temp root>/tool-output'`.
   A result over 32 KB is answered as `updatedToolOutput` with its first 8 KB, its last 4 KB and a
@@ -698,8 +718,14 @@ Every writer run started while the engine is on (not a preview, `MC_NO_LOOP_WRIT
 hub holding the crew lock) carries a loop. A writer run started without one cannot publish: its
 `report_evidence` answers that Mission Control is not driving the run.
 
-- **Report.** The seat commits, then calls `report_evidence` with a note. The engine pushes and
-  opens the draft PR (or pushes to the run's PR on a later report), then waits for CI.
+- **Report.** The seat commits, then calls `report_evidence` with a note and one `doneWhen`
+  entry for each line of the ticket's `## Done when`: `met` with its evidence (a test name, a file,
+  a measurement) or `not_met` with the reason. The hub took those lines from the ticket when the
+  run started, and refuses a report that leaves one out, quoting it (a run started before this
+  rule has none and owes none; a `Ruling:` note owes none). RETRO's brief carries the latest
+  table and starts from it: lines marked met whose evidence does not hold, and lines marked not met
+  without an accepted reason. The engine pushes and opens the draft PR (or pushes to the run's PR
+  on a later report), then waits for CI.
 - **CI.** A failure goes back to the seat as a log excerpt, twice; the third failure parks the
   run. A pass raises "Ready for review" in Needs you. Review fixes go to the seat by message: it
   commits and reports again, and the engine pushes to the same PR.
@@ -707,6 +733,11 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
   *Blocked*). Your next message to the seat resumes it; the seat then needs a new commit, or a
   note starting `Ruling:`, before it can report again. A run parked because its PR was closed
   does not resume.
+- **Conflict with main.** A PR in CI that conflicts with main sends its seat one line (per pushed
+  sha) to call `mc sync_main`, resolve, commit and report; the run goes back to working, not to the
+  operator. Only a seat already told for that sha, or with a merge of main under way, parks on the
+  conflict. A run parked on a conflict accepts the seat's report of a new commit (a merge of main)
+  and goes back to CI by itself once the pushed head shows on a PR that no longer conflicts.
 - **Silent.** A seat that stops without reporting is nudged once, then parked.
 - **Merged.** The engine ends the run itself and the seat goes idle; in a `merge` repo it then
   takes its next Ready ticket.
@@ -771,6 +802,9 @@ Setup's board action also creates the board's fields and the repo's type labels,
   - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
   - A CI failure or a long pending names the checks in the Activity line and the park note. Only
     the first 50 checks of a head are read. A change needs a hub restart.
+- **`repos[].keep_branches`** (default `[]`) lists branches the hub never deletes, on top of the
+  default branch and `archive/*`: an exact name, or a prefix ending in `*` (`release/*`). See
+  "Branch tidying". A change needs a hub restart.
 - **`repos[].full_suite`** (default `[]`) lists the commands that run a repo's whole suite, as
   prefixes, e.g. `["pnpm -s test"]`.
   - A seat's Bash call is a full suite when it starts with an entry's words, unless a later word
@@ -785,6 +819,11 @@ Setup's board action also creates the board's fields and the repo's type labels,
   - The lock box on Overview and the header's `Lock:` show who holds the lock and who waits.
 - **`crew.deny_read`** (default `[]`) lists absolute folders that code a seat runs may not read.
   See "First crew".
+- **`crew.allow_read`** (default `[]`) lists absolute paths (`~` allowed) inside your home folder
+  that code a seat runs may still read, such as `~/.config/pip`. An entry that is or holds the home
+  folder, or is, holds or lies inside a credential folder, is refused at start-up
+  (`crew.allow_read: <path> …`). Applies after a restart; it is read-only and holds for read-only
+  seats too.
 - **`crew.node`** (default `/opt/homebrew/bin/node`) is the node the guard hook runs under.
   - It must be an executable file reporting Node 22.6 or later. Give a stable path, not a
     `Cellar` one, which an upgrade removes.
@@ -822,14 +861,15 @@ Seat and role changes in `config.yaml` apply without a restart.
   file that doesn't load changes nothing, and the call answers with its error.
 - The reload answers with what it applied (`applied`), the seats as now loaded, any seat
   changes still waiting (`pending`, each with its reason), and `restartNeeded`: keys
-  that changed on disk but only apply after a restart, such as `loops` and `crew.deny_read`.
+  that changed on disk but only apply after a restart, such as `loops`, `crew.deny_read` and `crew.allow_read`.
 - `curl -s 127.0.0.1:7420/api/crew/changes` shows the same picture without reloading.
 - Setup › Sessions (#22) will use both from the HUD.
 
 ### Before the first crew push
 
-List your own working folders under `crew.deny_read`, then restart the hub. Agent-run code can
-read the rest of your home. The secret scan is the only backstop for anything a seat copies into
+List your own working folders under `crew.deny_read`, then restart the hub. Agent-run code cannot
+read your home folder beyond what a seat needs (see "First crew"), but can read other folders
+outside it. The secret scan is the only backstop for anything a seat copies into
 its branch, and it has limits (below).
 
 ### Landing a change to a protected file
@@ -999,12 +1039,23 @@ to hold, or the hold is the controller's and the caller is FLIGHT.
 
 The watch checks every 5 minutes (and 20 seconds after a change) and wakes FLIGHT when a reason is new.
 Besides the older reasons (questions, items, free or stopped seats, parks FLIGHT may lift, PRs awaiting
-it, red main, flaky checks, hub errors), the sweep raises these signals, each told once:
+it, red main, flaky checks, hub errors), the sweep raises these signals, each told once.
+
+Routine pipeline steps do not wake FLIGHT: a PR's CI turning green, a review queued or finished, a
+merge queued or done, a PR ready to merge, a park the engine clears alone, and a review that has waited
+under 10 minutes for its seat. They stay in `flight_state` (prs, mergeQueue, seats, reviewQueue) and
+wake FLIGHT only when a timed rule below says they have stood still (`old_park`, `merge_stalled`,
+`idle_seat`, or idle review seats with a review queued 10 minutes). The hourly re-wake fires only while a
+fact FLIGHT must act on is still open, never for a digest change. Each wake stores its reasons (the fact
+categories, e.g. `q`, `signals`, `reminder`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
+by reason and by hour over the last day.
 
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
+| `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
 | `old_park` | a run has been parked for 15 minutes |
+| `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |
 | `run_no_pr` | a build run ended (crashed or not) with a ticket and no PR, within the last day, and not already a missing report |
@@ -1099,7 +1150,7 @@ started before the set was recorded rotates on its wake count as before.
 | `usage:<account>` | Claude: OAuth usage endpoint, then the newest transcript `rate_limit_event`. Codex: `codex app-server`, then the newest rollout. | `poll.usage_minutes` |
 | `github:<repo>:prs` | The repo's recent pull requests with their CI state and review decision (read-only GraphQL) | hourly, first 5 min after start |
 | `flow:<repo>` | Flow history: cycle time and first-push CI over the last 14 days (read-only GraphQL) | hourly, first 7 min after start (after the first PR sweep) |
-| `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute | 2 s (status rewritten at most once a minute while unchanged) |
+| `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute; the spawned commands run only with a browser or crew work open (see `runbooks/machine-capacity.md`) | 2 s (status rewritten at most once a minute while unchanged) |
 | `maintenance` | No source and no status row: deletes run digests of runs started over 30 days ago | hourly |
 
 Pages are described under "The HUD" below. Run cost is shown as `~$2.47`: it is the
@@ -1304,6 +1355,23 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
+  window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
+  - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`
+    or its URL), one of its commits (7+ hex characters: its merge commit, head, or a commit the
+    hub made for its branch), or a file that exactly one PR merged in the 90 days before the bug
+    changed (a file two PRs changed is left out). Each carries the originating `seat` and `model`
+    (the branch's author run) and shows on the PR as `escapedDefects`. The link is kept after the
+    card leaves the board.
+  - `reviewTimings`: per reported review (one per head), `reviewWaitMs` (queued to started) and
+    `reviewMs` (started to reported), with median and p85. A review that never started is left out.
+  - `rework`: reported rounds with a blocking finding over all reported rounds, per author seat
+    and per model; under 3 rounds is marked `enough: false`.
+  - `testsPerPr`: test files (`*.test.*`, `*.spec.*`, or under `test/`, `tests/`, `__tests__/`) each
+    merged PR added or changed, from the first 100 files of its diff (`pr_files`). Deleted tests are
+    not counted.
+
+  Escaped defects and diff files are kept 90 days.
 
 ## The HUD
 
@@ -1832,6 +1900,30 @@ Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, wr
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
 
+## Branch tidying
+
+GitHub's delete-on-merge removes a branch only when its PR merges, so the hub removes the rest. It
+runs wherever the engine runs (not in a preview, not with `MC_NO_LOOP_WRITES=1`). It tidies only a
+repo with a crew session and no observed loop; a repo that only lists an observed loop is never
+touched.
+
+- **No push after a merge.** `mc push` asks GitHub for the state of the PR the run records. A merged
+  or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
+  last PR on its branch merged; nothing is sent, so a merged branch is not
+  recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
+- **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
+  branch) that closed without merging. The PR page keeps its commits.
+- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes every
+  remote branch with no open PR, no live run, and no commit for 24 hours. A branch that is the base
+  of an open PR stays. A run parked on a closed PR does not hold its branch; any other unended run
+  does. Each deletion is a hub event on the Activity page.
+- **Never touched:** the default branch, `archive/*`, and `repos[].keep_branches`. If any read of
+  branches or PRs fails, nothing is deleted for that repo.
+- **Local.** Every 10 minutes the hub fetches each seat clone with `--prune` and drops the local
+  branches that are merged into the default branch or whose remote is gone. A branch checked out in
+  a worktree, or held by a live run, stays. The operator's own checkout is not touched.
+- The only GitHub write is `DELETE /repos/{repo}/git/refs/heads/{branch}`, over `gh`.
+
 ## Branch previews
 
 The live hub can start an open PR as a loopback-only preview with `POST /api/previews {"pr":123}`.
@@ -1856,6 +1948,16 @@ repository checked out by the hub; PR numbers in another configured repository a
 - `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
 - `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
 - `tokenOveruse`: one finding per run started in range whose input + output tokens pass its ticket size's expected use. Expected use is 1.5 times the median of that size's build runs (only runs of build seats; watch, plan and review seats and observed loops are left out, as are runs of agents no longer configured) of the last `AUDIT_BASELINE_DAYS` (14) days, and `AUDIT_EXPECTED_TOKENS_DEFAULT` (400000) for a size with fewer than `AUDIT_BASELINE_MIN_RUNS` (5) of them or none. A finding carries review rounds, blocking findings by category, turns, uncached input, output, cache read and create, the expected use and a likely cause: `plan-gap` (scope or spec findings), `flaky-test-loop` (wrong or stale test findings), `rework-churn` (4 or more rounds, or 10 or more blocking findings), `wide-ticket` (Size L or XL with little rework) or `unexplained`. `groups` collects causes that repeat across two or more findings with a prevention to propose (`lesson`, `plan-rule` or `split-rule`); the proposal is text for the delegated path to take, nothing applies it. A finding never stops a run; only the `crew.run_token_budget` ceiling does.
+- `reviewRounds`: `prs` counts the PRs reviewed in range by their highest review round, and `late` counts, per reviewer seat and model, the blocking findings (Critical and Important) reported in range and how many were late. A finding is late when it comes in round 2 or later on a file the author left unchanged since the previous review (the hub compares the files of `since-last-review.diff`; a finding the reviewer holds from the last round, by a `held` resolution, is carried and not late; a review with no earlier round, or whose changed files are unknown, tags none). The tag is also on each stored finding.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.
+
+## FLIGHT's fresh session
+
+FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (300K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
+
+- **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
+- **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
+- **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
+- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).

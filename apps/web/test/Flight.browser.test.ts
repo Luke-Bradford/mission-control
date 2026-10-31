@@ -71,6 +71,14 @@ function apiFor(scenario: Scenario) {
     "/api/flight": {
       seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
       decisions,
+      promptWakes: Array.from({ length: n }, (_, i) => ({
+        runId: "run-flight",
+        wake: n - i,
+        at: NOW - i * 20 * MIN,
+        sections: ["role", "rules", "orders", "lessons", "ticket", "digest", "tool_results"].map(
+          (section, k) => ({ section, bytes: 4000 * (k + 1), tokens: 1000 * (k + 1) }),
+        ),
+      })),
       wake: { lastWakeAt: NOW, wokeOn: ["q (1)"], nextWakeAt: NOW + 30 * MIN },
     },
     "/api/attention": attention,
@@ -184,6 +192,27 @@ describeRendered("FLIGHT page in a browser", () => {
               expect(
                 await page.reachable("#outcomesP .flight-outcome-row", "#flight-did"),
                 `${label} outcome rows`,
+              ).not.toContain(false);
+              // every wake's bar and its seven legend rows are reachable, and the legend stays in its wake
+              const wakes = await page.evaluate((selector) => {
+                const items = [...document.querySelectorAll<HTMLElement>(selector)];
+                return {
+                  count: items.length,
+                  legend: items.every((w) => w.querySelectorAll("li").length === 7),
+                  clipped: items.some((w) => {
+                    const bottom = w.getBoundingClientRect().bottom;
+                    return [...w.querySelectorAll("*")].some(
+                      (el) => el.getBoundingClientRect().bottom > bottom + 0.5,
+                    );
+                  }),
+                };
+              }, "#promptP [data-testid=prompt-wake]");
+              expect(wakes.count, `${label} prompt wakes`).toBe(scenario === "many" ? 50 : 1);
+              expect(wakes.legend, `${label} prompt legend`).toBe(true);
+              expect(wakes.clipped, `${label} prompt wake content spills`).toBe(false);
+              expect(
+                await page.reachable("#promptP [data-testid=prompt-wake]", "#promptP"),
+                `${label} prompt wakes reachable`,
               ).not.toContain(false);
             }
             await page.screenshot(

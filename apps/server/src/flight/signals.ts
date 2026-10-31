@@ -1,11 +1,13 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_NO_WORK_MS,
   FLIGHT_ITEM_RELAPSE_MS,
   FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -13,6 +15,7 @@ import {
   FLIGHT_MERGE_STALL_MS,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_OLD_PARK_MS,
+  FLIGHT_PUSH_UNSEEN_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAITS_SETTING,
@@ -29,6 +32,7 @@ import {
   noReportExitReason,
   type PullRequestView,
   parkedEventText,
+  STUCK_PARK,
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
@@ -471,6 +475,15 @@ export function flightSignals(i: {
     );
   }
 
+  // only a `merge` repo has its Ready cards dealt into queues; elsewhere FLIGHT starts them itself
+  const dealt = config.repos.find((r) => r.id === repo)?.autonomy === "merge";
+  const readyInLane = board.some(
+    (b) =>
+      !b.closed &&
+      hudColumnOf(b) === "Ready" &&
+      inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
+      !b.blockedBy.some((d) => !d.closed),
+  );
   for (const seat of seats) {
     const row = store.seatSession(seat.id);
     const since = row ? Math.max(row.updatedAt, row.lastTurnEndedAt ?? row.updatedAt) : undefined;
@@ -499,6 +512,34 @@ export function flightSignals(i: {
         since,
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
+    }
+    if (
+      seat.loop === "build" &&
+      seat.free &&
+      row?.state === "idle" &&
+      !seat.atStop &&
+      since !== undefined &&
+      now - since >= FLIGHT_IDLE_NO_WORK_MS &&
+      !work &&
+      (dealt || !readyInLane)
+    ) {
+      const id = `idle_no_work:${seat.id}:${since}`;
+      // at most one wake per seat an hour: an earlier episode's signal, untold or told within
+      // the hour, holds this one back
+      const held = Object.entries(state.signals).some(
+        ([other, x]) =>
+          x.kind === "idle_no_work" &&
+          other !== id &&
+          x.key.startsWith(`${seat.id}:`) &&
+          (x.toldAt === null || now - x.toldAt < FLIGHT_HOUR_MS),
+      );
+      if (!held)
+        raise(
+          "idle_no_work",
+          `${seat.id}:${since}`,
+          since,
+          `${seat.id} (area ${seat.area.join(", ") || "any"}) idle since ${new Date(since).toISOString()}; no ticket in Ready is startable for its area and lane, so promote work for it`,
+        );
     }
   }
   // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
@@ -533,7 +574,7 @@ export function flightSignals(i: {
     }
   }
   for (const run of store.runsOverlapping(cutoff, now + 1)) {
-    if (run.repoId !== repo || run.endedBy === "operator") continue;
+    if (run.repoId !== repo || run.endedBy === "operator" || run.endedBy === "superseded") continue;
     const seat = session.seats.find((s) => s.id === run.agentId);
     if (!seat) continue;
     const loop = seatDef(seat).loop;
@@ -585,6 +626,26 @@ export function flightSignals(i: {
       );
   }
 
+  // a failed review that counts blocking findings but holds none is never sent to the author
+  for (const run of store.runsOverlapping(cutoff, now + 1)) {
+    if (run.repoId !== repo || run.endedAt !== null) continue;
+    const review = store
+      .reviewsOfRun(run.id)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    if (
+      review &&
+      review.blocking > 0 &&
+      !store.findingsOf(review.id).some((f) => BLOCKING_SEVERITIES.includes(f.severity))
+    )
+      raise(
+        "hub_error",
+        `findings:${run.id}:${review.id}`,
+        review.endedAt ?? now,
+        `${run.agentId} run ${run.id} (${run.ticket ?? "no ticket"}): review ${review.id} on ${review.sha.slice(0, 7)} counts ${review.blocking} blocking, but no finding text is stored, so the author was not woken for rework`,
+      );
+  }
+
   for (const parkedRun of [
     ...seats.flatMap((x) =>
       x.runId !== null && x.parked !== null ? [{ id: x.runId, at: x.id }] : [],
@@ -592,8 +653,20 @@ export function flightSignals(i: {
     ...(i.aside ?? []).flatMap((x) => (x.parked === null ? [] : [{ id: x.runId, at: x.seat }])),
   ]) {
     const at = parkedAt.get(parkedRun.id);
-    if (at === undefined || now - at < FLIGHT_OLD_PARK_MS) continue;
+    if (at === undefined) continue;
     const run = store.run(parkedRun.id);
+    if (run?.loop?.parked?.kind === STUCK_PARK) {
+      // the engine lifts this park the pass the PR shows the push; one still standing needs a decision
+      if (now - at >= FLIGHT_PUSH_UNSEEN_MS)
+        raise(
+          "push_unseen",
+          `${parkedRun.id}:${at}`,
+          at,
+          `${parkedRun.at} ${run.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run.loop.parked.reason}`,
+        );
+      continue;
+    }
+    if (now - at < FLIGHT_OLD_PARK_MS) continue;
     raise(
       "old_park",
       `${parkedRun.id}:${at}`,

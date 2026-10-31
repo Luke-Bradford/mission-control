@@ -11,6 +11,7 @@ import {
   GITHUB_SLOWED_PREFIX,
   githubCollector,
   type HudState,
+  hudColumnOf,
   MACHINE_COLLECTOR,
   type MachineSample,
   NOTABLE_STATES,
@@ -85,13 +86,20 @@ import {
 } from "./collectors/usage-sources.ts";
 import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
-import { TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
+import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
 import { followPrs } from "./github-board.ts";
-import { attentionItems, crew, flightNotTriagingDueAt, forgetViews, NO_LOCK } from "./hud.ts";
+import {
+  attentionItems,
+  crew,
+  flightNotTriagingDueAt,
+  forgetViews,
+  NO_LOCK,
+  stateInputs,
+} from "./hud.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
@@ -242,6 +250,8 @@ export interface Collectors {
     prev: MachineSample | null,
     now: number,
     testCommand: string | null,
+    /** Whether the reading may spawn `vm_stat`, `sysctl`, `memory_pressure` and `ps`. */
+    spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
 }
@@ -261,6 +271,11 @@ export interface SchedulerDeps {
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
   hasViewClients?: () => boolean;
+  /**
+   * A ticket or review waits for the machine guard to admit it. Default: from the stored queues,
+   * queued reviews and Ready cards. Only read while no browser is connected.
+   */
+  startPending?: () => boolean;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
@@ -345,8 +360,8 @@ export function realCollectors(config: CcConfig): Collectors {
         now,
       );
     },
-    machine: (prevCpus, prev, now, testCommand) =>
-      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
+    machine: (prevCpus, prev, now, testCommand, spawn) =>
+      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand, spawn }),
     transcripts: maintainTranscripts,
   };
 }
@@ -391,6 +406,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let latestMachine: MachineSample | null = null;
   let machineCpus: CpuInfo[] | null = null;
   let machineMinute = -1;
+  /** The capacity guard held new starts at the last stored sample. */
+  let machineBlocked = false;
+  /**
+   * Whether this machine reading may spawn commands. The swap and memory-pressure thresholds (the
+   * swap hard limit always applies) need `sysctl` and `memory_pressure`, so a browser, a start
+   * waiting at the guard, or a held guard (to see it clear) spawns; an idle hub reads os values.
+   */
+  const machineSpawns = (): boolean =>
+    !noViewClients() || machineBlocked || (deps.startPending ?? defaultStartPending)();
+  /** A queued ticket or review, an open run, or a Ready card on a repo with a crew session. */
+  const defaultStartPending = (): boolean =>
+    store.hasPendingStart() ||
+    (config.crew?.sessions ?? []).some((session) =>
+      store.board(session.repoId).some((card) => hudColumnOf(card) === "Ready"),
+    );
+  let lastSpawned = false;
   let machineStatus: { ok: boolean; error: string | null; at: number } | null = null;
   /** The last backfill left nothing to read: later ticks only count until something is left. */
   let backfillDone = false;
@@ -475,11 +506,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     triageTimer.unref();
   };
 
+  /** True when the hub knows no browser is connected; a caller that cannot tell reads eagerly. */
+  const noViewClients = (): boolean => deps.hasViewClients?.() === false;
+
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
   const sweepAcks = (rows?: CrewRow[]) => {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
-    const currentRows = rows ?? crew(config, store, at, lock).rows;
+    // Rows are read only if a hold needs them, and then without event timelines (the sweep keeps
+    // none).
+    const currentRows = (): CrewRow[] =>
+      rows ?? crew(config, store, at, lock, undefined, true).rows;
     let waiting: Set<string> | undefined;
     if (
       evaluateHolds(
@@ -496,7 +533,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             );
         },
         (since) =>
-          currentRows.some((r) => {
+          currentRows().some((r) => {
             if (r.kind !== "crew" || r.role === "FLIGHT" || r.hudState === "stopped") return false;
             const seat = store.seatSession(r.id);
             return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
@@ -509,7 +546,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         },
         (key) => {
           waiting ??= new Set(
-            attentionItems(config, store, at, lock, currentRows, null, true).map((i) => i.key),
+            attentionItems(config, store, at, lock, rows, null, true).map((i) => i.key),
           );
           return !waiting.has(key);
         },
@@ -517,6 +554,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     )
       emit("attention");
     void applyDefaults();
+    // The ack sweep is housekeeping: a hub with no browser leaves it to the next poll with one.
+    if (noViewClients()) return;
     store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
   };
 
@@ -551,9 +590,29 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
+  let lastInputs: string | null = null;
+  /** States that turn with the clock; the others turn only with the inputs `stateInputs` reads. */
+  const TIMED_STATES: readonly HudState[] = ["running", "stalled", "waiting"];
   const afterLoopTick = () => {
+    const inputs = noViewClients() ? stateInputs(config, store) : null;
+    // an agent no longer configured keeps its last event, and no row of it changes
+    const configured = new Set(configuredAgents(config).map((a) => a.id));
+    const quiet =
+      inputs !== null &&
+      inputs === lastInputs &&
+      !store.hasActiveRun() &&
+      ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
+    // nothing can change state: no crew read
+    if (quiet) return sweepAcks();
+    lastInputs = inputs;
     const at = now();
-    const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK).rows;
+    // with no browser the rows are the summary: state changes need no event timelines
+    const lock = deps.lockState?.() ?? NO_LOCK;
+    const rows = (
+      noViewClients()
+        ? crew(config, store, at, lock, undefined, true)
+        : crew(config, store, at, lock)
+    ).rows;
     recordStateChanges(rows, at);
     sweepAcks(rows);
   };
@@ -562,9 +621,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let unsubscribeCrew: (() => void) | null = null;
   let crewTimer: NodeJS.Timeout | null = null;
   const recordCrewSoon = () => {
-    if (crewTimer !== null) return;
+    if (crewTimer !== null || noViewClients()) return;
     crewTimer = setTimeout(() => {
       crewTimer = null;
+      if (noViewClients()) return;
       try {
         const at = now();
         // The feed refetches on `agents`; announce what was just recorded (the re-read finds no change).
@@ -1040,11 +1100,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     machine: async () => {
       if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
+      const spawn = machineSpawns();
+      // the first fresh reading after an idle spell is stored at once, so the guard sees it
+      if (spawn && !lastSpawned) machineMinute = -1;
+      lastSpawned = spawn;
       const r = await c.machine(
         machineCpus,
         latestMachine,
         at,
         deps.lockState?.().holder?.command ?? null,
+        spawn,
       );
       machineCpus = r.cpus;
       latestMachine = r.sample;
@@ -1066,6 +1131,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           at,
           capacityConfig,
         );
+        machineBlocked = capacity.blocked;
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;

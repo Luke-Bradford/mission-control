@@ -330,6 +330,9 @@ export const pushForeignText = (shas: readonly string[]): string =>
 /** origin's branch has commits the local branch lacks; also git's own non-fast-forward refusal. */
 export const originMovedText = (branch: string): string =>
   `Not pushed: origin's ${branch} has commits this run doesn't have. If they are not wanted, reset origin's branch to the run's last push, then message the seat; if they are, end the run.`;
+/** The run's PR on the branch has merged or closed: nothing more goes to that branch. */
+export const pushPrDoneText = (branch: string, pr: number, state: "merged" | "closed"): string =>
+  `Not pushed: PR #${pr} on ${branch} is ${state}, so the branch takes no more commits. Start new work on a new branch.`;
 export const MC_PUSH_MERGE =
   "Not pushed: the branch has a merge commit Mission Control did not make, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
 /** The worktree has a merge in progress that the engine did not start. */
@@ -575,10 +578,47 @@ function sectionLines(text: string, level: number, title: RegExp): string[] | nu
   return inside ? out : null;
 }
 
+/** The ticket's `## Done when` bullets, each with its list marker and checkbox cut off. */
+export function doneWhenItems(body: string): string[] {
+  return (sectionLines(body, 2, /^done when$/i) ?? [])
+    .filter((l) => LIST_ITEM.test(l))
+    .map((l) =>
+      l
+        .replace(/^ {0,1}(?:[-*+]|\d+[.)])[ \t]+/, "")
+        .replace(/^\[[ xX]\][ \t]*/, "")
+        .trim(),
+    );
+}
+
 /** How many bullets the ticket's `## Done when` holds. */
 export function doneWhenCount(body: string): number {
-  return (sectionLines(body, 2, /^done when$/i) ?? []).filter((l) => LIST_ITEM.test(l)).length;
+  return doneWhenItems(body).length;
 }
+
+/** How a report answers one Done-when line: met with its evidence, or not met with the reason. */
+export const DONE_WHEN_STATUSES = ["met", "not_met"] as const;
+export type DoneWhenStatus = (typeof DONE_WHEN_STATUSES)[number];
+
+/** One Done-when line as the author answered it; `text` is the ticket's line, set by the hub. */
+export interface DoneWhenEntry {
+  line: number;
+  text: string;
+  status: DoneWhenStatus;
+  /** For `met`: a test name, a file or a measurement. For `not_met`: why it could not be met. */
+  evidence: string;
+}
+
+/** The longest quote of a Done-when line in a refusal. */
+const DONE_WHEN_QUOTE_MAX = 200;
+const quoteLine = (n: number, text: string): string =>
+  `${n}. "${text.length > DONE_WHEN_QUOTE_MAX ? `${text.slice(0, DONE_WHEN_QUOTE_MAX)}…` : text}"`;
+
+/** The report leaves these Done-when lines unaddressed. */
+export const doneWhenMissingText = (missing: readonly { line: number; text: string }[]): string =>
+  `Not recorded: your report leaves ${missing.length === 1 ? "this Done-when line" : `these ${missing.length} Done-when lines`} unaddressed:\n${missing.map((m) => quoteLine(m.line, m.text)).join("\n")}\nAdd a doneWhen entry for each: { line, status: "met", evidence: the test name, file or measurement } or { line, status: "not_met", evidence: why you could not meet it }.`;
+/** A doneWhen entry names a line the ticket does not have, or names one twice. */
+export const doneWhenBadLineText = (line: number, lines: number): string =>
+  `Not recorded: doneWhen line ${line} is not one of the ticket's ${lines} Done-when ${lines === 1 ? "line" : "lines"} (numbered from 1), or is named twice.`;
 
 /** How many entries the plan's `### Tests` part holds, or null when it has no such part. */
 export function planTestCount(plan: string): number | null {

@@ -358,6 +358,7 @@ async function onboard(
           requiredChecks: [],
           commands: defaultSeatCommands(),
           protectedFiles: [],
+          keepBranches: [],
           autonomy: "draft" as const,
           flightPowers: "standard" as const,
         }
@@ -659,6 +660,7 @@ async function add(
     requiredChecks: [],
     commands: defaultSeatCommands(),
     protectedFiles: [],
+    keepBranches: [],
     autonomy: "draft",
     flightPowers: "standard",
   };
@@ -1016,7 +1018,8 @@ export async function createSession(
     (!isDeepStrictEqual(membership(current), membership(applied)) ||
       !isDeepStrictEqual(current.loops, applied.loops) ||
       crew.worktrees !== applied.crew?.worktrees ||
-      !isDeepStrictEqual(crew.denyRead, applied.crew?.denyRead))
+      !isDeepStrictEqual(crew.denyRead, applied.crew?.denyRead) ||
+      !isDeepStrictEqual(crew.allowRead, applied.crew?.allowRead))
   ) {
     throw new ConfigWriteError(
       "conflict",

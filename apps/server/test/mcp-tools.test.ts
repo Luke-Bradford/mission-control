@@ -23,6 +23,7 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  alreadyOnOriginText,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
@@ -93,6 +94,7 @@ import {
   prNotifyText,
   prSecretText,
   pushChecksText,
+  pushPrDoneText,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -2375,6 +2377,61 @@ describe("push and draft_pr", () => {
       expect(remoteTip("main")).toBe(git(clone, "rev-parse", "main").trim());
     });
 
+    it("refuses a push to a branch whose PR merged or closed, naming the PR, and sends nothing", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      for (const [state, word] of [
+        ["MERGED", "merged"],
+        ["CLOSED", "closed"],
+      ] as const) {
+        ghState({ "pr view": { stdout: `${JSON.stringify({ state })}\n` } });
+        const text = pushPrDoneText(BRANCH, 727, word);
+        expect(await push()).toEqual({ text, isError: true });
+        expect(text).toContain("PR #727");
+        expect(remoteTip()).toBeNull();
+        expect(store.runPush(RUN)).toBeNull();
+      }
+    });
+
+    it("refuses a push when the run has no PR yet but the branch's last PR merged", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: null });
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 727,
+            headSha: "a",
+            title: "x",
+            url: "https://github.com/o/mc/pull/727",
+            branch: BRANCH,
+            ticket: "mc#42",
+            state: "merged",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - 86_400_000,
+            updatedAt: NOW - 3_600_000,
+            mergedAt: NOW - 3_600_000,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      expect(await push()).toEqual({ text: pushPrDoneText(BRANCH, 727, "merged"), isError: true });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("pushes while the run's PR is open, and refuses when gh cannot say", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      ghState({ "pr view": { code: 1, stderr: "HTTP 502\n" } });
+      expect(await push()).toEqual({ text: MC_PUSH_FAILED, isError: true });
+      ghState({ "pr view": { stdout: `${JSON.stringify({ state: "OPEN" })}\n` } });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+    });
+
     it("gives every slow step the slow timeout and runs in the clone's queue", async () => {
       await commitOk("apps/a.ts", "a2\n");
       const seen: [string, number | undefined][] = [];
@@ -3051,6 +3108,57 @@ describe("push and draft_pr", () => {
           .map((l) => l.split(" ")[0]),
       ).toEqual([mine]);
       expect(store.runPush(second.runId)?.sha).toBe(mine);
+    });
+
+    it("a pushed head that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      // recorded under an earlier run of the branch, so the run's own newest is still `own`
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+      expect((await push()).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+      expect(store.runPush(RUN)?.sha).toBe(merge);
+    });
+
+    it("a head already on origin that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      git(wt, "push", "-q", "origin", `${merge}:refs/heads/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(merge));
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+    });
+
+    it("a commit someone else put on origin is not recorded as the run's, even when it descends from the newest", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      const foreign = operatorPushes("docs/operator.md");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--ff-only", `origin/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(foreign));
+      expect(store.branchCommits("mc", BRANCH).has(foreign)).toBe(false);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+    });
+
+    it("a pushed head that does not contain the run's newest commit leaves it as it was", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      git(wt, "reset", "-q", "--hard", `${own}^`);
+      write("apps/b.ts", "b\n");
+      git(wt, "add", "-A");
+      git(wt, "commit", "-qm", "feat: b");
+      const other = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: other, at: NOW });
+      expect((await push()).text).toBe(`Pushed ${other.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
     });
 
     it("a run that ended unpushed leaves its commits to the next run's push, which sends both", async () => {
@@ -3841,6 +3949,84 @@ describe("report_evidence", () => {
     });
   });
 
+  describe("the ticket's Done-when lines", () => {
+    const LINES = ["Test: a report missing a Done-when entry is refused", "Audit shows rounds"];
+    const answer = (line: number, status: "met" | "not_met" = "met", evidence = "a test") => ({
+      line,
+      status,
+      evidence,
+    });
+    const reportWith = (doneWhen?: unknown) =>
+      tool("report_evidence", ev).call(CTX, {
+        note: "done",
+        ...(doneWhen === undefined ? {} : { doneWhen }),
+      });
+
+    beforeEach(async () => {
+      store.setRunDoneWhen(RUN, LINES);
+      await committed();
+    });
+
+    it("refuses a report that leaves a line unaddressed, quoting the line", async () => {
+      const r = await reportWith([answer(1)]);
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('2. "Audit shows rounds"');
+      expect(r.text).not.toContain("a report missing");
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("refuses a report with no doneWhen, quoting every line", async () => {
+      const r = await reportWith();
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain(`1. "${LINES[0]}"`);
+      expect(r.text).toContain(`2. "${LINES[1]}"`);
+    });
+
+    it("refuses a line the ticket does not have, and a line named twice", async () => {
+      expect((await reportWith([answer(1), answer(2), answer(3)])).isError).toBe(true);
+      expect((await reportWith([answer(1), answer(1), answer(2)])).isError).toBe(true);
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("records a report that addresses every line, met or not met", async () => {
+      expect(
+        await reportWith([answer(1, "met", "mcp-tools.test.ts"), answer(2, "not_met", "web")]),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([
+        { line: 1, text: LINES[0], status: "met", evidence: "mcp-tools.test.ts" },
+        { line: 2, text: LINES[1], status: "not_met", evidence: "web" },
+      ]);
+    });
+
+    it("a Ruling: note on a fresh commit still owes the table", async () => {
+      const r = await tool("report_evidence", ev).call(CTX, { note: "Ruling: all done" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('1. "');
+    });
+
+    it("a Ruling: note on the sha CI failed, with no new commit, is recorded with no table", async () => {
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([]);
+    });
+
+    it("a Ruling: note with no new commit keeps the last table", async () => {
+      expect(await reportWith([answer(1), answer(2)])).toEqual({ text: EVIDENCE_RECORDED });
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toHaveLength(2);
+    });
+
+    it("needs no doneWhen from a run whose ticket lines were not recorded", async () => {
+      store.setRunDoneWhen(RUN, []);
+      expect(await reportWith()).toEqual({ text: EVIDENCE_RECORDED });
+    });
+  });
+
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
   });
@@ -4161,6 +4347,7 @@ describe("report_evidence", () => {
       at: clock,
       tests: [],
       testsAdded: [],
+      doneWhen: [],
     });
     expect(told).toEqual([["guido-1", RUN]]);
     expect(emitted).toContain("agents");

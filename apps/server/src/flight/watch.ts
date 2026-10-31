@@ -8,10 +8,13 @@
 import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_HANDOVER_ASK,
+  FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
@@ -27,8 +30,11 @@ import {
   type FlightState,
   flightDownText,
   flightStartFailedText,
+  freshStartLine,
   HUD_STATE_LABEL,
   type HudState,
+  handoverKey,
+  memoryTopicKey,
   type SeatSessionRow,
   type TestLockState,
   wakeKey,
@@ -38,6 +44,7 @@ import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { wakePieces } from "../prompt-cost.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
@@ -57,6 +64,7 @@ import {
   pending,
   recordFlightWake,
   recordNextFlightWake,
+  recordWakeReasons,
   unhandledReasons,
   type WakeReason,
   wakeFacts,
@@ -136,6 +144,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
 
+  /** The run that has been asked for its handover, and when. */
+  let handover: { runId: string; at: number } | null = null;
   let lastFacts = "";
   let lastWakeAt = 0;
   /**
@@ -437,7 +447,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
         const left = leftOf(state);
+        const note = store
+          .flightMemory(state.repo)
+          .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
         const { runId } = await supervisor.startWatch(id, {
+          firstPieces: wakePieces(digest),
           first: wakeLine(
             state,
             digest,
@@ -446,6 +460,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
                 ? causes
                 : ["initial"]
               : [leftLine(left), ...causes],
+            freshStartLine(note ?? null),
           ),
         });
         audit = nextAudit(t, reasons, left);
@@ -460,7 +475,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
+        const woke = causes.length > 0 ? causes : ["initial"];
+        recordFlightWake(store, found.session.repoId, t, woke);
+        recordWakeReasons(store, runId, t, left === null ? woke : [leftLine(left), ...causes]);
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -505,6 +522,24 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = true;
       await supervisor.endRunByEngine(runId);
       rotationRequested = false;
+      return;
+    }
+    // past the context limit: one handover wake, then the fresh session once that turn has ended
+    const context = store.digest(runId)?.contextTokens ?? null;
+    if (context !== null && context > FLIGHT_CONTEXT_ROTATE_TOKENS) {
+      let asked = handover?.runId === runId ? handover : null;
+      if (asked === null) {
+        const sent = await supervisor.send(runId, handoverKey(runId), FLIGHT_HANDOVER_ASK);
+        if (sent === "sent") asked = handover = { runId, at: t };
+        // a handover already sent (before a hub restart) is taken as written
+        else if (sent === "dup") asked = handover = { runId, at: 0 };
+        else return;
+        if (sent === "sent") return;
+      }
+      if (lastTurnEndAt >= asked.at) {
+        rotating = true;
+        await supervisor.endRunByEngine(runId);
+      }
       return;
     }
     prepareDaily(t);
@@ -563,8 +598,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       const causes = left === null ? changed : [leftLine(left), ...changed];
       const reasons = wakeReasons(lastFacts, wake, state.items);
       if (
-        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
-        "sent"
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
+          wake: n + 1,
+          pieces: wakePieces(digest),
+        })) === "sent"
       ) {
         audit = nextAudit(t, reasons, left);
         delivered = { runId, snapshot };
@@ -573,12 +610,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        recordFlightWake(
-          store,
-          found.session.repoId,
-          t,
-          causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER],
-        );
+        const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
+        recordFlightWake(store, found.session.repoId, t, woke);
+        recordWakeReasons(store, runId, t, woke);
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {

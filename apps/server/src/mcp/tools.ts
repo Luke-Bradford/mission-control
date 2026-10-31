@@ -38,7 +38,11 @@ import {
   commsCutMarker,
   crewAuthorName,
   DEFAULT_PROFILES,
+  DONE_WHEN_STATUSES,
+  type DoneWhenEntry,
+  doneWhenBadLineText,
   doneWhenCount,
+  doneWhenMissingText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -150,6 +154,7 @@ import {
   pushChecksText,
   pushedText,
   pushForeignText,
+  pushPrDoneText,
   pushReferenceText,
   pushSecretText,
   REVERT_STRAYS,
@@ -367,6 +372,16 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  doneWhen: z
+    .array(
+      z.strictObject({
+        line: z.int().min(1).max(REVIEW_FINDINGS_MAX),
+        status: z.enum(DONE_WHEN_STATUSES),
+        evidence: text(MC_TEXT_MAX),
+      }),
+    )
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
   tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
   testsAdded: z
     .array(z.strictObject({ file: text(FINDING_FILE_MAX), failedOnBase: z.boolean() }))
@@ -385,6 +400,22 @@ const ReportedTestSchema = {
     duration: { type: "integer", minimum: 0 },
   },
   required: ["command", "passed", "failed", "skipped", "duration"],
+  additionalProperties: false,
+};
+const DoneWhenAnswerSchema = {
+  type: "object",
+  properties: {
+    line: { type: "integer", minimum: 1, description: "The Done-when line's number, from 1." },
+    status: { type: "string", enum: [...DONE_WHEN_STATUSES] },
+    evidence: {
+      type: "string",
+      minLength: 1,
+      maxLength: MC_TEXT_MAX,
+      description:
+        "met: the test name, file or measurement that proves it. not_met: why you could not meet it.",
+    },
+  },
+  required: ["line", "status", "evidence"],
   additionalProperties: false,
 };
 const TestsAddedSchema = {
@@ -735,6 +766,41 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       return unmet;
     }
 
+    /**
+     * The run's PR (the one its loop records) when it has merged or closed; "unreadable" when gh
+     * cannot say. A run with no PR yet has none to check.
+     */
+    async function donePr(
+      run: Run,
+    ): Promise<{ number: number; word: "merged" | "closed" } | "unreadable" | null> {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (repo === undefined) return null;
+      const number = run.loop?.prNumber ?? null;
+      if (number === null) {
+        // no PR of this run yet: a branch whose last PR merged (a new run reusing it) stays closed
+        const onBranch = deps.store.pullRequests(run.repoId).filter((p) => p.branch === branch);
+        const newest = onBranch.sort((a, b) => b.number - a.number)[0];
+        return newest?.state === "merged" && !onBranch.some((p) => p.state === "open")
+          ? { number: newest.number, word: "merged" }
+          : null;
+      }
+      const viewed = await deps.gh(
+        ["pr", "view", String(number), `--repo=${repo}`, "--json=state"],
+        { cwd: crewDir(deps.dbPath) },
+      );
+      let state: unknown;
+      try {
+        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+      } catch {
+        state = null;
+      }
+      if (state === "OPEN") return null;
+      if (state === "MERGED") return { number, word: "merged" };
+      if (state === "CLOSED") return { number, word: "closed" };
+      deps.log?.(`mc push: gh pr view ${number} failed (${String(viewed.code)})`);
+      return "unreadable";
+    }
+
     async function steps(
       run: Run,
       g: (a: string[], o?: { maxBuffer?: number }) => Promise<string>,
@@ -770,9 +836,31 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
           () => false,
         );
 
+      /**
+       * The pushed head becomes the run's newest commit when it contains the one it had (a merge
+       * recorded under an earlier run of the branch, say): the engine compares the push with the
+       * newest commit, and a descendant head would otherwise never match it. Only a head that is
+       * already one of the crew's commits on this branch: a commit someone else put on origin is
+       * never recorded as the crew's.
+       */
+      const adoptHead = async () => {
+        const newest = store.newestRunCommit(runId)?.sha;
+        if (newest === undefined || newest === sha) return;
+        if (!store.branchCommits(run.repoId, branch).has(sha) || !(await has(newest))) return;
+        const contains = await g(["merge-base", "--is-ancestor", newest, sha]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+        if (contains) store.addRunCommit({ runId, repoId: run.repoId, branch, sha, at: now() });
+      };
+
       // 1. origin's tip
       const remote = heads.branchSha;
       if (remote === sha) {
+        await adoptHead();
         store.setRunPush({ runId, sha, at: now() });
         bus.emit("agents");
         return { text: alreadyOnOriginText(sha) };
@@ -790,6 +878,13 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         if (!ancestor) return { text: originMovedText(branch), isError: true };
       }
+
+      // 1b. the run's PR on this branch is merged or closed: GitHub deletes a merged branch, and a
+      // push would bring it back
+      const done = await donePr(run);
+      if (done === "unreadable") return { text: MC_PUSH_FAILED, isError: true };
+      if (done !== null)
+        return { text: pushPrDoneText(branch, done.number, done.word), isError: true };
 
       // 2. the new commits: exactly what this push sends
       if (!(await has(heads.defaultSha))) {
@@ -915,6 +1010,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         throw e;
       }
+      await adoptHead();
       store.setRunPush({ runId, sha, at: now() });
       bus.emit("agents");
       return { text: pushedText(sha, branch) };
@@ -2048,7 +2144,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded } = parsed.data;
+    const { note, tests, testsAdded, doneWhen } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2127,6 +2223,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
+      // every Done-when line the run started with is answered, so a gap is the seat's to name
+      const lines = store.runDoneWhen(currentRun.id);
+      // only a ruling with no new commit owes no table; a report on a fresh commit always does
+      const rulingOnly = ciRuling && !fresh;
+      // a ruling changes no code, so the table of the last report still stands for the review
+      const answers: DoneWhenEntry[] = rulingOnly ? [...(reported?.doneWhen ?? [])] : [];
+      if (lines.length > 0 && !rulingOnly) {
+        const seen = new Set<number>();
+        for (const a of doneWhen ?? []) {
+          if (a.line > lines.length || seen.has(a.line)) {
+            return { text: doneWhenBadLineText(a.line, lines.length), isError: true };
+          }
+          seen.add(a.line);
+          answers.push({ ...a, text: lines[a.line - 1] ?? "" });
+        }
+        const missing = lines.flatMap((text, i) =>
+          seen.has(i + 1) ? [] : [{ line: i + 1, text }],
+        );
+        if (missing.length > 0) return { text: doneWhenMissingText(missing), isError: true };
+        answers.sort((a, b) => a.line - b.line);
+      }
+
       const problem = prTextProblem(note, {
         repo: repoOf(deps, currentRun),
         issue: issueOf(currentRun),
@@ -2147,7 +2265,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded });
+      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
@@ -2562,7 +2680,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note, optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note, one doneWhen entry for every line of the ticket's ## Done when (met with its evidence, or not met with the reason; Mission Control refuses a report that leaves one out), optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2573,6 +2691,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
+          doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
           testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: TestsAddedSchema },
         },

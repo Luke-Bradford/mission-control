@@ -2316,13 +2316,44 @@ describe("seat sessions", () => {
     updatedAt: 5,
     lastTurnEndedAt: null,
     lastTurnStartedAt: null,
+    quietTurns: 0,
     ...over,
+  });
+
+  it("counts the turns in a row that ended with no new commit", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 10);
+    store.setSeatTurnEnded("guido", 20);
+    expect(store.seatSession("guido")?.quietTurns).toBe(2);
+    store.addRunCommit({
+      runId: "guido:20261020T101500Z",
+      repoId: "r",
+      branch: "b",
+      sha: "a1",
+      at: 25,
+    });
+    store.setSeatTurnEnded("guido", 30);
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
+    store.setSeatTurnEnded("guido", 40);
+    expect(store.seatSession("guido")?.quietTurns).toBe(1);
+    store.setSeatTurnEnded("guido", null);
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
+  });
+
+  it("clears the quiet turns for a new run and keeps them for the same run", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 10);
+    store.setSeatTurnEnded("guido", 20);
+    store.setSeatSession(seat({ state: "idle", updatedAt: 9 }));
+    expect(store.seatSession("guido")?.quietTurns).toBe(2);
+    store.setSeatSession(seat({ runId: "guido:20261021T090000Z", cliSessionId: "cli-2" }));
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
   });
 
   it("keeps when the last turn ended apart from the row's other writes", () => {
     store.setSeatSession(seat());
     store.setSeatTurnEnded("guido", 77);
-    expect(store.seatSession("guido")).toEqual(seat({ lastTurnEndedAt: 77 }));
+    expect(store.seatSession("guido")).toEqual(seat({ lastTurnEndedAt: 77, quietTurns: 1 }));
     store.setSeatSession(seat({ state: "idle", updatedAt: 9 }));
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBe(77);
   });
@@ -2332,6 +2363,32 @@ describe("seat sessions", () => {
     store.setSeatTurnEnded("guido", 77);
     store.setSeatTurnEnded("guido", null);
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
+  });
+
+  it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
+    const aside = { worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));
+    expect(store.hasPendingStart()).toBe(false);
+    expect(store.hasActiveRun()).toBe(false);
+    store.upsertRun(run({ id: "live", seq: 2, ticket: "repo#2", loop: { ...NEW_LOOP } }));
+    expect(store.hasPendingStart()).toBe(true);
+    expect(store.hasActiveRun()).toBe(true);
+    store.upsertRun(
+      run({ id: "live", seq: 2, ticket: "repo#2", endedAt: 5, loop: { ...NEW_LOOP } }),
+    );
+    expect(store.hasPendingStart()).toBe(false);
+    store.requestReview({
+      authorRunId: "set-aside",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 1,
+      sha: "s",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    });
+    expect(store.hasPendingStart()).toBe(true);
   });
 
   it("asideRuns: unended runs with an aside, oldest first", () => {
@@ -2637,6 +2694,75 @@ describe("reviews", () => {
     expect(store.recordFindings(third, "r2", { verdict, summary: "x", findings, at: 4 })).toBe(
       false,
     );
+  });
+
+  describe("late findings", () => {
+    const review = (round: number, runId: string, changed: string[] | null) => {
+      const id = store.requestReview(
+        request({ round, attempt: round, sha: String(round).repeat(40) }),
+      );
+      if (id === null) throw new Error("no id");
+      store.setReviewState(id, ["queued"], "starting", { at: 110 * round });
+      store.setReviewState(id, ["starting"], "running", { at: 120 * round, runId });
+      if (changed !== null) store.setReviewChangedSince(id, changed);
+      return id;
+    };
+    const report = (id: number, runId: string, findings: ReviewFinding[]) =>
+      store.recordFindings(id, runId, { verdict, summary: "s", findings, at: 500 });
+
+    it("tags a round 2 finding on a file unchanged since round 1, and not one on a changed file", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      const second = review(2, "rev-2", ["b.ts"]);
+      report(second, "rev-2", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", true],
+        ["b.ts", false],
+      ]);
+    });
+
+    it("tags nothing in round 1, or when the changed files are unknown", () => {
+      const first = review(1, "rev-1", []);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", null);
+      report(second, "rev-2", [finding()]);
+      expect(store.findingsOf(first).map((f) => f.late)).toEqual([false]);
+      expect(store.findingsOf(second).map((f) => f.late)).toEqual([false]);
+    });
+
+    it("audits PRs by round count and late findings per reviewer and model", () => {
+      const asRun = (id: string, model: string) =>
+        store.upsertRun(run({ id, agentId: "retro", model, startedAt: 100 }));
+      asRun("rev-1", "opus");
+      asRun("rev-2", "opus");
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", []);
+      report(second, "rev-2", [finding(), finding({ severity: "Minor" })]);
+      const { reviewRounds } = store.audit(0, 1000) as unknown as AuditView;
+      // blocking findings only: the Minor one is not counted
+      expect(reviewRounds).toEqual({
+        prs: [{ rounds: 2, count: 1 }],
+        late: [{ seatId: "retro", model: "opus", findings: 2, late: 1 }],
+      });
+    });
+
+    it("does not tag a finding the reviewer holds from the last round", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" })]);
+      const second = review(2, "rev-2", []);
+      store.recordFindings(second, "rev-2", {
+        verdict,
+        summary: "s",
+        findings: [finding({ file: "a.ts" }), finding({ file: "c.ts" })],
+        resolutions: [{ findingRef: { reviewId: first, pos: 0 }, outcome: "held" }],
+        at: 500,
+      });
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", false],
+        ["c.ts", true],
+      ]);
+    });
   });
 
   describe("finding resolutions", () => {
@@ -3551,7 +3677,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 13; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",

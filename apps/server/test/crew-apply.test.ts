@@ -387,6 +387,7 @@ describe("restartNeeded", () => {
       ["crew.worktrees", { worktrees: "/other" }],
       ["crew.node", { node: "/n" }],
       ["crew.deny_read", { denyRead: ["/x"] }],
+      ["crew.allow_read", { allowRead: ["/x"] }],
       ["crew.run_token_budget", { runTokenBudget: 5 }],
     ];
     for (const [name, patch] of keys) {
