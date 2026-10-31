@@ -229,6 +229,8 @@ export type OperatorRefusal =
   | "not-permitted"
   | "head-moved"
   | "pr-not-open"
+  | "second-review-done"
+  | "no-second-reviewer"
   | "floor-enforced"
   | "before-lift"
   | "rework-undelivered"
@@ -250,6 +252,8 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "not-permitted": "this action is not allowed for the caller",
   "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
   "pr-not-open": "the PR is not open",
+  "second-review-done": "a second review was already requested on this head",
+  "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
@@ -283,10 +287,10 @@ export interface Engine {
     by?: "CAPCOM" | "FLIGHT",
     opts?: {
       kinds?: readonly string[];
-      action?: "lift" | "rereview" | "accept" | "rework";
+      action?: "lift" | "rereview" | "accept" | "rework" | "second_review";
       /** Stores operator work after lift guards pass but before the resumed run can wake. */
       beforeLift?: () => Promise<boolean>;
-      /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
+      /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
     },
   ): Promise<OperatorResult>;
@@ -359,11 +363,19 @@ export function reviewerOf(
   config: CcConfig,
   seatId: string,
   role?: string,
-  avail?: { store: Store; now: number; avoid?: ReadonlySet<string> },
+  avail?: {
+    store: Store;
+    now: number;
+    avoid?: ReadonlySet<string>;
+    /** Seats on this account are never chosen (a second review runs on another account). */
+    exceptAccount?: string;
+  },
 ): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
-  const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
+  const seats = (session?.seats ?? []).filter(
+    (x) => !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
+  );
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
   if (avail === undefined) return pool[0] ?? null;
@@ -431,12 +443,19 @@ export function createEngine(deps: EngineDeps): Engine {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
-  const reviewerFor = (run: Run): CrewSeatConfig | null =>
-    reviewerOf(config, run.agentId, reviewRoleOf(run), {
+  const reviewerFor = (run: Run): CrewSeatConfig | null => {
+    // while FLIGHT's second review of the head is the one wanted, it runs on another account
+    const sha = store.runPush(run.id)?.sha;
+    const second = sha === undefined ? undefined : run.loop?.flightSecondReview?.[sha];
+    return reviewerOf(config, run.agentId, reviewRoleOf(run), {
       store,
       now: now(),
       avoid: budgetFailedSeats(store, run),
+      ...(second !== undefined && second.epoch === run.loop?.epoch
+        ? { exceptAccount: second.firstAccountId }
+        : {}),
     });
+  };
   /** The input + output tokens a review run on this seat's account may use. */
   const reviewBudgetOf = (seatId: string): number => {
     const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
@@ -2396,6 +2415,29 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** A reported second review is logged as a FLIGHT decision with both verdicts. */
+  function logSecondReview(rv: ReviewRow): void {
+    const author = store.run(rv.authorRunId);
+    const second = author?.loop?.flightSecondReview?.[rv.sha];
+    const row = store.review(rv.id);
+    if (author === null || second === undefined || second.epoch !== rv.epoch) return;
+    if (row?.state !== "reported") return;
+    const first = store.review(second.firstReviewId);
+    const said = (r: ReviewRow | null): string =>
+      r?.verdict ? `spec ${r.verdict.spec}, quality ${r.verdict.quality}` : "no verdict";
+    store.addFlightDecision({
+      at: now(),
+      kind: "settle",
+      seatId: author.agentId,
+      targetRunId: author.id,
+      ref: null,
+      questionId: null,
+      about: "second_review",
+      decision: `Second review ${row.blocking > 0 ? "holds" : "passes"} (${said(row)}); the first held (${said(first)})`,
+      basis: second.reason,
+    });
+  }
+
   function kickReviews(): Promise<void> {
     if (!live()) return Promise.resolve();
     return onChain(REVIEWS_CHAIN, superviseReviews);
@@ -2418,6 +2460,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
           if (e.kind === "findings") {
+            logSecondReview(rv);
             // The author run (aside or not) is looked at now, so its rework is flagged before a
             // slow review start can let the seat take a new ticket; once is enough (a second
             // pass would only retry a transient step ahead of its tick).
@@ -2569,6 +2612,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
           return refuse("wrong-action");
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
+        let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (
             (by === "CAPCOM" && opts.action !== "accept") ||
@@ -2591,6 +2635,32 @@ export function createEngine(deps: EngineDeps): Engine {
             !(kind === "review-failed" && opts.action === "rereview")
           )
             return refuse("wrong-action");
+          if (opts.action === "second_review") {
+            if (loop.flightSecondReview?.[pushed.sha] !== undefined)
+              return refuse("second-review-done");
+            const first = store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.sha === pushed.sha && r.state === "reported")
+              .at(-1);
+            // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
+            if (!first || first.blocking === 0) return refuse("wrong-action");
+            const paths = await publisher.hardRuleTouches(
+              run,
+              pushed.sha,
+              FLIGHT_FLOOR_ENFORCING_PATHS,
+            );
+            if (paths.length === 0) return refuse("wrong-action");
+            const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
+            if (
+              reviewerOf(config, run.agentId, reviewRoleOf(run), {
+                store,
+                now: now(),
+                exceptAccount: firstAccountId,
+              }) === null
+            )
+              return refuse("no-second-reviewer");
+            secondOf = { firstReviewId: first.id, firstAccountId };
+          }
           if (opts.action === "accept") {
             const review = store
               .reviewsOfRun(run.id)
@@ -2626,8 +2696,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
         if (kind === "review" || kind === "review-ruling") {
-          next.phase = opts?.action === "accept" ? "review" : "working";
-          if (opts?.action !== "accept") {
+          const staysInReview = opts?.action === "accept" || opts?.action === "second_review";
+          next.phase = staysInReview ? "review" : "working";
+          if (!staysInReview) {
             next.reviewWaivedSha = null;
             next.flightClearedSha = null;
           }
@@ -2646,6 +2717,14 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = pushed?.sha ?? null;
           next.flightClearedSha = pushed?.sha ?? null;
           next.phase = "review";
+        } else if (opts?.action === "second_review" && secondOf !== null && pushed) {
+          next.reviewWaivedSha = null;
+          next.flightClearedSha = null;
+          next.phase = "review";
+          next.flightSecondReview = {
+            ...loop.flightSecondReview,
+            [pushed.sha]: { epoch: next.epoch, ...secondOf, reason: opts.note ?? "" },
+          };
         } else if (opts?.action === "rereview" || opts?.action === "rework") {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
