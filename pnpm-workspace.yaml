@@ -4,3 +4,6 @@ packages:
 # esbuild ships prebuilt binaries via optional deps; its postinstall is unnecessary, so deny it.
 allowBuilds:
   esbuild: false
+
+# pnpm 11 reinstalls before every script when package.json changed; a seat's sandbox cannot write the store, so its checks fail. The hub installs each worktree once.
+verifyDepsBeforeRun: false

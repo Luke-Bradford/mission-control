@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -75,7 +76,9 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapLive,
   type MapSnapshot,
+  type MapTree,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -376,6 +379,8 @@ export interface AppDeps {
   hudShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
+  /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
+  mapTree?: typeof mapTree;
   /** Build each repo's map payload in the background once the app is ready (the hub's start). */
   warmMap?: boolean;
   config: CcConfig;
@@ -667,6 +672,9 @@ const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
 /** Longest a map payload is reused: the backstop for fields that age without any input changing. */
 const MAP_CACHE_MS = 15_000;
+/** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
+const MAP_TREE_MS = 60 * 60_000;
+type MapTreeBuilt = { etag: string; tree: MapTree };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -734,16 +742,71 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.mapCachePut(kind, scope, key, value, exclusive),
   };
   const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapSnapshot> }>();
-  const buildMapPayload = async (
+  const mapTrees = new Map<string, { key: string; at: number; built: Promise<MapTreeBuilt> }>();
+  const buildTree = deps.mapTree ?? mapTree;
+  /** The tree part for the default-branch `head`: built once, kept until an input of it moves. */
+  const mapTreeFor = async (
     repo: (typeof config.repos)[number],
+    checkout: string,
+    head: string,
+    prs: PullRequestView[],
+    board: BoardItem[],
+  ): Promise<MapTreeBuilt> => {
+    // The tree reads only the head, the merged PRs and the bug-labelled tickets (the history),
+    // and the rules: nothing about the crew, so a seat moving never reaches this key.
+    const key = JSON.stringify([
+      head,
+      prs
+        .filter((p) => p.state === "merged" && p.mergeCommitSha)
+        .map((p) => [p.number, p.mergeCommitSha, p.mergedAt, p.branch, p.ticket]),
+      board.filter((item) => item.labels.includes("bug")).map((item) => item.issueNumber),
+      flightPowersOf(config, repo.id),
+      repo.rules,
+    ]);
+    const at = now();
+    const cached = mapTrees.get(repo.id);
+    if (cached && cached.key === key && at - cached.at < MAP_TREE_MS) return await cached.built;
+    const built = (async (): Promise<MapTreeBuilt> => {
+      const tree = await buildTree(checkout, "origin/HEAD", prs, board, at, mapStore);
+      const read = await readRepoRules(repo.github, checkout, repo.rules);
+      // Unreadable repo rules leave the configured ones: the map still draws.
+      const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
+      return {
+        etag: `"${createHash("sha256").update(`${key}@${at}`).digest("hex").slice(0, 32)}"`,
+        tree: {
+          repoId: repo.id,
+          ...tree,
+          rules: {
+            areas: rules.areas,
+            hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
+          },
+        },
+      };
+    })();
+    const entry = { key, at, built };
+    mapTrees.set(repo.id, entry);
+    built.catch(() => {
+      if (mapTrees.get(repo.id) === entry) mapTrees.delete(repo.id);
+    });
+    return await built;
+  };
+  /** The crew's rows for the map: the summary view, which builds no event timelines. */
+  const mapCrewRows = (repo: (typeof config.repos)[number]) => {
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
+    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
+    const rows = crew(config, store, now(), lock, undefined, true)
+      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
+      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
+    return { rows, lock };
+  };
+  const buildMapLive = async (
     checkout: string,
     crewRows: CrewRow[],
     lock: typeof NO_LOCK,
     prs: PullRequestView[],
-    board: BoardItem[],
     log: FastifyBaseLogger,
-  ): Promise<MapSnapshot> => {
-    const tree = await mapTree(checkout, "origin/HEAD", prs, board, now(), mapStore);
+  ): Promise<MapLive> => {
     const data = mapSeats(
       crewRows,
       store,
@@ -765,24 +828,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seat.context = context ? { total: context.total, window: context.window } : null;
     }
     const conflicts = await mapConflicts.check(checkout, prs);
-    const read = await readRepoRules(repo.github, checkout, repo.rules);
-    // Unreadable repo rules leave the configured ones: the map still draws.
-    const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
     for (const failure of conflicts.failures)
       log.warn(failure, "map conflict check failed for a pair; reported unchecked");
     return {
-      repoId: repo.id,
-      ...tree,
       ...data,
       conflicts: conflicts.conflicts,
       conflictsUnchecked: conflicts.unchecked,
-      rules: {
-        areas: rules.areas,
-        hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
-      },
       // Slice 1b will publish sequenced deltas; none have been emitted yet.
       seq: 0,
     };
+  };
+  /** Starts the ring on first use and brings it up to date: the live part reads from it. */
+  const mapRingReady = () => {
+    if (!stopMapRing) stopMapRing = mapRing.start();
+    mapRing.poll();
+  };
+  /** The tree part and its ETag: built once per default-branch head, however many ask. */
+  const mapTreePayload = async (
+    repo: (typeof config.repos)[number],
+    checkout: string,
+  ): Promise<MapTreeBuilt> =>
+    await mapTreeFor(
+      repo,
+      checkout,
+      await mapHead(checkout),
+      store.pullRequests(repo.id),
+      store.board(repo.id),
+    );
+  /** The live part, built per request from the map ring: seats, findings and conflicts. */
+  const mapLivePayload = async (
+    repo: (typeof config.repos)[number],
+    checkout: string,
+    log: FastifyBaseLogger,
+  ): Promise<MapLive> => {
+    mapRingReady();
+    const { rows, lock } = mapCrewRows(repo);
+    return await buildMapLive(checkout, rows, lock, store.pullRequests(repo.id), log);
   };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
@@ -791,14 +872,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     log: FastifyBaseLogger,
   ): Promise<MapSnapshot> => {
     const head = await mapHead(checkout);
-    if (!stopMapRing) stopMapRing = mapRing.start();
-    mapRing.poll();
-    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
-    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
-    const crewRows = crew(config, store, now(), deps.lock?.state() ?? NO_LOCK)
-      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
-      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
-    const lock = deps.lock?.state() ?? NO_LOCK;
+    mapRingReady();
+    const { rows: crewRows, lock } = mapCrewRows(repo);
     const prs = store.pullRequests(repo.id);
     const board = store.board(repo.id);
     // reused until the default branch, the ring, the seats (rows and lock), the PRs, the
@@ -816,7 +891,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const at = now();
     const cached = mapPayloads.get(repo.id);
     if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
-    const payload = buildMapPayload(repo, checkout, crewRows, lock, prs, board, log);
+    // the tree part is its own cache: a changed seat or ring rebuilds only the live part
+    const payload = (async (): Promise<MapSnapshot> => {
+      const [{ tree }, live] = await Promise.all([
+        mapTreeFor(repo, checkout, head, prs, board),
+        buildMapLive(checkout, crewRows, lock, prs, log),
+      ]);
+      return { ...tree, ...live };
+    })();
     const entry = { key, at, payload };
     mapPayloads.set(repo.id, entry);
     payload.catch(() => {
@@ -2506,10 +2588,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map",
-        async (req, reply): Promise<MapSnapshot | FastifyReply> => {
+      /** Answers a map route for a known repo with a readable checkout; 404 / 503 otherwise. */
+      const mapRoute =
+        <T>(
+          read: (
+            repo: (typeof config.repos)[number],
+            checkout: string,
+            req: FastifyRequest<{ Params: { repoId: string } }>,
+            reply: FastifyReply,
+          ) => Promise<T>,
+        ) =>
+        async (
+          req: FastifyRequest<{ Params: { repoId: string } }>,
+          reply: FastifyReply,
+        ): Promise<T | FastifyReply> => {
           const repo = config.repos.find((r) => r.id === req.params.repoId);
           if (!repo) return reply.code(404).send({ error: "unknown repo" });
           const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
@@ -2518,7 +2610,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            return await mapPayloadFor(repo, checkout, reply.log);
+            return await read(repo, checkout, req, reply);
           } catch (e) {
             reply.log.warn(
               { reason: e instanceof Error ? e.message : String(e) },
@@ -2526,7 +2618,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             return reply.code(503).send({ error: "map snapshot unavailable" });
           }
-        },
+        };
+
+      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map",
+        mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
+      );
+
+      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/tree",
+        mapRoute(async (repo, checkout, req, reply): Promise<MapTree | FastifyReply> => {
+          const { etag, tree } = await mapTreePayload(repo, checkout);
+          reply.header("etag", etag).header("cache-control", "no-cache");
+          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+          return tree;
+        }),
+      );
+
+      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/live",
+        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
       );
 
       // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)

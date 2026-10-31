@@ -33,7 +33,7 @@ Write so the message makes sense by itself.
   Two to four sentences. Put long content (findings, a plan, evidence) in its structured tool and
   point at it. The hub allows 1,200 characters (#995); aim for 600.
 - **Question to the operator.** Only FLIGHT writes these, as a brief (`brief_item`). The fields
-  come from `roles/FLIGHT.md`:
+  come from the `mc brief_item` tool description:
   - the question, in one sentence;
   - why it is the operator's: money, direction, security, irreversible, or a floor approval;
   - an assessment in two or three sentences, and what FLIGHT did;

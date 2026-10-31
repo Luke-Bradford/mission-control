@@ -10,8 +10,8 @@ Renamed from Control Centre on 2026-10-18.
 - Build loop and FLIGHT: `docs/superpowers/specs/2026-10-20-build-loop-flight-design.md` (the target). Built:
   Plan 7a (`docs/superpowers/plans/2026-10-21-plan-7a-engine-board.md`), RETRO reviews with rework rounds (7b-1),
   FLIGHT 2 (answers seats' questions, starts tickets in `draft` repos), FLIGHT 3 (the hub keeps FLIGHT running and
-  wakes it) and a dev's seat freed at review. Not built yet, among others: the merge step (#66, #68, #69), the Done
-  move (#50), promotion and planner starts (#70, #71), 7a+'s templates, checks and escalation, and 7d.
+  wakes it), a dev's seat freed at review, the merge step, the Done move, promotion and planner starts. Not built
+  yet: 7a+'s templates, checks and escalation, and 7d.
 - The MVP is the HUD mockup: `docs/prototype/mission-control-hud.html`, catalogued verbatim in
   `docs/prototype/mission-control-hud-catalogue.md`. Build what they show; sample work data in them
   (repos, people, Windows paths) is illustration only.
@@ -49,11 +49,12 @@ The repo's skills are in `.claude/skills/`. Load the one that fits the work; the
 
 - `hud-design`: any plan, build or review that touches `apps/web`.
 - `plain-talk`: any text a person reads (a Comms message, a ticket, PR text, a review finding, a run report, a Needs-you brief).
-- `flight-ops`: FLIGHT loads it once per run, after a context reset, and when a seat, PR, ticket or the hub is stuck.
+- `flight-ops`: FLIGHT loads it when a seat, PR, ticket or the hub is stuck or unclear, and after a context reset; its reference files cover each situation.
 
 ## Checks
 
-`pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build` before any PR.
+Seats run the `checks` in the Mission Control block below; the push gate requires them, and CI runs the full suite.
+A PR made outside the crew also runs `pnpm -s test && pnpm -s build` first.
 
 ## Mission Control
 
