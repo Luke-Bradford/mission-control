@@ -24,13 +24,14 @@ import {
   type RunPr,
   type RunStatus,
   type RunView,
+  reviewCheckPill,
   STALL_MS,
   seatCallSign,
   type TestLockState,
 } from "@mc/core";
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
-import { cutText, hhmm, mss, percent, prLabel, shortSha, wkdTime } from "./fmt.ts";
+import { cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -137,9 +138,20 @@ export type ReviewingRow = CrewRow & { reviewing?: ReviewingPr | null };
 export const READY_KIND = "ready";
 export const READY_TO_MERGE = "Ready to merge";
 
-/** An idle reviewing seat's doing line: the PR, its short sha and the ticket ref when there is one. */
-export const reviewingLine = (r: ReviewingPr): string =>
-  `Reviewing PR #${r.prNumber} (${shortSha(r.sha)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+/**
+ * A review seat's doing line while it checks a PR: the Board pill's words (seat, minutes since the
+ * run started) then the PR and the ticket ref when there is one.
+ */
+export const reviewingLine = (
+  row: Pick<CrewRow, "id" | "kind" | "displayCallSign" | "run" | "stateSince">,
+  r: ReviewingPr,
+  now: number,
+): string => {
+  const seat = callSign(row);
+  const since = row.run?.startedAt ?? row.stateSince;
+  const checking = reviewCheckPill({ kind: "checking", seat, since }, now).label;
+  return `${checking}${DOING_SEP}${prLabel(r.prNumber)}${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+};
 
 /** Whether the seat has a session open: running, or idle at the end of a turn of an open run. */
 const sessionOpen = (row: CrewRow): boolean =>
@@ -220,7 +232,7 @@ export function doingLine(
       return "Waiting";
     case "idle": {
       const reviewing = row.reviewing;
-      if (reviewing) return reviewingLine(reviewing);
+      if (reviewing) return reviewingLine(row, reviewing, now);
       const review = seatReview(row, now, repoPrs);
       if (review) return reviewText(review);
       return (
@@ -281,8 +293,8 @@ export function seatReview(
   if (row.kind !== "crew" || row.hudState !== "idle" || row.note || !row.review) return null;
   // A loop step other than review is the better line; in review the PR line carries the title.
   if (loopLine(row) !== null && row.loop?.phase !== "review") return null;
-  const { prNumber, state } = row.review;
-  const lead = REVIEW_LEAD[state];
+  const { prNumber, state, check } = row.review;
+  const lead = check ? `${reviewCheckPill(check, now).label}${DOING_SEP}` : REVIEW_LEAD[state];
   if (!repoPrs) return { lead, prNumber, tail: null };
   const title = repoPrs.find((p) => p.number === prNumber)?.title;
   return { lead, prNumber, tail: title || seatActivity(row, now) };

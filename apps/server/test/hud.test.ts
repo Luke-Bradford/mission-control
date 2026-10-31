@@ -1453,6 +1453,30 @@ describe("crew seats in the rows", () => {
       expect(reviewing()).toBeNull();
     });
 
+    it("carries the PR's review state in check", () => {
+      const ask = (attempt: number) =>
+        store.requestReview({
+          authorRunId: "c1",
+          repoId: "shop-app",
+          seatId: "RETRO-1",
+          prNumber: 7,
+          sha: "c".repeat(40),
+          epoch: 0,
+          attempt,
+          round: 1,
+          at: NOW - MIN,
+        });
+      expect(reviewOf([pr({ number: 7 })])).not.toHaveProperty("check");
+      const id = ask(1) as number;
+      expect(reviewOf([pr({ number: 7 })])?.check).toEqual({ kind: "queued", position: 1 });
+      store.setReviewState(id, ["queued"], "running", { at: NOW - 12 * MIN, runId: "rr" });
+      expect(reviewOf([pr({ number: 7 })])?.check).toEqual({
+        kind: "checking",
+        seat: "RETRO-1",
+        since: NOW - 12 * MIN,
+      });
+    });
+
     it("is null for a loop row", () => {
       expect(rowOf(withCrew(), "shop-app-ta")?.review).toBeNull();
     });

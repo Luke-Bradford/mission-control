@@ -106,6 +106,7 @@ import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-d
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
+import { reviewCheckFor } from "./review-check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -309,6 +310,7 @@ function reviewOf(
   repoId: string,
   branch: string | null,
   inFlight: ReviewRow[],
+  now: number,
   prs?: readonly PullRequestView[],
 ): CrewRow["review"] {
   if (branch === null) return null;
@@ -322,7 +324,13 @@ function reviewOf(
       ? open.review
       : "open";
   const reviewing = inFlight.findLast((r) => r.repoId === repoId && r.prNumber === open.number);
-  return { prNumber: open.number, state, reviewing: reviewing?.seatId ?? null };
+  const check = reviewCheckFor(store, repoId, now, inFlight)(open);
+  return {
+    prNumber: open.number,
+    state,
+    reviewing: reviewing?.seatId ?? null,
+    ...(check === null ? {} : { check }),
+  };
 }
 
 /** A writer seat's queued tickets in order, without the one it holds; [] for any other row. */
@@ -684,6 +692,7 @@ function buildCrew(
                 agent.repoId,
                 latest?.branch ?? null,
                 reviewsInFlight,
+                now,
                 pullRequests.get(agent.repoId),
               )
             : null,

@@ -20,6 +20,15 @@ export const QA_FLOW_METRICS = {
     source: "GET /api/qa/flow (escapedDefects)",
     from: "server",
   },
+  reviewCheck: {
+    label: "Review state",
+    window: "now",
+    unit: "state",
+    definition:
+      "One state per open pull request, from its newest review that is not superseded. Waiting for review: the review is queued or starting, shown with its place in the repo's queue. Checking: a reviewer is running it, shown with the seat and the minutes since it started. Findings sent: the review reported blocking findings and the developer is fixing. Ready to merge: it reported none, with no hold. Held: it reported none but FLIGHT or CAPCOM holds the merge, or the operator has not accepted it. A failed review or none shows no state.",
+    source: "GET /api/repos/:repoId/prs (check) and GET /api/crew (review.check)",
+    from: "server",
+  },
   reviewWait: {
     label: "Review wait",
     window: "selected range",

@@ -106,6 +106,7 @@ import {
   type RepoId,
   type RepoProfile,
   type RepoView,
+  type ReviewCheckState,
   RUNAWAY_NOT_TRIPPED,
   type RunLoopView,
   type RunView,
@@ -288,6 +289,7 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
+import { reviewCheckFor } from "./review-check.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -671,7 +673,7 @@ const isLocalOrigin = (origin: string): boolean => {
 const errCode = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code;
 
 /** A PR as `?shape=summary` sends it: the fields a list shows, the checks as the `ci` rollup. */
-function prSummaryRow(pr: PullRequestView): PullRequestSummary {
+function prSummaryRow(pr: PullRequestView, check: ReviewCheckState | null): PullRequestSummary {
   return {
     repoId: pr.repoId,
     number: pr.number,
@@ -687,16 +689,18 @@ function prSummaryRow(pr: PullRequestView): PullRequestSummary {
     createdAt: pr.createdAt,
     updatedAt: pr.updatedAt,
     mergedAt: pr.mergedAt,
+    check,
   };
 }
 
 /** A PR as a list sends it by default: its checks by name and state only. */
-function prSummary(pr: PullRequestView): PullRequestListRow {
+function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullRequestListRow {
   const { checks, ...rest } = pr;
   return checks === undefined
-    ? rest
+    ? { ...rest, check }
     : {
         ...rest,
+        check,
         checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
       };
 }
@@ -2847,11 +2851,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
         const previewFor = (number: number) =>
           repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
+        const checkOf = reviewCheckFor(store, repo.id, now());
         if (shape === "summary")
-          return prs.map((pr) => ({ ...prSummaryRow(pr), preview: previewFor(pr.number) }));
+          return prs.map((pr) => ({
+            ...prSummaryRow(pr, checkOf(pr)),
+            preview: previewFor(pr.number),
+          }));
         return detail === "1"
-          ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
-          : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
+          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), preview: previewFor(pr.number) }))
+          : prs.map((pr) => ({ ...prSummary(pr, checkOf(pr)), preview: previewFor(pr.number) }));
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
       api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(

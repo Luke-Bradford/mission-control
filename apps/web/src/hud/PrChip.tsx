@@ -1,4 +1,5 @@
-import { type PullRequestView, prPill, type RunPr } from "@mc/core";
+import { type PullRequestView, prPill, type RunPr, reviewCheckPill } from "@mc/core";
+import { useNow } from "../clock.ts";
 import { Pill } from "./Pill.tsx";
 import { RepoRef } from "./RepoRef.tsx";
 import "./PrChip.css";
@@ -43,7 +44,14 @@ export function PrChip({
   /** The Board owns its full PR status line, so it supplies this as false. */
   showState?: boolean;
 }) {
-  const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
+  const now = useNow();
+  const check = "check" in pr && pr.state === "open" && !pr.isDraft ? pr.check : null;
+  const pill =
+    pr.state === "merged" || pr.state === "closed"
+      ? prPill({ state: pr.state })
+      : check
+        ? reviewCheckPill(check, now)
+        : null;
   const hold = "hold" in pr ? pr.hold : undefined;
   const url = previewUrl(initialPreview);
   return (
