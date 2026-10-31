@@ -9,3 +9,6 @@ dist-prev/
 .pnpm-store/
 CLAUDE.local.md
 apps/web/.vite-guard-test-*/
+
+# Playwright MCP server output (snapshots, console logs) from the browser tools
+.playwright-mcp/
