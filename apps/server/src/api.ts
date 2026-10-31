@@ -591,6 +591,9 @@ const FlightApprovalBody = z.strictObject({
   until: z.iso.datetime({ offset: true }),
   reason: z.string().trim().min(1).max(500),
 });
+/** The answer to a seat that calls a route only the operator may. */
+const SEAT_REFUSED = "a seat cannot use the operator's routes";
+
 const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
 
 const GuardCheckBody = z.strictObject({
@@ -1115,6 +1118,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
   // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
   // check keeps its own run token; /mcp is outside /api.
+  // A seat's run token marks a request as a seat's: it never reaches the routes that hand out or use
+  // the operator's authority (the token's bootstrap, FLIGHT's approvals, lifting the breaker, and the
+  // attention items whose dismissal lifts it). The operator token is a second, separate key.
+  app.addHook("onRequest", async (req, reply) => {
+    if (!deps.tokens || deps.tokens.resolve(bearer(req)) === null) return;
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path === OPERATOR_BOOTSTRAP_PATH ||
+      path === "/api/flight/approvals" ||
+      path === "/api/flight/runaway/lift" ||
+      path.startsWith("/api/attention/")
+    )
+      return reply.code(403).send({ error: SEAT_REFUSED });
+  });
+
   const operatorToken = deps.operatorToken;
   if (operatorToken !== undefined) {
     app.addHook("onRequest", async (req, reply) => {

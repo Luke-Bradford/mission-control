@@ -1173,9 +1173,17 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 ### FLIGHT's full access
 
 FLIGHT's watch run starts with the `flight-full` profile (`crewProfileOf` in `packages/core/src/runtime.ts`):
-no Bash sandbox, every built-in tool allowed unscoped (shell, `git`, `gh` as the operator, `curl`, the web,
-subagents) and no denied-tool list. Every other seat keeps its sandbox and denies unchanged. The guard hook
-still runs before each of FLIGHT's calls and holds it to the repo's rules only, naming the rule it refused:
+every built-in tool allowed unscoped (shell, `git`, `gh` as the operator, `curl`, the web, subagents) and no
+denied-tool list. Every other seat keeps its sandbox and denies unchanged. Its shell is sandboxed around one
+thing only, and that is the barrier that keeps the operator token out of FLIGHT's hands: the hub's data folder
+(the token file, the DB, every transcript) and `~/.config/mission-control` are denied to read, the data folder is
+denied to write, home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
+loopback address, and with it the HUD's token route, is out of reach from its shell. `mc operator` is its way to the
+hub. The hub also refuses any request that carries a seat's run token on the token's bootstrap route, `flight/approvals`,
+`flight/runaway/lift` and the attention routes (the operator token is a second, separate key). The guard hook still
+runs before each of FLIGHT's calls and holds it to the repo's rules only, naming the rule it refused. Its text checks
+on the token, approvals and breaker names (below) are a backstop for the sandbox, not the barrier; the controller
+checks the sandbox live after an Update (`git push`, `gh` and the keychain must still work from inside it).
 
 - `git push` to `main`, with `--force`, `-f`, `--mirror`, `--all` or a `+refspec`, or without an explicit branch (`git push`, `git push origin` and `git push origin HEAD` are refused, since FLIGHT's checkout may be on `main`; `git push origin <branch>` is allowed; a branch built by `$(...)`, backticks or `@{...}` is refused too); `git commit` (FLIGHT's checkouts are not for commits);
 - `gh pr merge` and `PUT .../merge` (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);

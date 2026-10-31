@@ -2571,9 +2571,11 @@ describe("repo guidance at launch", () => {
     expect(argv).not.toContain("--tools");
     expect(argv).not.toContain("--disallowedTools");
     expect(argv).toContain("--allowedTools");
-    expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox).toEqual({
-      enabled: false,
-    });
+    // sandboxed, with the hub's data folder (the operator token) denied to read and write
+    const sandbox = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox;
+    expect(sandbox.enabled).toBe(true);
+    expect(sandbox.filesystem.denyRead).toContain(realpathSync(dirname(dbPath)));
+    expect(sandbox.filesystem.denyWrite).toContain(realpathSync(dirname(dbPath)));
   });
 
   it("lets FLIGHT's git use the operator's config and credentials, with hooks and fsmonitor still off", async () => {

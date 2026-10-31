@@ -26,7 +26,7 @@ export type CrewEffort = string;
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
 export type CrewMode = (typeof CREW_MODES)[number];
-/** The controller-equivalent execution profile reserved for FLIGHT's watch run. */
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
 export const CREW_PROFILES = ["standard", "flight-full"] as const;
 export type CrewProfile = (typeof CREW_PROFILES)[number];
 /** The built-in tools FLIGHT's full profile allows, unscoped: shell, files, the web and subagents. */
@@ -43,6 +43,16 @@ export const FLIGHT_FULL_BUILTINS = [
   "WebFetch",
   "WebSearch",
   "Task",
+] as const;
+/**
+ * The hosts FLIGHT's sandboxed shell reaches (`git` and `gh` against GitHub). The hub's loopback
+ * address is not here, so FLIGHT's shell cannot call the HUD's token route; `mc operator` is its way in.
+ */
+export const FLIGHT_FULL_DOMAINS = [
+  "github.com",
+  "api.github.com",
+  "*.github.com",
+  "*.githubusercontent.com",
 ] as const;
 /** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
 export const crewProfileOf = (role: string, loop: string): CrewProfile =>
@@ -1115,7 +1125,33 @@ export function crewSandboxSettings(
   profile: CrewProfile = "standard",
 ): string {
   if (profile === "flight-full") {
-    return JSON.stringify({ hooks: guardHooks(hook), sandbox: { enabled: false } });
+    // The one structural barrier of FLIGHT's full access: its shell cannot read or write the hub's
+    // data folder (the operator token, the DB, every transcript) and reaches no host but GitHub.
+    // Everything else is open: home and temp are writable, and nothing else is denied by name.
+    if (!i.dataDir.startsWith("/") || !i.home.startsWith("/"))
+      throw new Error("crew sandbox: dataDir and home must be absolute");
+    return JSON.stringify({
+      hooks: guardHooks(hook),
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        autoAllowBashIfSandboxed: false,
+        network: { allowedDomains: [...FLIGHT_FULL_DOMAINS] },
+        filesystem: {
+          allowWrite: [
+            i.home,
+            "/tmp",
+            "/private/tmp",
+            ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
+          ],
+          // its own temp folder sits inside the denied data folder, as a seat's does
+          allowRead: i.tempRoot === undefined ? [] : [i.tempRoot],
+          denyWrite: [i.dataDir],
+          denyRead: [...new Set([i.dataDir, `${i.home}/.config/mission-control`])],
+        },
+      },
+    });
   }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);

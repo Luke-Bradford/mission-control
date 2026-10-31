@@ -10,6 +10,7 @@ import {
   mergeFloorScope,
   useApproval,
 } from "../src/flight-approvals.ts";
+import { RunTokens } from "../src/mcp/tokens.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.now();
@@ -81,6 +82,76 @@ describe("POST /api/flight/approvals", () => {
 
   it("lists every rule the guard or the merge gate can be approved past", () => {
     expect(FLIGHT_APPROVAL_RULES).toEqual(["merge-floor", "repo-rules", "merge-push"]);
+  });
+});
+
+describe("a seat's run token on the operator's routes (#1214)", () => {
+  const SEAT = "flight-1";
+  const setup = () => {
+    const tokens = new RunTokens();
+    const seatToken = tokens.issue(SEAT, "run-f");
+    const app = buildApp({ config, store, bus: new ChangeBus(), operatorToken: TOKEN, tokens });
+    return { app, seatToken };
+  };
+  const bootstrap = { "sec-fetch-site": "same-origin" };
+  const opHeader = { [OPERATOR_HEADER]: TOKEN };
+
+  it("refuses the token's bootstrap route to a request carrying a seat's token, and serves it without", async () => {
+    const { app, seatToken } = setup();
+    const refused = await app.inject({
+      url: "/api/operator/bootstrap",
+      headers: { ...bootstrap, authorization: `Bearer ${seatToken}` },
+    });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.body).not.toContain(TOKEN);
+    const page = await app.inject({ url: "/api/operator/bootstrap", headers: bootstrap });
+    expect(page.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("refuses approvals and the breaker's lift to a seat even with the operator token, and allows the operator", async () => {
+    const { app, seatToken } = setup();
+    const body = {
+      rule: "repo-rules",
+      scope: "x",
+      until: new Date(Date.now() + 3_600_000).toISOString(),
+      reason: "r",
+    };
+    const seatCall = (url: string, payload: object) =>
+      app.inject({
+        method: "POST",
+        url,
+        headers: {
+          ...opHeader,
+          authorization: `Bearer ${seatToken}`,
+          "content-type": "application/json",
+        },
+        payload,
+      });
+    expect((await seatCall("/api/flight/approvals", body)).statusCode).toBe(403);
+    expect((await seatCall("/api/flight/runaway/lift", {})).statusCode).toBe(403);
+    expect((await seatCall("/api/attention/note:flight-runaway/dismiss", {})).statusCode).toBe(403);
+    expect(store.getSetting("flight.approvals")).toBeNull();
+    const operator = await app.inject({
+      method: "POST",
+      url: "/api/flight/approvals",
+      headers: { ...opHeader, "content-type": "application/json" },
+      payload: body,
+    });
+    expect(operator.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("still needs the operator token on those routes for a request with no seat token", async () => {
+    const { app } = setup();
+    const noToken = await app.inject({
+      method: "POST",
+      url: "/api/flight/runaway/lift",
+      headers: { "content-type": "application/json" },
+      payload: {},
+    });
+    expect(noToken.statusCode).toBe(401);
+    await app.close();
   });
 });
 

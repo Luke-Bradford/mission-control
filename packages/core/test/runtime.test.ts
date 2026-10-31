@@ -31,6 +31,7 @@ import {
   crewSandboxTmp,
   DEFAULT_SEAT_COMMANDS,
   DENIED_TOOLS,
+  FLIGHT_FULL_DOMAINS,
   FLIGHT_TOOLS,
   foldForMatch,
   globMatches,
@@ -106,7 +107,55 @@ describe("crewCliArgs", () => {
       crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"),
     );
     expect(settings.hooks.PreToolUse).toHaveLength(1);
-    expect(settings.sandbox).toEqual({ enabled: false });
+    // sandboxed around the data folder, not unsandboxed: the one structural barrier
+    expect(settings.sandbox.enabled).toBe(true);
+    expect(settings.sandbox.failIfUnavailable).toBe(true);
+  });
+
+  describe("FLIGHT's full profile keeps the data folder out of reach (#1214)", () => {
+    const profile = (mode: "read-only" | "writer" = "read-only") =>
+      JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook, "flight-full")).sandbox;
+
+    it("denies reading and writing the hub's data folder, where the operator token lives", () => {
+      for (const mode of ["read-only", "writer"] as const) {
+        const fs = profile(mode).filesystem;
+        expect(fs.denyRead).toContain(base.sandbox.dataDir);
+        expect(fs.denyWrite).toContain(base.sandbox.dataDir);
+        // and the hub's config folder
+        expect(fs.denyRead).toContain(`${base.sandbox.home}/.config/mission-control`);
+        // no allow beats the deny except its own temp folder
+        expect(fs.allowRead).toEqual(
+          base.sandbox.tempRoot === undefined ? [] : [base.sandbox.tempRoot],
+        );
+        expect(fs.allowWrite).not.toContain(base.sandbox.dataDir);
+      }
+    });
+
+    it("reaches GitHub and not the hub's loopback address, and has no unsandboxed escape", () => {
+      const s = profile();
+      expect(s.network.allowedDomains).toEqual([...FLIGHT_FULL_DOMAINS]);
+      expect(JSON.stringify(s.network)).not.toMatch(/127\.0\.0\.1|localhost|\*"/);
+      expect(s.allowUnsandboxedCommands).toBe(false);
+      expect(s.network.allowLocalBinding).toBeUndefined();
+      expect(s.excludedCommands).toBeUndefined();
+    });
+
+    it("leaves a standard seat's sandbox as it was", () => {
+      const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
+      expect(seat.network).toEqual({ allowedDomains: [] });
+      expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
+    });
+
+    it("refuses a relative data folder", () => {
+      expect(() =>
+        crewSandboxSettings(
+          { ...base.sandbox, dataDir: "data" },
+          "read-only",
+          base.hook,
+          "flight-full",
+        ),
+      ).toThrow();
+    });
   });
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {

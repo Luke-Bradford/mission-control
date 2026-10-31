@@ -2185,7 +2185,11 @@ const namesControllerAct = (s: string): boolean =>
   APPROVAL_PATHS.test(normPath(s));
 /** A glob that could expand to the operator token file: `operator-t*`, `operator?token`, or any glob in the hub's data dir. */
 const globsToken = (w: string): boolean =>
-  /operator[^\s/]*[*?[]/i.test(w) || /mission-control\/[^\s]*[*?[]/i.test(w);
+  /operator[^\s/]*[*?[]/i.test(w) ||
+  /mission-c[^\s]*[*?[]/i.test(w) ||
+  /[*?[].*tok|tok.*[*?[]/i.test(w);
+/** Programs that read whole folders: pointed at the hub's data folder they would read the token file. */
+const FOLDER_READERS = new Set(["grep", "rg", "find", "tar", "cp", "rsync", "zip", "ag", "ack"]);
 
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
@@ -2372,6 +2376,21 @@ export function guardDecision(
           "repo-rules",
           "sqlite3 on the hub's database runs with -readonly and no dot-command that writes",
         );
+      // backstop only (the sandbox denies the data folder; the hub refuses a seat on the token routes):
+      // a $'...' word is decoded by bash but not by the parser, and curl expands [..] and {..} in a URL
+      if (/\$'[^']*\\/.test(command))
+        return deny("repo-rules", "a $'...' word with an escape: the guard does not decode it");
+      if (
+        program === "curl" &&
+        !args.some((a) => /^-[a-zA-Z]*g|^--globoff$/.test(a)) &&
+        args.some((a) => /^https?:\/\/.*[[{]/.test(a))
+      )
+        return deny("repo-rules", "a curl URL glob that could name a controller's act");
+      if (
+        FOLDER_READERS.has(program) &&
+        args.some((a) => /\/mission-control\/?$/.test(normPath(a)))
+      )
+        return deny("repo-rules", "a folder read of the hub's data folder");
       // each parsed word too: the parser has already taken out quotes and backslashes (`operator-to''ken`)
       if (namesControllerAct(command) || argv.some((w) => namesControllerAct(w) || globsToken(w)))
         return deny(
