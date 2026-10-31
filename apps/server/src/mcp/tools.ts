@@ -1682,7 +1682,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         section = null;
       }
     }
-    const body = section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
+    const body =
+      section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
     return editRunPrBody(deps, ctx.runId, prNumber, body);
   }
 
