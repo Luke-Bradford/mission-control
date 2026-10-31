@@ -292,6 +292,7 @@ interface Harness {
   excerpts: string[];
   moves: Move[];
   ended: string[];
+  endedReasons: Record<string, string | undefined>;
   taken: string[];
   /** Calls to the queue refill, and what it saw of `taken` each time (order checks). */
   refills: number[];
@@ -393,6 +394,7 @@ function harness(): Harness {
     excerpts: [],
     moves: [],
     ended: [],
+    endedReasons: {},
     taken: [],
     refills: [],
     listeners: new Set(),
@@ -624,11 +626,12 @@ function harness(): Harness {
             return store.seatSession(id);
           },
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
-          async endRunByEngine(runId) {
+          async endRunByEngine(runId, reason) {
             const r = store.run(runId);
             if (r === null || r.endedAt !== null || x.endBlocked) return;
             x.ended.push(runId);
-            store.setRunEnded(runId, clock, "ok", "engine");
+            x.endedReasons[runId] = reason;
+            store.setRunEnded(runId, clock, "ok", reason ?? "engine");
             if (store.seatSession(r.agentId)?.runId === runId) seatIdle(null, r.agentId);
           },
           async setAside(runId) {
@@ -5918,8 +5921,21 @@ describe("the engine runs reviews", () => {
     await h.engine.reconcileRun(RUN);
     expect(first().state).toBe("superseded");
     expect(h.ended).toContain(need(rv.runId));
+    expect(h.endedReasons[need(rv.runId)]).toBe("superseded");
     expect(loopTexts()).toContain(reviewDroppedText(SHA));
     expect(noteKeys()).toContain(`headmoved:${RUN}:${SHA_B}`);
+  });
+
+  it("a review run that ends after the PR head moved is superseded, not failed", async () => {
+    await toReview();
+    const one = first();
+    setPr({ ci: "passing", headSha: SHA_B });
+    crash(need(one.runId));
+    await vi.waitFor(() => expect(first().state).toBe("superseded"));
+    expect(loopTexts()).not.toContain(
+      reviewFailedText(CALL, SHA, "the review run ended (the process crashed)"),
+    );
+    expect(loopTexts()).toContain(reviewDroppedText(SHA));
   });
 
   it("the author's run ending supersedes the review and ends its run", async () => {

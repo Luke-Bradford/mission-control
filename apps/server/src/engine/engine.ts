@@ -1357,7 +1357,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const row = store.review(a.reviewId);
         if (row === null) return;
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
         await kickReviews();
         return;
       }
@@ -2028,9 +2028,9 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Ends the review's run when it has one that has not ended. */
-  async function endReviewRun(row: ReviewRow): Promise<void> {
+  async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
-    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId);
+    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId, reason);
   }
 
   /** Whether the review's author run is in review on the sha the hub pushed, its PR open at that head. */
@@ -2221,7 +2221,13 @@ export function createEngine(deps: EngineDeps): Engine {
       const phase = author?.loop?.phase;
       if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
+        continue;
+      }
+      // a run that ended while its review is no longer wanted (the head moved) was cut short by
+      // that, not a failure of its own
+      if (rrun.endedAt !== null && !reviewWanted(row)) {
+        dropReview(row);
         continue;
       }
       let seatRow: ReturnType<Supervisor["seat"]>;
