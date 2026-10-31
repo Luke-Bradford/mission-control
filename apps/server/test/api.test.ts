@@ -100,6 +100,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
+import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -109,7 +110,6 @@ import { type NotificationRead, Store } from "../src/store.ts";
 import { readStreamPage } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
-import { mapTree } from "../src/map/snapshot.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");

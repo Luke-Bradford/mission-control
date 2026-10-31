@@ -798,7 +798,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { rows, lock };
   };
   const buildMapLive = async (
-    repo: (typeof config.repos)[number],
     checkout: string,
     crewRows: CrewRow[],
     lock: typeof NO_LOCK,
@@ -861,7 +860,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   ): Promise<MapLive> => {
     mapRingReady();
     const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(repo, checkout, rows, lock, store.pullRequests(repo.id), log);
+    return await buildMapLive(checkout, rows, lock, store.pullRequests(repo.id), log);
   };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
@@ -893,7 +892,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const payload = (async (): Promise<MapSnapshot> => {
       const [{ tree }, live] = await Promise.all([
         mapTreeFor(repo, checkout, head, prs, board),
-        buildMapLive(repo, checkout, crewRows, lock, prs, log),
+        buildMapLive(checkout, crewRows, lock, prs, log),
       ]);
       return { ...tree, ...live };
     })();
