@@ -3280,8 +3280,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           // The supervisor records the failure and ends the run when recovery cannot start it.
         }
         const after = store.seatSession(a.seat);
+        // A row that said running before the call proves nothing; only a session does.
         const isLive =
-          after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
+          (after?.state === "running" && row.state !== "running") ||
+          deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
+          deps.supervisor.sessionAlive?.(a.seat) === true;
         if (!isLive) {
           const pauseBack = pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter;
           if (pauseBack) {
@@ -3311,7 +3314,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             store.run(run.id)?.endedAt !== null
               ? "ended after the failed resume"
               : "is not running";
-          const text = `${call}'s run ${outcome}${back.length > 0 ? `; put back: ${back.join(", ")}` : ""}${kept === "" ? "" : `. Lifted and kept lifted: ${kept}`}.`;
+          const text = `${call}'s run ${outcome}${back.length > 0 ? `; put back: ${back.join(", ")}` : ""}${kept === "" ? "" : `. Not put back, as the operator changed it since: ${kept}`}.`;
           filed(text);
           return fail(text);
         }

@@ -896,6 +896,8 @@ describe("resume_seat", () => {
     store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
     writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
     resumeImpl = async () => {
+      // unpauseSeat has already emitted; only the rollback can emit from here
+      seen.length = 0;
       const run = store.run("r-guido");
       if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
       store.setSeatSession({
@@ -904,7 +906,6 @@ describe("resume_seat", () => {
         reason: "resume failed",
       });
     };
-    seen.length = 0;
 
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
@@ -935,7 +936,7 @@ describe("resume_seat", () => {
     expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
   });
 
-  it("still calls what a newer operator change kept lifted, not put back", async () => {
+  it("does not claim the current state of what a newer operator change left alone", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-guido");
     store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
@@ -947,8 +948,40 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toBe(
-      "GUIDO-1's run is not running; put back: the operator's stop. Lifted and kept lifted: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
     );
+  });
+
+  it("does not report a resume that started nothing on a stale running row, and keeps the pause", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+  });
+
+  it("does not say a stop is lifted when the operator stopped the seat again", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "stopped",
+        reason: "operator again",
+        updatedAt: NOW + 1,
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).not.toContain("kept lifted");
+    expect(result.text).toContain("Not put back, as the operator changed it since");
   });
 
   it("lets a live, paused seat out of its pause without resuming it", async () => {
