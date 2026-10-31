@@ -771,9 +771,17 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     async function donePr(
       run: Run,
     ): Promise<{ number: number; word: "merged" | "closed" } | "unreadable" | null> {
-      const number = run.loop?.prNumber ?? null;
       const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
-      if (number === null || repo === undefined) return null;
+      if (repo === undefined) return null;
+      const number = run.loop?.prNumber ?? null;
+      if (number === null) {
+        // no PR of this run yet: a branch whose last PR merged (a new run reusing it) stays closed
+        const onBranch = deps.store.pullRequests(run.repoId).filter((p) => p.branch === branch);
+        const newest = onBranch.sort((a, b) => b.number - a.number)[0];
+        return newest?.state === "merged" && !onBranch.some((p) => p.state === "open")
+          ? { number: newest.number, word: "merged" }
+          : null;
+      }
       const viewed = await deps.gh(
         ["pr", "view", String(number), `--repo=${repo}`, "--json=state"],
         { cwd: crewDir(deps.dbPath) },

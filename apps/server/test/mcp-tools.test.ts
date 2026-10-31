@@ -2359,6 +2359,36 @@ describe("push and draft_pr", () => {
       }
     });
 
+    it("refuses a push when the run has no PR yet but the branch's last PR merged", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: null });
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 727,
+            headSha: "a",
+            title: "x",
+            url: "https://github.com/o/mc/pull/727",
+            branch: BRANCH,
+            ticket: "mc#42",
+            state: "merged",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - 86_400_000,
+            updatedAt: NOW - 3_600_000,
+            mergedAt: NOW - 3_600_000,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      expect(await push()).toEqual({ text: pushPrDoneText(BRANCH, 727, "merged"), isError: true });
+      expect(remoteTip()).toBeNull();
+    });
+
     it("pushes while the run's PR is open, and refuses when gh cannot say", async () => {
       const sha = await commitOk("apps/a.ts", "a2\n");
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });

@@ -164,10 +164,17 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
     }
   }
 
+  /** Whether the crew has a session in the repo and no observed loop works in it. */
+  const crewWorks = (repoId: string): boolean =>
+    (deps.config.crew?.sessions ?? []).some((x) => x.repoId === repoId) &&
+    !deps.config.loops.some((l) => l.repoId === repoId);
+
   /** The branches of runs that have not ended, per repo. */
   function liveBranches(repoId: string): Set<string> {
     const out = new Set<string>();
     for (const run of deps.store.runsActiveSince(Number.MAX_SAFE_INTEGER)) {
+      // a run parked on a closed PR holds nothing: its PR is gone and nothing lifts that park
+      if (run.loop?.parked?.kind === "pr-closed") continue;
       if (run.repoId === repoId && run.endedAt === null && run.branch !== null) out.add(run.branch);
     }
     return out;
@@ -188,6 +195,8 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
   ): Promise<string[]> {
     const deleted: string[] = [];
     for (const repo of deps.config.repos) {
+      // only a repo the crew works in: an observed loop's branches and the operator's are not ours
+      if (!crewWorks(repo.id)) continue;
       try {
         const listed = await remoteBranches(repo.github);
         const open = listed === null ? null : await openPrBranches(repo.github);

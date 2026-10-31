@@ -24,7 +24,11 @@ afterEach(() => {
 });
 
 const config = (keepBranches: string[] = []) =>
-  ({ repos: [{ id: "mc", github: "o/mc", keepBranches }] }) as unknown as CcConfig;
+  ({
+    repos: [{ id: "mc", github: "o/mc", keepBranches }],
+    loops: [],
+    crew: { sessions: [{ repoId: "mc", checkout: "/x" }] },
+  }) as unknown as CcConfig;
 
 const run = (id: string, branch: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -240,4 +244,55 @@ it("drops a seat clone's merged and remote-gone branches, and keeps a live run's
       .filter(Boolean)
       .sort(),
   ).toEqual(["live", "main", "wt"]);
+});
+
+it("tidies nothing in a repo with an observed loop or no crew session", async () => {
+  const { gh, deleted } = fakeGh({ "feature/9-loop-work": 30, "operator/wip": 72 }, []);
+  store.upsertPullRequests("mc", [pr(1, "feature/1-closed", "closed")], NOW);
+  for (const cfg of [
+    {
+      repos: [{ id: "mc", github: "o/mc" }],
+      loops: [{ id: "ta", repoId: "mc" }],
+      crew: { sessions: [] },
+    },
+    {
+      repos: [{ id: "mc", github: "o/mc" }],
+      loops: [{ id: "ta", repoId: "mc" }],
+      crew: { sessions: [{ repoId: "mc", checkout: "/x" }] },
+    },
+    { repos: [{ id: "mc", github: "o/mc" }], loops: [], crew: { sessions: [] } },
+  ]) {
+    const t = createBranchTidy({
+      config: cfg as unknown as CcConfig,
+      store,
+      gh,
+      dbPath: join(dir, "db.sqlite"),
+      inClone: (_c, fn) => fn(),
+      now: () => NOW,
+    });
+    expect(await t.sweep()).toEqual([]);
+    expect(await t.closedPass()).toEqual([]);
+  }
+  expect(deleted).toEqual([]);
+});
+
+it("a run parked on a closed PR does not hold its branch, a live one does", async () => {
+  store.upsertPullRequests(
+    "mc",
+    [pr(1, "feature/1-a", "closed"), pr(2, "feature/2-b", "closed")],
+    NOW,
+  );
+  store.upsertRun(
+    run("parked", "feature/1-a", {
+      loop: {
+        ...NEW_LOOP,
+        prNumber: 1,
+        parked: { kind: "pr-closed", reason: "closed", ended: false },
+      },
+    }),
+  );
+  store.upsertRun(run("live", "feature/2-b", { loop: { ...NEW_LOOP, prNumber: 2 } }));
+  const { gh, deleted } = fakeGh({ "feature/1-a": 1, "feature/2-b": 1 }, []);
+  expect(await tidyWith(gh).closedPass()).toEqual(["mc:feature/1-a"]);
+  expect(deleted).toEqual([ref("feature/1-a")]);
 });

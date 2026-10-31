@@ -1882,16 +1882,20 @@ Known limits: pipelines such as `a | b` are declined for now. `unified_exec = fa
 ## Branch tidying
 
 GitHub's delete-on-merge removes a branch only when its PR merges, so the hub removes the rest. It
-runs wherever the engine runs (not in a preview, not with `MC_NO_LOOP_WRITES=1`).
+runs wherever the engine runs (not in a preview, not with `MC_NO_LOOP_WRITES=1`). It tidies only a
+repo with a crew session and no observed loop; a repo that only lists an observed loop is never
+touched.
 
 - **No push after a merge.** `mc push` asks GitHub for the state of the PR the run records. A merged
-  or closed PR refuses the push, naming the PR; nothing is sent, so a merged branch is not
+  or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
+  last PR on its branch merged; nothing is sent, so a merged branch is not
   recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
 - **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
   branch) that closed without merging. The PR page keeps its commits.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes every
   remote branch with no open PR, no live run, and no commit for 24 hours. A branch that is the base
-  of an open PR stays. Each deletion is a hub event on the Activity page.
+  of an open PR stays. A run parked on a closed PR does not hold its branch; any other unended run
+  does. Each deletion is a hub event on the Activity page.
 - **Never touched:** the default branch, `archive/*`, and `repos[].keep_branches`. If any read of
   branches or PRs fails, nothing is deleted for that repo.
 - **Local.** Every 10 minutes the hub fetches each seat clone with `--prune` and drops the local
