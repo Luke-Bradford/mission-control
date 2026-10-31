@@ -2285,14 +2285,14 @@ describe("set aside", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
-  it("a park wakes it", () => {
+  it("a park on the seat's own work wakes it", () => {
     const r = reconcile(
       off(
         {},
         {
           ...asideOf(),
           phase: "parked",
-          parked: { kind: "review-failed", reason: "x", ended: false },
+          parked: { kind: "ci", reason: "x", ended: false },
         },
       ),
     );
@@ -2300,14 +2300,37 @@ describe("set aside", () => {
     expect(kindsOf(r.actions)).toContain("wake");
   });
 
-  it("the third blocking review parks and wakes it", () => {
+  it("the third blocking review parks and the run stays aside", () => {
     const rows = facts(
       [fact({ id: 1, blocking: 1 }), fact({ id: 2, blocking: 1 }), fact({ id: 3, blocking: 1 })],
       [finding],
     );
     const r = reconcile(off({ review: rows, claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 } }));
     expect(r.loop.phase).toBe("parked");
+    expect(r.loop.parked?.kind).toBe("review");
+    expect(r.loop.aside?.wake).toBe(false);
+    expect(kindsOf(r.actions)).not.toContain("wake");
+  });
+
+  it.each(["review", "review-ruling", "ruling", "review-failed"])(
+    "a run parked on a %s park waits on someone else: it is set aside, and an aside one is not woken",
+    (kind) => {
+      const parked: Partial<RunLoop> = {
+        phase: "parked",
+        parked: { kind, reason: "x", ended: false },
+      };
+      expect(kindsOf(reconcile(base({}, parked)).actions)).toContain("set-aside");
+      const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
+      expect(r.loop.aside?.wake).toBe(false);
+      expect(kindsOf(r.actions)).not.toContain("wake");
+    },
+  );
+
+  it("settling the wait brings the run back", () => {
+    // the park lifted: the run is working again, and an aside one is woken
+    const r = reconcile(off({}, { phase: "working", parked: null, ...asideOf(false) }));
     expect(r.loop.aside?.wake).toBe(true);
+    expect(kindsOf(r.actions)).toContain("wake");
   });
 
   it("clean review stays aside", () => {

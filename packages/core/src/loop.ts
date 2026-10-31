@@ -1289,9 +1289,17 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
-/** A park that waits on someone's call, not on the seat: the seat may be free while it stands. */
+/**
+ * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
+ * free while it stands. The run rejoins its seat's queue when the park is lifted.
+ */
 const isDecisionPark = (kind: string | undefined): boolean =>
-  kind === CONTROLLER_CHECK_PARK || kind === MERGE_HOLD_PARK;
+  kind === CONTROLLER_CHECK_PARK ||
+  kind === MERGE_HOLD_PARK ||
+  kind === RULING_PARK ||
+  kind === "review" ||
+  kind === "review-ruling" ||
+  kind === "review-failed";
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
