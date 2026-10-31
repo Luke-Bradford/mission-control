@@ -3848,6 +3848,21 @@ describe("every wake ends with each reason handled", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
+  it("holds a question that arrived with the re-wake to its own first miss", async () => {
+    const q1 = await wokeOnAQuestion();
+    ask("inco-1", "r-inco", nowMs);
+    await watch.check();
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain(FLIGHT_LEFT_HEAD);
+    flightIdle();
+    decide({ questionId: q1 });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    // the new question was missed once: it is re-woken for, not sent to the operator
+    expect(leftNotes()).toEqual([]);
+    expect(sendCalls.at(-1)?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} q 2`);
+  });
+
   it("raises one operator item when the second wake leaves them again, and none before", async () => {
     await wokeOnAQuestion();
     await watch.check();

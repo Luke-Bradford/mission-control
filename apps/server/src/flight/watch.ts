@@ -102,6 +102,8 @@ export interface FlightWatch {
   seen(runId: string, state: FlightState): void;
 }
 
+type AuditedReason = WakeReason & { round: 1 | 2 };
+
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
   Object.values(JSON.parse(facts) as Record<string, unknown[]>).some((l) => l.length > 0);
@@ -138,9 +140,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let lastWakeAt = 0;
   /**
    * The last wake's reasons, checked when FLIGHT's turn ends: each needs a decision on its target
-   * (or to be settled). `round` 2 is the one re-wake with "You left these".
+   * (or to be settled). Each reason has its own round: round 2 is a reason already re-woken for
+   * with "You left these", so a miss there is its second and reaches the operator; a reason new to
+   * that re-wake is on round 1.
    */
-  let audit: { wokeAt: number; reasons: WakeReason[]; round: 1 | 2 } | null = null;
+  let audit: { wokeAt: number; reasons: AuditedReason[] } | null = null;
   let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
@@ -295,9 +299,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   /** The reasons FLIGHT left, when the last audit found some and has not yet re-woken for them. */
   function leftOf(state: ReturnType<typeof flightState>): WakeReason[] | null {
-    if (audit === null || audit.round !== 1 || lastTurnEndAt < audit.wokeAt) return null;
+    if (audit === null || lastTurnEndAt < audit.wokeAt) return null;
     const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
-    return missed.length === 0 ? null : missed;
+    const first = missed.filter((r) => audit?.reasons.find((a) => a.id === r.id)?.round === 1);
+    return first.length === 0 ? null : first;
   }
   const leftLine = (left: WakeReason[]): string =>
     `${FLIGHT_LEFT_HEAD} ${left.map((r) => r.label).join("; ")}`;
@@ -307,8 +312,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     reasons: WakeReason[],
     left: WakeReason[] | null,
   ): typeof audit => {
-    const all = [...(left ?? []), ...reasons.filter((r) => !left?.some((l) => l.id === r.id))];
-    return all.length === 0 ? null : { wokeAt, reasons: all, round: left === null ? 1 : 2 };
+    const all: AuditedReason[] = [
+      ...(left ?? []).map((r) => ({ ...r, round: 2 as const })),
+      ...reasons
+        .filter((r) => !left?.some((l) => l.id === r.id))
+        .map((r) => ({ ...r, round: 1 as const })),
+    ];
+    return all.length === 0 ? null : { wokeAt, reasons: all };
   };
 
   async function pass(): Promise<void> {
@@ -495,13 +505,20 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     let left: WakeReason[] | null = null;
     if (audit !== null && lastTurnEndAt >= audit.wokeAt) {
       const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
+      const rounds = new Map(audit.reasons.map((r) => [r.id, r.round]));
+      const second = missed.filter((r) => rounds.get(r.id) === 2);
+      const first = missed.filter((r) => rounds.get(r.id) === 1);
       if (missed.length === 0) {
         audit = null;
         clearLeft(t);
-      } else if (audit.round === 2) {
-        raiseLeft(id, found.session.repoId, missed, t);
-        audit = null;
-      } else left = missed;
+      } else {
+        // a second miss goes to the operator; a first one gets its one re-wake
+        if (second.length > 0) raiseLeft(id, found.session.repoId, second, t);
+        if (first.length > 0) {
+          left = first;
+          audit = { wokeAt: audit.wokeAt, reasons: audit.reasons.filter((r) => r.round === 1) };
+        } else audit = null;
+      }
     }
     const due =
       left !== null ||
