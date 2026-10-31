@@ -403,6 +403,17 @@ export const mainConflictText = (mainSha: string, n: number): string =>
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
   "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. There is no turn or time limit: work until it is done or truly blocked; if blocked, name the blocker. When the work is committed, call mc report_evidence.";
+/** What a resume says to a seat whose last QUIET_TURNS_BEFORE_PUSH turns each ended with no new commit. */
+export const RESUME_PUSH_TEXT =
+  "Push what you have and report: call mc report_evidence for {ref} now. Your last turns ended with no new commit. If you are blocked, name the blocker in the report.";
+export const QUIET_TURNS_BEFORE_PUSH = 2;
+/** The lines that resume a seat (a restart, a reset rate limit): a waiting message goes ahead of them. */
+export const isResumeLineKey = (key: string): boolean =>
+  key.startsWith("resume:") || key.startsWith("ratelimit:") || key.startsWith("rv-resume:");
+const resumeText = (seat: { quietTurns: number }, ref: string): string =>
+  fillLoopText(seat.quietTurns >= QUIET_TURNS_BEFORE_PUSH ? RESUME_PUSH_TEXT : RESUME_TEXT, {
+    ref,
+  });
 export const NUDGE_TEXT =
   "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
 export const NUDGE_TRIES = 3;
@@ -588,6 +599,8 @@ export interface LoopSnapshot {
     inTurn: boolean;
     lastTurnEndedAt: number | null;
     resumedAt: number | null;
+    /** Turns in a row that ended with no new commit. */
+    quietTurns: number;
     rateLimitedUntil: number | null;
     openQuestion: boolean;
     /** The seat row holds this unended run. */
@@ -1442,7 +1455,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
       ([k, at]) => k.startsWith(`ratelimit:${runId}:`) && at >= (seat.resumedAt ?? 0),
     );
     if (free(key) && !told) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 
@@ -1468,7 +1481,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
     const waiting =
       seat.rateLimitedUntil === null && lastTry !== null && s.now - lastTry < RATE_LIMIT_RETRY_MS;
     if (free(key) && !waiting) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 

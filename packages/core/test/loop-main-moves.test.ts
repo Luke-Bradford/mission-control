@@ -35,6 +35,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
       inTurn: false,
       lastTurnEndedAt: NOW - 1000,
       resumedAt: null,
+      quietTurns: 0,
       rateLimitedUntil: null,
       openQuestion: false,
       holdsRun: true,

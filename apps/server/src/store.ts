@@ -1068,6 +1068,7 @@ const seatRow = (r: Row): SeatSessionRow => ({
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
   lastTurnStartedAt: (r.last_turn_started_at as number | null | undefined) ?? null,
+  quietTurns: (r.quiet_turns as number | null | undefined) ?? 0,
   ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
 });
 
@@ -1385,6 +1386,8 @@ export class Store {
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
+    // Turns in a row that ended with no new commit; the resume line reads it.
+    this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
@@ -5766,11 +5769,21 @@ export class Store {
       );
   }
 
-  /** Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. */
+  /**
+   * Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. A turn
+   * that made no commit since the one before it adds to the seat's quiet turns; a commit clears them.
+   */
   setSeatTurnEnded(seatId: string, at: number | null): void {
+    const row = this.db
+      .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
+      .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
+    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
-      .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+      .prepare(
+        "UPDATE seat_sessions SET last_turn_ended_at = ?, quiet_turns = CASE WHEN ? THEN 0 ELSE quiet_turns + 1 END WHERE seat_id = ?",
+      )
+      .run(at, at === null || committed ? 1 : 0, seatId);
   }
 
   /** Records that the seat started a turn at `at`. */

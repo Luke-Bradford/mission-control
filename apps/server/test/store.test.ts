@@ -2316,13 +2316,34 @@ describe("seat sessions", () => {
     updatedAt: 5,
     lastTurnEndedAt: null,
     lastTurnStartedAt: null,
+    quietTurns: 0,
     ...over,
+  });
+
+  it("counts the turns in a row that ended with no new commit", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 10);
+    store.setSeatTurnEnded("guido", 20);
+    expect(store.seatSession("guido")?.quietTurns).toBe(2);
+    store.addRunCommit({
+      runId: "guido:20261020T101500Z",
+      repoId: "r",
+      branch: "b",
+      sha: "a1",
+      at: 25,
+    });
+    store.setSeatTurnEnded("guido", 30);
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
+    store.setSeatTurnEnded("guido", 40);
+    expect(store.seatSession("guido")?.quietTurns).toBe(1);
+    store.setSeatTurnEnded("guido", null);
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
   });
 
   it("keeps when the last turn ended apart from the row's other writes", () => {
     store.setSeatSession(seat());
     store.setSeatTurnEnded("guido", 77);
-    expect(store.seatSession("guido")).toEqual(seat({ lastTurnEndedAt: 77 }));
+    expect(store.seatSession("guido")).toEqual(seat({ lastTurnEndedAt: 77, quietTurns: 1 }));
     store.setSeatSession(seat({ state: "idle", updatedAt: 9 }));
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBe(77);
   });

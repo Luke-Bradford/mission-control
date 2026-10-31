@@ -688,6 +688,32 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.commsInboxRead("guido-1", waiting.id)).toBe(true);
     });
 
+    it("puts a message waiting at a resume ahead of the hub's resume line", async () => {
+      const inbox = vi.fn((seatId: string, runId: string) =>
+        commsInboxContext(store, seatId, runId),
+      );
+      const { sup, runId } = await idleRun({ inbox });
+      store.addComms({
+        at: Date.now(),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: null,
+        text: "stop building, push and report",
+        targetRunId: runId,
+      });
+
+      expect(await sup.send(runId, `resume:${runId}:1`, "Carry on with #1")).toBe("sent");
+      await until(() =>
+        expect(
+          userLines().some(
+            (line) =>
+              line.startsWith("Comms inbox") &&
+              line.indexOf("stop building, push and report") < line.indexOf("Carry on with #1"),
+          ),
+        ).toBe(true),
+      );
+    });
+
     it("answers busy while the seat is in a turn, even before the CLI's turn-start", async () => {
       const { sup, runId } = await idleRun();
       await sup.message("guido-1", "SLOW", { interrupt: false });

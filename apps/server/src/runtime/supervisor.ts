@@ -68,6 +68,7 @@ import {
   HUD_STATE_LABEL,
   hasPlanSection,
   inferTicket,
+  isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
   MCP_PATH,
@@ -751,10 +752,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   };
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
-  const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
+  /** A message waiting at a resume leads: the hub's "carry on" must not be the seat's first word. */
+  const withInbox = (
+    seatId: string,
+    runId: string,
+    text: string,
+    inboxFirst = false,
+  ): InboxContext => {
     const inbox = deps.inbox?.(seatId, runId) ?? { text: "", messageIds: [] };
+    const joined = inboxFirst ? `${inbox.text}\n\n${text}` : `${text}\n\n${inbox.text}`;
     return {
-      text: inbox.text === "" ? text : text === "" ? inbox.text : `${text}\n\n${inbox.text}`,
+      text: inbox.text === "" ? text : text === "" ? inbox.text : joined,
       messageIds: inbox.messageIds,
     };
   };
@@ -4107,7 +4115,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
       try {
-        const inbox = withInbox(seatId, runId, text);
+        const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
         writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {

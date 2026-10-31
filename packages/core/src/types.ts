@@ -1274,6 +1274,8 @@ export interface SeatSessionRow {
   lastTurnEndedAt?: number | null;
   /** When the seat's current (or most recent) turn started. */
   lastTurnStartedAt?: number | null;
+  /** Turns in a row that ended with no new commit. Absent on a row not read. */
+  quietTurns?: number;
 }
 
 /** A crew session's context window, from its `get_context_usage` control request. */
