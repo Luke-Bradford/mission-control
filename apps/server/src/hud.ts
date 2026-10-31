@@ -371,6 +371,16 @@ export function runWait(
   return null;
 }
 
+/** What a rework due on a seat that is on another ticket reads: null when nothing holds it up. */
+function reworkWaitText(store: Store, run: Run): string | null {
+  const holder = store.seatSession(run.agentId)?.runId ?? null;
+  if (holder === null || holder === run.id) return null;
+  const held = store.run(holder);
+  if (held === null || held.endedAt !== null || held.ticket === null) return null;
+  const issue = held.ticket.slice(held.ticket.lastIndexOf("#"));
+  return `rework waiting on ${seatCallSign(run.agentId)} (behind ${issue})`;
+}
+
 /** The current step's try and its limit, else null. */
 function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewLoop["tries"] {
   if (loop.phase === "ci")
@@ -538,25 +548,27 @@ function buildCrew(
   const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
-  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null =>
-    run.loop
-      ? {
-          phase: run.loop.phase,
-          text: loopText(ticket, run.loop),
-          prNumber: run.loop.prNumber,
-          parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
-          tries: runTries(store, run, run.loop),
-          wait: runWait(config, store, run, run.loop, lock),
-          ...(run.profile
-            ? {
-                profile: run.profile.profile.name,
-                step: profileStep(run.profile.profile, run.loop.phase),
-                steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
-                planned: store.planLanded(run),
-              }
-            : {}),
-        }
-      : null;
+  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null => {
+    if (!run.loop) return null;
+    const wait = runWait(config, store, run, run.loop, lock);
+    return {
+      phase: run.loop.phase,
+      text: loopText(ticket, run.loop),
+      prNumber: run.loop.prNumber,
+      parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+      tries: runTries(store, run, run.loop),
+      wait,
+      ...(wait === "seat" ? { waitText: reworkWaitText(store, run) } : {}),
+      ...(run.profile
+        ? {
+            profile: run.profile.profile.name,
+            step: profileStep(run.profile.profile, run.loop.phase),
+            steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
+            planned: store.planLanded(run),
+          }
+        : {}),
+    };
+  };
   const eventIndex = summary ? null : runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
