@@ -241,6 +241,11 @@ export interface RunLoop {
   pendingLine?: { key: string; text: string } | null;
   controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
   /**
+   * The operator's acceptance (UAT) hold, like `controllerCheck`: the sha the run parked on and the
+   * phase it left; `accepted` once the operator accepted that sha.
+   */
+  uat?: { sha: string; from: LoopPhase; accepted: boolean } | null;
+  /**
    * A hold on the run's merge by FLIGHT or the controller (CAPCOM): the engine does not merge
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
@@ -313,6 +318,8 @@ export interface RunPr {
   ticket: string | null;
   /** Set while FLIGHT or the controller holds this PR's merge: who holds it, and why. */
   hold?: { by: "FLIGHT" | "CAPCOM"; reason: string };
+  /** Set while the PR waits for the operator's acceptance (UAT): the head it waits on. */
+  uat?: { sha: string };
 }
 
 /** A run in a list; full assistant text stays on the individual run record. */

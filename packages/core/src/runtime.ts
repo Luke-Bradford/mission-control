@@ -103,6 +103,7 @@ export const MC_TOOL_GRANTS: Readonly<
     base: [
       "commit",
       "sync_main",
+      MC_TOOL_NAMES.prBody,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -314,6 +315,7 @@ export const WRITER_TOOLS = [
   "Skill",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
+  MC_TOOLS.prBody,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
