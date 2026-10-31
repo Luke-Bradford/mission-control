@@ -18,7 +18,7 @@ describe("KpiStrip", () => {
     const fetch = stubFetch({
       ...REGISTRY_ROUTES,
       "/api/metrics": { ...METRICS_VIEW, cost: { usd: 0 } },
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/overview": {
         ...OVERVIEW,
         kpis: {

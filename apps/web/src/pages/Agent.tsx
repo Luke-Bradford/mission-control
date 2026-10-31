@@ -1,4 +1,4 @@
-import type { AttentionItem, Crew, LimitRow } from "@mc/core";
+import type { AttentionItem, Crew, CrewRow, LimitRow } from "@mc/core";
 import { useEffect } from "react";
 import { Header } from "../agent/Header.tsx";
 import { NeedBanner } from "../agent/NeedBanner.tsx";
@@ -34,7 +34,7 @@ export function Agent({ id }: { id: string | null }) {
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
   const inView = all?.filter((r) => matchesSession(r)) ?? [];
   const crewSeats = inView.filter((r) => r.kind === "crew");
-  const row =
+  const listed =
     all === null
       ? null
       : ((id !== null
@@ -43,7 +43,10 @@ export function Agent({ id }: { id: string | null }) {
             crewSeats.find((r) => r.hudState === "running") ??
             crewSeats[0] ??
             inView[0])) ?? null);
-  const shownId = row?.id ?? null;
+  const shownId = listed?.id ?? null;
+  // The list is summary rows; the page itself shows the seat in full (events, digest), one row.
+  const detail = useResource<CrewRow>(shownId !== null ? RESOURCES.crewDetail(shownId) : null);
+  const row = detail.data ?? null;
 
   // The selection follows the agent on screen, so j/k step from it.
   useEffect(() => {
@@ -51,7 +54,7 @@ export function Agent({ id }: { id: string | null }) {
   }, [shownId]);
 
   // `i` interrupts a crew seat; an observed loop is never interrupted, so it says so.
-  const shownKind = row?.kind ?? null;
+  const shownKind = listed?.kind ?? null;
   useEffect(() => {
     if (shownId === null) return;
     setPageKey("i", () => {
@@ -67,8 +70,9 @@ export function Agent({ id }: { id: string | null }) {
   let missing: string | null = null;
   if (crew.error && !crew.data) missing = "Could not load the crew.";
   else if (!crew.data) missing = "Loading…";
-  else if (id !== null && !row) missing = `No agent called ${id}.`;
-  else if (!row) missing = "No agents in this session.";
+  else if (id !== null && !listed) missing = `No agent called ${id}.`;
+  else if (!listed) missing = "No agents in this session.";
+  else if (!row) missing = detail.error ? "Could not load this agent." : "Loading…";
 
   return (
     <section id="page-agent">
@@ -91,7 +95,13 @@ export function Agent({ id }: { id: string | null }) {
               </div>
             </>
           ) : (
-            <p className={crew.error && !crew.data ? "pb crit-t" : "pb muted"}>{missing}</p>
+            <p
+              className={
+                (crew.error && !crew.data) || (detail.error && !row) ? "pb crit-t" : "pb muted"
+              }
+            >
+              {missing}
+            </p>
           )}
         </>
       )}

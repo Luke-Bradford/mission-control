@@ -18,10 +18,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  type CheckDrop,
+  COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
@@ -371,6 +374,7 @@ describe("the mc tools", () => {
         startRun: vi.fn(),
         endRun: vi.fn(),
         endAsideRun: vi.fn(),
+        resumeRun: vi.fn(),
         interrupt: vi.fn(),
       },
       rules: vi.fn(),
@@ -1034,7 +1038,13 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "flight-1", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
     expect(emitted).toContain("agents");
   });
@@ -1042,8 +1052,24 @@ describe("ask_flight", () => {
   it("with no FLIGHT seat, mirrors it to CAPCOM: nobody else can answer it", async () => {
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "CAPCOM",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
+  });
+
+  it("keeps a long question in its record and sends FLIGHT a short pointer", async () => {
+    tools = make({ config: withFlight() });
+    const question = "x".repeat(2000);
+    await ask({ question });
+    expect(store.openQuestions()[0]?.text).toBe(question);
+    const comms = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(comms).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(comms).not.toBe(question);
   });
 
   it("refuses FLIGHT itself, recording nothing: FLIGHT briefs the operator instead", async () => {
@@ -1303,6 +1329,14 @@ describe("Comms seat tools", () => {
     tool("comms_inbox", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("refuses a long message and directs the seat to its structured report", async () => {
+    expect(await send({ to: "crew", text: "x".repeat(COMMS_MESSAGE_MAX + 1) })).toEqual({
+      text: "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+  });
 
   it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
     store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
@@ -2366,6 +2400,7 @@ describe("push and draft_pr", () => {
             exitCode: number | null;
             at: number;
           } | null;
+          dropped?: CheckDrop | null;
         }[],
       ) => ({
         text: pushChecksText(head, found),
@@ -2388,6 +2423,33 @@ describe("push and draft_pr", () => {
         expect(r.text).toContain(MC_PUSH_CHECKS);
         expect(r.text).toContain(`not run: ${TYPES}`);
         expect(remoteTip()).toBeNull();
+      });
+
+      it.each([
+        ["not-plain", "chains the check with a pipe"],
+        ["dirty-start", "uncommitted or untracked files in the tree"],
+        ["dirty-end", "left uncommitted or untracked files"],
+        ["head-moved", "moved the head during the call"],
+        ["turn-ended", "the turn ended before the call reported its end"],
+        ["background", "went to the background"],
+        ["timeout", "Bash timeout"],
+        ["unreadable", "could not read the seat's clone"],
+      ] as const)("says why a %s call was not counted, in the refusal", async (reason, words) => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const drop = { reason, command: TYPES, head: sha, invoked: TYPES, at: NOW };
+        const r = await push(gated({ checkDrops: () => [drop] }));
+        expect(r).toEqual(refusal(sha, [{ command: TYPES, state: "missing", dropped: drop }]));
+        expect(r.text).toContain(words);
+        expect(r.text).not.toContain("nothing recorded");
+      });
+
+      it("says the hub saw no start when it has no reason for a missing check", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const r = await push(gated({ checkDrops: () => [] }));
+        expect(r.text).toContain(`nothing recorded on ${sha.slice(0, 7)}: the hub saw no start`);
+        expect(r.text).toContain("Bash timeout parameter set to 600000");
       });
 
       it("refuses a check that failed, naming it", async () => {

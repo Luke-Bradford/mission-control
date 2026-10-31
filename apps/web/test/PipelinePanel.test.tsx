@@ -56,7 +56,7 @@ describe("Pipeline", () => {
         { ...building, count: 1, cards: [{ ...card, ticket: 20, title: "Building ticket" }] },
         { ...checks, count: 1, cards: [{ ...card, ticket: 21, title: "Checked ticket" }] },
       ]),
-      "/api/crew": { rows: [{ id: "seat-1", displayCallSign: "INCO", index: 3 }] },
+      "/api/crew?shape=summary": { rows: [{ id: "seat-1", displayCallSign: "INCO", index: 3 }] },
     });
     render(<PipelinePanel />);
 

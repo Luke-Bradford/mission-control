@@ -68,6 +68,7 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
+  TICKET_SIZES,
   TYPE_LABELS,
   UPDATE_LOG_UNREADABLE,
   type UsageSample,
@@ -470,6 +471,15 @@ describe("audit", () => {
     chatter: [],
     flakes: [],
     changes: [],
+    tokenOveruse: {
+      runs: [],
+      groups: [],
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: 400_000,
+        measured: false,
+      })),
+    },
     surgeonProposals: [],
   });
 
@@ -781,6 +791,22 @@ describe("Comms API", () => {
         to: "alpha",
         count: 1,
         lastText: "back",
+      });
+    });
+  });
+
+  it("reports each sender's p95 message length over the shared 24-hour Comms range", async () => {
+    commsRow("alpha", "crew", "a");
+    commsRow("alpha", "crew", "x".repeat(101));
+    commsRow("beta", "crew", "z".repeat(20));
+    commsRow("alpha", "crew", "old", clock - 25 * 60 * 60 * 1000);
+    await withCommsApp(async (comms) => {
+      const metrics = (await comms.inject({ method: "GET", url: "/api/comms/metrics" })).json();
+      expect(metrics).toMatchObject({
+        p95BySeat: [
+          { seatId: "alpha", p95: 96, n: 2 },
+          { seatId: "beta", p95: 20, n: 1 },
+        ],
       });
     });
   });
@@ -1281,6 +1307,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/mentions/seen", { ids: [] }],
   ["GET", "/api/comms/pins"],
   ["GET", "/api/comms/links"],
+  ["GET", "/api/comms/metrics"],
   ["GET", "/api/comms/traffic"],
   ["GET", "/api/comms/chatter"],
   ["GET", "/api/comms/open"],

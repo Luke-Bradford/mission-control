@@ -450,6 +450,7 @@ describe("startWatch", () => {
       "mcp__mc__screenshot_hud",
       "mcp__mc__promote",
       "mcp__mc__end_run",
+      "mcp__mc__resume_seat",
       "mcp__mc__accept_ruling",
       "mcp__mc__merge_pr",
       "mcp__mc__settle_park",

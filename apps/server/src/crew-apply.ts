@@ -1,6 +1,12 @@
 import { statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import { type CrewChanges, type PendingSeatChange, type ReloadResult, seatDef } from "@mc/core";
+import {
+  type CrewChanges,
+  type LoopKind,
+  type PendingSeatChange,
+  type ReloadResult,
+  seatDef,
+} from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import {
   type CcConfig,
@@ -276,6 +282,22 @@ export function createCrewReloader(deps: {
   let removing = false;
   let settling = false;
 
+  /**
+   * Records the loop kind of each seat in `cfg` on its runs that lack one, before a reload or a
+   * session removal can retire the seat and leave Audit unable to tell what it ran.
+   */
+  const recordLoopKinds = (cfg: CcConfig): void => {
+    try {
+      const kinds = new Map<string, LoopKind>();
+      for (const session of cfg.crew?.sessions ?? []) {
+        for (const s of session.seats) kinds.set(s.id, seatDef(s).loop);
+      }
+      store.backfillRunLoopKinds(kinds);
+    } catch (e) {
+      log(`could not record seat loop kinds: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const statFile = (): FileStat => {
     const s = statSync(configPath);
     return { mtimeMs: s.mtimeMs, size: s.size, ino: s.ino };
@@ -462,6 +484,8 @@ export function createCrewReloader(deps: {
       setError(e instanceof ConfigError ? e.message : READ_FAILED);
       return { ...status(), applied: [] };
     }
+    // the applied config still lists the seats this load may remove
+    recordLoopKinds(config);
     target = loaded;
     setError(null);
     const applied = settle();
@@ -503,6 +527,7 @@ export function createCrewReloader(deps: {
       } catch {
         last = null;
       }
+      recordLoopKinds(config);
       settle();
       timer = setInterval(poll, CONFIG_POLL_MS);
       timer.unref();
@@ -529,6 +554,7 @@ export function createCrewReloader(deps: {
         const active = session.seats.filter((s) => !stopped(s.id)).length;
         if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
         // Removing it synchronously prevents any new supervisor start during the file write.
+        recordLoopKinds(config);
         removing = true;
         sessions.splice(index, 1);
         let saved = false;

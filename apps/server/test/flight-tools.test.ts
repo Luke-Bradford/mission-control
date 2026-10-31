@@ -19,6 +19,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   capText,
   ciLogText,
@@ -236,6 +237,7 @@ let optionsImpl: () => { ok: boolean; reason?: string };
 let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
+let aliveNow: string[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
@@ -267,6 +269,8 @@ let screenshotCalls: string[];
 let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
+let resumeCalls: string[];
+let resumeImpl: (runId: string) => Promise<void>;
 let shotsKnown: string[];
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
@@ -375,6 +379,9 @@ beforeEach(() => {
     shotsSaved.push(png);
     return "a".repeat(32);
   };
+  aliveNow = [];
+  resumeCalls = [];
+  resumeImpl = async () => {};
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
@@ -431,6 +438,11 @@ beforeEach(() => {
         startCalls.push(a);
         return startImpl();
       },
+      resumeRun: async (runId) => {
+        resumeCalls.push(runId);
+        await resumeImpl(runId);
+      },
+      sessionAlive: (seatId) => aliveNow.includes(seatId),
     },
     engine: {
       clearFlight: async (...args) => {
@@ -591,6 +603,283 @@ const named = (name: string): McTool => {
   return t;
 };
 const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
+
+describe("resume_seat", () => {
+  it("does not report a stopped seat's held run as resumed when resumeRun is a no-op", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("is not running");
+    expect(resumeCalls).toEqual(["r-guido"]);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+  });
+
+  it("clears a stopped seat before resuming, and reports success only once it is live", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      expect(store.seatSession("guido-1")?.state).toBe("idle");
+      store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    };
+
+    await expect(
+      call("resume_seat", { seat: "guido-1", basis: "continue the run" }),
+    ).resolves.toEqual({
+      text: "Resume started for GUIDO-1's run: the operator had stopped the seat.",
+    });
+  });
+
+  it("reports a resume as live when the supervisor shows the session alive", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    resumeImpl = async () => {
+      aliveNow = ["guido-1"];
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toBe(
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause on GUIDO-1 (ci); the operator had stopped the seat.",
+    );
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        kind: "pause",
+        about: "resume_seat",
+        seatId: "guido-1",
+        targetRunId: "r-guido",
+        decision: expect.stringContaining("FLIGHT lifted the crew pause on GUIDO-1 (ci)"),
+      }),
+    ]);
+    expect(readCrewPause(store)).toBeNull();
+  });
+
+  it("does not resume a seat whose session is already alive or busy", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "idle" });
+    aliveNow = ["guido-1"];
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("neither stopped, paused nor waiting");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("refuses a held run and leaves the operator's stop", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Approve?",
+      at: NOW - 20 * 60_000,
+    });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "Run is held.", isError: true });
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("refuses when the machine has no headroom", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 20 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      swapUsedBytes: 1,
+      swapTotalBytes: 100,
+      memoryPressureFreePct: 9,
+      agents: null,
+    });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("insufficient headroom");
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("says a seat with no unfinished run holds none to resume", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.setSeatSession({
+      ...row("guido-1", "r-x"),
+      runId: null,
+      state: "stopped",
+      reason: "operator",
+    });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "GUIDO-1 holds no unfinished run to resume.", isError: true });
+  });
+
+  it("refuses a seat that is not a build or plan seat in FLIGHT's session", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("retro-1", "r-retro");
+
+    const result = await call("resume_seat", { seat: "retro-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("needs a superuser repo", async () => {
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: needsSuperuserText("o/mc"), isError: true });
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("reports a failed resume that ended its run", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    resumeImpl = async () => {
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "error",
+        reason: "resume failed",
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.text).toContain("ended after the failed resume");
+    expect(result.text).not.toContain("nothing was changed");
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(store.seatSession("guido-1")?.reason).toBe("operator");
+  });
+
+  it("puts the crew pause back when a failed resume ended the run", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    resumeImpl = async () => {
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+  });
+
+  it("keeps a newer operator pause and stop when a resume does not go live", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    const newer = { seats: "all", reason: "later", at: NOW + 1, by: "op" } as const;
+    resumeImpl = async () => {
+      writeCrewPause(store, newer, NOW + 1);
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "stopped",
+        reason: "operator again",
+        updatedAt: NOW + 1,
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)).toMatchObject(newer);
+    expect(store.seatSession("guido-1")?.reason).toBe("operator again");
+  });
+
+  it("leaves the operator's stop alone when the seat is busy", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    busyNow = [{ seatId: "guido-1", state: "starting" } as SeatBusy];
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it.each(["budget", "account", "away quota unknown", "away quota reserve"] as const)(
+    "refuses a %s limit before resuming",
+    async (limit) => {
+      need(cfg.repos[0]).flightPowers = "superuser";
+      live("guido-1", "r-guido");
+      store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+      if (limit === "budget")
+        store.setRunLoop("r-guido", {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "budget", ended: false },
+        });
+      if (limit === "account")
+        store.addUsage({
+          accountId: "claude-main",
+          window: "5h",
+          at: NOW,
+          pct: 96,
+          resetAt: NOW + 86_400_000,
+          source: "test",
+        });
+      if (limit.startsWith("away quota")) {
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        if (limit === "away quota reserve") {
+          store.addUsage({
+            accountId: "claude-main",
+            window: "5h",
+            at: NOW,
+            pct: 10,
+            resetAt: NOW + 86_400_000,
+            source: "test",
+          });
+          store.addUsage({
+            accountId: "claude-main",
+            window: "7d",
+            at: NOW,
+            pct: 70,
+            resetAt: NOW + 86_400_000,
+            source: "test",
+          });
+        }
+      }
+
+      const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(
+        limit === "budget" ? "budget" : limit === "account" ? "usage stop" : AWAY_QUOTA_REFUSED,
+      );
+      expect(resumeCalls).toEqual([]);
+      expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    },
+  );
+});
+
 const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   repoId: "mc",
   issueNumber: n,
@@ -652,7 +941,7 @@ const need = <T>(value: T | null | undefined): T => {
 };
 
 describe("tool list", () => {
-  it("adds the six tools, each shown only to a granted role", () => {
+  it("lists each tool and shows it only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
       "read_ticket",
@@ -676,6 +965,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "resume_seat",
       "merge_pr",
       "settle_park",
       "hold_pr",
@@ -1010,6 +1300,7 @@ describe("answer_question", () => {
     });
     expect((await call("answer_question", A(id, { answer }))).isError).toBeUndefined();
     expect(decisions()[0]).toMatchObject({ about: `GUIDO-1: ${question}`, decision: answer });
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.recent[0]).toMatchObject({
       about: cut(`GUIDO-1: ${question}`, FLIGHT_STATE_TEXT_MAX),
@@ -1905,6 +2196,14 @@ describe("message_seat", () => {
     text: "Please push",
     basis: "idle",
     ...over,
+  });
+
+  it("refuses a long message and directs FLIGHT to the structured report", async () => {
+    expect(await call("message_seat", M({ text: "x".repeat(COMMS_MESSAGE_MAX + 1) }))).toEqual(
+      refused(
+        "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      ),
+    );
   });
 
   it("wakes through the supervisor inbox boundary and records it", async () => {

@@ -5,7 +5,7 @@ import { useReviewPrs } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { prView, seatRow } from "./fixtures.ts";
 
-const PRS = "/api/repos/shop-app/prs?linked=1";
+const PRS = "/api/repos/shop-app/prs?linked=1&shape=summary";
 const review = { prNumber: 77, state: "open" } as const;
 
 afterEach(() => {

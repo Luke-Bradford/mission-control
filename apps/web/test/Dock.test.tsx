@@ -45,7 +45,7 @@ beforeEach(() => {
   stubFetch({
     "/api/attention": [],
     "/api/escalations": [],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/flight": { seat: null, decisions: [] },
   });
   off = installKeys({
@@ -303,10 +303,10 @@ function stubFlight(view: FlightView, extra: Record<string, unknown> = {}) {
   return stubFetch({
     "/api/attention": [],
     "/api/escalations": [],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/config": CONFIG,
     "/api/flight": view,
-    "/api/agents/flight-1/stream": STREAM,
+    "/api/agents/flight-1/stream?limit=20": STREAM,
     ...extra,
   });
 }
@@ -322,7 +322,7 @@ describe("live FLIGHT", () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "/api/crew": {
+        "/api/crew?shape=summary": {
           rows: [
             seatRow({
               id: "flight-1",
@@ -331,7 +331,7 @@ describe("live FLIGHT", () => {
             }),
           ],
         },
-        "/api/repos/shop-app/prs?linked=1": [prView({ title: "Cache quotes" })],
+        "/api/repos/shop-app/prs?linked=1&shape=summary": [prView({ title: "Cache quotes" })],
       },
     );
     const { container } = render(<Dock />);
@@ -344,7 +344,7 @@ describe("live FLIGHT", () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "/api/crew": { rows: [seatRow({ id: "known", index: 2 })] },
+        "/api/crew?shape=summary": { rows: [seatRow({ id: "known", index: 2 })] },
         "/api/attention": [
           item({ key: "known", agentId: "known", brief: brief() }),
           item({ key: "removed", agentId: "removed", brief: brief() }),
@@ -373,7 +373,7 @@ describe("live FLIGHT", () => {
     stubFlight(
       { seat: flightSeat({ turns: { n: 4, max: 41 } }), decisions: [] },
       {
-        "/api/crew": {
+        "/api/crew?shape=summary": {
           rows: [
             crewRow({ id: "other", accountId: "other-account" }),
             crewRow({
@@ -651,7 +651,10 @@ describe("the conversation", () => {
       { seat: flightSeat(), decisions: [] },
       {
         "POST /api/seats/flight-1/message": {},
-        "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }),
+        "/api/agents/flight-1/stream?limit=20": () => ({
+          status: 200,
+          body: { ...STREAM, events },
+        }),
       },
     );
     const { container } = render(<Dock />);
@@ -661,13 +664,64 @@ describe("the conversation", () => {
     expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
     events = [...STREAM.events, { id: "5:0", at: NOW, kind: "op", text: "assign it" }];
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream");
+      hub.refetch("/api/agents/flight-1/stream?limit=20");
     });
     await waitFor(() => expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(0));
     const mine = [...container.querySelectorAll(".dmsg.you")].filter(
       (r) => r.querySelector(".txt")?.textContent === "assign it",
     );
     expect(mine).toHaveLength(1);
+  });
+
+  it("asks for FLIGHT's last 20 events and pages older ones in ahead of them", async () => {
+    const older = [
+      { id: "old:0", at: NOW - 2 * HOUR, kind: "msg" as const, text: "An older reply" },
+    ];
+    const fetch = stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/agents/flight-1/stream?limit=20": { ...STREAM, hasMore: true },
+        "/api/agents/flight-1/stream?limit=20&before=0%3A0": { ...STREAM, events: older },
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
+    await screen.findByText("An older reply");
+    expect(fetch.mock.calls.map(([p]) => p)).toContain(
+      "/api/agents/flight-1/stream?limit=20&before=0%3A0",
+    );
+    expect(container.querySelectorAll(".dmsg")).toHaveLength(4);
+    expect(container.querySelector(".dmsg .txt")?.textContent).toBe("An older reply");
+    // Nothing older remains, so the control goes.
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  });
+
+  it("loads older events when the reader scrolls to the top of the dock", async () => {
+    const fetch = stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/agents/flight-1/stream?limit=20": { ...STREAM, hasMore: true },
+        "/api/agents/flight-1/stream?limit=20&before=0%3A0": { ...STREAM, events: [] },
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    const box = container.querySelector(".dmsgs") as HTMLElement;
+    box.scrollTop = 0;
+    fireEvent.scroll(box);
+    await waitFor(() =>
+      expect(fetch.mock.calls.map(([p]) => p)).toContain(
+        "/api/agents/flight-1/stream?limit=20&before=0%3A0",
+      ),
+    );
+  });
+
+  it("offers no older events when the stream has none", async () => {
+    stubFlight({ seat: flightSeat(), decisions: [] });
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
   });
 
   it("drops the pending message when the send fails", async () => {
@@ -708,7 +762,12 @@ describe("the conversation", () => {
     let events = STREAM.events;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      { "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }) },
+      {
+        "/api/agents/flight-1/stream?limit=20": () => ({
+          status: 200,
+          body: { ...STREAM, events },
+        }),
+      },
     );
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
@@ -725,7 +784,7 @@ describe("the conversation", () => {
     act(() => toggleDock(false));
     events = [...STREAM.events, reply];
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream");
+      hub.refetch("/api/agents/flight-1/stream?limit=20");
     });
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
     act(() => toggleDock(true));
@@ -739,7 +798,12 @@ describe("the conversation", () => {
     let events = STREAM.events;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      { "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }) },
+      {
+        "/api/agents/flight-1/stream?limit=20": () => ({
+          status: 200,
+          body: { ...STREAM, events },
+        }),
+      },
     );
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
@@ -754,7 +818,7 @@ describe("the conversation", () => {
     expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
     events = [...STREAM.events, reply];
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream");
+      hub.refetch("/api/agents/flight-1/stream?limit=20");
     });
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
@@ -765,7 +829,12 @@ describe("the conversation", () => {
     let events = STREAM.events;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      { "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }) },
+      {
+        "/api/agents/flight-1/stream?limit=20": () => ({
+          status: 200,
+          body: { ...STREAM, events },
+        }),
+      },
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
@@ -775,7 +844,7 @@ describe("the conversation", () => {
     const reply = async (id: string, n: number) => {
       events = [...events, { id, at: NOW - 100_000 + n, kind: "msg", text: `reply ${id}` }];
       await act(async () => {
-        hub.refetch("/api/agents/flight-1/stream");
+        hub.refetch("/api/agents/flight-1/stream?limit=20");
       });
       await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3 + n));
     };

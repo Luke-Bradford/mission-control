@@ -13,7 +13,7 @@ for (const display of ["lock box", "Telemetry lock row", "Decided without you"])
     const now = Date.now();
     const fetch = stubFetch({
       "/api/config": CONFIG,
-      "/api/crew": { rows: [row], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [row], firstRunToday: null },
       "/api/test-lock": {
         holder: { runId: "r", seatId: row.id, command: "pnpm test", since: now },
         waiting: [{ runId: "w", seatId: row.id, command: "pnpm test", since: now }],
@@ -36,7 +36,7 @@ for (const display of ["lock box", "Telemetry lock row", "Decided without you"])
     const answer = fetch.getMockImplementation();
     if (!answer) throw new Error("Missing fetch stub");
     fetch.mockImplementation(async (...args) =>
-      args[0] === "/api/crew"
+      args[0] === "/api/crew?shape=summary"
         ? new Response(JSON.stringify({ rows: [row], firstRunToday: null }))
         : answer(...args),
     );

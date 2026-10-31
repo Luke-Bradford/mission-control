@@ -10,11 +10,13 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  type CheckDrop,
   type CheckState,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
@@ -232,6 +234,8 @@ export interface McToolsDeps {
    * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
    */
   checks: (runId: string) => Promise<readonly string[]>;
+  /** The run's check calls the hub saw start and did not count, with the reasons; none when unset. */
+  checkDrops?: (runId: string) => readonly CheckDrop[];
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -682,25 +686,41 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     }
 
     /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
-    async function unmetChecks(
-      sha: string,
-    ): Promise<
-      { command: string; state: CheckState; recorded: ReturnType<Store["newestCheckRun"]> }[]
+    async function unmetChecks(sha: string): Promise<
+      {
+        command: string;
+        state: CheckState;
+        recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
+      }[]
     > {
       const unmet: {
         command: string;
         state: CheckState;
         recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
       }[] = [];
+      const drops = deps.checkDrops?.(runId) ?? [];
+      // the newest call of this check that was not counted: on the pushed commit first, else any
+      const droppedFor = (command: string): CheckDrop | null => {
+        const mine = drops.filter((x) => x.command === command);
+        return mine.findLast((x) => x.head === sha) ?? mine.at(-1) ?? null;
+      };
       for (const command of await deps.checks(runId)) {
         const last = store.latestCheckRun(runId, command, sha);
         if (last === null)
-          unmet.push({ command, state: "missing", recorded: store.newestCheckRun(runId, command) });
+          unmet.push({
+            command,
+            state: "missing",
+            recorded: store.newestCheckRun(runId, command),
+            dropped: droppedFor(command),
+          });
         else if (!last.ok)
           unmet.push({
             command,
             state: "failed",
             recorded: last,
+            dropped: droppedFor(command),
           });
       }
       return unmet;
@@ -1966,7 +1986,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       from: ctx.seatId,
       to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
-      text: parsed.data.question,
+      text: ASK_FLIGHT_COMMS_POINTER,
     });
     bus.emit("attention");
     bus.emit("agents");

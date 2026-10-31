@@ -65,7 +65,7 @@ export interface PaletteSources {
   prs?: readonly PullRequestView[];
   /** Needs-you items (attention), which open the Item panel. */
   threads?: readonly AttentionItem[];
-  /** Each crew seat's stored Comms (`/api/comms/agents/:id`), for conversations and ticket threads. */
+  /** Each crew seat's stored Comms (`/api/comms/agents/:id?summary=1`: the conversation list, and no messages), for conversations and ticket threads. */
   comms?: readonly { agentId: string; data: CommsAgentResponse }[];
   /** A seat in this repo that is free to start a ticket; null when there is none. */
   freeSeatFor?: (repoId: string) => string | null;
@@ -152,7 +152,10 @@ function commsEntries(src: PaletteSources): PaletteEntry[] {
         run: () => navigate(commsContactPath(agentId, c.id)),
       });
     }
-    for (const m of data.messages) {
+    for (const m of [
+      ...(data.messages ?? []),
+      ...data.contacts.flatMap((c) => (c.lastMessage ? [c.lastMessage] : [])),
+    ]) {
       if (!m.ref || !TICKET_REF.test(m.ref)) continue;
       const ticket = ticketForRef(m.ref, m.ticket);
       const key = `${m.ref}|${ticket ?? ""}`;

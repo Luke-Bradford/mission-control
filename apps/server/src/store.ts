@@ -8,14 +8,17 @@ import {
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
   type AuditMetrics,
+  type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditTokenOveruse,
   type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
@@ -31,6 +34,7 @@ import {
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  classifyOveruse,
   commsCutMarker,
   DECISION_DEFAULT_WAIT_MS,
   type Escalation,
@@ -63,13 +67,16 @@ import {
   GUARD_RULES,
   type GuardHit,
   type GuardRule,
+  groupOveruse,
   type HealthRow,
   type HudColumn,
   type HudState,
   inferTicket,
   type LoopEvent,
+  type LoopKind,
   type MachineSample,
   memoryTopicKey,
+  overusePrevention,
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
@@ -98,8 +105,10 @@ import {
   type StrayKind,
   type Telemetry,
   type TestLockRun,
+  TICKET_SIZES,
   TITLE_MARKERS,
   type TokenUsage,
+  tokenBaselines,
   type UsageSample,
   validateMemoryNote,
   wakeKeyPrefix,
@@ -895,6 +904,7 @@ const toRun = (r: Row): Run => ({
     : { cliVersion: r.cli_version as string }),
   ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
   ...(r.effort == null ? {} : { effort: r.effort as string }),
+  ...(r.loop_kind == null ? {} : { loopKind: r.loop_kind as LoopKind }),
   ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
@@ -1270,6 +1280,8 @@ export class Store {
       ["account_id", "TEXT"],
       ["effort", "TEXT"],
       ["prompt_hash", "TEXT"],
+      // The seat's loop kind at the start; `upsertRun` keeps the first value.
+      ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1519,8 +1531,8 @@ export class Store {
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
            ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           account_id, effort, prompt_hash, loop_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1533,7 +1545,8 @@ export class Store {
            latest_plan = COALESCE(excluded.latest_plan, latest_plan),
            account_id = COALESCE(account_id, excluded.account_id),
            effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash)`,
+           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
+           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
       )
       .run(
         r.id,
@@ -1565,7 +1578,22 @@ export class Store {
         r.accountId ?? null,
         r.effort ?? null,
         r.promptHash ?? null,
+        r.loopKind ?? null,
       );
+  }
+
+  /**
+   * Gives runs stored before `loop_kind` existed the loop kind of their seat as configured now, so
+   * a seat removed later still shows as a build seat in Audit. A run that has one keeps it.
+   * Returns how many rows it set.
+   */
+  backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
+    const set = this.db.prepare(
+      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
+    );
+    let n = 0;
+    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
+    return n;
   }
 
   /** Completes immutable launch metadata once the generated prompt file exists. */
@@ -2858,6 +2886,7 @@ export class Store {
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
+      tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       surgeonProposals: [],
     };
   }
@@ -2956,6 +2985,113 @@ export class Store {
       }
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
+  }
+
+  /**
+   * Runs started in range whose input + output tokens pass their size's expected use (see
+   * `tokenBaselines`, built from build runs of the last `AUDIT_BASELINE_DAYS` days), largest first.
+   * Only runs of agents `kinds` marks as build count: watch, plan and review seats and observed
+   * loops have other shapes of use.
+   * A finding only: it reads the run, never changes it.
+   */
+  private auditTokenOveruse(
+    since: number,
+    until: number,
+    kinds: ReadonlyMap<string, AuditRunKind>,
+  ): AuditView["tokenOveruse"] {
+    const runRows = (sql: string, ...args: SQLInputValue[]) =>
+      this.db.prepare(sql).all(...args) as Row[];
+    // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
+    const from = `FROM runs r LEFT JOIN board_items b
+         ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
+       WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
+    // the loop kind stored at the run's start; a seat since removed still counts, and a row from
+    // before it was stored falls back to the seat's kind now
+    const isBuild = (r: Row): boolean => (r.loopKind ?? kinds.get(r.agentId as string)) === "build";
+    const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
+    const baselines = tokenBaselines(
+      runRows(
+        `SELECT r.agent_id AS agentId, r.loop_kind AS loopKind, b.size AS size, r.tokens AS tokens ${from}
+           AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
+        until - AUDIT_BASELINE_DAYS * DAY_MS,
+        until,
+      )
+        .filter(isBuild)
+        .map((r) => ({
+          size: r.size as string | null,
+          tokens: usage(r).input + usage(r).output,
+        })),
+    );
+    const blocking = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const runs: AuditTokenOveruse[] = [];
+    for (const r of runRows(
+      `SELECT r.id AS id, r.agent_id AS agentId, r.ticket AS ticket, r.started_at AS startedAt,
+         r.ended_at AS endedAt, r.loop_kind AS loopKind, r.tokens AS tokens, b.size AS size ${from}
+         AND r.started_at >= ? AND r.started_at <= ? ORDER BY r.started_at DESC`,
+      since,
+      until,
+    )) {
+      if (!isBuild(r)) continue;
+      const tokens = usage(r);
+      const total = tokens.input + tokens.output;
+      const size = r.size as string | null;
+      const expected = baselines.expected(size);
+      if (total <= expected) continue;
+      const id = r.id as string;
+      const rounds = this.db
+        .prepare("SELECT COUNT(*) AS n FROM reviews WHERE author_run_id = ? AND state = 'reported'")
+        .get(id) as { n: number };
+      const byCategory: AuditOveruseFacts["blockingByCategory"] = {};
+      let blockingTotal = 0;
+      for (const f of this.db
+        .prepare(
+          `SELECT COALESCE(category, 'uncategorised') AS category, COUNT(*) AS n FROM review_findings
+           WHERE author_run_id = ? AND severity IN (${blocking}) GROUP BY category`,
+        )
+        .all(id, ...BLOCKING_SEVERITIES) as { category: keyof typeof byCategory; n: number }[]) {
+        byCategory[f.category] = f.n;
+        blockingTotal += f.n;
+      }
+      const digest = this.db
+        .prepare(
+          "SELECT json_extract(digest, '$.turns') AS turns FROM run_digests WHERE run_id = ?",
+        )
+        .get(id) as { turns: number | null } | undefined;
+      const facts: AuditOveruseFacts = {
+        size,
+        reviewRounds: rounds.n,
+        blocking: blockingTotal,
+        blockingByCategory: byCategory,
+        turns: digest?.turns ?? null,
+      };
+      const cause = classifyOveruse(facts);
+      runs.push({
+        runId: id,
+        agentId: r.agentId as string,
+        ticket: r.ticket as string | null,
+        startedAt: r.startedAt as number,
+        ended: r.endedAt !== null,
+        tokens: total,
+        input: tokens.input,
+        output: tokens.output,
+        cacheRead: tokens.cacheRead,
+        cacheCreate: tokens.cacheCreate,
+        expected,
+        ...facts,
+        cause,
+        prevention: overusePrevention(cause),
+      });
+    }
+    runs.sort((a, b) => b.tokens - a.tokens || a.runId.localeCompare(b.runId));
+    return {
+      runs,
+      groups: groupOveruse(runs),
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: baselines.expected(size),
+        measured: baselines.bySize.has(size ?? ""),
+      })),
+    };
   }
 
   /** Crew-wide metrics over one window, both ends inclusive. */

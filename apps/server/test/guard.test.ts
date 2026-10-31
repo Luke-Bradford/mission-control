@@ -732,13 +732,18 @@ describe("POST /api/guard/check", () => {
     const CONFIGURED = ["pnpm -s lint", "pnpm -s typecheck"];
     const spy = () => {
       const calls: unknown[][] = [];
+      const options: unknown[] = [];
       const checks: CheckRecorder = {
-        begin: async (k, c) => void calls.push(["begin", k, c]),
+        begin: async (k, c, _aliases, o) => {
+          calls.push(["begin", k, c]);
+          options.push(o);
+        },
         end: async (k, ok) => void calls.push(["end", k, ok]),
         lockedBy: async (_run, c) => CONFIGURED.find((x) => x === c) ?? null,
         dropRun: () => {},
+        drops: () => [],
       };
-      return { calls, checks };
+      return { calls, checks, options };
     };
 
     it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
@@ -781,6 +786,29 @@ describe("POST /api/guard/check", () => {
         ["begin", { runId: "run-a", toolUseId: "c2" }, "pnpm -s typecheck"],
         ["end", { runId: "run-a", toolUseId: "c2" }, false],
       ]);
+    });
+
+    it("tells the recorder the call's own Bash timeout", async () => {
+      const { options, checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, pre("c1", "Bash", { command: "pnpm -s lint", timeout: 600_000 }));
+      await check(tokA, post("c1"));
+      expect(options).toEqual([{ background: false, timeoutMs: 600_000 }]);
+    });
+
+    it("starts a lock-held check's record only once the lock is granted, and never for one refused as busy", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { calls, checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, bash("a1", "pnpm -s lint"));
+      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await until(() => lock.state().waiting.length === 1);
+      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "a1" }, "pnpm -s lint"]]);
+      vi.advanceTimersByTime(LOCK_WAIT_MS);
+      await b;
+      expect(calls).toHaveLength(1);
     });
 
     it("records a held full suite too, and nothing for a denied call or another tool", async () => {
@@ -1088,9 +1116,11 @@ describe("hookMain", () => {
     });
   });
 
-  it("sends run_in_background and file_path when the call has them", async () => {
+  it("sends run_in_background, timeout and file_path when the call has them, and drops other fields", async () => {
     await hookMain(
-      stdinFor({ tool_input: { command: "pnpm -s test", run_in_background: true, timeout: 5 } }),
+      stdinFor({
+        tool_input: { command: "pnpm -s test", run_in_background: true, timeout: 5, other: 1 },
+      }),
       [tokenFile, URL_OK],
       answer(200, "{}"),
     );
@@ -1098,7 +1128,7 @@ describe("hookMain", () => {
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
       tool_use_id: "toolu_1",
-      tool_input: { command: "pnpm -s test", run_in_background: true },
+      tool_input: { command: "pnpm -s test", run_in_background: true, timeout: 5 },
     });
   });
 

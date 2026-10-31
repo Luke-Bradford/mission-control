@@ -623,6 +623,39 @@ describe("the reloader", () => {
     r.stop();
   });
 
+  it("records each seat's loop kind on its older runs at start and before a reload removes it", () => {
+    const old = (id: string, agentId: string) =>
+      store.upsertRun({
+        id,
+        agentId,
+        repoId: "shop-app",
+        seq: 1,
+        startedAt: 1,
+        endedAt: 2,
+        status: "ok",
+        sessionId: null,
+        model: null,
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/x",
+        prs: [],
+        summary: null,
+      });
+    old("o1", "guido-1");
+    const r = make();
+    r.start();
+    expect(store.run("o1")?.loopKind).toBe("build");
+    old("o2", "guido-1");
+    loaded = config([{ id: "s1", seats: [seat("guido-2")] }]);
+    touch(1);
+    return r.reload().then(() => {
+      expect(store.run("o2")?.loopKind).toBe("build");
+      r.stop();
+    });
+  });
+
   it("an unchanged file is not reloaded", async () => {
     const load = vi.fn(() => structuredClone(applied));
     const r = createCrewReloader({
@@ -792,7 +825,8 @@ describe("the reloader", () => {
       if (!renamedSeat) throw new Error("missing fixture seat");
       renamedSeat.displayCallSign = "Orbit One";
       expect(applied).toEqual(renamed);
-      expect(store.runs("guido-1", 10)).toEqual(runs);
+      // history is kept; the reload only records the seat's loop kind on its older runs
+      expect(store.runs("guido-1", 10)).toEqual(runs.map((r) => ({ ...r, loopKind: "build" })));
       expect(store.seatSession("guido-1")).toEqual(session);
       expect(store.queue("guido-1")).toEqual(queue);
       expect(store.threadComms("guido-1")).toEqual(messages);

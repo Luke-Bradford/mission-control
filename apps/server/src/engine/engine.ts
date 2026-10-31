@@ -20,6 +20,7 @@ import {
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
   asideEventText,
+  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   awayDiffSafe,
@@ -33,6 +34,7 @@ import {
   CI_RERUN_FAILED_TEXT,
   COMMS_CAPCOM,
   COMMS_MC,
+  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
   cardMark,
@@ -41,6 +43,8 @@ import {
   ciVerdict,
   cleanupBranchNoteKey,
   closedIssueText,
+  commsMirror,
+  conflictCommsText,
   conflictKey,
   conflictText,
   controllerCheckFailText,
@@ -58,6 +62,7 @@ import {
   FLIGHT_REWORKS_PER_HEAD,
   FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
+  fixCommsText,
   fixSentText,
   fixText,
   gateView,
@@ -145,7 +150,7 @@ import {
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { wakeDueAsideRun } from "./aside.ts";
+import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -873,6 +878,7 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
         : {}),
@@ -1156,7 +1162,10 @@ export function createEngine(deps: EngineDeps): Engine {
           // a park for no progress then explains itself
           cur.lastRefusal = text;
           if (sent === "sent") {
-            handOff(COMMS_MC, text);
+            handOff(
+              COMMS_MC,
+              commsMirror(text, "Push checks failed; the full command list was sent to the seat."),
+            );
             // running checks makes no commit, so the push clock starts over: a full window from the message
             cur.pushStartedAt = at;
           }
@@ -1201,18 +1210,26 @@ export function createEngine(deps: EngineDeps): Engine {
         const sent = await send(run.id, a.key, a.text);
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
-          const rv = store.review(id);
-          if (rv !== null) {
+          const review = store.review(id);
+          if (review !== null) {
             store.addLoopEvent(
               reviewEventKey(run.id, id, "fix"),
               run.id,
-              fixSentText(rv.blocking, seatCallSign(run.agentId)),
+              fixSentText(review.blocking, seatCallSign(run.agentId)),
               at,
             );
-            handOff(rv.seatId, a.text);
+            handOff(
+              review.seatId,
+              fixCommsText({
+                retro: seatCallSign(review.seatId),
+                sha: review.sha,
+                findings: store.findingsOf(review.id),
+              }),
+            );
           }
         }
-        if (sent === "sent" && a.key.startsWith("conflict:")) handOff(COMMS_MC, a.text);
+        if (sent === "sent" && a.key.startsWith("conflict:"))
+          handOff(COMMS_MC, commsMirror(a.text, conflictCommsText(cur.mainMerge?.files ?? [])));
         return;
       }
       case "ci-excerpt": {
@@ -1221,7 +1238,13 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a real excerpt is kept: a failed read or an empty answer is asked for again
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
-        const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
+        const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
+        const shortened = "\n[CI output shortened; inspect the CI log.]";
+        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+        const text =
+          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+            ? intro + excerpt
+            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
         const sent = await send(run.id, a.key, text);
         if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
@@ -1342,7 +1365,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
-        cur.aside = { worktree, wake: false };
+        // (a run set aside mid-build is due back as soon as the rework is out of the way)
+        cur.aside = { worktree, wake: cur.phase === "working" };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1354,7 +1378,11 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "ci" ? asideInCiEventText(call) : asideEventText(call),
+          cur.phase === "working"
+            ? asideForReworkEventText(call)
+            : cur.phase === "ci"
+              ? asideInCiEventText(call)
+              : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1381,8 +1409,18 @@ export function createEngine(deps: EngineDeps): Engine {
         try {
           await supervisor.wakeRun(run.id);
         } catch (e) {
-          // the seat is busy or the hub is stopping: the next pass tries again
-          if (isTransientStart(e)) return;
+          // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
+          // seat is looked at now, to give way to this rework if its turn has ended
+          if (isTransientStart(e)) {
+            const holder = supervisor.seat(run.agentId)?.runId ?? null;
+            if (
+              holder !== null &&
+              holder !== run.id &&
+              store.run(holder)?.loop?.phase === "working"
+            )
+              void reconcileRun(holder);
+            return;
+          }
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
@@ -2649,7 +2687,10 @@ export function createEngine(deps: EngineDeps): Engine {
                 ticket: run.ticket ?? null,
                 ref: run.ticket ?? null,
                 targetRunId: run.id,
-                text: message,
+                text: commsMirror(
+                  message,
+                  "FLIGHT requested rework; the full request was sent to the seat.",
+                ),
               });
               if (stored === null) return refuse("rework-undelivered");
               store.markCommsInboxRead(run.agentId, [stored.id]);
@@ -2737,7 +2778,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ticket: run.ticket ?? null,
             ref: run.ticket ?? null,
             targetRunId: run.id,
-            text,
+            text: commsMirror(text, "Controller check failed; the full note was sent to the seat."),
           };
           if (loop.aside) {
             // off its seat (the seat may hold another run now): the note waits in Comms for the

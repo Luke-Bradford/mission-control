@@ -94,8 +94,9 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
       input[k] = raw[k];
     }
     // a Read's range: a numeric string is a number to the CLI; anything else fails closed, since
-    // dropping it would make a range look like a whole-file read
-    for (const k of ["offset", "limit"]) {
+    // dropping it would make a range look like a whole-file read. A Bash `timeout` is forwarded the
+    // same way: the hub uses it only to say why a check call that ran that long was not counted.
+    for (const k of ["offset", "limit", "timeout"]) {
       const v = raw[k];
       if (v === undefined) continue;
       const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;

@@ -5,7 +5,7 @@ import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
+import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -104,6 +104,8 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
+  loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
@@ -891,6 +893,8 @@ export interface CrewLoop {
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
+  /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
+  waitText?: string | null;
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */

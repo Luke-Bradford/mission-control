@@ -143,7 +143,7 @@ it("updates the open card as live changes arrive", async () => {
   );
   stubFetch({
     "/api/repos": [{ id: "sample" }],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/config": { crew: { sessions: [] } },
     "/api/repos/sample/map": { ...mapSnapshotFixture, seq: 10 },
   });

@@ -102,7 +102,7 @@ function stub(d: Data = {}) {
     "/api/overview": OVERVIEW,
     "/api/metrics": METRICS_VIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
-    "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
     "/api/machine": {
       latest: d.machine === undefined ? sample() : d.machine,
@@ -120,7 +120,7 @@ function stub(d: Data = {}) {
     "/api/config": d.config ?? CONFIG,
     "/api/test-lock": d.lock ?? { holder: null, waiting: [] },
     "/api/crew/status": d.crewStatus ?? { enabled: true, note: null },
-    "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": d.prs ?? [],
   });
 }
 
@@ -1057,7 +1057,7 @@ describe("Agents panel", () => {
       release = resolve;
     });
     vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-      if (input === "/api/repos/shop-app/prs?linked=1") await gate;
+      if (input === "/api/repos/shop-app/prs?linked=1&shape=summary") await gate;
       return f(input, init);
     });
     const { container } = render(<Overview />);
@@ -1075,7 +1075,7 @@ describe("Agents panel", () => {
 
   it("the repo's PRs are kept for a seat with an open review, whatever its state, and not for a note", async () => {
     const review = { prNumber: 77, state: "open" } as const;
-    const prsPath = "/api/repos/shop-app/prs?linked=1";
+    const prsPath = "/api/repos/shop-app/prs?linked=1&shape=summary";
     const fetched = async (rows: CrewRow[]) => {
       const f = stub({ rows });
       const { unmount } = render(<Overview />);
@@ -1775,7 +1775,7 @@ describe("Account quota panel", () => {
 
   it("keeps the row — until the timezone has loaded", async () => {
     stubFetch({
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/limits": limits,
       "/api/limits/github": GITHUB_RATE,
       "/api/health": [],

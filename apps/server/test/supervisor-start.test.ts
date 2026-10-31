@@ -329,6 +329,13 @@ describe("startRun eligibility", () => {
     expect(store.seatSession("guido-1")).not.toBeNull();
     expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
   });
+
+  it("stores the seat's loop kind on the run it starts", async () => {
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+    expect(store.run(out.runId)?.loopKind).toBe("build");
+  });
 });
 
 describe("startRun profiles", () => {
@@ -1177,7 +1184,11 @@ describe("startRun", () => {
     const out = await sup.startRun("fao-1", 42);
     expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     const wt = join(root, "mc-crew", "fao-1-42");
-    expect(store.run(out.runId)).toMatchObject({ branch: null, ticket: "mc#42" });
+    expect(store.run(out.runId)).toMatchObject({
+      branch: null,
+      ticket: "mc#42",
+      loopKind: "plan",
+    });
     expect(store.seatSession("fao-1")?.worktree).toBe(wt);
     expect(() => git(wt, "symbolic-ref", "--quiet", "HEAD")).toThrow();
     await until(() => expect(recorded().length).toBeGreaterThan(0));
