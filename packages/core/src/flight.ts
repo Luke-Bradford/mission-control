@@ -755,7 +755,9 @@ export const closeFailedText = (): string =>
   "Not closed: GitHub refused the comment and close; see the server log.";
 export const closeUnconfirmedText = (): string =>
   "Close unconfirmed: GitHub accepted the call but the ticket does not read as closed; the comment may have posted. Tell the operator.";
-/** The most waiting tickets whose bodies close_ticket reads for "Depends on", and how many at once. */
+/** The most tickets close_ticket's search may return; a full page may be missing some, so it refuses. */
+export const FLIGHT_CLOSE_SEARCH_LIMIT = 1000;
+/** The most waiting tickets mentioning the closed one whose bodies close_ticket reads for "Depends on", and how many at once. */
 export const FLIGHT_CLOSE_DEPENDENT_READS_MAX = 60;
 export const FLIGHT_CLOSE_DEPENDENT_READ_BATCH = 4;
 
