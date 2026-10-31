@@ -2270,6 +2270,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store,
             pr,
             runCommand: repo.runCommand,
+            previewUrl:
+              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number)?.url ?? null) : null,
             singleRepo: config.repos.length === 1,
             repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
           });

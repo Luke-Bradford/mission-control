@@ -15,6 +15,8 @@ const COMMS_READ = 200;
 export interface PrUatInput {
   store: Store;
   pr: PullRequestView;
+  /** The URL of the PR's running branch preview, else null. */
+  previewUrl: string | null;
   /** The repo's run command from config, if it has one. */
   runCommand: string | undefined;
   /** True when the hub serves one repo, so an unqualified `#n` can only mean this one. */
@@ -53,7 +55,7 @@ function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
 
 /** Comms, rework rounds and try-it commands for one PR. */
 export function prUat(input: PrUatInput): PrUatView {
-  const { store, pr, runCommand, singleRepo, repoOfSender } = input;
+  const { store, pr, runCommand, previewUrl, singleRepo, repoOfSender } = input;
   const ticketNumber = pr.ticket === null ? null : /#(\d+)$/.exec(pr.ticket)?.[1];
   const all = store
     .commsOnTicket(
@@ -115,7 +117,7 @@ export function prUat(input: PrUatInput): PrUatView {
         `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
         ...(runCommand === undefined ? [] : [runCommand]),
       ],
-      previewUrl: null,
+      previewUrl,
     },
     uat: uatOf(input),
   };

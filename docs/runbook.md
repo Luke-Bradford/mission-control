@@ -1425,7 +1425,7 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   first branch commit before the next round (`fixSha`) and a `result` (`clean`, `resolved` or
   `open`); and `tryIt`, the branch name as the run pushed it, `git fetch origin <branch> && git
   switch <branch>` plus the repo's `run_command` from `config.yaml` when it sets one. `previewUrl`
-  is null until previews land (#985). `uat` says whether the PR's open run is parked for the
+  is the URL of the PR's running branch preview (see Branch previews), else null. `uat` says whether the PR's open run is parked for the
   operator's acceptance (`waiting`), when it parked (`since`) and the note the operator last sent it
   back with (`note`); a PR with no such run answers `{ waiting: false, since: null, note: null }`.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one

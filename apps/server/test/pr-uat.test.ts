@@ -291,6 +291,34 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     },
   );
 
+  it("carries the running preview's URL for its PR and null for another", async () => {
+    store.upsertPullRequests("shop-app", [pr("shop-app", 41)], NOW);
+    const withPreview = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      previewRepoId: "shop-app",
+      previews: {
+        get: (n: number) =>
+          n === 30
+            ? { pr: 30, branch: BRANCH, port: 7431, url: "http://127.0.0.1:7431", startedAt: NOW }
+            : null,
+      } as never,
+    });
+    await withPreview.ready();
+    const read = async (n: number) =>
+      (
+        (
+          await withPreview.inject({ method: "GET", url: `/api/qa/uat/shop-app/${n}` })
+        ).json() as PrUatView
+      ).tryIt.previewUrl;
+    const [started, other] = [await read(30), await read(41)];
+    await withPreview.close();
+    expect(started).toBe("http://127.0.0.1:7431");
+    expect(other).toBeNull();
+  });
+
   it("omits the run command when the repo has none", async () => {
     const bare = buildApp({
       config: { ...config, repos: [{ ...config.repos[0], runCommand: undefined } as never] },
