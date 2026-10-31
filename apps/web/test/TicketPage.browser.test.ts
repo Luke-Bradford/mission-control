@@ -78,10 +78,14 @@ describeRendered("The ticket page in a browser", () => {
             (await page.reachable(".tk-done li", ".tk-form .pb")).every(Boolean),
             `${label} done`,
           ).toBe(true);
-          expect(
-            (await page.reachable(".tk-event", ".tk-timeline .pb")).every(Boolean),
-            `${label} events`,
-          ).toBe(true);
+          if (name === "many") {
+            expect(
+              (await page.reachable(".tk-event", ".tk-timeline .pb")).every(Boolean),
+              `${label} events`,
+            ).toBe(true);
+          } else {
+            await page.box(".tk-timeline .muted"); // the empty line is shown
+          }
           const form = await page.box(".tk-form");
           const line = await page.box(".tk-timeline");
           expect(form.x, label).toBeLessThan(line.x);
