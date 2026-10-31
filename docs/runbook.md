@@ -1394,6 +1394,14 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **PR readiness: Comms, rework and try-it.** `GET /api/qa/uat/:repoId/:number` carries, for one
+  PR: `comms`, the newest 20 messages whose ref or ticket is the PR or its ticket (sender, time,
+  text; newest first); `rounds`, each reported review round newest first with its blocking findings
+  as `file:line summary`, the author seat's newest message before the next round (`reply`), the
+  first branch commit before the next round (`fixSha`) and a `result` (`clean`, `resolved` or
+  `open`); and `tryIt`, the branch name as the run pushed it, `git fetch origin <branch> && git
+  switch <branch>` plus the repo's `run_command` from `config.yaml` when it sets one. `previewUrl`
+  is null until previews land (#985); the `uat` waiting state arrives with #1162.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
   window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
   - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`

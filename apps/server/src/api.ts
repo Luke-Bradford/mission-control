@@ -91,6 +91,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
+  type PrUatView,
   type PullRequestListRow,
   type PullRequestSummary,
   type PullRequestView,
@@ -277,6 +278,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -2240,6 +2242,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
           const since = now() - days * DAY_MS;
           return { days, since, metrics: QA_FLOW_METRICS, ...store.qaFlow(since) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (a PR's Comms, rework rounds and try-it commands, for the QA readiness card)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/qa/uat/:repoId/:number",
+        async (req, reply): Promise<PrUatView | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return prUat({
+            store,
+            pr,
+            runCommand: repo.runCommand,
+            singleRepo: config.repos.length === 1,
+            repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+          });
         },
       );
 

@@ -6305,6 +6305,15 @@ export class Store {
     }));
   }
 
+  /** Every commit the commit tool made on a branch, oldest first. */
+  commitsOnBranch(repoId: RepoId, branch: string): { sha: string; at: number }[] {
+    return (
+      this.db
+        .prepare("SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? ORDER BY at, id")
+        .all(repoId, branch) as { sha: string; at: number }[]
+    ).map((r) => ({ sha: r.sha, at: r.at }));
+  }
+
   /** The commits the commit tool made for a run, in the order it made them. */
   runCommits(runId: string): string[] {
     const rows = this.db
