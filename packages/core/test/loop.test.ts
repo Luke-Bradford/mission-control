@@ -407,6 +407,38 @@ describe("state step", () => {
     }
   });
 
+  it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    expect(stopped.parked?.kind).toBe("stuck");
+    // the stored PR row later carries the pushed head
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, stopped));
+    expect(r.loop).toMatchObject({
+      phase: "ci",
+      parked: null,
+      pushStartedAt: NOW,
+      pushFor: SHA,
+      unparkedAt: NOW,
+    });
+    expect(events(r.actions)).toEqual([`PR #12 shows ${SHA.slice(0, 7)}; back to CI`]);
+  });
+
+  it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    for (const over of [
+      { pr: pr({ headSha: SHA2 }) },
+      { pr: pr({ headSha: null }) },
+      { pr: null },
+      { pr: pr({ state: "closed" as const }) },
+      { headCommit: SHA2 },
+    ] as Partial<LoopSnapshot>[]) {
+      expect(reconcile(inCi(over, stopped)).loop.phase).toBe("parked");
+    }
+  });
+
   it("9: a push or PR not there yet, within ten minutes, waits", () => {
     for (const over of [
       { pushed: null },

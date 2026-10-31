@@ -883,6 +883,8 @@ export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
+/** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
+export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
@@ -910,6 +912,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "github_budget",
   "hub_error",
   "old_park",
+  "push_unseen",
   "merge_stalled",
   "item_stale",
   "run_no_pr",

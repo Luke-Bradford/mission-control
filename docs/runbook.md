@@ -1011,6 +1011,7 @@ by reason and by hour over the last day.
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `old_park` | a run has been parked for 15 minutes |
+| `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |
 | `run_no_pr` | a build run ended (crashed or not) with a ticket and no PR, within the last day, and not already a missing report |

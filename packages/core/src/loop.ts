@@ -126,6 +126,8 @@ export const REFUSAL_TRIES = 3;
 export const CI_PENDING_MAX_MS = 30 * 60_000;
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
+/** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
+export const STUCK_PARK = "stuck";
 
 /** The engine reconciles every looped run this often. */
 export const ENGINE_TICK_MS = 60_000;
@@ -889,6 +891,30 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [],
     };
   }
+  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does
+  if (
+    loop.phase === "parked" &&
+    loop.parked?.kind === STUCK_PARK &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "ci",
+        parked: null,
+        pushStartedAt: now,
+        pushFor: headCommit,
+        unparkedAt: now,
+        transient: 0,
+        lastRefusal: null,
+      },
+      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
@@ -1004,7 +1030,7 @@ function stateStep(s: LoopSnapshot): Step {
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(
           loop,
-          "stuck",
+          STUCK_PARK,
           `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
         );
       }
