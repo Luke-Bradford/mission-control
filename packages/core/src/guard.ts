@@ -2160,7 +2160,14 @@ const FILE_WRITERS = new Set([
 const GH_PROTECTED_ENDPOINT =
   /^\/?repos\/[^/]+\/[^/]+(?:$|\?|\/(?:branches\/.+\/protection|rulesets|collaborators|invitations|hooks|keys|environments|pages|transfer|actions\/(?:permissions|secrets|variables)|codespaces\/secrets|dependabot\/secrets)(?:\/|\?|$))/;
 /** A controller's act: FLIGHT neither reads the operator token nor records its own approvals. */
-const APPROVAL_PATHS = /operator-token|flight[/.](?:approvals|runaway)|flight\.appr/;
+const APPROVAL_PATHS =
+  /operator[-/](?:token|tok|bootstrap)|x-mc-operator|flight[/.](?:approvals|runaway)|flight\.appr|flight-runaway/i;
+/** `%xx` escapes decoded, so `flight/%61pprovals` is read as the route the hub will route it to. */
+const decodePercent = (s: string): string =>
+  s.replace(/%([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(Number.parseInt(h, 16)));
+/** Whether a command or path names the operator token, the HUD's bootstrap, approvals or the breaker. */
+const namesControllerAct = (s: string): boolean =>
+  APPROVAL_PATHS.test(s) || APPROVAL_PATHS.test(decodePercent(s));
 
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
@@ -2291,7 +2298,7 @@ export function guardDecision(
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") {
-    if (ctx.fullAccess && APPROVAL_PATHS.test(e.input.file_path ?? ""))
+    if (ctx.fullAccess && namesControllerAct(e.input.file_path ?? ""))
       return deny(
         "repo-rules",
         "the operator token, approvals and the runaway breaker are a controller's",
@@ -2344,7 +2351,7 @@ export function guardDecision(
           "repo-rules",
           "sqlite3 on the hub's database runs with -readonly and no dot-command that writes",
         );
-      if (APPROVAL_PATHS.test(command))
+      if (namesControllerAct(command))
         return deny(
           "repo-rules",
           "the operator token, approvals and the runaway breaker are a controller's",

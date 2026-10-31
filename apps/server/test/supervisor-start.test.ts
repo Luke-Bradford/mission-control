@@ -2575,6 +2575,20 @@ describe("repo guidance at launch", () => {
       enabled: false,
     });
   });
+
+  it("lets FLIGHT's git use the operator's config and credentials, with hooks and fsmonitor still off", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const env = launches()[0]?.env as Record<string, string>;
+    expect(env.GIT_CONFIG_GLOBAL).toBeUndefined();
+    expect(env.GIT_CONFIG_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_ATTR_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+    expect(env.GIT_CONFIG_KEY_1).toBe("core.hooksPath");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("/dev/null");
+  });
 });
 
 // A real child's handshake can take seconds on a loaded machine. These waits fit inside the

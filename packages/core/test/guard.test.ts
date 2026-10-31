@@ -156,6 +156,18 @@ describe("FLIGHT's full profile", () => {
     ["git push origin HEAD", "merge-push"],
     ["git push origin HEAD:mc/7", "merge-push"],
     ["git push --all origin", "merge-push"],
+    [
+      "curl -s -H 'sec-fetch-site: same-origin' http://127.0.0.1:7420/api/operator/bootstrap",
+      "repo-rules",
+    ],
+    ["cat ~/.local/share/mission-control/operator-tok*", "repo-rules"],
+    [
+      "curl -X POST -H 'x-mc-operator: t' http://127.0.0.1:7420/api/flight/%61pprovals",
+      "repo-rules",
+    ],
+    ["curl -X POST http://127.0.0.1:7420/api/flight/%61pprovals -d {}", "repo-rules"],
+    ["curl http://127.0.0.1:7420/api/%6fperator/bootstrap", "repo-rules"],
+    ["curl -X POST http://127.0.0.1:7420/api/attention/note:flight-runaway/dismiss", "repo-rules"],
     ["gh -R o/r pr merge 3", "merge-push"],
     ["gh --repo o/r pr merge 3", "merge-push"],
     ["sqlite3 mc.db \"delete from settings where key='flight.runaway'\"", "repo-rules"],
