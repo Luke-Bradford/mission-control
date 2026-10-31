@@ -1220,6 +1220,7 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
   // A re-allow beats a deny in the seat's sandbox, so one over home itself or a credential folder
   // would hand a seat what the sandbox keeps from it.
   const home = lower(homedir());
+  const tempDirs = ["/tmp", "/private/tmp"].map(lower);
   const dataDir = lower(join(homedir(), ".local", "share", "mission-control"));
   const credentialDirs = SANDBOX_DENY_READ_HOME.map((d) => lower(join(homedir(), d)));
   for (const p of crew.allowRead ?? []) {
@@ -1231,7 +1232,13 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
       throw new ConfigError("crew.allow_read", `${p} holds or is inside a credential folder`);
     }
     // the default data dir (a MC_DB elsewhere is checked when a seat starts) and crew.deny_read
-    const denied = [dataDir, ...(crew.denyRead ?? []).map(lower)];
+    // the temp folders: the seat's own temp root lives under them, and a seat's siblings with it
+    // (not for a path inside home, which a home under /tmp would otherwise put there)
+    const denied = [
+      dataDir,
+      ...(isInside(real, home) ? [] : tempDirs),
+      ...(crew.denyRead ?? []).map(lower),
+    ];
     if (denied.some((x) => isInside(x, real) || isInside(real, x))) {
       throw new ConfigError("crew.allow_read", `${p} holds or is inside a denied folder`);
     }

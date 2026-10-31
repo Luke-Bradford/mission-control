@@ -1293,6 +1293,12 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     expect(e.path).toBe("crew.allow_read");
   });
 
+  it("refuses allow_read over or inside the temp folders", () => {
+    for (const p of ["/tmp", "/private/tmp", "/private/tmp/m501/key"]) {
+      expect(fails(crewText({ allowRead: [p] })).path).toBe("crew.allow_read");
+    }
+  });
+
   describe("deny_read", () => {
     const holds = (p: string) => `crew.deny_read: ${p} holds the crew's own folders`;
 

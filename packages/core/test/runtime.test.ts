@@ -923,6 +923,13 @@ describe("crew sandbox home-folder reads (#487)", () => {
     ).toThrow(/inside denied/);
   });
 
+  it("refuses a re-allow over or inside the shared temp folders", () => {
+    const tempRoot = "/tmp/mc-runs/own";
+    for (const p of ["/tmp", "/tmp/mc-runs", "/tmp/mc-runs/other", "/tmp/claude-501"]) {
+      expect(() => fsOf({ ...sandbox, tempRoot, allowRead: [p] }, "writer")).toThrow(/denied/);
+    }
+  });
+
   it("refuses a re-allow of the whole home folder, or of a parent of it", () => {
     expect(() => fsOf({ ...sandbox, toolchainDirs: ["/home/you"] }, "writer")).toThrow(/home/);
     expect(() => fsOf({ ...sandbox, allowRead: ["/home"] }, "writer")).toThrow(/home/);

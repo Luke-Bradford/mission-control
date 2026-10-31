@@ -1009,6 +1009,9 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
   ];
 }
 
+/** The CLI's shared temp folders (`/tmp/claude-<uid>`), denied whole to a seat with its own temp root. */
+const TEMP_DENY_GLOBS = ["/tmp/claude-*", "/private/tmp/claude-*"] as const;
+
 const holds = (parent: string, path: string) =>
   path === parent || path.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
 
@@ -1039,6 +1042,11 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
   for (const p of given) {
     const d = denied.find((x) => holds(x, p));
     if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} is inside denied ${d}`);
+    // the CLI's shared temp folder is denied by a glob, which `holds` does not read
+    if (i.tempRoot !== undefined && TEMP_DENY_GLOBS.some((g) => p.startsWith(g.slice(0, -1))))
+      throw new Error(
+        `crew sandbox: allowRead ${p} is inside denied ${TEMP_DENY_GLOBS.join(", ")}`,
+      );
   }
   return [...new Set(allows)];
 }
@@ -1052,7 +1060,7 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
 export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
-  const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
+  const tempDenies = i.tempRoot === undefined ? [] : [...TEMP_DENY_GLOBS];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
   if (!i.pnpmStoreDir.startsWith("/"))
@@ -1079,7 +1087,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.
         allowWrite: i.tempRoot === undefined ? [] : [i.tempRoot],
         // Home is denied whole; the seat's own paths, toolchain and git config are re-allowed in it.
-        allowRead: sandboxReadAllows(i, denyRead),
+        allowRead: sandboxReadAllows(i, [...denyRead, ...tempReadDenies]),
         // The worktree's `.git` pointer (a writer's worktree is otherwise writable), which
         // rewriting would send the host's own git calls elsewhere; the clone's whole git dir; and
         // the worktree's own git dir (inside it, named so the grant reads plainly). A read-only
