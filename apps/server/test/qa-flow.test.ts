@@ -107,6 +107,15 @@ describe("escaped defects", () => {
     ]);
   });
 
+  it("links a bug written before its PR merged into the store", () => {
+    store.replaceBoard("r1", [bug(50, '{"prs":[7]}')]);
+    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toEqual([]);
+    store.upsertPullRequests("r1", [pr(7)], NOW);
+    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toMatchObject([
+      { issueNumber: 50, prNumber: 7, via: "pr" },
+    ]);
+  });
+
   it("records a bug that names a commit the hub made for the PR's branch", () => {
     store.addRunCommit({
       runId: "run-a",

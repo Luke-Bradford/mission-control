@@ -64,11 +64,18 @@ export interface DefectRefs {
 
 const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
 
-/** The pull requests, commits and files a bug body names. */
-export function parseDefectRefs(body: string): DefectRefs {
-  const prs = [...body.matchAll(/(?:^|[^\w/])#(\d+)\b|\/pull\/(\d+)\b/g)].map((m) =>
-    Number(m[1] ?? m[2]),
-  );
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The pull requests, commits and files a bug body names. A PR URL counts only for `repo`
+ * (`owner/name`); a bare `#N` is this repo's.
+ */
+export function parseDefectRefs(body: string, repo?: string): DefectRefs {
+  const prs = [...body.matchAll(/(?:^|[^\w/])#(\d+)\b/g)].map((m) => Number(m[1]));
+  if (repo !== undefined) {
+    const url = new RegExp(`github\\.com/${escapeRe(repo)}/pull/(\\d+)\\b`, "gi");
+    for (const m of body.matchAll(url)) prs.push(Number(m[1]));
+  }
   // A sha has a digit in it, so plain words made of a-f do not read as one.
   const shas = [...body.matchAll(/\b[0-9a-f]{7,40}\b/gi)]
     .map((m) => m[0].toLowerCase())

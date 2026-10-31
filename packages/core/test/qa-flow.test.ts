@@ -24,10 +24,16 @@ describe("parseDefectRefs", () => {
   it("reads PR numbers, URLs, shas and file paths from a bug body", () => {
     const refs = parseDefectRefs(
       "Broke after #12 and https://github.com/o/r/pull/34. See abc1234 and `apps/server/src/store.ts`.",
+      "o/r",
     );
     expect(refs.prs).toEqual([12, 34]);
     expect(refs.shas).toEqual(["abc1234"]);
     expect(refs.paths).toEqual(["apps/server/src/store.ts"]);
+  });
+
+  it("counts a PR URL only for the card's own repo", () => {
+    expect(parseDefectRefs("https://github.com/o/other/pull/34", "o/r").prs).toEqual([]);
+    expect(parseDefectRefs("https://github.com/o/r/pull/34", "o/r").prs).toEqual([34]);
   });
 
   it("does not take plain words as shas", () => {

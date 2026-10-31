@@ -536,9 +536,9 @@ const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
 /** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
 /** What a bug's body names, for the QA board's escaped defects; nothing for other cards. */
-function defectRefsOf(labels: string[], body: unknown): { defectRefs?: DefectRefs } {
+function defectRefsOf(repo: string, labels: string[], body: unknown): { defectRefs?: DefectRefs } {
   if (!isBugLabelled(labels)) return {};
-  const refs = parseDefectRefs(str(body, ""));
+  const refs = parseDefectRefs(str(body, ""), repo);
   return refs.prs.length + refs.shas.length + refs.paths.length > 0 ? { defectRefs: refs } : {};
 }
 
@@ -762,7 +762,7 @@ function boardItem(
         : null,
     blockedBy: blockers(c.blockedBy),
     ...afterOf(c.body),
-    ...defectRefsOf(labels, c.body),
+    ...defectRefsOf(repo.github, labels, c.body),
     milestone:
       typeof path(c, "milestone", "title") === "string"
         ? str(path(c, "milestone", "title"), "")
