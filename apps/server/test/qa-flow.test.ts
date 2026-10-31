@@ -72,7 +72,7 @@ const run = (over: Partial<Run>): Run => ({
   seq: 1,
   startedAt: NOW - 12 * DAY,
   endedAt: NOW - 5 * DAY,
-  status: "done",
+  status: "ok",
   sessionId: null,
   model: "claude-opus",
   branch: null,
