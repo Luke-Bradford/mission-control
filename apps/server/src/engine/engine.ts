@@ -379,8 +379,7 @@ export function reviewerOf(
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
   const seats = (session?.seats ?? []).filter(
-    (x) =>
-      !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
+    (x) => !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
   );
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
