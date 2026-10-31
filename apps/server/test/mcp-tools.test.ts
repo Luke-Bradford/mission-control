@@ -23,6 +23,7 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  type CheckDrop,
   COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
@@ -2398,6 +2399,7 @@ describe("push and draft_pr", () => {
             exitCode: number | null;
             at: number;
           } | null;
+          dropped?: CheckDrop | null;
         }[],
       ) => ({
         text: pushChecksText(head, found),
@@ -2420,6 +2422,33 @@ describe("push and draft_pr", () => {
         expect(r.text).toContain(MC_PUSH_CHECKS);
         expect(r.text).toContain(`not run: ${TYPES}`);
         expect(remoteTip()).toBeNull();
+      });
+
+      it.each([
+        ["not-plain", "chains the check with a pipe"],
+        ["dirty-start", "uncommitted or untracked files in the tree"],
+        ["dirty-end", "left uncommitted or untracked files"],
+        ["head-moved", "moved the head during the call"],
+        ["turn-ended", "the turn ended before the call reported its end"],
+        ["background", "went to the background"],
+        ["timeout", "Bash timeout"],
+        ["unreadable", "could not read the seat's clone"],
+      ] as const)("says why a %s call was not counted, in the refusal", async (reason, words) => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const drop = { reason, command: TYPES, head: sha, invoked: TYPES, at: NOW };
+        const r = await push(gated({ checkDrops: () => [drop] }));
+        expect(r).toEqual(refusal(sha, [{ command: TYPES, state: "missing", dropped: drop }]));
+        expect(r.text).toContain(words);
+        expect(r.text).not.toContain("nothing recorded");
+      });
+
+      it("says the hub saw no start when it has no reason for a missing check", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const r = await push(gated({ checkDrops: () => [] }));
+        expect(r.text).toContain(`nothing recorded on ${sha.slice(0, 7)}: the hub saw no start`);
+        expect(r.text).toContain("Bash timeout parameter set to 600000");
       });
 
       it("refuses a check that failed, naming it", async () => {
