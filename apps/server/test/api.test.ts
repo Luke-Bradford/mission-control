@@ -9487,6 +9487,32 @@ it("starts, lists and closes an operator-only PR preview", async () => {
       (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
         .statusCode,
     ).toBe(404);
+    // No preview manager (a preview hub), or no crew checkout for the repo: the start route would
+    // answer 409, so the row must say false.
+    const noManager = buildApp({ config, store, bus, previewRepoId: "shop-app" });
+    try {
+      expect((await noManager.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noManager.close();
+    }
+    const crew = config.crew;
+    if (!crew) throw new Error("crew missing");
+    const noCheckout = buildApp({
+      config: { ...config, crew: { ...crew, sessions: [] } },
+      store,
+      bus,
+      previews,
+      previewRepoId: "shop-app",
+    });
+    try {
+      expect((await noCheckout.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noCheckout.close();
+    }
     // A repo with preview support: an open PR can start one, a closed PR cannot. Another repo cannot.
     const rowOf = async (repoId: string, number: number, query = "") =>
       (await a.inject(`/api/repos/${repoId}/prs${query}`))
