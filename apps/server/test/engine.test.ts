@@ -3997,6 +3997,8 @@ describe("the engine runs reviews", () => {
     await toReview();
     // the review start queued a pass of its own: let it finish before the loop is written here
     await h.engine.reconcileRun(RUN);
+    // a ruling stands while CI is red; a green head would clear the failure instead
+    setPr({ ci: "failing" });
     setLoop({ ciFailedSha: SHA });
     reported(first().id, []);
     await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
