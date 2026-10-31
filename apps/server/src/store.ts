@@ -1928,6 +1928,33 @@ export class Store {
   }
 
   /**
+   * True while crew work stands at the machine guard or has just passed it: a queued ticket, a
+   * queued review, or a ticket run (a review's included) that has not ended and is not set aside.
+   */
+  hasPendingStart(): boolean {
+    const found = (sql: string, ...params: string[]): boolean =>
+      this.db.prepare(sql).get(...params) !== undefined;
+    return (
+      found("SELECT 1 FROM queues WHERE taken_at IS NULL LIMIT 1") ||
+      found("SELECT 1 FROM reviews WHERE state = ? LIMIT 1", "queued") ||
+      found(
+        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+      )
+    );
+  }
+
+  /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  hasActiveRun(): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+        )
+        .get() !== undefined
+    );
+  }
+
+  /**
    * The newest run (ended or not, not a review) on `branch`, which owns that branch's ticket:
    * `agentId`'s own run first, any seat's otherwise.
    */

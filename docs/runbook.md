@@ -1130,7 +1130,7 @@ started before the set was recorded rotates on its wake count as before.
 | `usage:<account>` | Claude: OAuth usage endpoint, then the newest transcript `rate_limit_event`. Codex: `codex app-server`, then the newest rollout. | `poll.usage_minutes` |
 | `github:<repo>:prs` | The repo's recent pull requests with their CI state and review decision (read-only GraphQL) | hourly, first 5 min after start |
 | `flow:<repo>` | Flow history: cycle time and first-push CI over the last 14 days (read-only GraphQL) | hourly, first 7 min after start (after the first PR sweep) |
-| `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute | 2 s (status rewritten at most once a minute while unchanged) |
+| `machine` | This Mac: CPU, memory, disk, Claude/Codex processes (`os`, `vm_stat`, `statfs`, `ps`); a sample is kept each minute; the spawned commands run only with a browser or crew work open (see `runbooks/machine-capacity.md`) | 2 s (status rewritten at most once a minute while unchanged) |
 | `maintenance` | No source and no status row: deletes run digests of runs started over 30 days ago | hourly |
 
 Pages are described under "The HUD" below. Run cost is shown as `~$2.47`: it is the

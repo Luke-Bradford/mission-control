@@ -1220,8 +1220,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return crewSummaryMemo.value;
   };
 
+  /**
+   * The rows the notification reconcile builds attention from: the full crew when one is already
+   * built for this moment (a browser's read), else the summary, which skips the event timelines
+   * attention never reads.
+   */
+  const attentionRows = (at: number): CrewRow[] => {
+    const lockKey = JSON.stringify(deps.lock?.state() ?? NO_LOCK);
+    if (
+      crewMemo?.bucket === Math.floor(at / HUD_MEMO_MS) &&
+      crewMemo.revision === crewRevision &&
+      crewMemo.lockKey === lockKey
+    )
+      return crewMemo.value.rows;
+    return sharedCrewSummary(at).rows;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
-  const sharedAttention = (): AttentionItem[] => {
+  const sharedAttention = (light = false): AttentionItem[] => {
     const at = now();
     if (!attentionMemo || at - attentionMemo.at >= HUD_MEMO_MS) {
       attentionMemo = {
@@ -1231,7 +1247,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          sharedCrew(at).rows,
+          light ? attentionRows(at) : sharedCrew(at).rows,
           deps.hubLogin?.() ?? null,
         ),
       };
@@ -1239,7 +1255,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return attentionMemo.items;
   };
   const notifications = new LocalNotifications(store, config, bus, now);
-  const reconcileNotifications = () => notifications.reconcile(sharedAttention());
+  const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   const scheduleNotifications = () => {
