@@ -504,6 +504,10 @@ describe("POST /api/guard/check", () => {
       'sqlite3 -readonly mc.sqlite "select 1"',
       "find . -name x",
       "gh -R o/r pr view 12",
+      'sqlite3 -readonly mc.sqlite "select id from runs where started_at > 0"',
+      "gh pr list --json number --jq '.[] | select(.number > 5)'",
+      "gh search issues stuck",
+      "gh project item-list 1 --owner o",
     ])("does not count %s toward the breaker", async (cmd) => {
       for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
         await check(tokF, bash(`q${i}`, cmd), flight);

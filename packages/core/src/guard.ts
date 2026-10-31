@@ -3144,6 +3144,17 @@ export function rereadVerdict(
   };
 }
 
+/** The command with its quoted text blanked, so a `>` inside a query or a format string is not a redirect. */
+const unquoted = (command: string): string =>
+  command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''").replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
+
+/** Whether `gh <args>` (global flags already stripped) only reads: search, auth, a view, a list, a status. */
+const ghReadVerb = (args: readonly string[]): boolean =>
+  args[0] === "search" ||
+  args[0] === "auth" ||
+  SHELL_GH_READS.has(args[1] ?? "") ||
+  /-list$/.test(args[1] ?? "");
+
 /** Programs that only read, whatever their arguments (a redirect or `tee` is checked apart). */
 const SHELL_READERS = new Set([
   "ls",
@@ -3202,8 +3213,7 @@ const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "sea
  * A command the guard cannot read to the end counts as a write, as does any redirect to a file.
  */
 export function flightShellWrite(command: string): boolean {
-  const bare = command.replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
-  if (/(?<![<>&])>|\btee\b/.test(bare)) return true;
+  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...rawArgs] = argv;
     if (program === undefined) continue;
@@ -3225,7 +3235,7 @@ export function flightShellWrite(command: string): boolean {
         if (!writing || get) continue;
         return true;
       }
-      if (SHELL_GH_READS.has(args[1] ?? "") || args[0] === "auth") continue;
+      if (ghReadVerb(args)) continue;
       return true;
     }
     if (program === "curl") {
@@ -3340,8 +3350,7 @@ const BREAKER_GIT_WRITES = new Set(["push", "commit", "merge", "rebase", "reset"
  * counted, so a diagnostic repeated on every wake cannot trip it.
  */
 export function flightShellBreakerWrite(command: string): boolean {
-  const bare = command.replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
-  if (/(?<![<>&])>|\btee\b/.test(bare)) return true;
+  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...raw] = argv;
     if (program === undefined) continue;
@@ -3361,7 +3370,7 @@ export function flightShellBreakerWrite(command: string): boolean {
       const args = ghStripGlobal(raw);
       if (args[0] === "api") {
         if (ghApiCall(args).writes) return true;
-      } else if (args.length > 1 && !SHELL_GH_READS.has(args[1] ?? "") && args[0] !== "auth") {
+      } else if (args.length > 1 && !ghReadVerb(args)) {
         return true;
       }
     } else if (program === "curl") {

@@ -279,6 +279,12 @@ describe("flightShellBreakerWrite", () => {
     "git tag",
     "git branch -a",
     'sqlite3 -readonly mc.sqlite "select 1"',
+    'sqlite3 -readonly mc.sqlite "select id from runs where started_at > 0"',
+    "gh pr list --json number --jq '.[] | select(.number > 5)'",
+    "git log --format='%h -> %s'",
+    "gh search issues stuck",
+    "gh project item-list 1 --owner o",
+    "gh project field-list 1 --owner o",
     "find . -name '*.log'",
     "gh -R o/r pr view 12",
     "gh pr list",
@@ -307,6 +313,8 @@ describe("flightShellBreakerWrite", () => {
     "curl -X POST http://127.0.0.1:7420/api/runs/r/resume",
     "curl -d x http://h",
     "echo a > f",
+    'echo a > "f x"',
+    "echo 'a > b' > f",
     "echo a | tee f",
   ])("counts %s", (command) => {
     expect(flightShellBreakerWrite(command)).toBe(true);
