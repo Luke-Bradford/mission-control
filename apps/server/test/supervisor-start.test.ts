@@ -2456,8 +2456,10 @@ describe("repo guidance at launch", () => {
     "Avoid: large rewrites.",
     "Keep the launch path boring.",
   ].join("\n");
-  const launchGrants = (start: { argv: unknown }) => {
-    const argv = start.argv as string[];
+  // The run id carries the launch's second, and the token, MCP config and prompt paths carry the
+  // run id; compare launches with it replaced.
+  const launchGrants = (start: { argv: unknown }, runId: string) => {
+    const argv = (start.argv as string[]).map((a) => a.split(runId).join("<run>"));
     const allowedAt = argv.indexOf("--allowedTools");
     const deniedAt = argv.indexOf("--disallowedTools");
     const promptAt = argv.indexOf("--append-system-prompt-file");
@@ -2535,21 +2537,27 @@ describe("repo guidance at launch", () => {
     const { sup, cfg } = make({ extraSeat: FLIGHT });
     sup.start();
 
+    // only Date is faked: the two launches land in different seconds, as a slow machine can make them
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-30T23:35:40.100Z"));
     const plain = await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
-    const plainGrants = launchGrants(launches()[0] as { argv: unknown });
+    const plainGrants = launchGrants(launches()[0] as { argv: unknown }, plain.runId);
     await sup.endRun("flight-1");
+    vi.setSystemTime(new Date("2026-10-30T23:35:41.900Z"));
 
     const repo = cfg.repos[0];
     if (!repo) throw new Error("missing test repo");
     repo.guidance = guidance;
     const guided = await sup.startWatch("flight-1");
+    vi.useRealTimers();
+    expect(guided.runId).not.toBe(plain.runId);
     await until(() => expect(launches()).toHaveLength(2));
     const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
     expect(guidedPrompt).toContain(advice);
     expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
-    expect(launchGrants(launches()[1] as { argv: unknown })).toEqual(plainGrants);
+    expect(launchGrants(launches()[1] as { argv: unknown }, guided.runId)).toEqual(plainGrants);
     await sup.endRun("flight-1");
 
     const build = await sup.startRun("guido-1", 42);
