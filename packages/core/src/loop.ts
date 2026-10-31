@@ -1085,6 +1085,9 @@ function stateStep(s: LoopSnapshot): Step {
           ...loop,
           phase: "review",
           ciFails: 0,
+          // a sha that failed earlier and now passes is no longer the failed one: the merge step
+          // and the ruling park both read ciFailedSha, and a stale one wedged the run in review
+          ciFailedSha: loop.ciFailedSha === pushed.sha ? null : loop.ciFailedSha,
           rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
         },
         actions,

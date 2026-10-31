@@ -568,6 +568,15 @@ describe("state step", () => {
       });
     });
 
+    it("a pass on the sha that failed before clears ciFailedSha, so the run can reach merge", () => {
+      const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }, { ciFailedSha: SHA, ciFails: 1 }));
+      expect(r.loop).toMatchObject({ phase: "review", ciFails: 0, ciFailedSha: null });
+      const other = reconcile(
+        inCi({ pr: pr({ ci: "passing" }) }, { ciFailedSha: "b".repeat(40), ciFails: 1 }),
+      );
+      expect(other.loop.ciFailedSha).toBe("b".repeat(40));
+    });
+
     it("a flake note is never cleared by the loop, at done or after a later sha is re-run", () => {
       const key = `flake:r1:${SHA}`;
       const done = reconcile(
