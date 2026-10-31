@@ -364,7 +364,11 @@ describe("state step", () => {
       for (const over of [
         { pr: pr({ headSha: SHA2, ci: "failing" as const }) },
         { pr: pr({ headSha: SHA2, ci: "pending" as const }) },
-        { pr: pr({ headSha: SHA, ci: "passing" as const }), headCommit: SHA, pushed: { sha: SHA, at: 1 } },
+        {
+          pr: pr({ headSha: SHA, ci: "passing" as const }),
+          headCommit: SHA,
+          pushed: { sha: SHA, at: 1 },
+        },
         { pr: pr({ headSha: SHA2, ci: "passing" as const, state: "closed" as const }) },
       ] as Partial<LoopSnapshot>[]) {
         const stays = reconcile(snap({ ...newer, ...over }, parked));

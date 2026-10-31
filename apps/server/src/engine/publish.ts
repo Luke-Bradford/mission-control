@@ -770,10 +770,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       // a failed run that was not re-run (its re-run was refused) means CI still fails
       const failed =
         runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
-        listed.some(
-          (r) =>
-            !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion),
-        );
+        listed.some((r) => !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion));
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
