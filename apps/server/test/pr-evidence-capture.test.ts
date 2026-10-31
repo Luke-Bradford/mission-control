@@ -53,7 +53,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
       snapshots.push(to);
       writeFileSync(to, "live-db");
     },
-    startSide: async ({ sha }) => {
+    startSide: async ({ sha, db }) => {
       started.push({ sha, db, dbBytes: readFileSync(db, "utf8") });
       return {
         origin: `http://side/${sha}`,
