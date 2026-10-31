@@ -1399,11 +1399,13 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
 - **Review previews and screenshots.** When a PR changes web files (paths under the repo's
   `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
   the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
-  copy of the live data with loop writes off. Its URL is in the review brief. The preview is
-  opened when the review run starts, closed when it ends, and a preview that cannot start
-  (capacity, the two-preview limit, a failed build) does not hold the review: the brief says there
-  is none. A preview the operator already started for that PR is used and left running. RETRO's
-  `preview_browser` tool opens a page of it, sets the width (320..3840) and theme, and runs up to
+  copy of the live data with loop writes off. It is built in the background when the review run
+  starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
+  every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
+  when the run ends (a preview the operator started for that PR is used and left running). If the
+  preview cannot start (capacity, the two-preview limit, a failed build), `preview_browser` says
+  so and RETRO notes the live-data check was not run. RETRO's
+  `preview_browser` tool waits for it (up to 5 minutes), opens a page, sets the width (320..3840) and theme, and runs up to
   20 steps (click, type, read, measure, screenshot). Chrome runs behind a proxy that reaches only
   the preview's `host:port`; every other request, the operator-token bootstrap and the live
   stream included, is refused. Each call starts on a fresh page. A screenshot is kept in

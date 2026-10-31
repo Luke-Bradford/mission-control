@@ -224,8 +224,8 @@ export interface ReviewBriefInput {
   fullSuite: readonly string[];
   /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
   second?: { reason: string; findings: readonly StoredFinding[] };
-  /** A web PR's preview: its URL, or why there is none. Absent for a PR that changes no web files. */
-  preview?: { origin: string | null; note: string | null };
+  /** True for a web PR: its preview is starting in the background. */
+  preview?: boolean;
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";
@@ -264,15 +264,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
         ]
       : []),
     `- CI: every check passed on ${sha7}.`,
-    ...(i.preview === undefined
+    ...(i.preview !== true
       ? []
-      : i.preview.origin !== null
-        ? [
-            `- Preview: ${i.preview.origin} runs this PR's head on a copy of the live data, with loop writes off. Use mc ${MC_TOOL_NAMES.previewBrowser} to open its pages (set the width and theme), click every link and button the change touches, fill its forms with bad input, read the page and take screenshots; each screenshot is kept with this review. The browser reaches only this URL. Real data shows what fixtures miss: long text, many rows, odd states.`,
-          ]
-        : [
-            `- Preview: none for this PR (${i.preview.note ?? "it could not start"}). Say in your summary that the live-data check was not run.`,
-          ]),
+      : [
+          `- Preview: this PR changes web files, so its head is starting on a copy of the live data, with loop writes off. Use mc ${MC_TOOL_NAMES.previewBrowser} to open its pages (set the width and theme); the first call waits for the build, up to 5 minutes. Click every link and button the change touches, fill its forms with bad input, read the page and take screenshots; each screenshot is kept with this review. The browser reaches only the preview. Real data shows what fixtures miss: long text, many rows, odd states. If the tool says there is no preview, say in your summary that the live-data check was not run.`,
+        ]),
     ...(i.touches.length > 0
       ? [
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,

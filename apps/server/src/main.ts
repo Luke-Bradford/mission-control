@@ -449,7 +449,7 @@ export async function main(): Promise<void> {
       ? {}
       : {
           previewBrowser: {
-            origin: (runId) => reviewPreviews.origin(runId),
+            ready: (runId) => reviewPreviews.ready(runId),
             browse: (job, guard) => previewBrowserInHelper(job, guard),
             saveShot: (png) => reviewShots.save(png),
           },

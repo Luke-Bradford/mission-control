@@ -5812,7 +5812,7 @@ describe("preview_browser", () => {
     const ts = make({
       config: cfg,
       previewBrowser: {
-        origin: () => origin,
+        ready: async () => ({ origin, note: origin === null ? "the preview did not start" : null }),
         browse: browse as never,
         saveShot: () => "a".repeat(32),
       },

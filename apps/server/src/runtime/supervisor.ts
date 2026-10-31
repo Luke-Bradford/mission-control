@@ -3665,10 +3665,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       store.upsertRun(run);
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
-      // A web PR's review gets a preview of its head; one that cannot start does not stop the review.
-      const preview =
+      // A web PR's review gets a preview of its head, built in the background: the review does not
+      // wait for it, and one that cannot start does not stop the review.
+      const previewStarting =
         deps.reviewPreviews === undefined
-          ? null
+          ? false
           : await deps.reviewPreviews.open({
               runId,
               repoId: info.repo.id,
@@ -3706,9 +3707,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
-        ...(preview === null || (preview.origin === null && preview.note === null)
-          ? {}
-          : { preview }),
+        ...(previewStarting ? { preview: true } : {}),
         ...(second === null
           ? {}
           : {

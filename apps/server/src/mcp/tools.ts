@@ -266,8 +266,8 @@ export interface McToolsDeps {
   onComms?: (to: string, text: string, from: string) => void;
   /** RETRO's browser on a review's preview; absent: `preview_browser` says there is none. */
   previewBrowser?: {
-    /** The origin of the preview this review run has, or null. */
-    origin(runId: string): string | null;
+    /** Waits for this review run's preview to start; `origin` is null when there is none to use. */
+    ready(runId: string): Promise<{ origin: string | null; note: string | null }>;
     /** Runs the job in a browser that reaches only the guard's origin. */
     browse(job: PreviewJob, guard: PreviewGuard): Promise<PreviewResult>;
     /** Stores a PNG; the id it can be read back by. */
@@ -1608,10 +1608,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (review === null || review.runId !== live.run.id || review.state !== "running")
       return { text: FINDINGS_NOT_A_REVIEW, isError: true };
     const browser = deps.previewBrowser;
-    const origin = browser?.origin(ctx.runId) ?? null;
+    const preview = browser === undefined ? null : await browser.ready(ctx.runId);
+    const origin = preview?.origin ?? null;
     if (browser === undefined || origin === null)
       return {
-        text: "No preview for this review: it is not a web PR, or the preview did not start. Say in your summary that the live-data check was not run.",
+        text: `No preview for this review: ${preview?.note ?? "it is not a web PR"}. Say in your summary that the live-data check was not run.`,
         isError: true,
       };
     const job: PreviewJob = parsed.data;
