@@ -193,6 +193,9 @@ it("a spoke with one seat named after its role draws no rim name; two seats or a
   expect(spokeName({ key: "GUIDO", ids: ["guido-1"] }, all, upper)).toBeNull();
   expect(spokeName({ key: "GUIDO", ids: ["guido-1", "guido-2"] }, all, upper)).toBe("GUIDO");
   expect(spokeName({ key: "LOOPS", ids: ["ebull-ta"] }, all, upper)).toBe("LOOPS");
+  // named after the role exactly or with a dash: FAOX-1 is not FAO's
+  expect(spokeName({ key: "FAO", ids: ["faox-1"] }, all, upper)).toBe("FAO");
+  expect(spokeName({ key: "FAO", ids: ["fao"] }, all, upper)).toBeNull();
   // only present seats count: an away second seat leaves one, so the name goes
   expect(
     spokeName({ key: "RETRO", ids: ["retro-1", "retro-cx"] }, (id) => id === "retro-1", upper),

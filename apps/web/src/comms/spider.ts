@@ -99,13 +99,9 @@ export function spokeName(
   nameOf: (id: string) => string,
 ): string | null {
   const ids = spoke.ids.filter(present);
-  if (
-    ids.length === 1 &&
-    nameOf(ids[0] as string)
-      .toUpperCase()
-      .startsWith(spoke.key.toUpperCase())
-  )
-    return null;
+  const name = ids.length === 1 ? nameOf(ids[0] as string).toUpperCase() : null;
+  const key = spoke.key.toUpperCase();
+  if (name !== null && (name === key || name.startsWith(`${key}-`))) return null;
   return spoke.key;
 }
 
