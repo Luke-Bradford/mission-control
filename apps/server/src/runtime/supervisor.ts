@@ -3264,7 +3264,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             startedAt,
           );
         } else if (result?.kind === "skipped") {
-          log(`${seatId}: main not brought into the reused worktree (${result.why})`);
+          log(`${seatId}: main not brought into the reused worktree (${result.why === "failed" ? `${result.why}: ${result.detail}` : result.why})`);
         }
         return result;
       });

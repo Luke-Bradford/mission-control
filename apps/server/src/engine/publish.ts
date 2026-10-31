@@ -57,8 +57,8 @@ import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
   installAfterSync,
-  MC_MERGE_AUTHOR,
   mainMergeArgs,
+  mainMergeEnv,
 } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath } from "../store.ts";
@@ -1041,10 +1041,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             return transient(UPDATE_UP_TO_DATE);
           }
           try {
-            await w(mainMergeArgs(branch, mainSha), {
-              GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-              GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-            });
+            await w(mainMergeArgs(branch, mainSha), mainMergeEnv());
           } catch (e) {
             if ((e as { code?: unknown } | null)?.code === 1) {
               const files = await unmerged();

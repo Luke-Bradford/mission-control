@@ -56,6 +56,14 @@ async function checkSeatGitConfig(path: string): Promise<void> {
 export const CREW_GIT_SLOW_MS = 120_000;
 /** The author and committer of the merge commit the hub makes. */
 export const MC_MERGE_AUTHOR = "Mission Control";
+/** Fixed, so a merge never depends on git guessing an address from the host's name. */
+export const MC_MERGE_EMAIL = "mission-control@users.noreply.github.com";
+export const mainMergeEnv = (): NodeJS.ProcessEnv => ({
+  GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+  GIT_AUTHOR_EMAIL: MC_MERGE_EMAIL,
+  GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+  GIT_COMMITTER_EMAIL: MC_MERGE_EMAIL,
+});
 export const mainMergeArgs = (branch: string, mainSha: string): string[] => [
   "-c",
   "commit.gpgsign=false",
@@ -283,7 +291,8 @@ export type ReuseSync =
   | { kind: "up-to-date" }
   | { kind: "merged"; sha: string; before: string }
   | { kind: "conflict"; mainSha: string; files: string[] }
-  | { kind: "skipped"; why: "dirty" | "merging" | "failed" };
+  | { kind: "skipped"; why: "dirty" | "merging" }
+  | { kind: "skipped"; why: "failed"; detail: string };
 
 export interface PendingCheckouts {
   isPending(path: string): boolean;
@@ -325,6 +334,12 @@ function gitReason(e: unknown): string {
   const stderr = String((e as { stderr?: unknown }).stderr ?? "");
   const fatal = stderr.split("\n").find((l) => l.startsWith("fatal: "));
   return fatal ? fatal.slice("fatal: ".length) : "git failed";
+}
+
+/** What a failed git call said: its stderr, else the error's message. */
+function failureDetail(e: unknown): string {
+  const stderr = String((e as { stderr?: unknown } | null)?.stderr ?? "").trim();
+  return (stderr || (e instanceof Error ? e.message : String(e))).slice(0, 500);
 }
 
 const succeeds = (p: Promise<unknown>) =>
@@ -1400,10 +1415,7 @@ async function syncReused(
     if (status !== "") return { kind: "skipped", why: "dirty" };
     const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
     try {
-      await w(mainMergeArgs(branch, baseSha), {
-        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-      });
+      await w(mainMergeArgs(branch, baseSha), mainMergeEnv());
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code === 1) {
         const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
@@ -1412,11 +1424,11 @@ async function syncReused(
         if (files.length > 0) return { kind: "conflict", mainSha: baseSha, files };
       }
       await w(["merge", "--abort"]).catch(() => {});
-      return { kind: "skipped", why: "failed" };
+      return { kind: "skipped", why: "failed", detail: failureDetail(e) };
     }
     return { kind: "merged", sha: (await w(["rev-parse", "--verify", "HEAD"])).trim(), before };
-  } catch {
-    return { kind: "skipped", why: "failed" };
+  } catch (e) {
+    return { kind: "skipped", why: "failed", detail: failureDetail(e) };
   }
 }
 

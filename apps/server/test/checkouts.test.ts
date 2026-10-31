@@ -38,6 +38,7 @@ import {
   installAfterSync,
   installEnv,
   MC_MERGE_AUTHOR,
+  MC_MERGE_EMAIL,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
@@ -597,6 +598,34 @@ describe("prepareCheckout", () => {
       `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}`,
     );
     expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
+  });
+
+  it("merges main under a fixed identity, so a git that guesses no email still merges", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "b.txt": "branch\n" });
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced?.kind).toBe("merged");
+    expect(git(r.path, "log", "-1", "--format=%ae|%ce")).toBe(
+      `${MC_MERGE_EMAIL}|${MC_MERGE_EMAIL}`,
+    );
+  });
+
+  it("says why a failed sync failed", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "b.txt": "branch\n" });
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    // a hook-free repo still refuses to merge when the index is locked
+    writeFileSync(join(first.gitDir, "index.lock"), "");
+    const synced = await syncReusedWorktree(clone, await prepareCheckout(input()), {
+      syncMain: true,
+    });
+    expect(synced).toMatchObject({ kind: "skipped", why: "failed" });
+    expect(synced?.kind === "skipped" && synced.why === "failed" && synced.detail).toMatch(
+      /index\.lock/,
+    );
   });
 
   it("leaves a reused worktree's conflicts for the seat", async () => {
