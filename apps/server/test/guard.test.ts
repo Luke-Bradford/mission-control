@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEFAULT_REPO_RULES,
+  FLIGHT_RUNAWAY,
   GUARD_BODY_LIMIT,
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
@@ -34,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { runawayTrip } from "../src/flight/runaway.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
@@ -487,6 +489,21 @@ describe("POST /api/guard/check", () => {
       ]);
     });
 
+    it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        expect((await check(tokF, bash(`r${i}`, "gh pr close 12"), flight)).body).toBe("{}");
+      expect(runawayTrip(store)).not.toBeNull();
+      const held = await check(tokF, bash("r-next", "gh pr close 13"), flight);
+      expect(reason(held.body)).toContain("runaway breaker");
+      // a read still runs
+      expect((await check(tokF, bash("r-read", "git status"), flight)).body).toBe("{}");
+    });
+
+    it("does not count a read toward the breaker", async () => {
+      for (let i = 0; i < 8; i++) await check(tokF, bash(`g${i}`, "gh pr view 12"), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
     it("redacts a secret from the recorded command", async () => {
       const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
       await check(
@@ -580,6 +597,8 @@ describe("POST /api/guard/check", () => {
           "gh issue close 7",
           "gh issue view 8 && gh issue close 7",
           "gh issue close -c done 7",
+          "gh api -X PATCH repos/o/r/issues/7 -f state=closed",
+          "gh -R o/r issue close 7",
           "gh issue edit -R o/r 7 --add-label x",
           "gh issue edit 8 7 --add-label x",
         ].entries()) {

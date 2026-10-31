@@ -1181,11 +1181,11 @@ still runs before each of FLIGHT's calls and holds it to the repo's rules only, 
 - `gh pr merge` and `PUT .../merge` (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
 - writes to `.github/**` or `CLAUDE.md` by Edit, Write, a redirect, `tee`, `cp`, `mv`, `rm` or `sed -i` (best effort for a shell; the whole `CLAUDE.md` file is held, not only its Mission Control block);
 - `gh api` with a writing method on branch protection, rulesets, repo settings, collaborators, hooks, keys, environments, pages or Actions secrets and variables;
-- reading or writing the operator token file, or naming `flight/approvals` or the `flight.approvals` setting: an approval is a controller's act;
-- `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (every number is read, with flags before or after it; judged on the board the hub last read; refused when a number or the repo's rules cannot be read), and any `gh project item-*` write (use `set_fields` or `edit_card`).
+- reading or writing the operator token file, or naming `flight/approvals`, the `flight.approvals` setting or the `flight.runaway` setting: approvals and lifting the breaker are a controller's acts; `sqlite3` runs only with `-readonly` and no writing dot-command, since SQL text can always be reworded;
+- `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (every number is read, with flags before or after it; judged on the board the hub last read; refused when a number or the repo's rules cannot be read), and any `gh project item-*` write or `gh api graphql` mutation (use `set_fields` or `edit_card`). A `gh api` write to `repos/<o>/<r>/issues/<n>...` counts as a ticket edit, and a `-R o/r` or `--repo o/r` before the verb is looked through.
 
 `gh_write` refuses an `always_ask` or other-lane ticket, and refuses when the card cannot be read live. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
-a `shell` decision, with credentials redacted. The runaway breaker counts `operator` (POST), `gh_write` and `crew_tidy` calls like any other FLIGHT write; shell commands are on the ledger but the breaker does not count them yet. The
+a `shell` decision, with credentials redacted. The runaway breaker counts `operator` (POST), `gh_write` and `crew_tidy` calls like any other FLIGHT write; each shell write also counts as one (a loop of the same command trips it), and while the breaker is tripped the guard refuses every FLIGHT shell write until the operator lifts it. The
 operator token and `GH_TOKEN` are not added to FLIGHT's environment: `operator` and the operator's own `gh` login are its routes.
 
 ### FLIGHT approvals

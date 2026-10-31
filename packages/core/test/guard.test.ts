@@ -136,6 +136,7 @@ describe("FLIGHT's full profile", () => {
     "cd /clones/other && git log --oneline",
     "git push origin mc/7",
     "git push -u origin mc/7",
+    'sqlite3 -readonly mc.db "select count(*) from runs"',
     "git push -o ci.skip origin mc/7",
     "curl -s -X POST http://127.0.0.1:7420/api/runs/r/resume",
     "gh api repos/o/r/issues -f title=x",
@@ -154,6 +155,18 @@ describe("FLIGHT's full profile", () => {
     ["git push origin HEAD", "merge-push"],
     ["git push origin HEAD:mc/7", "merge-push"],
     ["git push --all origin", "merge-push"],
+    ["gh -R o/r pr merge 3", "merge-push"],
+    ["gh --repo o/r pr merge 3", "merge-push"],
+    ["sqlite3 mc.db \"delete from settings where key='flight.runaway'\"", "repo-rules"],
+    [
+      "sqlite3 mc.db \"update settings set value='[]' where key like 'flight.appr%'\"",
+      "repo-rules",
+    ],
+    ['sqlite3 -readonly mc.db ".shell rm x"', "repo-rules"],
+    [
+      "sqlite3 -readonly mc.db \"select value from settings where key='flight.runaway'\"",
+      "repo-rules",
+    ],
     ["git push origin $(git branch --show-current)", "merge-push"],
     ['git push origin "$(git rev-parse --abbrev-ref HEAD)"', "merge-push"],
     ["git push origin `git branch --show-current`", "merge-push"],
@@ -224,6 +237,22 @@ describe("flightTicketWrites", () => {
     expect(flightTicketWrites("gh issue edit -R o/r 7 --add-label x").issues).toEqual([7]);
     expect(flightTicketWrites("gh issue edit --add-label x 7").issues).toEqual([7]);
     expect(flightTicketWrites("gh issue edit 8 7 --add-label x").issues).toEqual([8, 7]);
+    // the REST route to a ticket, a leading -R, and GraphQL
+    expect(flightTicketWrites("gh api -X PATCH repos/o/r/issues/7 -f state=closed").issues).toEqual(
+      [7],
+    );
+    expect(flightTicketWrites("gh api repos/o/r/issues/7/labels -f labels[]=x").issues).toEqual([
+      7,
+    ]);
+    expect(
+      flightTicketWrites("gh api -X DELETE repos/o/r/issues/7/labels/approval:x").issues,
+    ).toEqual([7]);
+    expect(flightTicketWrites("gh api repos/o/r/issues/7").issues).toEqual([]);
+    expect(flightTicketWrites("gh -R o/r issue close 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh --repo o/r issue edit 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites("gh --repo=o/r issue edit 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites('gh api graphql -f query="mutation{x}"').project).toBe(true);
+    expect(flightTicketWrites('gh api graphql -f query="query{x}"').project).toBe(false);
     // a write whose ticket cannot be read is unreadable, and refused
     expect(flightTicketWrites("gh issue edit --add-label x").unreadable).toBe(true);
     expect(flightTicketWrites("gh issue close some-branch").unreadable).toBe(true);

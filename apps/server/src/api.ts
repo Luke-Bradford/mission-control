@@ -243,7 +243,7 @@ import {
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
-import { liftRunaway } from "./flight/runaway.ts";
+import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import {
   FLIGHT_APPROVAL_MAX_MS,
@@ -2205,6 +2205,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             typeof command === "string" &&
             flightShellWrite(command)
           ) {
+            // the runaway breaker bounds the shell too: a tripped one holds every shell write
+            const tripped = runawayTrip(store);
+            if (tripped !== null) {
+              verdict = {
+                kind: "deny",
+                rule: "repo-rules",
+                text: `${GUARD_RULES["repo-rules"]}: the runaway breaker is tripped (${tripped.reason}); FLIGHT's shell writes wait until the operator lifts it`,
+              };
+            }
+          }
+          if (
+            fullAccess &&
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string" &&
+            flightShellWrite(command)
+          ) {
             let shown = cleanText(command, 1500);
             for (const k of await (deps.knownSecrets?.() ?? Promise.resolve([])).catch(() => [])) {
               if (k !== "") shown = shown.split(k).join("[redacted]");
@@ -2223,6 +2240,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? "in the background"
                   : "in the foreground",
             });
+            noteFlightWrite(store, bus, now(), "shell", { command: shown });
           }
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
           if (

@@ -2160,7 +2160,7 @@ const FILE_WRITERS = new Set([
 const GH_PROTECTED_ENDPOINT =
   /^\/?repos\/[^/]+\/[^/]+(?:$|\?|\/(?:branches\/.+\/protection|rulesets|collaborators|invitations|hooks|keys|environments|pages|transfer|actions\/(?:permissions|secrets|variables)|codespaces\/secrets|dependabot\/secrets)(?:\/|\?|$))/;
 /** A controller's act: FLIGHT neither reads the operator token nor records its own approvals. */
-const APPROVAL_PATHS = /operator-token|flight[/.]approvals/;
+const APPROVAL_PATHS = /operator-token|flight[/.](?:approvals|runaway)|flight\.appr/;
 
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
@@ -2189,8 +2189,24 @@ function pushRefusal(rest: readonly string[]): string | null {
   return null;
 }
 
-/** Why `gh api ...` may not run (a writing call on protection, settings or access), or null. */
-function ghApiRefusal(args: readonly string[]): string | null {
+/** `gh`'s leading global flags (`-R o/r`, `--repo o/r`, `--repo=o/r`) dropped, so the verb is first. */
+function ghStripGlobal(args: readonly string[]): string[] {
+  const out = [...args];
+  while (out.length > 0) {
+    const a = out[0] ?? "";
+    if (a === "-R" || a === "--repo") out.splice(0, 2);
+    else if (a.startsWith("--repo=") || /^-R./.test(a)) out.splice(0, 1);
+    else break;
+  }
+  return out;
+}
+
+/** The method, endpoint and whether a `gh api ...` call writes (args start at `api`). */
+function ghApiCall(args: readonly string[]): {
+  method: string;
+  endpoint: string | null;
+  writes: boolean;
+} {
   const valued = new Set([
     "-H",
     "--header",
@@ -2224,8 +2240,14 @@ function ghApiRefusal(args: readonly string[]): string | null {
       if (inline === undefined) i++;
     } else if (!a.startsWith("-") && endpoint === null) endpoint = a;
   }
-  const writes = (method ?? (fields ? "POST" : "GET")) !== "GET";
-  if (writes && endpoint !== null && GH_PROTECTED_ENDPOINT.test(endpoint))
+  const used = method ?? (fields ? "POST" : "GET");
+  return { method: used, endpoint, writes: used !== "GET" };
+}
+
+/** Why `gh api ...` may not run (a writing call on protection, settings or access), or null. */
+function ghApiRefusal(args: readonly string[]): string | null {
+  const call = ghApiCall(args);
+  if (call.writes && call.endpoint !== null && GH_PROTECTED_ENDPOINT.test(call.endpoint))
     return "gh api write to branch protection, rulesets, settings or collaborators";
   return null;
 }
@@ -2270,7 +2292,10 @@ export function guardDecision(
   }
   if (e.tool !== "Bash") {
     if (ctx.fullAccess && APPROVAL_PATHS.test(e.input.file_path ?? ""))
-      return deny("repo-rules", "the operator token and approvals are a controller's");
+      return deny(
+        "repo-rules",
+        "the operator token, approvals and the runaway breaker are a controller's",
+      );
     if (
       ctx.fullAccess &&
       ["Edit", "Write"].includes(e.tool) &&
@@ -2307,8 +2332,23 @@ export function guardDecision(
     if (program === undefined) continue;
     if (ctx.fullAccess) {
       const command = e.input.command ?? "";
+      // SQL can always be reworded, so the hub's database is only read: no write, no shell escape
+      if (
+        program === "sqlite3" &&
+        (!args.includes("-readonly") ||
+          /(?:^|[\s;"'])\.(?:shell|system|load|output|once|import|backup|save|restore|read)\b/.test(
+            command,
+          ))
+      )
+        return deny(
+          "repo-rules",
+          "sqlite3 on the hub's database runs with -readonly and no dot-command that writes",
+        );
       if (APPROVAL_PATHS.test(command))
-        return deny("repo-rules", "the operator token and approvals are a controller's");
+        return deny(
+          "repo-rules",
+          "the operator token, approvals and the runaway breaker are a controller's",
+        );
       if (
         /(?:^|[^>])>>?\s*["']?[^\s;&|"']*(?:\.github\/|CLAUDE\.md)/.test(command) ||
         ((FILE_WRITERS.has(program) ||
@@ -2457,10 +2497,11 @@ export function guardDecision(
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
       if (ctx.fullAccess) {
-        const gh = args.join(" ");
+        const ghArgs = ghStripGlobal(args);
+        const gh = ghArgs.join(" ");
         if (/^pr\s+merge(?:\s|$)/.test(gh) || /^api\s+.*\/merge(?:\s|\?|$)/.test(gh))
           return deny("merge-push", "gh PR merge");
-        const api = args[0] === "api" ? ghApiRefusal(args) : null;
+        const api = ghArgs[0] === "api" ? ghApiRefusal(ghArgs) : null;
         if (api !== null) return deny("repo-rules", api);
       } else githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
@@ -3256,9 +3297,17 @@ export function flightTicketWrites(command: string): {
   let project = false;
   let unreadable = false;
   for (const { argv } of lineCommands(command, newWalk())) {
-    const [program, ...args] = argv;
+    const [program, ...rawArgs] = argv;
     if (program !== "gh") continue;
+    const args = ghStripGlobal(rawArgs);
     if (args[0] === "project" && GH_PROJECT_WRITES.has(args[1] ?? "")) project = true;
+    if (args[0] === "api") {
+      // the REST route to a ticket (`repos/o/r/issues/7...`) and any GraphQL mutation are ticket and board writes
+      const call = ghApiCall(args);
+      const n = /^\/?repos\/[^/]+\/[^/]+\/issues\/(\d+)(?:[/?]|$)/.exec(call.endpoint ?? "")?.[1];
+      if (call.writes && n !== undefined) issues.push(Number(n));
+      if (call.endpoint === "graphql" && args.some((a) => /\bmutation\b/.test(a))) project = true;
+    }
     if (args[0] === "issue" && GH_ISSUE_WRITES.has(args[1] ?? "")) {
       // gh takes its flags before or after the numbers, and several numbers: collect every positional
       const rest = args.slice(2);
