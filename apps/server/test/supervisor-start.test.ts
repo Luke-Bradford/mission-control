@@ -2420,19 +2420,24 @@ describe("repo guidance at launch", () => {
     );
     await until(() => expect(seatState("flight-1")).toBe("idle"));
 
-    const line = `${wakeLine(state, digest)} TOOLGAP`;
+    const line = wakeLine(state, digest);
     const cost = { wake: 1, pieces: wakePieces(digest) };
     expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("sent");
     const wake = store.promptWakes(runId).find((w) => w.wake === 1);
     const kinds = wake?.sections.map((x) => x.section) ?? [];
     expect(kinds).toContain("digest");
-    expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("dup");
-    expect(store.promptWakes(runId)).toHaveLength(2);
-
     await until(() => expect(userLines()).toHaveLength(2));
     expect(wake?.sections.reduce((n, x) => n + x.bytes, 0)).toBe(
       textBytes(userLines()[1] as string),
     );
+    // the turn must end first: a send into a turn is "busy" before it is checked for a repeat
+    await until(async () =>
+      expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("dup"),
+    );
+    expect(store.promptWakes(runId)).toHaveLength(2);
+
+    await sup.message("flight-1", "TOOLGAP", { interrupt: false });
+    await until(() => expect(userLines()).toHaveLength(3));
     await sup.message("flight-1", "cue: the call ends", { interrupt: false });
     await until(() =>
       expect(
