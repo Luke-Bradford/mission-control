@@ -4430,7 +4430,10 @@ describe("the sweep's new checks hold back until their time", () => {
 
   describe("an idle seat with nothing startable in Ready", () => {
     // a laned hub: the lane:work card is another lane's, so nothing is startable here
-    const laned = { ...config, crew: { ...config.crew!, lane: "home" as const } };
+    const laned = {
+      ...config,
+      crew: { ...(config.crew as NonNullable<typeof config.crew>), lane: "home" as const },
+    };
     const idleNoWork = () =>
       flightState({ config: laned, store, busy: [], now: nowMs }).signals.filter((s) =>
         s.key.startsWith("inco-1:"),
