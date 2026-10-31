@@ -5010,7 +5010,7 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([{ ...pr, preview: null, previewable: false }]);
+    expect(r.json()).toEqual([{ ...pr, check: null, preview: null, previewable: false }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
@@ -5040,11 +5040,11 @@ describe("boards, escalations, health", () => {
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
-      { ...pr(4, "shop-app#9"), preview: null, previewable: false },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      { ...pr(5, null), preview: null, previewable: false },
-      { ...pr(4, "shop-app#9"), preview: null, previewable: false },
+      { ...pr(5, null), check: null, preview: null, previewable: false },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
@@ -5124,6 +5124,7 @@ describe("boards, escalations, health", () => {
         "createdAt",
         "updatedAt",
         "mergedAt",
+        "check",
         "preview",
         "previewable",
       ].sort(),
@@ -5134,6 +5135,67 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);
     expect((await get("/api/repos/shop-app/prs?days=0")).statusCode).toBe(400);
     expect((await get("/api/repos/shop-app/prs?all=2")).statusCode).toBe(400);
+  });
+
+  it("repos/:repoId/prs?shape=summary carries the review state: queued place for an open PR, null otherwise", async () => {
+    const pr = (number: number, state: "open" | "merged") => ({
+      repoId: "shop-app",
+      number,
+      title: `t${number}`,
+      url: `https://github.com/o/shop-app/pull/${number}`,
+      branch: `chore/x${number}`,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: clock - 1000,
+      updatedAt: clock - 500,
+      mergedAt: state === "merged" ? clock - 500 : null,
+      mergeCommitSha: null,
+      headSha: null,
+      mergeable: null,
+      author: null,
+      assignees: [] as string[],
+      closingIssues: [] as number[],
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [pr(1, "open"), pr(2, "open"), pr(3, "open"), pr(4, "merged")],
+      0,
+    );
+    const ask = (prNumber: number, at: number, attempt: number) =>
+      store.requestReview({
+        authorRunId: "c1",
+        repoId: "shop-app",
+        seatId: "RETRO-1",
+        prNumber,
+        sha: "c".repeat(40),
+        epoch: 0,
+        attempt,
+        round: 1,
+        at,
+      });
+    ask(1, clock - 300, 1);
+    ask(2, clock - 200, 2);
+    ask(4, clock - 100, 3);
+    const byNumber = async (query: string) =>
+      Object.fromEntries(
+        (
+          (await get(`/api/repos/shop-app/prs${query}`)).json() as {
+            number: number;
+            check: unknown;
+          }[]
+        ).map((p) => [p.number, p.check]),
+      );
+    for (const query of ["?shape=summary", "", "?detail=1"]) {
+      expect(await byNumber(query)).toEqual({
+        1: { kind: "queued", position: 1 },
+        2: { kind: "queued", position: 2 },
+        3: null,
+        4: null,
+      });
+    }
   });
 
   it("repos returns the configured repos as id, github, project and projectUrl", async () => {

@@ -3,6 +3,7 @@ import {
   CI_PILL,
   type CrewRow,
   type HudColumn,
+  type PillSpec,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
@@ -37,10 +38,12 @@ const MILESTONE_SPLIT = " — ";
 const PR_EXPECTED: readonly HudColumn[] = ["In progress", "In review", "Ready for QA"];
 
 /** The card's PR; the card's own header names the repo, so the PR does not. */
-function PrLine({ pr }: { pr: PullRequestView }) {
-  const showState = pr.state !== "open" || pr.isDraft || pr.review !== null;
+function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec | null }) {
+  // a crew PR stays a draft until the engine merges it: the review state is the open PR's pill
+  const review = pr.state === "open" ? (checkPill ?? null) : null;
+  const showState = review !== null || pr.state !== "open" || pr.isDraft || pr.review !== null;
   const ci = pr.ci === null ? null : CI_PILL[pr.ci];
-  const state = prPill(pr);
+  const state = review ?? prPill(pr);
   const checks = checksText(pr.checks);
   return (
     <>
@@ -71,6 +74,8 @@ export interface CardProps {
   reviewer: CardSeat | null;
   /** The PR the card shows. */
   pr: PullRequestView | null;
+  /** The PR's review state as a pill (`reviewCheckPill`), set by `Kanban`; null or absent without one. */
+  checkPill?: PillSpec | null;
   /** Something on this card waits on you. */
   mine: boolean;
   unacked: boolean;
@@ -106,6 +111,7 @@ export const Card = memo(function Card({
   queued,
   reviewer,
   pr,
+  checkPill,
   mine,
   unacked,
   outcome,
@@ -168,7 +174,9 @@ export const Card = memo(function Card({
           )}
         </span>
       ) : (
-        col === "In review" && (
+        // the review-state pill says who is checking or what the PR waits on; without one, the line does
+        col === "In review" &&
+        !checkPill && (
           <span key="rev" className="xs muted">
             {NO_REVIEWER}
           </span>
@@ -176,7 +184,7 @@ export const Card = memo(function Card({
       )),
     col !== "Done" &&
       (pr ? (
-        <PrLine key="pr" pr={pr} />
+        <PrLine key="pr" pr={pr} checkPill={checkPill} />
       ) : (
         PR_EXPECTED.includes(col) && (
           <span key="nopr" className="xs muted">

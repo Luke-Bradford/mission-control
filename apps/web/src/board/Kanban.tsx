@@ -4,6 +4,7 @@ import {
   HUD_COLUMNS,
   type HudColumn,
   type PullRequestView,
+  reviewCheckPill,
   statusOutOfDate,
 } from "@mc/core";
 import { useId, useMemo, useState } from "react";
@@ -71,6 +72,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     queued: agent ? null : cardQueue(item, ctx.crew),
     reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
     pr,
+    checkPill: pr?.check ? reviewCheckPill(pr.check, ctx.now) : null,
     mine: needs.length > 0,
     unacked: needs.some((a) => !a.acked),
     outcome: doneOutcome(item, prs),

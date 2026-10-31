@@ -152,6 +152,7 @@ describe("QA flow metrics", () => {
     }
     expect(Object.keys(QA_FLOW_METRICS).sort()).toEqual([
       "escapedDefects",
+      "reviewCheck",
       "reviewTime",
       "reviewWait",
       "reworkRatio",

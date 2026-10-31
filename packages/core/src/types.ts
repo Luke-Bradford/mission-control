@@ -6,7 +6,7 @@ import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.t
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
-import type { ReviewStatus } from "./review.ts";
+import type { ReviewCheckState, ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
@@ -467,6 +467,7 @@ export type PullRequestSummary = Pick<
   | "createdAt"
   | "updatedAt"
   | "mergedAt"
+  | "check"
 >;
 
 /** A stored pull request's number and title: what a PR link shows. */
@@ -514,6 +515,8 @@ export interface PullRequestView {
   files?: PrFileInput[];
   /** Bugs recorded against this PR as escaped defects; absent when none. */
   escapedDefects?: { issueNumber: number; via: DefectVia; filedAt: number }[];
+  /** The open PR's review state, set by the API; absent or null without a live review. */
+  check?: ReviewCheckState | null;
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -999,6 +1002,8 @@ export interface CrewRow {
     state: "draft" | "open" | "changes" | "approved";
     /** The review seat reviewing this PR now (queued, starting or running), else null. */
     reviewing?: AgentId | null;
+    /** The PR's review state; absent on older servers. */
+    check?: ReviewCheckState | null;
   } | null;
   /** A scratch seat's live review, else null. */
   reviewing?: { prNumber: number; sha: string; ref: string | null } | null;

@@ -129,6 +129,25 @@ describe("a seat's PR in its doing line", () => {
     expect(seatReview(row, at, undefined)?.tail).toBeNull();
   });
 
+  it("a review state leads the line with the Board pill's words", () => {
+    const withCheck = (check: NonNullable<CrewRow["review"]>["check"]) =>
+      seat("open", { review: { prNumber: 77, state: "open", check } });
+    const words = (check: NonNullable<CrewRow["review"]>["check"]) =>
+      doingLine(withCheck(check), at, TZ, [prView()]);
+    expect(words({ kind: "queued", position: 2 })).toBe(
+      "Waiting for review · 2nd in queue · PR #77 · Cache quotes",
+    );
+    expect(words({ kind: "checking", seat: "retro-1", since: at - 12 * 60_000 })).toBe(
+      "RETRO-1 checking · 12 min · PR #77 · Cache quotes",
+    );
+    expect(words({ kind: "sent" })).toBe(
+      "Findings sent · developer fixing · PR #77 · Cache quotes",
+    );
+    expect(words({ kind: "ready" })).toBe("Ready to merge · PR #77 · Cache quotes");
+    expect(words({ kind: "held", by: "FLIGHT" })).toBe("Held · FLIGHT · PR #77 · Cache quotes");
+    expect(words(null)).toBe("In review · PR #77 · Cache quotes");
+  });
+
   it("the text is the parts DoingLine renders, joined", () => {
     const review = seatReview(seat("open"), at, [prView()]);
     expect(review && reviewParts(review)).toEqual({
