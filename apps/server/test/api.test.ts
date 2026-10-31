@@ -1524,6 +1524,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
+  ["GET", "/api/qa/uat/:repoId/:number"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
