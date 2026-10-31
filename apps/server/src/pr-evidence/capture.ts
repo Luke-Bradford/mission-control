@@ -77,6 +77,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Heads being captured, and heads whose capture failed (when). */
   const running = new Map<string, Promise<void>>();
   const failedAt = new Map<string, number>();
+  /** Why the last capture of a head failed. */
+  const failedWhy = new Map<string, string>();
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
   /** Captures run one at a time: each builds two hubs. */
@@ -177,9 +179,12 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         try {
           await capture(t, pages);
           failedAt.delete(key);
+          failedWhy.delete(key);
         } catch (e) {
+          const why = e instanceof Error ? e.message : String(e);
           failedAt.set(key, now());
-          log(`#${t.pr}: screenshot capture failed: ${e instanceof Error ? e.message : String(e)}`);
+          failedWhy.set(key, why);
+          log(`#${t.pr}: screenshot capture failed: ${why}`);
           return;
         }
         await post(t);
@@ -196,7 +201,12 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(deps.store.manifest(deps.repoId, t.pr, t.sha), t.sha, pages);
-      return missing.length === 0 ? null : evidenceRefusalText(missing);
+      if (missing.length === 0) return null;
+      const why = failedWhy.get(keyOf(t));
+      return `${evidenceRefusalText(missing)}; capture failed: ${why ?? ""}`.replace(
+        /; capture failed: $/,
+        "",
+      );
     },
   };
 }

@@ -218,6 +218,22 @@ describe("PrEvidence gate", () => {
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toBeNull();
   });
 
+  it("says a capture failed, and why, instead of holding silently", async () => {
+    const t = setup({
+      render: async () => {
+        throw new Error("page did not render");
+      },
+    });
+    await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    const text = t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    expect(text).toContain("board");
+    expect(text).toContain("capture failed: page did not render");
+    // another head has no failure to report
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: NEXT, paths: WEB })).not.toContain(
+      "capture failed",
+    );
+  });
+
   it("does not release a head on the pairs of an older head", async () => {
     const t = setup();
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });

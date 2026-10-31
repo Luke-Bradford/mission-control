@@ -121,6 +121,7 @@ import {
   ticketHasRunText,
   trackedText,
   twoAreasText,
+  UAT_PARK,
   untrackedText,
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
@@ -6729,6 +6730,21 @@ describe("superuser housekeeping", () => {
       touches: { sha: SHA, paths: [path] },
     });
     expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([]);
+    expect(ghCalls).toEqual([]);
+  });
+  it("merge_pr refuses a PR that waits for the operator's acceptance", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      uat: { sha: SHA, from: "review", accepted: false },
+    });
+    const refused = await call("merge_pr", { pr: 12, basis: "ready" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("acceptance");
     expect(clearanceCalls).toEqual([]);
     expect(ghCalls).toEqual([]);
   });

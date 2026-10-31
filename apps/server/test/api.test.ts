@@ -1470,6 +1470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
+  ["POST", "/api/prs/shop-app/12/uat", { action: "accept" }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
@@ -2276,6 +2277,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url.startsWith("/api/prs/") && url.endsWith("/uat")) {
+        // the fixture has no PR waiting for acceptance: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
       if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
@@ -2586,6 +2592,7 @@ describe("local access", () => {
             .replace("/items/7", "/items/:number")
             .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
             .replace(/\/prs\/4$/, "/prs/:number")
+            .replace(/\/prs\/:repoId\/12\/uat$/, "/prs/:repoId/:number/uat")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
@@ -8793,6 +8800,117 @@ describe("operator token", () => {
       });
       expect(r.statusCode).toBe(409);
       expect(r.json().error).toContain("controller-check");
+    });
+  });
+
+  describe("uat route", () => {
+    const calls: [string, string, string, string | undefined][] = [];
+    const SHA = "abcdef1".padEnd(40, "0");
+    let noWrites = false;
+    let app: FastifyInstance;
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const post = (headers: Record<string, string>, payload: object, pr = "12") =>
+      app.inject({
+        method: "POST",
+        url: `/api/prs/shop-app/${pr}/uat`,
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      calls.length = 0;
+      noWrites = false;
+      store.upsertRun(
+        run({
+          id: "ua",
+          agentId: "guido-1",
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            prNumber: 12,
+            parked: { kind: "uat", reason: "waiting for your acceptance", ended: false },
+            uat: { sha: SHA, from: "review", accepted: false },
+          },
+        }),
+      );
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        get noLoopWrites() {
+          return noWrites;
+        },
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+          uat: async (id, verdict, sha, note) => {
+            calls.push([id, verdict, sha, note]);
+            return verdict === "accept"
+              ? { lifted: true }
+              : { lifted: false, reason: "head-moved" };
+          },
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { action: "accept" })).statusCode).toBe(401);
+      expect((await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept" })).statusCode).toBe(
+        401,
+      );
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a bad body", async () => {
+      for (const payload of [
+        {},
+        { action: "maybe" },
+        { action: "accept", extra: 1 },
+        { action: "send_back" },
+        { action: "send_back", note: "  " },
+        { action: "send_back", note: "x".repeat(COMMS_MESSAGE_MAX + 1) },
+      ]) {
+        expect((await post(key, payload)).statusCode, JSON.stringify(payload)).toBe(400);
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it("records a verdict for the waiting head and names a refusal", async () => {
+      expect((await post(key, { action: "accept" })).statusCode).toBe(200);
+      const refused = await post(key, { action: "send_back", note: "unreadable" });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain("head moved");
+      expect(calls).toEqual([
+        ["ua", "accept", SHA, undefined],
+        ["ua", "send_back", SHA, "unreadable"],
+      ]);
+    });
+
+    it("answers 404 for a PR that is not waiting and 409 when loop writes are off", async () => {
+      expect((await post(key, { action: "accept" }, "13")).statusCode).toBe(404);
+      noWrites = true;
+      expect((await post(key, { action: "accept" })).statusCode).toBe(409);
+      expect(calls).toEqual([]);
+    });
+
+    it("a plain resume of the park is refused with the route to use", async () => {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/runs/ua/resume",
+        headers: { ...json, ...key },
+        payload: {},
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("/uat");
     });
   });
 

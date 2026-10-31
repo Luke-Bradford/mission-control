@@ -53,6 +53,8 @@ import {
   RUN_BRANCH,
   readKnown,
   seatPlace,
+  seatWroteBody,
+  withEngineSection,
 } from "../mcp/tools.ts";
 import { runPathGrants } from "../path-grants.ts";
 import {
@@ -624,13 +626,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
       const evidence = deps.prEvidenceSection?.(run) ?? null;
       const sections = [section, evidence].filter((x): x is string => x !== null);
-      const body = runPrBody(
-        ticket,
-        note,
-        sections.length === 0 ? null : sections.join("\n\n"),
-        withTitle,
+      const combined = sections.length === 0 ? null : sections.join("\n\n");
+      const body = runPrBody(ticket, note, combined, withTitle);
+      // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
+      const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
+        seatWroteBody(current, issue)
+          ? withEngineSection(withSection(current, EVIDENCE_HEADING, null), issue, combined)
+          : body,
       );
-      const r = await editRunPrBody(deps, run.id, prNumber, body);
       if (r.isError === true) {
         return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
       }
