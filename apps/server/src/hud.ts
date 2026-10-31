@@ -986,6 +986,9 @@ function otherLogin(
   return logins.find((l): l is string => l !== null && l !== hubLogin) ?? null;
 }
 
+/** An open escalation older than this is a record on the loop's card, not a decision in Needs you. */
+const ESCALATION_OPERATOR_MAX_MS = 72 * 60 * 60_000;
+
 /**
  * Needs-you items: every escalation, every stalled loop (keyed by run and last output, so a new
  * stall, on a new run or later in the same one, pulses again) and every loop in error (keyed by
@@ -1130,10 +1133,19 @@ function buildAttentionItems(
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
+    // A paused, parked or stopped loop asks nobody: its open escalations stay on its card. So does
+    // one the operator has left for days; Needs you is for decisions, not a record of them.
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === e.repoId);
+    const loopIdle =
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped");
+    const stale = now - e.openedAt >= ESCALATION_OPERATOR_MAX_MS;
     items.push({
       // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
       owner:
-        e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
+        !loopIdle && !stale && (e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind))
+          ? OWNER_OPERATOR
+          : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -1199,6 +1211,16 @@ function buildAttentionItems(
   );
   for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
+    // a paused, parked, stopped or blocked loop's PRs wait on nobody: they stay on its card
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === repo.id);
+    if (
+      loopRow !== undefined &&
+      (loopRow.paused ||
+        loopRow.hudState === "parked" ||
+        loopRow.hudState === "stopped" ||
+        loopRow.hudState === "blocked")
+    )
+      continue;
     // a ticket the board has seen closed clears its PR's item
     const onBoard = new Set(
       store
@@ -1311,6 +1333,14 @@ function buildAttentionItems(
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
     if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
+    // "FLIGHT will do this unless you object": once the default time has passed it is FLIGHT's to do
+    if (
+      brief !== undefined &&
+      brief.for !== "flight" &&
+      brief.defaultAt !== undefined &&
+      brief.defaultAt <= now
+    )
+      return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
