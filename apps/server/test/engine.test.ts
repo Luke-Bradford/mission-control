@@ -789,52 +789,6 @@ afterEach(() => {
 });
 
 describe("idle-seat wakes", () => {
-  it("wakes once when failing findings arrived during the turn", async () => {
-    store.setSeatTurnStarted(SEAT, clock);
-    const id = store.requestReview({
-      authorRunId: RUN,
-      repoId: REPO,
-      seatId: RETRO,
-      prNumber: 12,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 2,
-      at: clock,
-    }) as number;
-    store.setReviewState(id, ["queued"], "running", { at: clock, runId: "retro-run" });
-    clock += 9 * MIN;
-    expect(
-      store.recordFindings(id, "retro-run", {
-        verdict: { spec: "fail", quality: "pass" },
-        summary: "broken",
-        findings: [
-          {
-            severity: "Important",
-            file: "apps/a.ts",
-            line: 1,
-            summary: "bad",
-            scenario: "breaks",
-            fix: "fix",
-          },
-        ],
-        at: clock,
-      }),
-    ).toBe(true);
-    expect(store.seatSession(SEAT)?.lastTurnStartedAt).toBe(START + 10 * MIN);
-    expect(store.reviewsOfRun(RUN)[0]?.endedAt).toBe(clock);
-    for (const listener of h.listeners)
-      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
-    await vi.waitFor(() =>
-      expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1),
-    );
-    expect(h.sent.at(-1)?.text).toContain("RETRO round 2 findings");
-    for (const listener of h.listeners)
-      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
-    await Promise.resolve();
-    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1);
-  });
-
   it("reminds once for a green head without evidence, then raises Needs-you", async () => {
     setLoop({
       phase: "working",
@@ -2999,6 +2953,27 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("wakes an author idle after a failed review with the findings' text, not a bare notice", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    const id = first().id;
+    expect(
+      store.recordFindings(id, need(store.review(id)?.runId), {
+        verdict: { spec: "pass", quality: "fail" },
+        summary: "broken",
+        findings: [finding("Important")],
+        at: clock,
+      }),
+    ).toBe(true);
+    emit({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toEqual([]);
+    expect(h.sent[0]?.key).toMatch(/^fix:/);
+    expect(h.sent[0]?.text).toContain("a Important thing");
+  });
+
   it("does not make a HUD design check a readiness gate", async () => {
     h.gate = { ...need(h.gate), webChanged: true };
     await toReview();
@@ -5148,6 +5123,22 @@ describe("the engine runs reviews", () => {
           ).toBe(true);
       },
     );
+
+    it("sends FLIGHT's own reason when the review holds no blocking finding text", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      draftWorkspace();
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Minor")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review round cap", ended: false },
+      });
+      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+      expect(h.sent.at(-1)?.text).toBe("FLIGHT requests rework: review round cap");
+      expect(h.sent.at(-1)?.text).not.toContain("found 0");
+    });
 
     it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
