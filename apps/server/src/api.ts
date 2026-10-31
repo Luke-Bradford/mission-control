@@ -35,6 +35,7 @@ import {
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  type CommsCount,
   type CommsMetricsView,
   type ContextUsage,
   CREW_DISABLED,
@@ -53,6 +54,7 @@ import {
   ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   fullAt5h,
   GITHUB_RATE_SETTING,
@@ -104,6 +106,7 @@ import {
   type RepoId,
   type RepoProfile,
   type RepoView,
+  RUNAWAY_NOT_TRIPPED,
   type RunLoopView,
   type RunView,
   reviewStatusOf,
@@ -120,6 +123,7 @@ import {
   type TelemetryRange,
   type TestLockHistory,
   type TestLockView,
+  type TicketView,
   type Topic,
   TYPE_LABELS,
   UPDATE_LOG_UNREADABLE,
@@ -176,6 +180,7 @@ import {
   threadMessages,
   validateCommsText,
 } from "./comms.ts";
+import { compressResponse } from "./compress.ts";
 import {
   agentIds,
   type CcConfig,
@@ -231,6 +236,7 @@ import {
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+import { liftRunaway } from "./flight/runaway.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
@@ -261,7 +267,13 @@ import { type MapPersist, mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
-import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
+import {
+  evidenceProblemText,
+  type McToolsDeps,
+  prTextProblem,
+  readKnown,
+  seatPlace,
+} from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
@@ -304,6 +316,12 @@ import {
 } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
@@ -317,6 +335,8 @@ const TELEMETRY_COMMIT_CONCURRENCY = 4;
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
 const MAX_ISSUE_NUMBER = 2 ** 31 - 1;
+/** The most PR titles one lookup reads. */
+const PR_TITLES_MAX = 50;
 
 export const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", LOOPBACK_HOST]);
 /** The socket addresses of a caller on this machine. */
@@ -1171,6 +1191,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (responseCache.size >= 64) responseCache.clear();
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
+  // After the cache hook above, so the cache keeps plain strings.
+  app.addHook("onSend", compressResponse);
 
   // The configured crew changes only through routes and reloads, which emit one of these topics.
   // Keep a small local revision rather than serialising the full config for every GET /api/crew.
@@ -1580,6 +1602,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return rows.map((row) => storedCommsMessage(row, pins));
       };
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      /** The agents an agent has talked with, as its conversation list names them. */
+      const commsContacts = (id: string) =>
+        store.commsContactIds(id).filter((contact) => contact !== id && contact !== COMMS_CREW);
+      /** Direct-line replies not yet seen. Needs you no longer counts them; the thread does (#757). */
+      const directUnreadOf = (id: string) =>
+        id === COMMS_CAPCOM
+          ? 0
+          : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct).length;
+      /** An agent's counts, as its page shows them (the page and the counts route share these). */
+      const agentCommsCounts = (id: string) => ({
+        // every message with its contacts, all time: the figure the nav row shows
+        contacts: commsContacts(id).reduce(
+          (n, contact) =>
+            n +
+            store.commsCounts(
+              { pair: [id, contact] },
+              store.commsScopeCursor(pairScope(id, contact)),
+            ).count,
+          0,
+        ),
+        unread: store.commsCounts({ agent: id }, store.commsScopeCursor(`agent-all:${id}`)).unread,
+        directUnread: directUnreadOf(id),
+      });
       const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
       /** `?limit=&before=` of a Comms read; null when either is malformed (the caller answers 400). */
       const commsPaging = (query: {
@@ -1677,20 +1722,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const inbox =
           summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = store
-          .commsContactIds(id)
-          .filter((contact) => contact !== id && contact !== COMMS_CREW)
-          .map((contact) => {
-            const scope: CommsReadScope = { pair: [id, contact] };
-            const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-            const last = store.commsPage(scope, 1).rows[0];
-            return {
-              id: contact,
-              lastMessage: last === undefined ? null : storedCommsMessage(last),
-              count: counts.count,
-              unread: counts.unread,
-            };
-          });
+        const contacts = commsContacts(id).map((contact) => {
+          const scope: CommsReadScope = { pair: [id, contact] };
+          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
+          const last = store.commsPage(scope, 1).rows[0];
+          return {
+            id: contact,
+            lastMessage: last === undefined ? null : storedCommsMessage(last),
+            count: counts.count,
+            unread: counts.unread,
+          };
+        });
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
@@ -1698,13 +1740,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           contacts,
           inboxCursor,
           inboxUnread: store.commsCounts({ inbox: id }, inboxCursor).unread,
-          // Needs you no longer counts direct-line replies; the thread does (#757)
-          directUnread:
-            id === COMMS_CAPCOM
-              ? 0
-              : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
-                  .length,
+          directUnread: directUnreadOf(id),
         };
+      });
+      // Reader: apps/web/src/comms/CommsNav.tsx (the nav rows' message counts)
+      api.get("/comms/counts", (): CommsCount[] => {
+        const since = now() - 86_400_000;
+        return commsCrew().map((id) => ({
+          id,
+          recent24h: store.commsForAgent(id).filter((row) => row.at >= since).length,
+          ...agentCommsCounts(id),
+        }));
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
@@ -2796,6 +2842,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
           : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
       });
+      // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
+      api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
+        "/repos/:repoId/prs/titles",
+        async (req, reply) => {
+          const parts = typeof req.query.numbers === "string" ? req.query.numbers.split(",") : [];
+          const numbers = [...new Set(parts.map(Number))];
+          if (
+            !parts.every((p) => /^[1-9]\d*$/.test(p) && Number(p) <= MAX_ISSUE_NUMBER) ||
+            numbers.length < 1 ||
+            numbers.length > PR_TITLES_MAX
+          )
+            return reply
+              .code(400)
+              .send({ error: `numbers must be 1 to ${PR_TITLES_MAX} PR numbers, comma-separated` });
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          return store.pullRequestTitles(repo.id, numbers);
+        },
+      );
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's full detail on demand)
       api.get<{ Params: { repoId: string; number: string } }>(
         "/repos/:repoId/prs/:number",
@@ -2903,6 +2968,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
+
+      // Reader: docs/runbook.md#ticket-history (the ticket page is a later web ticket)
+      api.get<{
+        Params: { repoId: string; number: string };
+        Querystring: { before?: string; limit?: string };
+      }>("/tickets/:repoId/:number", async (req, reply) => {
+        const repo = config.repos.find((r) => r.id === req.params.repoId);
+        if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const n = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+        if (n === 0 || n > MAX_ISSUE_NUMBER)
+          return reply.code(404).send({ error: "unknown issue" });
+        const { before: rawBefore, limit: rawLimit } = req.query;
+        const before = rawBefore === undefined ? null : decodeCursor(rawBefore);
+        if (rawBefore !== undefined && before === null)
+          return reply.code(400).send({ error: "before: not a cursor from this endpoint" });
+        const limit = rawLimit === undefined ? TICKET_PAGE_DEFAULT : Number(rawLimit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > TICKET_PAGE_MAX)
+          return reply
+            .code(400)
+            .send({ error: `limit: a whole number from 1 to ${TICKET_PAGE_MAX}` });
+        let issue: TicketView | null = null;
+        let githubError: string | null = null;
+        try {
+          issue = await fetchTicket(repo, n, await githubGql(), config.repos);
+        } catch (e) {
+          // The local facts still answer; the page shows why the body is missing.
+          githubError = e instanceof Error ? e.message : String(e);
+        }
+        const history = ticketHistory({
+          store,
+          repoId: repo.id,
+          github: repo.github,
+          number: n,
+          issue,
+          githubError,
+          singleRepo: config.repos.length === 1,
+          repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+          before,
+          limit,
+        });
+        return history ?? reply.code(404).send({ error: "unknown issue" });
+      });
 
       // Setup runs one at a time per repo, so a second tab pressing it waits and then finds the fields.
       const setupLocks = new Map<string, Promise<unknown>>();
@@ -3666,6 +3773,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+      // Reader: docs/runbook.md#flight-runaway-breaker (the operator lifts a tripped breaker)
+      api.post("/flight/runaway/lift", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!liftRunaway(store, bus, now()))
+          return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
+        return { ok: true };
+      });
       // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
@@ -4468,6 +4583,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        // dismissing the runaway breaker's flag lifts the breaker, so the flag cannot go while it holds
+        if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && liftRunaway(store, bus, now()))
+          return { dismissed: key };
         if (key.length > 200 || noteKey === "" || !store.dismissNote(noteKey, now())) {
           return reply.code(404).send({ error: NO_OPEN_NOTE });
         }
@@ -4487,8 +4605,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/notifications.ts (local notification feed)
-      api.get("/notifications/events", async () => {
-        return notifications.events();
+      // `?after=<id>`: only the events after that id (all of them if it is not in the list).
+      api.get<{ Querystring: { after?: unknown } }>("/notifications/events", async (req, reply) => {
+        const events = notifications.events();
+        const { after } = req.query;
+        if (after === undefined) return events;
+        if (typeof after !== "string" || after.length < 1 || after.length > 100)
+          return reply.code(400).send({ error: "after must be a notification id" });
+        const at = events.findIndex((e) => e.id === after);
+        return at < 0 ? events : events.slice(at + 1);
       });
 
       // Reader: apps/web/src/notifications.ts (Send a test notification)
@@ -4599,14 +4724,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
 
       // Reader: apps/web/src/shell/AwayDigest.tsx
-      api.get("/away/digest", async (req, reply) => {
+      api.get<{ Querystring: { meta?: unknown } }>("/away/digest", async (req, reply) => {
+        const { meta } = req.query;
+        if (meta !== undefined && meta !== "1")
+          return reply.code(400).send({ error: "meta must be 1" });
+        const active = activeAway(store, now(), config.operator.timezone) !== null;
+        // `?meta=1`: whether away is on and when it started, without building the digest.
+        if (meta === "1") {
+          const started = Number(store.getSetting(AWAY_STARTED_SETTING));
+          return started > 0 ? { active, startedAt: started } : { active };
+        }
         const query = z
           .object({ since: z.coerce.number().finite().nonnegative().optional() })
           .safeParse(req.query);
         if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
         return awayDigest(
           store,
-          activeAway(store, now(), config.operator.timezone) !== null,
+          active,
           attentionItems(
             config,
             store,

@@ -143,9 +143,14 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
-  flightReruns?: Record<string, number>;
-  /** Fresh RETRO requests by FLIGHT, at most two per head. */
-  flightRereviews?: Record<string, number>;
+  /**
+   * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
+   * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
+   */
+  flightSecondReview?: Record<
+    string,
+    { epoch: number; firstReviewId: number; firstAccountId: string; reason: string }
+  >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
   phase: LoopPhase;
@@ -447,6 +452,12 @@ export type PullRequestSummary = Pick<
   | "updatedAt"
   | "mergedAt"
 >;
+
+/** A stored pull request's number and title: what a PR link shows. */
+export interface PrTitle {
+  number: number;
+  title: string;
+}
 
 export interface PullRequestView {
   repoId: RepoId;
@@ -1276,6 +1287,8 @@ export interface SeatSessionRow {
   lastTurnEndedAt?: number | null;
   /** When the seat's current (or most recent) turn started. */
   lastTurnStartedAt?: number | null;
+  /** Turns in a row that ended with no new commit. Absent on a row not read. */
+  quietTurns?: number;
 }
 
 /** A crew session's context window, from its `get_context_usage` control request. */

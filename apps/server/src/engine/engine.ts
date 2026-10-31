@@ -59,8 +59,6 @@ import {
   evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
-  FLIGHT_REWORKS_PER_HEAD,
-  FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
   fixCommsText,
   fixKey,
@@ -124,6 +122,7 @@ import {
   reviewStatusOf,
   reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
+  STUCK_PARK,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
   seatDef,
@@ -230,7 +229,8 @@ export type OperatorRefusal =
   | "not-permitted"
   | "head-moved"
   | "pr-not-open"
-  | "round-granted"
+  | "second-review-done"
+  | "no-second-reviewer"
   | "floor-enforced"
   | "before-lift"
   | "rework-undelivered"
@@ -252,7 +252,8 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "not-permitted": "this action is not allowed for the caller",
   "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
   "pr-not-open": "the PR is not open",
-  "round-granted": "the extra review or rework round was already granted on this head",
+  "second-review-done": "a second review was already requested on this head",
+  "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
@@ -286,10 +287,10 @@ export interface Engine {
     by?: "CAPCOM" | "FLIGHT",
     opts?: {
       kinds?: readonly string[];
-      action?: "lift" | "rereview" | "accept" | "rework";
+      action?: "lift" | "rereview" | "accept" | "rework" | "second_review";
       /** Stores operator work after lift guards pass but before the resumed run can wake. */
       beforeLift?: () => Promise<boolean>;
-      /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
+      /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
     },
   ): Promise<OperatorResult>;
@@ -314,13 +315,13 @@ export interface Engine {
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
-   * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
+   * on the ruled sha (once per sha); later
    * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
    * author the failure.
    */
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
-  acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
+  acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
   syncMain(runId: string): Promise<SyncMainResult>;
   /** Writer-requested local sync, capped per run; reports conflicts and dependency install refusals. */
@@ -337,7 +338,6 @@ export type AcceptRulingResult =
   | { kind: "pending"; sha: string }
   | { kind: "accepted"; sha: string }
   | { kind: "refused"; sha: string }
-  | { kind: "capped" }
   | { kind: "not"; text: string };
 
 export type SyncMainResult =
@@ -363,11 +363,19 @@ export function reviewerOf(
   config: CcConfig,
   seatId: string,
   role?: string,
-  avail?: { store: Store; now: number; avoid?: ReadonlySet<string> },
+  avail?: {
+    store: Store;
+    now: number;
+    avoid?: ReadonlySet<string>;
+    /** Seats on this account are never chosen (a second review runs on another account). */
+    exceptAccount?: string;
+  },
 ): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
-  const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
+  const seats = (session?.seats ?? []).filter(
+    (x) => !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
+  );
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
   if (avail === undefined) return pool[0] ?? null;
@@ -435,12 +443,19 @@ export function createEngine(deps: EngineDeps): Engine {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
-  const reviewerFor = (run: Run): CrewSeatConfig | null =>
-    reviewerOf(config, run.agentId, reviewRoleOf(run), {
+  const reviewerFor = (run: Run): CrewSeatConfig | null => {
+    // while FLIGHT's second review of the head is the one wanted, it runs on another account
+    const sha = store.runPush(run.id)?.sha;
+    const second = sha === undefined ? undefined : run.loop?.flightSecondReview?.[sha];
+    return reviewerOf(config, run.agentId, reviewRoleOf(run), {
       store,
       now: now(),
       avoid: budgetFailedSeats(store, run),
+      ...(second !== undefined && second.epoch === run.loop?.epoch
+        ? { exceptAccount: second.firstAccountId }
+        : {}),
     });
+  };
   /** The input + output tokens a review run on this seat's account may use. */
   const reviewBudgetOf = (seatId: string): number => {
     const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
@@ -835,6 +850,7 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
+        quietTurns: current ? (row?.quietTurns ?? 0) : 0,
         rateLimitedUntil: current ? (facts?.rateLimitedUntil ?? null) : null,
         openQuestion: store.openQuestions().some((q) => q.runId === run.id),
       },
@@ -2401,6 +2417,29 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** A reported second review is logged as a FLIGHT decision with both verdicts. */
+  function logSecondReview(rv: ReviewRow): void {
+    const author = store.run(rv.authorRunId);
+    const second = author?.loop?.flightSecondReview?.[rv.sha];
+    const row = store.review(rv.id);
+    if (author === null || second === undefined || second.epoch !== rv.epoch) return;
+    if (row?.state !== "reported") return;
+    const first = store.review(second.firstReviewId);
+    const said = (r: ReviewRow | null): string =>
+      r?.verdict ? `spec ${r.verdict.spec}, quality ${r.verdict.quality}` : "no verdict";
+    store.addFlightDecision({
+      at: now(),
+      kind: "settle",
+      seatId: author.agentId,
+      targetRunId: author.id,
+      ref: null,
+      questionId: null,
+      about: "second_review",
+      decision: `Second review ${row.blocking > 0 ? "holds" : "passes"} (${said(row)}); the first held (${said(first)})`,
+      basis: second.reason,
+    });
+  }
+
   function kickReviews(): Promise<void> {
     if (!live()) return Promise.resolve();
     return onChain(REVIEWS_CHAIN, superviseReviews);
@@ -2423,6 +2462,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
           if (e.kind === "findings") {
+            logSecondReview(rv);
             // The author run (aside or not) is looked at now, so its rework is flagged before a
             // slow review start can let the seat take a new ticket; once is enough (a second
             // pass would only retry a transient step ahead of its tick).
@@ -2574,6 +2614,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
           return refuse("wrong-action");
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
+        let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (
             (by === "CAPCOM" && opts.action !== "accept") ||
@@ -2596,15 +2637,32 @@ export function createEngine(deps: EngineDeps): Engine {
             !(kind === "review-failed" && opts.action === "rereview")
           )
             return refuse("wrong-action");
-          if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
-            return refuse("round-granted");
-          if (
-            opts.action === "rework" &&
-            ((loop.flightReworks?.[pushed.sha] ?? 0) >= FLIGHT_REWORKS_PER_HEAD ||
-              Object.values(loop.flightReworks ?? {}).reduce((n, v) => n + v, 0) >=
-                FLIGHT_REWORKS_PER_RUN)
-          )
-            return refuse("round-granted");
+          if (opts.action === "second_review") {
+            if (loop.flightSecondReview?.[pushed.sha] !== undefined)
+              return refuse("second-review-done");
+            const first = store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.sha === pushed.sha && r.state === "reported")
+              .at(-1);
+            // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
+            if (!first || first.blocking === 0) return refuse("wrong-action");
+            const paths = await publisher.hardRuleTouches(
+              run,
+              pushed.sha,
+              FLIGHT_FLOOR_ENFORCING_PATHS,
+            );
+            if (paths.length === 0) return refuse("wrong-action");
+            const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
+            if (
+              reviewerOf(config, run.agentId, reviewRoleOf(run), {
+                store,
+                now: now(),
+                exceptAccount: firstAccountId,
+              }) === null
+            )
+              return refuse("no-second-reviewer");
+            secondOf = { firstReviewId: first.id, firstAccountId };
+          }
           if (opts.action === "accept") {
             const review = store
               .reviewsOfRun(run.id)
@@ -2641,8 +2699,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetUsdExtra = (next.budgetUsdExtra ?? 0) + (run.profile?.profile.budgetUsd ?? 0);
         }
         if (kind === "review" || kind === "review-ruling") {
-          next.phase = opts?.action === "accept" ? "review" : "working";
-          if (opts?.action !== "accept") {
+          const staysInReview = opts?.action === "accept" || opts?.action === "second_review";
+          next.phase = staysInReview ? "review" : "working";
+          if (!staysInReview) {
             next.reviewWaivedSha = null;
             next.flightClearedSha = null;
           }
@@ -2661,15 +2720,18 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = pushed?.sha ?? null;
           next.flightClearedSha = pushed?.sha ?? null;
           next.phase = "review";
+        } else if (opts?.action === "second_review" && secondOf !== null && pushed) {
+          next.reviewWaivedSha = null;
+          next.flightClearedSha = null;
+          next.phase = "review";
+          next.flightSecondReview = {
+            ...loop.flightSecondReview,
+            [pushed.sha]: { epoch: next.epoch, ...secondOf, reason: opts.note ?? "" },
+          };
         } else if (opts?.action === "rereview" || opts?.action === "rework") {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
-          if (opts.action === "rereview" && pushed)
-            next.flightRereviews = {
-              ...loop.flightRereviews,
-              [pushed.sha]: (loop.flightRereviews?.[pushed.sha] ?? 0) + 1,
-            };
           if (opts.action === "rework") {
             if (pushed)
               next.flightReworks = {
@@ -2953,20 +3015,14 @@ export function createEngine(deps: EngineDeps): Engine {
           pr.ci !== "failing"
         )
           return no("No failed CI on this run's current head.");
-        const count = run.loop.flightReruns?.[sha] ?? 0;
-        if (count >= 2) return no("Already re-run twice on this head.");
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);
-        store.setRunLoop(runId, {
-          ...run.loop,
-          flightReruns: { ...run.loop.flightReruns, [sha]: count + 1 },
-        });
         return { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` };
       });
     },
 
-    acceptRuling(runId, opts) {
+    acceptRuling(runId) {
       const not = (text: string): AcceptRulingResult => ({ kind: "not", text });
       return onChainResult(runId, not("the loop engine is off"), async () => {
         if (!live()) return not("the loop engine is off");
@@ -2996,7 +3052,6 @@ export function createEngine(deps: EngineDeps): Engine {
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null) {
-          if (!opts.mayRerun) return { kind: "capped" };
           const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
           store.setRunLoop(run.id, {
@@ -3132,23 +3187,29 @@ export function createEngine(deps: EngineDeps): Engine {
         if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
           return refused("its repo is a draft workspace");
         }
-        const parkedOnConflict =
-          loop.phase === "parked" && loop.parked?.kind === "conflict" && !loop.parked.ended;
-        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict) {
-          return refused("the run is not in CI or review, or parked on a conflict");
+        const parkedOn = (kind: string) =>
+          loop.phase === "parked" && loop.parked?.kind === kind && !loop.parked.ended;
+        const parkedOnConflict = parkedOn("conflict");
+        // a push or PR GitHub does not show: the merge is the new push, so the old one need not match
+        const parkedStuck = parkedOn(STUCK_PARK);
+        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict && !parkedStuck) {
+          return refused("the run is not in CI or review, or parked on a conflict or a stuck push");
         }
         if (loop.mainMerge) return refused("a merge of main already waits on the seat");
+        const newest = store.newestRunCommit(run.id)?.sha;
         const pushed = store.runPush(run.id);
-        if (pushed === null || store.newestRunCommit(run.id)?.sha !== pushed.sha) {
+        if (!parkedStuck && (pushed === null || newest !== pushed.sha)) {
           return refused("the branch has unpushed commits");
         }
+        const tip = parkedStuck ? (newest ?? pushed?.sha) : pushed?.sha;
+        if (tip === undefined) return refused("the branch has no recorded commit");
         const worktree = worktreeOf(run, loop);
         if (worktree === null) return refused("the run has no worktree");
         const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
         if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
           return refused("its seat is in a turn");
         }
-        const g = await publisher.gateFacts(run, pushed.sha, null);
+        const g = await publisher.gateFacts(run, tip, null);
         if (!g.ok) return refused(g.text);
         const mainSha = g.facts.mainSha;
         if (g.facts.containsMain) return { kind: "current", mainSha };
@@ -3157,7 +3218,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
         if (!r.ok) return refused(r.text);
         if (r.kind === "wait") return refused("the worktree has uncommitted changes");
-        if (parkedOnConflict) {
+        if (parkedOnConflict || parkedStuck) {
           cur.epoch += 1;
           cur.parked = null;
           cur.unparkedAt = at;

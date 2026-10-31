@@ -58,6 +58,8 @@ export interface BriefInput {
   branch: string;
   /** A writer's globs; [] = the whole checkout. */
   area: string[];
+  /** Files outside the area that FLIGHT approved for this run alone. */
+  granted?: readonly string[];
   /** Configured validation commands for this mode; ordinary sandboxed local commands remain available. */
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
@@ -141,7 +143,11 @@ const fullSuiteText = (fullSuite: readonly string[]): string =>
 export function ticketBrief(i: BriefInput): string {
   const writer = i.mode === "writer";
   const scope = writer
-    ? `Change files only inside your area: ${i.area.length > 0 ? i.area.join(", ") : "the whole checkout"}.`
+    ? `Change files only inside your area: ${i.area.length > 0 ? i.area.join(", ") : "the whole checkout"}.${
+        i.granted && i.granted.length > 0
+          ? ` FLIGHT also approved this run to change ${i.granted.join(", ")}, and no other file outside it.`
+          : ""
+      }`
     : "Read and report only; do not change files.";
   const note = cutNoteText(i.body, i.bodyTruncated, i.bodyLength);
   const ran =
@@ -215,6 +221,8 @@ export interface ReviewBriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which wait for the test lock. */
   fullSuite: readonly string[];
+  /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
+  second?: { reason: string; findings: readonly StoredFinding[] };
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";
@@ -296,6 +304,25 @@ export function reviewBrief(i: ReviewBriefInput): string {
     notes.text === "" ? "(none)" : notes.text,
     ...(notes.cut ? ["", "(Earlier notes were cut to fit.)"] : []),
   ];
+  if (i.second) {
+    lines.push(
+      "",
+      "## A second, independent review",
+      "",
+      "A first review blocked this PR on hard-rule floor paths. FLIGHT asked for you to review it afresh. Reach your own verdict from the code: the findings below are claims to check, not conclusions to repeat or dismiss.",
+      "",
+      `FLIGHT's reason: ${i.second.reason}`,
+      "",
+      i.second.findings.length === 0
+        ? "(The first review's blocking findings are not recorded.)"
+        : i.second.findings
+            .map(
+              (f) =>
+                `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n  Why: ${f.scenario}`,
+            )
+            .join("\n"),
+    );
+  }
   if (i.prevFindings.length > 0) {
     lines.push(
       "",

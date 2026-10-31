@@ -99,6 +99,7 @@ import {
   type PrFileInput,
   type ProfileOverride,
   type PrTestsView,
+  type PrTitle,
   type PullRequestView,
   prCarries,
   QA_RETENTION_DAYS,
@@ -1009,6 +1010,66 @@ const toRun = (r: Row): Run => ({
   reviewId: (r.review_id ?? null) as number | null,
 });
 
+const toBoardItem = (r: Row): BoardItem => ({
+  repoId: r.repo_id as string,
+  issueNumber: r.issue_number as number,
+  title: r.title as string,
+  status: r.status as string,
+  state: r.state as BoardItem["state"],
+  labels: JSON.parse(r.labels as string) as string[],
+  assignees: JSON.parse(r.assignees as string) as string[],
+  ...(typeof r.author === "string" ? { author: r.author } : {}),
+  priority: r.priority as string | null,
+  updatedAt: r.updated_at as number,
+  url: r.url as string,
+  stage: r.stage as BoardItem["stage"],
+  owner: r.owner as BoardItem["owner"],
+  parent: r.parent as number | null,
+  subIssues:
+    r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
+  blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
+  ...(typeof r.after_deps === "string"
+    ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
+    : {}),
+  ...(typeof r.defect_refs === "string"
+    ? { defectRefs: JSON.parse(r.defect_refs) as DefectRefs }
+    : {}),
+  milestone: r.milestone as string | null,
+  size: r.size as string | null,
+  closed: r.closed === 1,
+  prioritySource: r.priority_source as BoardItem["prioritySource"],
+  createdAt: r.created_at as number,
+  itemId: r.item_id as string | null,
+  projectId: r.project_id as string | null,
+});
+
+const toFlightDecision = (r: Row): FlightDecision => ({
+  id: r.id as number,
+  at: r.at as number,
+  kind: r.kind as FlightDecisionKind,
+  seatId: r.seat_id as string | null,
+  targetRunId: r.target_run_id as string | null,
+  ref: r.ref as string | null,
+  questionId: r.question_id as number | null,
+  about: r.about as string,
+  decision: r.decision as string,
+  basis: r.basis as string,
+});
+
+const toCiRun = (r: Row): CiRunView => ({
+  repoId: r.repo_id as string,
+  prNumber: r.pr_number as number,
+  sha: r.sha as string,
+  workflow: r.workflow as string | null,
+  name: r.name as string,
+  attempt: r.attempt as number,
+  state: r.state as CiRunView["state"],
+  conclusion: r.conclusion as string,
+  url: r.url as string | null,
+  firstSeenAt: r.first_seen_at as number,
+  at: r.at as number,
+});
+
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as number,
   authorRunId: r.author_run_id as string,
@@ -1068,6 +1129,7 @@ const seatRow = (r: Row): SeatSessionRow => ({
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
   lastTurnStartedAt: (r.last_turn_started_at as number | null | undefined) ?? null,
+  quietTurns: (r.quiet_turns as number | null | undefined) ?? 0,
   ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
 });
 
@@ -1356,6 +1418,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS reviews_repo_pr ON reviews(repo_id, pr_number, state);
       CREATE INDEX IF NOT EXISTS board_moves_run ON board_moves(run_id);
       CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
+      CREATE INDEX IF NOT EXISTS flight_decisions_ref ON flight_decisions(ref, at);
+      CREATE INDEX IF NOT EXISTS ci_runs_pr ON ci_runs(repo_id, pr_number);
       CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
       CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
@@ -1385,6 +1449,8 @@ export class Store {
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
+    // Turns in a row that ended with no new commit; the resume line reads it.
+    this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
@@ -2723,38 +2789,15 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number ASC")
       .all(repoId) as Row[];
-    return rows.map((r) => ({
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      title: r.title as string,
-      status: r.status as string,
-      state: r.state as BoardItem["state"],
-      labels: JSON.parse(r.labels as string) as string[],
-      assignees: JSON.parse(r.assignees as string) as string[],
-      ...(typeof r.author === "string" ? { author: r.author } : {}),
-      priority: r.priority as string | null,
-      updatedAt: r.updated_at as number,
-      url: r.url as string,
-      stage: r.stage as BoardItem["stage"],
-      owner: r.owner as BoardItem["owner"],
-      parent: r.parent as number | null,
-      subIssues:
-        r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
-      blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
-      ...(typeof r.after_deps === "string"
-        ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
-        : {}),
-      ...(typeof r.defect_refs === "string"
-        ? { defectRefs: JSON.parse(r.defect_refs) as DefectRefs }
-        : {}),
-      milestone: r.milestone as string | null,
-      size: r.size as string | null,
-      closed: r.closed === 1,
-      prioritySource: r.priority_source as BoardItem["prioritySource"],
-      createdAt: r.created_at as number,
-      itemId: r.item_id as string | null,
-      projectId: r.project_id as string | null,
-    }));
+    return rows.map(toBoardItem);
+  }
+
+  /** One board card from the last read, else null. */
+  boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
+    const row = this.db
+      .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
+      .get(repoId, issueNumber) as Row | undefined;
+    return row === undefined ? null : toBoardItem(row);
   }
 
   /**
@@ -3541,6 +3584,83 @@ export class Store {
             "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR updated_at >= ? OR merged_at >= ?) ORDER BY number DESC",
           ).all(repoId, since, since) as Row[]);
     return this.pullRequestRows(rows);
+  }
+
+  /** The repo's cached PRs that belong to the ticket (`repo#number`), newest number first. */
+  pullRequestsOnTicket(repoId: RepoId, ticket: string): PullRequestView[] {
+    const rows = this.statement(
+      "SELECT * FROM pull_requests WHERE ticket = ? AND repo_id = ? ORDER BY number DESC",
+    ).all(ticket, repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  /** Every review of a PR, oldest first. */
+  reviewsOfPr(repoId: RepoId, prNumber: number): ReviewRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? ORDER BY id")
+      .all(repoId, prNumber) as Row[];
+    return rows.map(toReview);
+  }
+
+  /** Every check run read for a PR's heads, newest first. */
+  ciRunsOfPr(repoId: RepoId, prNumber: number): CiRunView[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM ci_runs WHERE repo_id = ? AND pr_number = ? ORDER BY at DESC, name, attempt DESC",
+      )
+      .all(repoId, prNumber) as Row[];
+    return rows.map(toCiRun);
+  }
+
+  /**
+   * The newest `limit` comms messages that name the ticket: by its qualified `repo#n` (set by the
+   * hub), by the short `#n` a seat's or the operator's message carries, or by `PR n` for one of its
+   * PRs. Short forms carry no repo, so the caller keeps only those that belong to this one.
+   */
+  commsOnTicket(
+    ticket: string,
+    shortRef: string,
+    prRefs: readonly string[],
+    limit: number,
+  ): CommsRow[] {
+    const marks = prRefs.map((_, i) => `?${i + 4}`).join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM comms WHERE ticket = ?1 OR ticket = ?2 OR ref = ?2 OR ref = ?1
+           ${prRefs.length > 0 ? `OR ticket IN (${marks}) OR ref IN (${marks})` : ""}
+         ORDER BY at DESC, id DESC LIMIT ?3`,
+      )
+      .all(ticket, shortRef, limit, ...prRefs) as Row[];
+    return rows.map((r) => this.commsRow(r));
+  }
+
+  /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */
+  flightDecisionsOnTicket(ref: string, runIds: readonly string[], limit: number): FlightDecision[] {
+    const byRef = this.db
+      .prepare("SELECT * FROM flight_decisions WHERE ref = ? ORDER BY at DESC, id DESC LIMIT ?")
+      .all(ref, limit) as Row[];
+    const byRun = this.statement(
+      "SELECT * FROM flight_decisions WHERE target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+    );
+    const seen = new Set<number>();
+    const out: FlightDecision[] = [];
+    for (const r of [...byRef, ...runIds.flatMap((id) => byRun.all(id, limit) as Row[])]) {
+      if (seen.has(r.id as number)) continue;
+      seen.add(r.id as number);
+      out.push(toFlightDecision(r));
+    }
+    return out.sort((a, b) => b.at - a.at || b.id - a.id).slice(0, limit);
+  }
+
+  /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
+  pullRequestTitles(repoId: RepoId, numbers: readonly number[]): PrTitle[] {
+    if (numbers.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT number, title FROM pull_requests WHERE repo_id = ? AND number IN (${numbers.map(() => "?").join(", ")}) ORDER BY number ASC`,
+      )
+      .all(repoId, ...numbers) as { number: number; title: string }[];
+    return rows.map((r) => ({ number: r.number, title: r.title }));
   }
 
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
@@ -5751,7 +5871,8 @@ export class Store {
            reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
            error_since = CASE WHEN excluded.state != 'error' THEN NULL
              WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END`,
+             ELSE excluded.updated_at END,
+           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
       )
       .run(
         row.seatId,
@@ -5766,11 +5887,21 @@ export class Store {
       );
   }
 
-  /** Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. */
+  /**
+   * Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. A turn
+   * that made no commit since the one before it adds to the seat's quiet turns; a commit clears them.
+   */
   setSeatTurnEnded(seatId: string, at: number | null): void {
+    const row = this.db
+      .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
+      .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
+    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
-      .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+      .prepare(
+        "UPDATE seat_sessions SET last_turn_ended_at = ?, quiet_turns = CASE WHEN ? THEN 0 ELSE quiet_turns + 1 END WHERE seat_id = ?",
+      )
+      .run(at, at === null || committed ? 1 : 0, seatId);
   }
 
   /** Records that the seat started a turn at `at`. */
@@ -5987,19 +6118,7 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM ci_runs WHERE at >= ? ORDER BY at DESC, name, attempt DESC")
       .all(since) as Row[];
-    return rows.map((r) => ({
-      repoId: r.repo_id as string,
-      prNumber: r.pr_number as number,
-      sha: r.sha as string,
-      workflow: r.workflow as string | null,
-      name: r.name as string,
-      attempt: r.attempt as number,
-      state: r.state as CiRunView["state"],
-      conclusion: r.conclusion as string,
-      url: r.url as string | null,
-      firstSeenAt: r.first_seen_at as number,
-      at: r.at as number,
-    }));
+    return rows.map(toCiRun);
   }
 
   /** The repo's milestones, from the last full read. */
@@ -6727,6 +6846,16 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
       .all(since, limit) as Row[];
+    return rows.map(toFlightDecision);
+  }
+
+  /** The decisions of one kind about one ticket, newest first. */
+  flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
+      )
+      .all(kind, ref) as Row[];
     return rows.map((r) => ({
       id: r.id as number,
       at: r.at as number,

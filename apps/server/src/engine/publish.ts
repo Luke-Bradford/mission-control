@@ -12,6 +12,7 @@ import {
   CI_EXCERPT_MAX,
   type CiRerun,
   globMatches,
+  grantedPath,
   isProtectedPath,
   MC_PR_BODY_MAX,
   MC_PR_EDIT_FAILED,
@@ -51,9 +52,11 @@ import {
   readKnown,
   seatPlace,
 } from "../mcp/tools.ts";
+import { runPathGrants } from "../path-grants.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
+  gitIdentity,
   installAfterSync,
   MC_MERGE_AUTHOR,
   mainMergeArgs,
@@ -99,7 +102,7 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-export { MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
+export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
@@ -144,6 +147,9 @@ export type RerunStateResult =
   | { ok: false; text: string; transient: boolean };
 /** A completed run with one of these conclusions did not fail. */
 const NOT_FAILED_CONCLUSIONS = ["success", "skipped", "neutral"];
+/** A run that failed, timed out or was cancelled has jobs to re-run. */
+const needsRerun = (conclusion: unknown): boolean =>
+  conclusion === "failure" || conclusion === "timed_out" || conclusion === "cancelled";
 
 /**
  * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
@@ -713,7 +719,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         }
         const failed = runs.flatMap((r: unknown) => {
           const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return x?.conclusion === "failure" &&
+          return x !== null &&
+            needsRerun(x.conclusion) &&
             typeof x.databaseId === "number" &&
             Number.isSafeInteger(x.databaseId)
             ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
@@ -737,9 +744,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       const listed = await actionsRuns(repo, sha, "databaseId,conclusion,attempt");
       if (isRefusal(listed)) return listed;
-      const failed = listed.filter(
-        (r) => r.conclusion === "failure" || r.conclusion === "timed_out",
-      );
+      const failed = listed.filter((r) => needsRerun(r.conclusion));
       if (failed.length === 0) return final(NO_FAILED_RUN);
       const done: CiRerun["runs"] = [];
       for (const r of failed) {
@@ -769,11 +774,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       // a failed run that was not re-run (its re-run was refused) means CI still fails
       const failed =
         runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
-        listed.some(
-          (r) =>
-            !saved.some((s) => s.id === r.id) &&
-            (r.conclusion === "failure" || r.conclusion === "timed_out"),
-        );
+        listed.some((r) => !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion));
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
@@ -939,7 +940,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           }
         }
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
-        const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p, extra));
+        const grants = runPathGrants(deps.store, run.id);
+        const strays = names.filter(
+          (p) =>
+            !grantedPath(grants, p) && (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),
+        );
         return {
           ok: true,
           facts: {
@@ -1037,10 +1042,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             return transient(UPDATE_UP_TO_DATE);
           }
           try {
-            await w(mainMergeArgs(branch, mainSha), {
-              GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-              GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-            });
+            await w(mainMergeArgs(branch, mainSha), gitIdentity(MC_MERGE_AUTHOR));
           } catch (e) {
             if ((e as { code?: unknown } | null)?.code === 1) {
               const files = await unmerged();

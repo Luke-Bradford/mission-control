@@ -7,6 +7,7 @@ import {
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_NO_WORK_MS,
   FLIGHT_ITEM_RELAPSE_MS,
   FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -474,6 +475,15 @@ export function flightSignals(i: {
     );
   }
 
+  // only a `merge` repo has its Ready cards dealt into queues; elsewhere FLIGHT starts them itself
+  const dealt = config.repos.find((r) => r.id === repo)?.autonomy === "merge";
+  const readyInLane = board.some(
+    (b) =>
+      !b.closed &&
+      hudColumnOf(b) === "Ready" &&
+      inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
+      !b.blockedBy.some((d) => !d.closed),
+  );
   for (const seat of seats) {
     const row = store.seatSession(seat.id);
     const since = row ? Math.max(row.updatedAt, row.lastTurnEndedAt ?? row.updatedAt) : undefined;
@@ -502,6 +512,34 @@ export function flightSignals(i: {
         since,
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
+    }
+    if (
+      seat.loop === "build" &&
+      seat.free &&
+      row?.state === "idle" &&
+      !seat.atStop &&
+      since !== undefined &&
+      now - since >= FLIGHT_IDLE_NO_WORK_MS &&
+      !work &&
+      (dealt || !readyInLane)
+    ) {
+      const id = `idle_no_work:${seat.id}:${since}`;
+      // at most one wake per seat an hour: an earlier episode's signal, untold or told within
+      // the hour, holds this one back
+      const held = Object.entries(state.signals).some(
+        ([other, x]) =>
+          x.kind === "idle_no_work" &&
+          other !== id &&
+          x.key.startsWith(`${seat.id}:`) &&
+          (x.toldAt === null || now - x.toldAt < FLIGHT_HOUR_MS),
+      );
+      if (!held)
+        raise(
+          "idle_no_work",
+          `${seat.id}:${since}`,
+          since,
+          `${seat.id} (area ${seat.area.join(", ") || "any"}) idle since ${new Date(since).toISOString()}; no ticket in Ready is startable for its area and lane, so promote work for it`,
+        );
     }
   }
   // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or

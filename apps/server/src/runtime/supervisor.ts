@@ -64,10 +64,14 @@ import {
   errorText as errText,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
+  grantRefusedText,
+  grantUngrantableText,
   guardHookCommand,
   HUD_STATE_LABEL,
   hasPlanSection,
   inferTicket,
+  isProtectedPath,
+  isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
   MCP_PATH,
@@ -83,6 +87,8 @@ import {
   PNPM_STORE_ENV,
   type Profile,
   type ProfileOverride,
+  pathGrantProblem,
+  pathInArea,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -110,6 +116,7 @@ import {
   TRIM_HOOK_TIMEOUT_S,
   ticketControllerCheck,
   ticketInReviewText,
+  ticketPathGrants,
   trimHookCommand,
   watchCheckoutName,
   watchStartRefusedText,
@@ -144,6 +151,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -751,10 +759,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   };
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
-  const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
+  /** A message waiting at a resume leads: the hub's "carry on" must not be the seat's first word. */
+  const withInbox = (
+    seatId: string,
+    runId: string,
+    text: string,
+    inboxFirst = false,
+  ): InboxContext => {
     const inbox = deps.inbox?.(seatId, runId) ?? { text: "", messageIds: [] };
+    const joined = inboxFirst ? `${inbox.text}\n\n${text}` : `${text}\n\n${inbox.text}`;
     return {
-      text: inbox.text === "" ? text : text === "" ? inbox.text : `${text}\n\n${inbox.text}`,
+      text: inbox.text === "" ? text : text === "" ? inbox.text : joined,
       messageIds: inbox.messageIds,
     };
   };
@@ -1769,6 +1784,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
+          granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
           maxBudgetUsd:
@@ -1842,6 +1858,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       runId: run.id,
       mode: seatDef(info.seat).mode,
       area: info.seat.area,
+      granted: runPathGrants(store, run.id),
       cwd,
       lock: deps.lock,
       ...(deps.checks === undefined ? {} : { checks: deps.checks }),
@@ -3066,6 +3083,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         waits: waitReader(store, info.repo.id)(card),
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
+      // Files the ticket lists outside the seat's area (or that a protected-file rule covers) are
+      // written only on FLIGHT's logged approval; the run holds exactly those.
+      const grants: string[] = [];
+      if (def.mode === "writer" && !planner) {
+        const extra = info.repo.protectedFiles ?? [];
+        for (const p of ticketPathGrants(ticket.body)) {
+          const why = pathGrantProblem(p, extra);
+          if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
+          if (!pathInArea(info.seat.area, p) || isProtectedPath(p, extra)) grants.push(p);
+        }
+        const approved = approvedPaths(store, ref);
+        const unapproved = grants.filter((p) => !approved.includes(p));
+        if (unapproved.length > 0)
+          throw new SupervisorError(422, grantRefusedText(ref, unapproved));
+      }
       // only a build run works from the ticket's plan; planner and review runs record none
       const plan: RunPlan | undefined =
         def.loop !== "build"
@@ -3170,6 +3202,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      setRunPathGrants(store, runId, grants);
       // the lines report_evidence will hold the seat to, as the ticket words them now
       if (def.loop === "build" && !readOnly)
         store.setRunDoneWhen(runId, doneWhenItems(ticket.body));
@@ -3253,6 +3286,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
         area: info.seat.area,
+        granted: grants,
         commands:
           def.mode === "writer"
             ? (info.repo.commands?.writer ?? [])
@@ -3548,9 +3582,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
       const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
+      // the first review's findings and FLIGHT's reason
+      const secondOf = author.loop?.flightSecondReview?.[review.sha];
+      const second = secondOf?.epoch === review.epoch ? secondOf : null;
       // a Claude full-depth profile wins; a Codex seat always keeps its configured model
       const model =
-        author.profile?.profile.reviewer.depth === "full"
+        second !== null || author.profile?.profile.reviewer.depth === "full"
           ? isCodex(info)
             ? info.seat.model
             : REVIEW_FULL_MODEL
@@ -3658,6 +3696,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
+        ...(second === null
+          ? {}
+          : {
+              second: {
+                reason: second.reason,
+                findings: store
+                  .findingsOf(second.firstReviewId)
+                  .filter((f) => BLOCKING_SEVERITIES.includes(f.severity)),
+              },
+            }),
       });
       const briefPieces = [
         ticketPiece(
@@ -4111,7 +4159,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
       try {
-        const inbox = withInbox(seatId, runId, text);
+        const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
         writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {

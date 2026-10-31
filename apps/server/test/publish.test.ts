@@ -49,6 +49,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { setRunPathGrants } from "../src/path-grants.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({
@@ -420,6 +421,29 @@ describe("rerunFailed", () => {
     expect(ghCalls).toHaveLength(2);
   });
 
+  it("re-runs a run whose jobs were cancelled or timed out, like a failed one", async () => {
+    ghAnswers = [
+      listed(
+        { databaseId: 11, name: "server", conclusion: "cancelled" },
+        { databaseId: 12, name: "web", conclusion: "timed_out" },
+        { databaseId: 13, name: "lint", conclusion: "success" },
+      ),
+      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    expect(out).toEqual([
+      { id: 11, name: "server" },
+      { id: 12, name: "web" },
+    ]);
+  });
+
+  it("re-runs nothing when no run failed, was cancelled or timed out", async () => {
+    ghAnswers = [listed({ databaseId: 13, name: "lint", conclusion: "success" })];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toEqual([]);
+    expect(ghCalls).toHaveLength(1);
+  });
+
   it("answers running, and re-runs nothing, while a listed run has not completed", async () => {
     ghAnswers = [
       () => ({
@@ -620,6 +644,27 @@ describe("rerunRuling and rerunState", () => {
       ["run", "rerun", "--repo=o/mc", "11", "--failed"],
       ["run", "rerun", "--repo=o/mc", "13", "--failed"],
     ]);
+  });
+
+  it("re-runs a cancelled run, and reads an un-re-run cancelled run as still failed", async () => {
+    ghAnswers = [
+      runs({ databaseId: 11, conclusion: "cancelled", attempt: 1 }),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toEqual({
+      ok: true,
+      runs: [{ id: 11, attempt: 1 }],
+    });
+    expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "success", attempt: 2, status: "completed" },
+        { databaseId: 13, conclusion: "cancelled", attempt: 1, status: "completed" },
+      ),
+    ];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, [{ id: 11, attempt: 1 }])).toEqual(
+      { ok: true, outcome: "failed" },
+    );
   });
 
   it("returns the runs already re-run when a later rerun fails, so the caller records them", async () => {
@@ -1367,6 +1412,22 @@ describe("merge steps", () => {
         SHA,
         "--",
       ]);
+    });
+
+    it("leaves a file this run holds a grant for out of the strays, so its PR is not parked at the gate", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      setRunPathGrants(store, R.id, ["package.json"]);
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["docs/b.md"] },
+      });
     });
 
     it("marks only HUD diffs for the design readiness gate", async () => {

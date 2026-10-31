@@ -95,6 +95,16 @@ const READONLY_CLOSE =
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 
+describe("ticketBrief path grant", () => {
+  it("names the files FLIGHT approved beyond the area, and only when there are some", () => {
+    expect(ticketBrief(input)).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: [] })).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: ["package.json", ".gitignore"] })).toContain(
+      "FLIGHT also approved this run to change package.json, .gitignore, and no other file outside it.",
+    );
+  });
+});
+
 describe("ticketBrief leftover changes", () => {
   it("omits the block for a fresh or clean worktree", () => {
     expect(ticketBrief(input)).not.toContain("Leftover changes");
@@ -492,6 +502,14 @@ describe("reviewBrief", () => {
     const out = reviewBrief({ ...review, commands: ["uv run pytest"] });
     expect(out).toContain("Configured review checks are `uv run pytest`");
     expect(out).not.toContain("pnpm");
+  });
+
+  it("a second review without recorded findings says so, with FLIGHT's reason", () => {
+    const out = reviewBrief({ ...review, second: { reason: "the guard is fine", findings: [] } });
+    expect(out).toContain("## A second, independent review");
+    expect(out).toContain("FLIGHT's reason: the guard is fine");
+    expect(out).toContain("(The first review's blocking findings are not recorded.)");
+    expect(reviewBrief(review)).not.toContain("second, independent");
   });
 
   it("tells a scratch reviewer that a whole suite waits for the test lock", () => {

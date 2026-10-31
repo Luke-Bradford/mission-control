@@ -32,8 +32,6 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
-  FLIGHT_REWORKS_PER_HEAD,
-  FLIGHT_REWORKS_PER_RUN,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -2525,7 +2523,7 @@ describe("FLIGHT settles a ruling", () => {
       parked: { kind: "ruling", reason: "ruled", ended: false },
     });
   }
-  const accept = (mayRerun = true) => h.engine.acceptRuling(RUN, { mayRerun });
+  const accept = () => h.engine.acceptRuling(RUN);
 
   it("re-runs once, waits while it runs, then accepts a pass and clears the failure", async () => {
     await ruled();
@@ -2580,12 +2578,6 @@ describe("FLIGHT settles a ruling", () => {
       text: `${SHA.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
     });
     expect(h.rulingReruns).toHaveLength(1);
-  });
-
-  it("does not re-run when the hourly cap is used, and says so", async () => {
-    await ruled();
-    expect(await accept(false)).toEqual({ kind: "capped" });
-    expect(h.rulingReruns).toEqual([]);
   });
 
   it("refuses a run that is not parked on a ruling, or whose ruled commit is not the PR's head", async () => {
@@ -4032,6 +4024,8 @@ describe("the engine runs reviews", () => {
     await toReview();
     // the review start queued a pass of its own: let it finish before the loop is written here
     await h.engine.reconcileRun(RUN);
+    // a ruling stands while CI is red; a green head would clear the failure instead
+    setPr({ ci: "failing" });
     setLoop({ ciFailedSha: SHA });
     reported(first().id, []);
     await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
@@ -4747,6 +4741,64 @@ describe("the engine runs reviews", () => {
           });
         });
 
+        const parkedStuck = async () => {
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          setLoop({
+            phase: "parked",
+            parked: { kind: "stuck", reason: "the push is not shown on GitHub", ended: false },
+          });
+        };
+
+        it("a stuck park behind main goes to CI after one syncMain", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
+          await parkedStuck();
+          const before = loopOf().epoch;
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "merged",
+            sha: SHA_B,
+            mainSha: MAIN,
+          });
+          expect(loopOf()).toMatchObject({
+            phase: "ci",
+            pushFor: SHA_B,
+            parked: null,
+            epoch: before + 1,
+            unparkedAt: clock,
+          });
+          expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(true);
+        });
+
+        it("a stuck park whose newest commit was never recorded as pushed still merges main", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
+          await parkedStuck();
+          commit("e".repeat(40));
+          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "merged" });
+        });
+
+        it("a stuck park's conflicting merge is refused to the author with the files", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+          await parkedStuck();
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "conflict",
+            files: ["apps/a.ts", "apps/b.ts"],
+          });
+          expect(loopOf()).toMatchObject({
+            phase: "working",
+            mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
+          });
+        });
+
+        it("a stuck park not behind main is current, and stays parked", async () => {
+          await parkedStuck();
+          expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
+          expect(h.updates).toEqual([]);
+          expect(loopOf().phase).toBe("parked");
+        });
+
         it("a branch that has main already is current, and nothing is merged", async () => {
           await parkedOnConflict();
           expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
@@ -4783,7 +4835,7 @@ describe("the engine runs reviews", () => {
           setLoop({ phase: "working", parked: null });
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "refused",
-            text: "the run is not in CI or review, or parked on a conflict",
+            text: "the run is not in CI or review, or parked on a conflict or a stuck push",
           });
         });
 
@@ -5097,7 +5149,7 @@ describe("the engine runs reviews", () => {
       expect(await operate(RUN, "FLIGHT")).toBe(false);
     });
 
-    it("caps fresh RETRO requests at two per head", async () => {
+    it("grants fresh RETRO requests on one head without a limit", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       for (let i = 0; i < 3; i++) {
@@ -5110,10 +5162,10 @@ describe("the engine runs reviews", () => {
           kinds: ["review-failed"],
           action: "rereview",
         });
-        expect(result).toBe(i < 2);
+        expect(result).toBe(true);
       }
     });
-    it("a refused CI rerun costs no per-head attempt", async () => {
+    it("a refused CI rerun is not counted, and later ones run", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       setPr({ ci: "failing" });
@@ -5121,7 +5173,7 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
     it("an accepted head waits until the waived status has been written", async () => {
@@ -5175,6 +5227,133 @@ describe("the engine runs reviews", () => {
       },
     );
 
+    describe("second_review settles a blocking floor review", () => {
+      const SECOND = "retro-2";
+      const FLOOR = "apps/server/src/guard/x.ts";
+      /** A reviewer on another account, so a second review has somewhere to go. */
+      const addSecondReviewer = (): void => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: SECOND, accountId: "claude-2" });
+      };
+      const parkOnBlocking = async (): Promise<void> => {
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = [FLOOR];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Critical")]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+      };
+      const second = () =>
+        operate(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "the floor review looks wrong",
+        });
+      const secondReview = () => need(reviewRows().find((r) => r.epoch === loopOf().epoch));
+
+      it("starts a fresh review on another account, and a pass lets the merge follow", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        expect(loopOf().flightSecondReview?.[SHA]).toMatchObject({
+          epoch: loopOf().epoch,
+          reason: "the floor review looks wrong",
+        });
+        await h.engine.tick();
+        reported(secondReview().id, []);
+        setPr({
+          ci: "passing",
+          checks: [
+            {
+              name: "mc/review",
+              kind: "status",
+              conclusion: "SUCCESS",
+              state: "passing",
+              attempt: null,
+              url: null,
+            },
+          ],
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked).toBeNull();
+        expect(h.sent.some((l) => l.key.includes("flight-rework"))).toBe(false);
+        expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toContain("merge");
+      });
+
+      it("a holding second review sends its findings to the seat", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        reported(secondReview().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).not.toContain("merge");
+        expect(h.sent.some((l) => l.text.includes("a Important thing"))).toBe(true);
+        expect(store.flightDecisions(0, 10)).toEqual([
+          expect.objectContaining({
+            kind: "settle",
+            targetRunId: RUN,
+            basis: "the floor review looks wrong",
+            decision: expect.stringMatching(/Second review holds .*the first held/),
+          }),
+        ]);
+      });
+
+      it("a holding second review still sends its findings after a granted rework", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        setLoop({ flightReworks: { [SHA]: 1 } });
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        reported(secondReview().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked).toBeNull();
+        expect(h.sent.some((l) => l.text.includes("a Important thing"))).toBe(true);
+      });
+
+      it("refuses a second one on the same head", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        const again = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "again",
+        });
+        expect(again).toEqual({ lifted: false, reason: "second-review-done" });
+      });
+
+      it("refuses when no reviewer on another account is left", async () => {
+        await parkOnBlocking();
+        const r = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(r).toEqual({ lifted: false, reason: "no-second-reviewer" });
+        expect(loopOf().parked).not.toBeNull();
+      });
+
+      it("refuses off the floor paths, and when the review is not blocking", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        h.touches = ["apps/web/x.ts"];
+        const off = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(off).toEqual({ lifted: false, reason: "wrong-action" });
+      });
+    });
+
     it("sends FLIGHT's own reason when the review holds no blocking finding text", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       draftWorkspace();
@@ -5191,7 +5370,7 @@ describe("the engine runs reviews", () => {
       expect(h.sent.at(-1)?.text).not.toContain("found 0");
     });
 
-    it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
+    it("grants reworks on one head without a limit, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       await h.engine.reconcileRun(RUN);
@@ -5217,15 +5396,12 @@ describe("the engine runs reviews", () => {
         "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
       );
 
-      // further rounds are granted on the same head, up to the raised cap
-      for (let n = 2; n <= FLIGHT_REWORKS_PER_HEAD; n++) {
+      // further rounds are granted on the same head, with no limit
+      for (let n = 2; n <= 5; n++) {
         setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
         expect(loopOf().flightReworks).toEqual({ [SHA]: n });
       }
-      setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
-      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
-      expect(loopOf().parked).not.toBeNull();
     });
 
     const parkedForRework = async () => {
@@ -5237,18 +5413,18 @@ describe("the engine runs reviews", () => {
       setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
     };
 
-    it("stops granting rework once the run has had its cap over all its heads", async () => {
+    it("keeps granting rework over many heads of one run", async () => {
       await parkedForRework();
       setLoop({
         phase: "parked",
         parked: { kind: "review", reason: "again", ended: false },
-        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: FLIGHT_REWORKS_PER_RUN - 6 },
+        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: 3 },
       });
       const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
         kinds: ["review"],
         action: "rework",
       });
-      expect(result).toEqual({ lifted: false, reason: "round-granted" });
+      expect(result).toEqual({ lifted: true });
     });
 
     it("lift verifies that the current head descends from the push", async () => {
@@ -5337,16 +5513,6 @@ describe("the engine runs reviews", () => {
         expect(await refusal("CAPCOM", { action: "accept" })).toBe("pr-not-open");
       });
 
-      it("round already granted on this head", async () => {
-        await parkedReview();
-        setLoop({
-          phase: "parked",
-          parked: { kind: "review", reason: "again", ended: false },
-          flightReworks: { [SHA]: FLIGHT_REWORKS_PER_HEAD },
-        });
-        expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
-      });
-
       it("a blocking review on floor-enforcing paths", async () => {
         need(config.repos[0]).flightPowers = "superuser";
         h.touches = ["apps/server/src/guard/x.ts"];
@@ -5390,13 +5556,11 @@ describe("the engine runs reviews", () => {
       });
     });
 
-    it("FLIGHT's CI reruns stop at two per head", async () => {
+    it("FLIGHT's CI reruns have no per-head limit", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       setPr({ ci: "failing" });
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+      for (let i = 0; i < 4; i++) expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
     it("a run that touches a hard-rule file is not marked ready or merged", async () => {
@@ -6633,6 +6797,55 @@ describe("the engine runs reviews", () => {
       expect(h.wakes.at(-1)).toBe(RUN);
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toHaveLength(takesBefore);
+    });
+
+    describe("a run stopped on someone else's call", () => {
+      const WAIT_AT_LIMIT = { kind: "review", reason: "review limit", ended: false };
+      /** A younger run of the seat with findings waiting, set aside in review. */
+      const waitingB = "guido-1:b";
+
+      /** A is in review on its seat, then stops at the review-round limit. */
+      async function stoppedAtLimit(): Promise<void> {
+        seatIdle(RUN);
+        store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: WT });
+        await toReview();
+        // (the mock records a refused attempt too: only the park's counts)
+        h.asides.length = 0;
+        h.asideOn = true;
+        store.upsertRun(
+          run({
+            id: waitingB,
+            startedAt: START + MIN,
+            seq: 3,
+            ticket: `${REPO}#8`,
+            loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/b", wake: true } },
+          }),
+        );
+        setLoop({ phase: "parked", parked: WAIT_AT_LIMIT });
+      }
+
+      it("is set aside, and the seat works its other run on the next pass", async () => {
+        await stoppedAtLimit();
+        await h.engine.reconcileRun(RUN);
+        expect(h.asides).toEqual([RUN]);
+        expect(asideRun()).toEqual({ worktree: WT, wake: false });
+        await vi.waitFor(() => expect(h.wakes).toEqual([waitingB]));
+        // the wait is still on: A is not woken
+        expect(loopOf().phase).toBe("parked");
+      });
+
+      it("rejoins its seat when the wait is settled", async () => {
+        await stoppedAtLimit();
+        await h.engine.reconcileRun(RUN);
+        store.setRunLoop(waitingB, { ...NEW_LOOP, phase: "review" });
+        store.setRunEnded(waitingB, clock, "ok", "engine");
+        store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+        h.wakes.length = 0;
+        expect(await operate(RUN, "CAPCOM", { kinds: ["review"] })).toBe(true);
+        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+        await vi.waitFor(() => expect(asideRun()).toBeNull());
+        expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      });
     });
 
     it("the ticket being built is not set aside while its turn runs", async () => {

@@ -17,6 +17,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_NO_WORK_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_LOOPS_SETTING,
@@ -29,9 +30,9 @@ import {
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
   FLIGHT_RUN_TOOLS_SETTING,
+  FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_STARTS_PER_HOUR,
   FLIGHT_TICK_MS,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
@@ -70,7 +71,6 @@ import {
   deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
-  flightStartCap,
   flightState,
   flightView,
   markPrsShown,
@@ -1472,7 +1472,7 @@ describe("the FLIGHT watcher", () => {
     expect(digest.facts.q).toEqual([]);
   });
 
-  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free or counted", () => {
+  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free", () => {
     const cfg = structuredClone(config);
     const seats = cfg.crew?.sessions[0]?.seats ?? [];
     const byId = (id: string) => {
@@ -1482,11 +1482,8 @@ describe("the FLIGHT watcher", () => {
     };
     byId("flight-1").retiring = true;
     expect(flightSeat(cfg)).toBeNull();
-    // two build seats count; a retiring one does not
     delete byId("flight-1").retiring;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR * 2);
     byId("inco-1").retiring = true;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR);
     const state = flightState({ config: cfg, store, busy: [], now: T0 });
     expect(state.seats.map((s) => s.id)).toEqual(["guido-1", "retro-1"]);
     // a second watch seat takes over while the first retires
@@ -2053,6 +2050,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
+    liveCrew();
+    ask();
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    const state = flightState({ config, store, busy: [], now: nowMs });
+    expect(JSON.parse(wakeFacts(state)).breaker).toEqual(["a loop"]);
+    // lifted, the waiting question wakes it
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
   it("wakes on a new Needs-you item, once", async () => {
     liveCrew();
     raiseBlocked();
@@ -2238,7 +2249,7 @@ describe("the FLIGHT watcher", () => {
     const idle = () =>
       listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
 
-    it("sends one handover wake at 151K, then rotates once that turn ends", async () => {
+    it("sends one handover wake just past the limit, then rotates once that turn ends", async () => {
       liveCrew();
       watch.start();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
@@ -2319,11 +2330,11 @@ describe("the FLIGHT watcher", () => {
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
         text: null,
       });
-      context(151_000);
+      context(301_000);
       expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
-        tokens: 151_000,
+        tokens: 301_000,
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-        text: "context 151K · fresh session at 150K",
+        text: "context 301K · fresh session at 300K",
       });
     });
   });
@@ -2525,7 +2536,7 @@ describe("wakeSummary", () => {
     items: [],
     holds: [],
     recent: [],
-    limits: { startsLeft: 4, messagesLeft: 30 },
+    breaker: { tripped: false, reason: null },
     brief: [],
     headlineAgeMin: null,
     headline: "",
@@ -3225,9 +3236,9 @@ describe("ops signals", () => {
     store.replaceBoard("mc", [
       triageCard({ status: "Ready", blockedBy: [{ ref: "mc#1", closed: false }] }),
     ]);
-    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    expect(signalState().signals.filter((s) => s.kind === "idle_seat" && !s.told)).toEqual([]);
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
-    expect(signalState().signals[0]?.kind).toBe("idle_seat");
+    expect(signalState().signals.map((s) => s.kind)).toContain("idle_seat");
   });
 
   it("does not count a previous run's last turn as time idle after the seat is freed", () => {
@@ -4425,6 +4436,58 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("idle_seat");
     nowMs += MIN;
     expect(kinds()).toContain("idle_seat");
+  });
+
+  describe("an idle seat with nothing startable in Ready", () => {
+    // a laned hub: the lane:work card is another lane's, so nothing is startable here
+    const laned = {
+      ...config,
+      crew: { ...(config.crew as NonNullable<typeof config.crew>), lane: "home" as const },
+    };
+    const idleNoWork = () =>
+      flightState({ config: laned, store, busy: [], now: nowMs }).signals.filter((s) =>
+        s.key.startsWith("inco-1:"),
+      );
+    beforeEach(() => {
+      // Ready holds only a ticket of another lane: the seat's queue stays empty
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: T0 - FLIGHT_IDLE_NO_WORK_MS });
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:work"] })]);
+      store.replaceQueue("inco-1", []);
+    });
+
+    it("wakes FLIGHT once, naming the seat and its area", () => {
+      const found = idleNoWork().filter((s) => s.kind === "idle_no_work");
+      expect(found).toHaveLength(1);
+      expect(found[0]?.evidence).toContain("inco-1");
+      expect(found[0]?.evidence).toContain("apps/web/**");
+    });
+
+    it("is not raised when Ready holds a startable ticket of the hub's lane (draft repo, no queue)", () => {
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:home"] })]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised before 5 minutes idle", () => {
+      nowMs -= MIN;
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised while the seat has startable work queued", () => {
+      store.replaceQueue("inco-1", [{ repoId: "mc", issue: 176 }]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("raises nothing new in the same hour, then again after it", () => {
+      const first = flightState({ config: laned, store, busy: [], now: nowMs });
+      markFlightSignalsShown(store, first, nowMs);
+      // the seat starts and finishes work: a new idle episode within the hour
+      nowMs += 20 * MIN;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toEqual([]);
+      nowMs += FLIGHT_HOUR_MS;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toHaveLength(1);
+    });
   });
 
   it("a park counts after 15 minutes, not before", () => {

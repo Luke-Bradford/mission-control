@@ -27,7 +27,6 @@ import {
   FLIGHT_MEMORY_KINDS,
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
-  FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
@@ -36,7 +35,6 @@ import {
   FLIGHT_REPORT_PARKS,
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTABLE,
-  FLIGHT_STARTS_PER_HOUR,
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_TICKETS_LISTED,
@@ -105,6 +103,7 @@ import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
+import { runawayTrip } from "./runaway.ts";
 import { flightSeat } from "./seat.ts";
 import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
@@ -190,17 +189,6 @@ export function flightHeadline(
     headline: row?.text ?? "",
     headlineAgeMin: !row?.text ? null : Math.floor((now - row.updatedAt) / 60_000),
   };
-}
-
-/**
- * The tickets FLIGHT may start in an hour: FLIGHT_STARTS_PER_HOUR per developer (build) seat in its
- * session, and never fewer. The cap guards against a runaway FLIGHT, so it grows with the seats.
- */
-export function flightStartCap(config: CcConfig): number {
-  const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
-    (s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build",
-  ).length;
-  return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
 }
 
 export { flightSeat };
@@ -596,18 +584,8 @@ export function flightState(i: {
   const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
   const found = flightSeat(config);
-  const since = now - FLIGHT_HOUR_MS;
-  const limits = {
-    startsLeft: Math.max(
-      0,
-      flightStartCap(config) - store.countFlightDecisions({ kinds: ["start"], since }),
-    ),
-    messagesLeft: Math.max(
-      0,
-      FLIGHT_MESSAGES_PER_HOUR -
-        store.countFlightDecisions({ kinds: ["answer", "message", "unpark"], since }),
-    ),
-  };
+  const trip = runawayTrip(store);
+  const breaker = { tripped: trip !== null, reason: trip?.reason ?? null };
   // brief edits stay out of `recent`: the brief itself is in the state, and edits would crowd it
   const recent = store
     .flightDecisions(0, FLIGHT_RECENT_LISTED * 4)
@@ -657,7 +635,7 @@ export function flightState(i: {
       mergeQueue: [],
       flowHolds: [],
       recent,
-      limits,
+      breaker,
       brief,
       ...headline,
       ledger,
@@ -1126,7 +1104,7 @@ export function flightState(i: {
     mergeQueue,
     flowHolds,
     recent,
-    limits,
+    breaker,
     brief,
     ...headline,
     ledger,
@@ -1365,6 +1343,7 @@ export function wakeFacts(
       .map((x) => (x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key))
       .sort(),
     release: releasable(s),
+    breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
 
