@@ -6473,6 +6473,8 @@ describe("superuser housekeeping", () => {
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
     ["floor-enforced", "only the controller can merge it"],
+    ["second-review-done", "second review was already requested"],
+    ["no-second-reviewer", "no reviewer on another account"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
     elevated();
     runPr();
@@ -6486,6 +6488,33 @@ describe("superuser housekeeping", () => {
     const result = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(result).toHaveProperty("isError", true);
     expect(JSON.stringify(result)).toContain(text);
+  });
+  it("second_review hands the engine FLIGHT's reason and reports the first verdict", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "review", reason: "Blocked", ended: false },
+    });
+    const result = await call("settle_park", {
+      runId: "r-pr",
+      action: "second_review",
+      basis: "the finding misreads the guard",
+    });
+    expect(result).not.toHaveProperty("isError", true);
+    expect(JSON.stringify(result)).toContain("second_review requested");
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling"],
+          action: "second_review",
+          note: "the finding misreads the guard",
+        },
+      ],
+    ]);
   });
   it("grants review reworks with a fix list, as many as it judges right on one head", async () => {
     elevated();

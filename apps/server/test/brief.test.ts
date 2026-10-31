@@ -504,6 +504,14 @@ describe("reviewBrief", () => {
     expect(out).not.toContain("pnpm");
   });
 
+  it("a second review without recorded findings says so, with FLIGHT's reason", () => {
+    const out = reviewBrief({ ...review, second: { reason: "the guard is fine", findings: [] } });
+    expect(out).toContain("## A second, independent review");
+    expect(out).toContain("FLIGHT's reason: the guard is fine");
+    expect(out).toContain("(The first review's blocking findings are not recorded.)");
+    expect(reviewBrief(review)).not.toContain("second, independent");
+  });
+
   it("tells a scratch reviewer that a whole suite waits for the test lock", () => {
     const out = reviewBrief({ ...review, fullSuite: ["pnpm -s test"] });
     expect(out).toContain(

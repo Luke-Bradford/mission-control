@@ -2939,7 +2939,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const PrBasisArgs = z.strictObject({ pr: issueNumber, basis: basisArg });
   const SettleArgs = z.strictObject({
     runId: text(200),
-    action: z.enum(["lift", "rereview", "accept", "rework"]),
+    action: z.enum(["lift", "rereview", "accept", "rework", "second_review"]),
     note: z.string().min(1).max(2_000).optional(),
     basis: basisArg,
   });
@@ -3251,7 +3251,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
       SettleArgs,
       "settle",
       async (a) => {
@@ -3269,10 +3269,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               : ["review", "review-ruling"];
         if (!kinds.includes(run.loop.parked.kind))
           return fail("This action cannot settle this park.");
+        const head = store.runPush(run.id)?.sha ?? run.loop.awaitingFlight ?? null;
         const settled = await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
           kinds,
           action: a.action,
-          ...(a.note === undefined ? {} : { note: a.note }),
+          ...(a.action === "second_review"
+            ? { note: a.note ?? a.basis }
+            : a.note === undefined
+              ? {}
+              : { note: a.note }),
         });
         if (settled === undefined)
           return fail("Park cannot be settled: the engine is unavailable.");
@@ -3287,6 +3292,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             decision: "Lifted stuck park",
             basis: a.basis,
           });
+        if (a.action === "second_review") {
+          const first = store
+            .reviewsOfRun(run.id)
+            .filter((r) => r.sha === head && r.state === "reported")
+            .at(-1);
+          const said = first?.verdict
+            ? `spec ${first.verdict.spec}, quality ${first.verdict.quality}`
+            : "no verdict";
+          return {
+            text: `Settled ${run.id}: second_review requested; the first review held (${said}). A fresh review on the most capable model, on another reviewer account, decides.`,
+          };
+        }
         return { text: `Settled ${run.id}: ${a.action}.` };
       },
     ),
