@@ -6561,6 +6561,7 @@ describe("crew routes", () => {
         state: null,
         live: false,
         turns: null,
+        context: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
     });
