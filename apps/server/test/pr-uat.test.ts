@@ -264,6 +264,33 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     expect(body.uat).toEqual({ waiting: false, since: null, note: null });
   });
 
+  it.each([
+    [
+      "parked for CI",
+      { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } },
+    ],
+    ["still working", { phase: "working" as const, parked: null }],
+  ])(
+    "says a PR is not waiting while its run is %s, though loop.uat is not accepted",
+    async (_, state) => {
+      store.upsertPullRequests("shop-app", [pr("shop-app", 50)], NOW);
+      store.upsertRun(
+        run("dev-5", {
+          endedAt: null,
+          status: "running",
+          loop: {
+            ...NEW_LOOP,
+            prNumber: 50,
+            ...state,
+            uat: { sha: "abc1234def", from: "ci", accepted: false },
+          },
+        }),
+      );
+      const body = (await get("/api/qa/uat/shop-app/50")).json() as PrUatView;
+      expect(body.uat).toEqual({ waiting: false, since: null, note: null });
+    },
+  );
+
   it("omits the run command when the repo has none", async () => {
     const bare = buildApp({
       config: { ...config, repos: [{ ...config.repos[0], runCommand: undefined } as never] },
