@@ -143,9 +143,6 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
-  flightReruns?: Record<string, number>;
-  /** Fresh RETRO requests by FLIGHT, at most two per head. */
-  flightRereviews?: Record<string, number>;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
   phase: LoopPhase;

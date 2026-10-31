@@ -54,6 +54,7 @@ import {
   ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   fullAt5h,
   GITHUB_RATE_SETTING,
@@ -105,6 +106,7 @@ import {
   type RepoId,
   type RepoProfile,
   type RepoView,
+  RUNAWAY_NOT_TRIPPED,
   type RunLoopView,
   type RunView,
   reviewStatusOf,
@@ -233,6 +235,7 @@ import {
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+import { liftRunaway } from "./flight/runaway.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
@@ -3715,6 +3718,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+      // Reader: docs/runbook.md#flight-runaway-breaker (the operator lifts a tripped breaker)
+      api.post("/flight/runaway/lift", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!liftRunaway(store, bus, now()))
+          return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
+        return { ok: true };
+      });
       // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
@@ -4517,6 +4528,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        // dismissing the runaway breaker's flag lifts the breaker, so the flag cannot go while it holds
+        if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && liftRunaway(store, bus, now()))
+          return { dismissed: key };
         if (key.length > 200 || noteKey === "" || !store.dismissNote(noteKey, now())) {
           return reply.code(404).send({ error: NO_OPEN_NOTE });
         }

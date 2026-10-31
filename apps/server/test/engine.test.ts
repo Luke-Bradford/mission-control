@@ -32,8 +32,6 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
-  FLIGHT_REWORKS_PER_HEAD,
-  FLIGHT_REWORKS_PER_RUN,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -2490,7 +2488,7 @@ describe("FLIGHT settles a ruling", () => {
       parked: { kind: "ruling", reason: "ruled", ended: false },
     });
   }
-  const accept = (mayRerun = true) => h.engine.acceptRuling(RUN, { mayRerun });
+  const accept = () => h.engine.acceptRuling(RUN);
 
   it("re-runs once, waits while it runs, then accepts a pass and clears the failure", async () => {
     await ruled();
@@ -2545,12 +2543,6 @@ describe("FLIGHT settles a ruling", () => {
       text: `${SHA.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
     });
     expect(h.rulingReruns).toHaveLength(1);
-  });
-
-  it("does not re-run when the hourly cap is used, and says so", async () => {
-    await ruled();
-    expect(await accept(false)).toEqual({ kind: "capped" });
-    expect(h.rulingReruns).toEqual([]);
   });
 
   it("refuses a run that is not parked on a ruling, or whose ruled commit is not the PR's head", async () => {
@@ -5122,7 +5114,7 @@ describe("the engine runs reviews", () => {
       expect(await operate(RUN, "FLIGHT")).toBe(false);
     });
 
-    it("caps fresh RETRO requests at two per head", async () => {
+    it("grants fresh RETRO requests on one head without a limit", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       for (let i = 0; i < 3; i++) {
@@ -5135,10 +5127,10 @@ describe("the engine runs reviews", () => {
           kinds: ["review-failed"],
           action: "rereview",
         });
-        expect(result).toBe(i < 2);
+        expect(result).toBe(true);
       }
     });
-    it("a refused CI rerun costs no per-head attempt", async () => {
+    it("a refused CI rerun is not counted, and later ones run", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       setPr({ ci: "failing" });
@@ -5146,7 +5138,7 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
     it("an accepted head waits until the waived status has been written", async () => {
@@ -5216,7 +5208,7 @@ describe("the engine runs reviews", () => {
       expect(h.sent.at(-1)?.text).not.toContain("found 0");
     });
 
-    it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
+    it("grants reworks on one head without a limit, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       await h.engine.reconcileRun(RUN);
@@ -5242,15 +5234,12 @@ describe("the engine runs reviews", () => {
         "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
       );
 
-      // further rounds are granted on the same head, up to the raised cap
-      for (let n = 2; n <= FLIGHT_REWORKS_PER_HEAD; n++) {
+      // further rounds are granted on the same head, with no limit
+      for (let n = 2; n <= 5; n++) {
         setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
         expect(loopOf().flightReworks).toEqual({ [SHA]: n });
       }
-      setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
-      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
-      expect(loopOf().parked).not.toBeNull();
     });
 
     const parkedForRework = async () => {
@@ -5262,18 +5251,18 @@ describe("the engine runs reviews", () => {
       setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
     };
 
-    it("stops granting rework once the run has had its cap over all its heads", async () => {
+    it("keeps granting rework over many heads of one run", async () => {
       await parkedForRework();
       setLoop({
         phase: "parked",
         parked: { kind: "review", reason: "again", ended: false },
-        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: FLIGHT_REWORKS_PER_RUN - 6 },
+        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: 3 },
       });
       const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
         kinds: ["review"],
         action: "rework",
       });
-      expect(result).toEqual({ lifted: false, reason: "round-granted" });
+      expect(result).toEqual({ lifted: true });
     });
 
     it("lift verifies that the current head descends from the push", async () => {
@@ -5362,16 +5351,6 @@ describe("the engine runs reviews", () => {
         expect(await refusal("CAPCOM", { action: "accept" })).toBe("pr-not-open");
       });
 
-      it("round already granted on this head", async () => {
-        await parkedReview();
-        setLoop({
-          phase: "parked",
-          parked: { kind: "review", reason: "again", ended: false },
-          flightReworks: { [SHA]: FLIGHT_REWORKS_PER_HEAD },
-        });
-        expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
-      });
-
       it("a blocking review on floor-enforcing paths", async () => {
         need(config.repos[0]).flightPowers = "superuser";
         h.touches = ["apps/server/src/guard/x.ts"];
@@ -5415,13 +5394,11 @@ describe("the engine runs reviews", () => {
       });
     });
 
-    it("FLIGHT's CI reruns stop at two per head", async () => {
+    it("FLIGHT's CI reruns have no per-head limit", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       setPr({ ci: "failing" });
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+      for (let i = 0; i < 4; i++) expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
     it("a run that touches a hard-rule file is not marked ready or merged", async () => {

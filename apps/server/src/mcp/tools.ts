@@ -171,6 +171,7 @@ import {
   removeNotFileText,
   reviewedEventText,
   reviewFor,
+  runawayRefusedText,
   type StrayKind,
   SYNC_MAIN_GAP_MIN,
   scanSecrets,
@@ -188,6 +189,7 @@ import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
+import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
 import { runPathGrants } from "../path-grants.ts";
@@ -1486,6 +1488,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const parsed = CommsSendArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
+    const flightCall = isFlight(ctx.seatId);
+    if (flightCall) {
+      const tripped = runawayTrip(store);
+      if (tripped !== null) return { text: runawayRefusedText(tripped.reason), isError: true };
+    }
     if (
       parsed.data.to === COMMS_CAPCOM &&
       parsed.data.label === "question" &&
@@ -1510,6 +1517,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       bus.emit("agents");
       bus.emit("attention");
+      if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsSend, parsed.data);
       return { text: `Sent ${sent.id}.` };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms message refused.", isError: true };
@@ -1525,6 +1533,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       [];
     if (!crew.includes(ctx.seatId))
       return { text: "This seat is no longer in the crew.", isError: true };
+    const flightCall = isFlight(ctx.seatId);
+    if (flightCall) {
+      const tripped = runawayTrip(store);
+      if (tripped !== null) return { text: runawayRefusedText(tripped.reason), isError: true };
+    }
     try {
       reactComms(
         store,
@@ -1536,6 +1549,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       bus.emit("agents");
       bus.emit("attention");
+      if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsReact, parsed.data);
       return { text: "Reaction recorded." };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };
