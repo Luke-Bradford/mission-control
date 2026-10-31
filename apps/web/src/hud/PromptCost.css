@@ -14,16 +14,16 @@
   background: var(--line);
 }
 
-.prompt-cost-bar i + i {
-  box-shadow: inset 1px 0 var(--surface);
-}
-
 .prompt-cost-bar i {
   display: block;
   background: var(--section);
   flex: none;
   min-width: 0;
   height: 100%;
+}
+
+.prompt-cost-bar i + i {
+  box-shadow: inset 1px 0 var(--surface);
 }
 
 .prompt-cost [data-section="role"] {
