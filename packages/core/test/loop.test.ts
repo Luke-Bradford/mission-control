@@ -765,6 +765,14 @@ describe("state step", () => {
     ).toBe("review");
   });
 
+  it("the dollar cap leaves a pushed PR in ci or review moving", () => {
+    expect(reconcile(inCi({ costUsd: 12.6, budgetUsd: 12.5 })).loop.phase).toBe("ci");
+    const review = reconcile(
+      snap({ costUsd: 12.6, budgetUsd: 12.5, headCommit: SHA }, { phase: "review" }),
+    );
+    expect(review.loop.parked?.kind).not.toBe("budget");
+  });
+
   describe("16: silent after three carry-on resumes", () => {
     const keys = ["nudge:r1:0:0:1", "nudge:r1:0:0:2", "nudge:r1:0:0:3"];
     const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>

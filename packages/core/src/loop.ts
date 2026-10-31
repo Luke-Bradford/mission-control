@@ -915,7 +915,10 @@ function stateStep(s: LoopSnapshot): Step {
           : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
     };
   }
+  // like the token park, only while the seat works: a cap passed on the last turn leaves a
+  // pushed PR moving. An ended run is parked anyway, so it keeps the dollar figure.
   if (
+    (loop.phase === "working" || s.ended !== null) &&
     loop.phase !== "parked" &&
     s.budgetUsd !== null &&
     s.budgetUsd !== undefined &&
