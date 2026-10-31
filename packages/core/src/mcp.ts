@@ -330,6 +330,9 @@ export const pushForeignText = (shas: readonly string[]): string =>
 /** origin's branch has commits the local branch lacks; also git's own non-fast-forward refusal. */
 export const originMovedText = (branch: string): string =>
   `Not pushed: origin's ${branch} has commits this run doesn't have. If they are not wanted, reset origin's branch to the run's last push, then message the seat; if they are, end the run.`;
+/** The run's PR on the branch has merged or closed: nothing more goes to that branch. */
+export const pushPrDoneText = (branch: string, pr: number, state: "merged" | "closed"): string =>
+  `Not pushed: PR #${pr} on ${branch} is ${state}, so the branch takes no more commits. Start new work on a new branch.`;
 export const MC_PUSH_MERGE =
   "Not pushed: the branch has a merge commit Mission Control did not make, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
 /** The worktree has a merge in progress that the engine did not start. */

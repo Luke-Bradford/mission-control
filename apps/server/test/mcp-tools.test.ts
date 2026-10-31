@@ -94,6 +94,7 @@ import {
   prNotifyText,
   prSecretText,
   pushChecksText,
+  pushPrDoneText,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -2340,6 +2341,31 @@ describe("push and draft_pr", () => {
         ],
       ]);
       expect(remoteTip("main")).toBe(git(clone, "rev-parse", "main").trim());
+    });
+
+    it("refuses a push to a branch whose PR merged or closed, naming the PR, and sends nothing", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      for (const [state, word] of [
+        ["MERGED", "merged"],
+        ["CLOSED", "closed"],
+      ] as const) {
+        ghState({ "pr view": { stdout: `${JSON.stringify({ state })}\n` } });
+        const text = pushPrDoneText(BRANCH, 727, word);
+        expect(await push()).toEqual({ text, isError: true });
+        expect(text).toContain("PR #727");
+        expect(remoteTip()).toBeNull();
+        expect(store.runPush(RUN)).toBeNull();
+      }
+    });
+
+    it("pushes while the run's PR is open, and refuses when gh cannot say", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      ghState({ "pr view": { code: 1, stderr: "HTTP 502\n" } });
+      expect(await push()).toEqual({ text: MC_PUSH_FAILED, isError: true });
+      ghState({ "pr view": { stdout: `${JSON.stringify({ state: "OPEN" })}\n` } });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
     });
 
     it("gives every slow step the slow timeout and runs in the clone's queue", async () => {

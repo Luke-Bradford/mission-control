@@ -154,6 +154,7 @@ import {
   pushChecksText,
   pushedText,
   pushForeignText,
+  pushPrDoneText,
   pushReferenceText,
   pushSecretText,
   REVERT_STRAYS,
@@ -763,6 +764,33 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       return unmet;
     }
 
+    /**
+     * The run's PR (the one its loop records) when it has merged or closed; "unreadable" when gh
+     * cannot say. A run with no PR yet has none to check.
+     */
+    async function donePr(
+      run: Run,
+    ): Promise<{ number: number; word: "merged" | "closed" } | "unreadable" | null> {
+      const number = run.loop?.prNumber ?? null;
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (number === null || repo === undefined) return null;
+      const viewed = await deps.gh(
+        ["pr", "view", String(number), `--repo=${repo}`, "--json=state"],
+        { cwd: crewDir(deps.dbPath) },
+      );
+      let state: unknown;
+      try {
+        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+      } catch {
+        state = null;
+      }
+      if (state === "OPEN") return null;
+      if (state === "MERGED") return { number, word: "merged" };
+      if (state === "CLOSED") return { number, word: "closed" };
+      deps.log?.(`mc push: gh pr view ${number} failed (${String(viewed.code)})`);
+      return "unreadable";
+    }
+
     async function steps(
       run: Run,
       g: (a: string[], o?: { maxBuffer?: number }) => Promise<string>,
@@ -840,6 +868,13 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         if (!ancestor) return { text: originMovedText(branch), isError: true };
       }
+
+      // 1b. the run's PR on this branch is merged or closed: GitHub deletes a merged branch, and a
+      // push would bring it back
+      const done = await donePr(run);
+      if (done === "unreadable") return { text: MC_PUSH_FAILED, isError: true };
+      if (done !== null)
+        return { text: pushPrDoneText(branch, done.number, done.word), isError: true };
 
       // 2. the new commits: exactly what this push sends
       if (!(await has(heads.defaultSha))) {
