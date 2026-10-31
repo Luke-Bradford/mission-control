@@ -2319,11 +2319,11 @@ describe("the FLIGHT watcher", () => {
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
         text: null,
       });
-      context(151_000);
+      context(301_000);
       expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
-        tokens: 151_000,
+        tokens: 301_000,
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-        text: "context 151K · fresh session at 150K",
+        text: "context 301K · fresh session at 300K",
       });
     });
   });

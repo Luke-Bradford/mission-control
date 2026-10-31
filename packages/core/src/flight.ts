@@ -1120,7 +1120,7 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
-export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 300_000;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1135,7 +1135,7 @@ export const freshStartLine = (handover: { body: string; updatedAt: number } | n
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
   }`;
-/** "context 142K · fresh session at 150K"; null while the context is unknown. */
+/** "context 142K · fresh session at 300K"; null while the context is unknown. */
 export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
   tokens === null
     ? null
