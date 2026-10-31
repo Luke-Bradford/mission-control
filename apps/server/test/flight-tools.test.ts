@@ -3040,6 +3040,10 @@ describe("sync_main", () => {
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
 
+  it("keeps the wake inputs out of what FLIGHT reads, and marks its items seen", async () => {
+    expect(await state()).not.toHaveProperty("wake");
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3100,7 +3104,11 @@ describe("flight_state", () => {
 
   it("refreshes the delivered snapshot with the state returned to the calling run", async () => {
     const result = await state();
-    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", result);
+    // the baseline keeps the wake inputs FLIGHT is not shown
+    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", {
+      ...(result as object),
+      wake: expect.anything(),
+    });
     stateSeen.mockClear();
     await call("flight_state", { invalid: true });
     await call("flight_state", {}, ctx("guido-1", "r-guido"));
