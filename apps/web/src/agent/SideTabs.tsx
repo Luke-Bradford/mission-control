@@ -22,10 +22,11 @@ import { BuildChips } from "../shell/buildStatus.tsx";
 
 import { openItem } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
+import { PromptTab } from "./PromptTab.tsx";
 
 const DASH = "—";
 
-type Tab = "plan" | "queue" | "subs" | "files";
+type Tab = "plan" | "queue" | "subs" | "files" | "prompt";
 
 /** The run's own checklist, replayed from its stream. */
 function Plan({
@@ -477,9 +478,10 @@ export function SideTabs({ row }: { row: CrewRow }) {
     { value: "queue", label: "Queue" },
     { value: "subs", label: `Subagents ${row.digest?.subagents.length ?? 0}` },
     { value: "files", label: nFiles === undefined ? "Files" : `Files ${nFiles}` },
+    { value: "prompt", label: "Context" },
   ] as const;
   return (
-    <section className="panel" id="sideP" aria-label="Plan, queue, subagents and files">
+    <section className="panel" id="sideP" aria-label="Plan, queue, subagents, files and context">
       <div className="ph">
         <Seg label="Agent details" options={options} value={tab} onChange={setTab} />
         <BuildChips panel="sideP" />
@@ -489,6 +491,7 @@ export function SideTabs({ row }: { row: CrewRow }) {
         {tab === "queue" && <Queue key={row.id} row={row} />}
         {tab === "subs" && <Subagents row={row} />}
         {tab === "files" && <Files agentId={row.id} files={files} />}
+        {tab === "prompt" && <PromptTab key={row.id} row={row} />}
       </div>
     </section>
   );
