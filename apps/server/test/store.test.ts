@@ -2340,6 +2340,16 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")?.quietTurns).toBe(0);
   });
 
+  it("clears the quiet turns for a new run and keeps them for the same run", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 10);
+    store.setSeatTurnEnded("guido", 20);
+    store.setSeatSession(seat({ state: "idle", updatedAt: 9 }));
+    expect(store.seatSession("guido")?.quietTurns).toBe(2);
+    store.setSeatSession(seat({ runId: "guido:20261021T090000Z", cliSessionId: "cli-2" }));
+    expect(store.seatSession("guido")?.quietTurns).toBe(0);
+  });
+
   it("keeps when the last turn ended apart from the row's other writes", () => {
     store.setSeatSession(seat());
     store.setSeatTurnEnded("guido", 77);

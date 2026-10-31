@@ -5754,7 +5754,8 @@ export class Store {
            reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
            error_since = CASE WHEN excluded.state != 'error' THEN NULL
              WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END`,
+             ELSE excluded.updated_at END,
+           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
       )
       .run(
         row.seatId,
