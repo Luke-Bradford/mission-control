@@ -1281,6 +1281,8 @@ function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat } = s;
   return (
     s.reworkDue === true &&
+    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
+    s.pushed === null &&
     loop.phase === "working" &&
     !loop.aside &&
     s.ended === null &&

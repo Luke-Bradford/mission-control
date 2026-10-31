@@ -2180,6 +2180,7 @@ describe("set aside", () => {
         ["not idle", building({ seat: { ...b.seat, state: "running" } })],
         ["seat does not hold the run", building({ seat: { ...b.seat, holdsRun: false } })],
         ["no rework due", building({ reworkDue: false })],
+        ["already pushed", building({ pushed: { sha: SHA, at: NOW - 60_000 } })],
         ["ended", building({ ended: { reason: "done" } })],
       ];
       for (const [name, s] of cases) {

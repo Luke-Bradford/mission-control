@@ -6671,5 +6671,31 @@ describe("the engine runs reviews", () => {
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toEqual([SEAT]);
     });
+
+    it("two reworks on one seat do not set each other aside at every turn end", async () => {
+      await inCi();
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+      // a younger run of the seat has findings waiting; the woken one's turn ends
+      store.upsertRun(
+        run({
+          id: "guido-1:younger",
+          startedAt: START + MIN,
+          seq: 3,
+          ticket: `${REPO}#8`,
+          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/y", wake: true } },
+        }),
+      );
+      h.facts = { inTurn: false, resumedAt: clock, rateLimitedUntil: null };
+      seatIdle(RUN);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(h.asides).toEqual([RUN]);
+      expect(h.wakes).toEqual([RUN]);
+    });
   });
 });
