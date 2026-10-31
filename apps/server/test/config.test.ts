@@ -419,6 +419,7 @@ describe("crew", () => {
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
+    allowRead?: string[];
     budget?: string;
     maxOpen?: string;
     lane?: string;
@@ -437,6 +438,7 @@ crew:
   worktrees: ${opts.worktrees ?? "~/code/mc-crew/worktrees"}
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
+  ${opts.allowRead === undefined ? "" : `allow_read: ${JSON.stringify(opts.allowRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
@@ -1260,6 +1262,26 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
       `worktree: ${loopDir}\n`,
     );
     expect(fails(t).path).toBe("crew.sessions[0].checkout");
+  });
+
+  describe("allow_read", () => {
+    it("loads with ~ expanded, and defaults to none", () => {
+      expect(load(crewText({})).crew?.allowRead).toEqual([]);
+      const c = load(crewText({ allowRead: ["~/.config/pip", "/opt/tools"] })).crew;
+      expect(c?.allowRead).toEqual([join(homedir(), ".config/pip"), "/opt/tools"]);
+    });
+
+    it("refuses a relative path, the home folder, a parent of it, or a credential folder", () => {
+      const bad = (p: string) => fails(crewText({ allowRead: [p] }));
+      expect(bad("pip").message).toBe("crew.allow_read: pip is not an absolute path");
+      for (const p of [homedir(), dirname(homedir())]) {
+        expect(bad(p).path).toBe("crew.allow_read");
+        expect(bad(p).message).toContain("home folder");
+      }
+      for (const p of ["~/.ssh", "~/.ssh/keys", "~/.config/git/credentials", "~/.config"]) {
+        expect(bad(p.replace("~", homedir())).message).toContain("credential folder");
+      }
+    });
   });
 
   describe("deny_read", () => {

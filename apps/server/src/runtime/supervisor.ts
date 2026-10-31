@@ -214,6 +214,7 @@ import {
   startSession,
 } from "./session.ts";
 import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
+import { seatToolchainDirs } from "./toolchain.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
 export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
@@ -1578,6 +1579,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
         pnpmStoreDir: pnpmStore,
+        toolchainDirs: seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir()),
+        allowRead: crew?.allowRead ?? [],
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),

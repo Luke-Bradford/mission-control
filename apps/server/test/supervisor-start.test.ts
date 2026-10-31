@@ -88,6 +88,7 @@ import {
   type Supervisor,
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
+import { seatToolchainDirs } from "../src/runtime/toolchain.ts";
 import {
   crewCodexDir,
   crewKeeperDir,
@@ -695,7 +696,7 @@ describe("startRun", () => {
       const parent = dirname(tmp);
       expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([
+      expect(settings.sandbox.filesystem.allowRead.slice(0, 2)).toEqual([
         realpathSync(tmp),
         join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       ]);
@@ -836,6 +837,31 @@ describe("startRun", () => {
     const text = readFileSync(crewPromptPath(dbPath, runId), "utf8");
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
     expect(text).not.toContain("INJECTED");
+  });
+
+  it("denies the operator's home to a seat and re-allows its worktree, toolchain, store and crew.allow_read (#487)", async () => {
+    const { sup, cfg } = make();
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.allowRead = [join(dir, "tools-config")];
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
+    const common = join(clone, ".git");
+    expect(fs.denyRead).toContain(homedir());
+    expect(fs.allowRead).toEqual(
+      expect.arrayContaining([
+        `${root}/mc-crew/guido-1-42`,
+        common,
+        `${common}/worktrees/guido-1-42`,
+        join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
+        ...seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir()),
+        join(homedir(), ".gitconfig"),
+        join(dir, "tools-config"),
+      ]),
+    );
+    expect(fs.allowRead).not.toContain(homedir());
   });
 
   it("passes a sandbox that writes no git state, for the seat's worktree", async () => {

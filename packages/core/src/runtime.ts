@@ -876,6 +876,13 @@ export interface CrewSandboxInput {
   denyRead: string[];
   /** The hub-owned pnpm store seats may read but never write. */
   pnpmStoreDir: string;
+  /**
+   * The node and pnpm install folders the seat's tools run from, re-allowed for reads inside the
+   * home folder's deny. Default [].
+   */
+  toolchainDirs?: string[];
+  /** `crew.allow_read`: further absolute paths re-allowed for reads inside home. Default []. */
+  allowRead?: string[];
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
 }
@@ -915,6 +922,17 @@ export const SANDBOX_DENY_READ_HOME = [
   // opens it; with it, opening fails EPERM and only the System keychain is listed (probe
   // 2026-10-20; no real item was read). The CLI's own login runs outside the sandbox.
   "Library/Keychains",
+] as const;
+
+/**
+ * What a seat may read in the home folder (relative to home), which the sandbox otherwise denies
+ * whole: git's global config. Files, not `.config/git`, so the folder's `credentials` stays denied.
+ */
+export const SANDBOX_ALLOW_READ_HOME = [
+  ".gitconfig",
+  ".config/git/config",
+  ".config/git/ignore",
+  ".config/git/attributes",
 ] as const;
 
 export const CODEX_MIN_VERSION = "0.154.0";
@@ -991,6 +1009,34 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
   ];
 }
 
+const holds = (parent: string, path: string) =>
+  path === parent || path.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
+
+/**
+ * What a seat's sandbox re-allows for reads inside the denied home folder: the seat's own paths,
+ * its toolchain, git's global config and `crew.allow_read`. A re-allow beats a deny in the CLI, so
+ * one that holds a denied path (a credential folder, the data dir) or home itself is refused.
+ */
+function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
+  const allows = [
+    ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
+    i.pnpmStoreDir,
+    i.cwd,
+    i.gitCommonDir,
+    i.worktreeGitDir,
+    ...(i.toolchainDirs ?? []),
+    ...SANDBOX_ALLOW_READ_HOME.map((d) => `${i.home}/${d}`),
+    ...(i.allowRead ?? []),
+  ];
+  for (const p of allows) {
+    if (!p.startsWith("/")) throw new Error(`crew sandbox: allowRead ${p} must be absolute`);
+    if (holds(p, i.home)) throw new Error(`crew sandbox: allowRead ${p} holds the home folder`);
+    const d = denied.find((x) => holds(p, x));
+    if (d !== undefined) throw new Error(`crew sandbox: allowRead ${p} holds denied ${d}`);
+  }
+  return [...new Set(allows)];
+}
+
 /**
  * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
  * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
@@ -1026,17 +1072,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // config.worktree all fail; git reads and the full suite still work). That also covers
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.
         allowWrite: i.tempRoot === undefined ? [] : [i.tempRoot],
-        ...(i.tempRoot === undefined
-          ? {}
-          : {
-              allowRead: [
-                i.tempRoot,
-                i.pnpmStoreDir,
-                ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
-                  tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
-                ),
-              ],
-            }),
+        // Home is denied whole; the seat's own paths, toolchain and git config are re-allowed in it.
+        allowRead: sandboxReadAllows(i, denyRead),
         // The worktree's `.git` pointer (a writer's worktree is otherwise writable), which
         // rewriting would send the host's own git calls elsewhere; the clone's whole git dir; and
         // the worktree's own git dir (inside it, named so the grant reads plainly). A read-only
@@ -1056,7 +1093,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
         // read: the hub, the loops, the other crew clones and the operator's own working folders.
-        denyRead: [...denyRead, ...tempDenies, ...tempReadDenies],
+        denyRead: [i.home, ...denyRead, ...tempDenies, ...tempReadDenies],
       },
     },
   });

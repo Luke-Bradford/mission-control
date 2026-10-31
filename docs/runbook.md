@@ -469,9 +469,16 @@ What each seat's process starts with:
   (the hub's other worktrees) or any repo no loop runs in, stay readable until you list them under
   `crew.deny_read`.
 
+  Your whole home folder is denied to code a seat runs (#487), and only these paths inside it are
+  re-allowed for reads: the seat's worktree and its clone's git dirs, its temp dir and the pnpm
+  store, the install folders of the hub's node and of the `node` and `pnpm` on its `PATH`,
+  `~/.gitconfig`, git's `~/.config/git/{config,ignore,attributes}` and `crew.allow_read`. The
+  credential folders above stay denied even if an entry would cover them. Browser profiles and
+  `~/Library/Application Support` are unreadable. A repo whose tools read other files in home (a
+  global npm or pip config) lists them under `crew.allow_read`.
+
   The file tools are confined to the worktree already. What stays readable:
-  - the rest of your home, including other apps' data under `~/Library` (browser profiles,
-    Application Support);
+  - outside home: system folders such as `/usr` and `/opt`, and the folders above;
   - the other seats' worktrees, this session's and other sessions', since they all live in
     `crew.worktrees`, which no seat may deny;
   - the keychains as a service: the rule blocks only the keychain *file*. Security-framework
@@ -767,6 +774,11 @@ Setup's board action also creates the board's fields and the repo's type labels,
   - The lock box on Overview and the header's `Lock:` show who holds the lock and who waits.
 - **`crew.deny_read`** (default `[]`) lists absolute folders that code a seat runs may not read.
   See "First crew".
+- **`crew.allow_read`** (default `[]`) lists absolute paths (`~` allowed) inside your home folder
+  that code a seat runs may still read, such as `~/.config/pip`. An entry that is or holds the home
+  folder, or is, holds or lies inside a credential folder, is refused at start-up
+  (`crew.allow_read: <path> …`). Applies after a restart; it is read-only and holds for read-only
+  seats too.
 - **`crew.node`** (default `/opt/homebrew/bin/node`) is the node the guard hook runs under.
   - It must be an executable file reporting Node 22.6 or later. Give a stable path, not a
     `Cellar` one, which an upgrade removes.
@@ -804,14 +816,15 @@ Seat and role changes in `config.yaml` apply without a restart.
   file that doesn't load changes nothing, and the call answers with its error.
 - The reload answers with what it applied (`applied`), the seats as now loaded, any seat
   changes still waiting (`pending`, each with its reason), and `restartNeeded`: keys
-  that changed on disk but only apply after a restart, such as `loops` and `crew.deny_read`.
+  that changed on disk but only apply after a restart, such as `loops`, `crew.deny_read` and `crew.allow_read`.
 - `curl -s 127.0.0.1:7420/api/crew/changes` shows the same picture without reloading.
 - Setup › Sessions (#22) will use both from the HUD.
 
 ### Before the first crew push
 
-List your own working folders under `crew.deny_read`, then restart the hub. Agent-run code can
-read the rest of your home. The secret scan is the only backstop for anything a seat copies into
+List your own working folders under `crew.deny_read`, then restart the hub. Agent-run code cannot
+read your home folder beyond what a seat needs (see "First crew"), but can read other folders
+outside it. The secret scan is the only backstop for anything a seat copies into
 its branch, and it has limits (below).
 
 ### Landing a change to a protected file
