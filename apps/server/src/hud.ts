@@ -744,7 +744,7 @@ function buildCrew(
             : null,
         prs,
         summary: latest?.summary ?? null,
-        digest: digest ? (({ toolStarts: _, ...rest }) => rest)(digest) : null,
+        digest: digest ? (({ toolStarts: _, attemptUsage: __, ...rest }) => rest)(digest) : null,
         contextWindow,
         lastOutputAt: view.lastOutputAt,
       };

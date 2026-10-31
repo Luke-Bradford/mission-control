@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import {
   ACTIVITY_LIMIT,
   type ActivityEvent,
@@ -84,6 +85,7 @@ import {
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
 } from "../src/api.ts";
+import { AWAY_STARTED_SETTING } from "../src/away.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import {
@@ -689,6 +691,31 @@ describe("Comms API", () => {
       });
       expect((await getComms("/api/comms/crew")).cursor).toBe(crew.id);
       expect((await getComms("/api/comms/flight")).cursor).toBe(flight.id);
+    });
+  });
+
+  it("GET /api/comms/counts gives each seat's last-24-hour count and the unread counts of its agent page", async () => {
+    commsRow("beta", "alpha", "old", clock - 25 * 3_600_000);
+    commsRow("beta", "alpha", "new one", clock - 3_600_000);
+    commsRow("alpha", "CAPCOM", "new two", clock - 3_600_000);
+    await withCommsApp(async (comms) => {
+      const counts = (await comms.inject({ method: "GET", url: "/api/comms/counts" })).json() as {
+        id: string;
+        recent24h: number;
+        unread: number;
+        directUnread: number;
+      }[];
+      expect(counts.map((c) => c.id)).toEqual(["flight", "alpha", "beta"]);
+      const alpha = counts.find((c) => c.id === "alpha");
+      expect(alpha?.recent24h).toBe(2);
+      const page = (await comms.inject({ method: "GET", url: "/api/comms/agents/alpha" })).json();
+      expect(alpha).toEqual({
+        id: "alpha",
+        recent24h: 2,
+        unread: page.unread,
+        directUnread: page.directUnread,
+      });
+      expect(counts.find((c) => c.id === "beta")?.recent24h).toBe(1);
     });
   });
 
@@ -1303,6 +1330,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/crew"],
   ["GET", "/api/comms/flight"],
   ["GET", "/api/comms/agents/guido-1"],
+  ["GET", "/api/comms/counts"],
   ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
   ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
   ["GET", "/api/comms/tickets/%237"],
@@ -1472,6 +1500,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/settings/crew-pause", { seats: null }],
   ["GET", "/api/settings/away"],
   ["GET", "/api/away/digest"],
+  ["GET", "/api/repos/shop-app/prs/titles?numbers=4"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
     "POST",
@@ -9331,4 +9360,133 @@ it("reports ordinary child-preview requests to the parent activity callback", as
   } finally {
     await a.close();
   }
+});
+
+describe("lighter reads and compressed responses", () => {
+  const prRow = (number: number, title: string): PullRequestView => ({
+    repoId: "shop-app",
+    number,
+    title,
+    url: `https://github.com/o/shop-app/pull/${number}`,
+    branch: `fix/${number}`,
+    ticket: null,
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    mergedAt: null,
+    headSha: null,
+    mergeable: null,
+  });
+
+  it("GET /api/crew rows carry neither attemptUsage nor toolStarts, and keep minuteTokens", async () => {
+    store.upsertRun(run({ id: "a", startedAt: NOW - 30 * 60e3 }));
+    store.setDigest(
+      "a",
+      digest({
+        attemptUsage: [{ id: "m1", at: NOW, tokens: 5 }],
+        toolStarts: [NOW],
+        minuteTokens: [[NOW, 5]],
+      }),
+    );
+    const row = ((await get("/api/crew")).json() as Crew).rows[0];
+    expect(row?.digest).toBeDefined();
+    expect(row?.digest).not.toHaveProperty("attemptUsage");
+    expect(row?.digest).not.toHaveProperty("toolStarts");
+    expect(row?.digest?.minuteTokens).toEqual([[NOW, 5]]);
+  });
+
+  describe("GET /api/repos/:repoId/prs/titles", () => {
+    it("gives the stored PRs' numbers and titles in number order", async () => {
+      store.upsertPullRequests("shop-app", [prRow(4, "four"), prRow(9, "nine")], NOW);
+      const res = await get("/api/repos/shop-app/prs/titles?numbers=9,4,77");
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual([
+        { number: 4, title: "four" },
+        { number: 9, title: "nine" },
+      ]);
+    });
+
+    it("answers 400 for no numbers, 0, a non-number or more than 50", async () => {
+      const error = { error: "numbers must be 1 to 50 PR numbers, comma-separated" };
+      const fifty1 = Array.from({ length: 51 }, (_, i) => i + 1).join(",");
+      for (const q of ["", "?numbers=", "?numbers=0", "?numbers=4,x", `?numbers=${fifty1}`]) {
+        const res = await get(`/api/repos/shop-app/prs/titles${q}`);
+        expect(res.statusCode, q).toBe(400);
+        expect(res.json(), q).toEqual(error);
+      }
+    });
+
+    it("answers 404 for an unknown repo", async () => {
+      const res = await get("/api/repos/nope/prs/titles?numbers=4");
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ error: "unknown repo" });
+    });
+  });
+
+  it("GET /api/notifications/events?after= gives the events after that id, all of them for an unknown id", async () => {
+    const first = (await post("/api/notifications/test")).json() as { id: string };
+    const second = (await post("/api/notifications/test")).json() as { id: string };
+    const ids = async (q: string) =>
+      ((await get(`/api/notifications/events${q}`)).json() as { id: string }[]).map((e) => e.id);
+    expect(await ids("")).toEqual([first.id, second.id]);
+    expect(await ids(`?after=${first.id}`)).toEqual([second.id]);
+    expect(await ids("?after=unknown")).toEqual([first.id, second.id]);
+    const long = await get(`/api/notifications/events?after=${"x".repeat(101)}`);
+    expect(long.statusCode).toBe(400);
+    expect(long.json()).toEqual({ error: "after must be a notification id" });
+  });
+
+  it("GET /api/away/digest?meta=1 gives only active and startedAt", async () => {
+    expect(Object.keys((await get("/api/away/digest?meta=1")).json())).toEqual(["active"]);
+    store.setSetting(AWAY_STARTED_SETTING, String(NOW));
+    expect((await get("/api/away/digest?meta=1")).json()).toEqual({
+      active: false,
+      startedAt: NOW,
+    });
+    const bad = await get("/api/away/digest?meta=2");
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: "meta must be 1" });
+  });
+
+  describe("compression", () => {
+    const encoded = (accept?: string) =>
+      app.inject({
+        method: "GET",
+        url: "/api/repos/shop-app/prs",
+        headers: accept === undefined ? {} : { "accept-encoding": accept },
+      });
+
+    beforeEach(() => {
+      store.upsertPullRequests(
+        "shop-app",
+        Array.from({ length: 60 }, (_, i) => prRow(i + 1, `A pull request titled ${i + 1}`)),
+        NOW,
+      );
+    });
+
+    it("answers brotli, then gzip, and says the body varies on the request", async () => {
+      const br = await encoded("gzip, deflate, br");
+      expect(br.headers["content-encoding"]).toBe("br");
+      expect(String(br.headers.vary)).toContain("accept-encoding");
+      expect(JSON.parse(brotliDecompressSync(br.rawPayload).toString())).toHaveLength(60);
+      const gz = await encoded("gzip");
+      expect(gz.headers["content-encoding"]).toBe("gzip");
+      expect(JSON.parse(gunzipSync(gz.rawPayload).toString())).toHaveLength(60);
+    });
+
+    it("sends plain when the client names no encoding, and leaves small bodies alone", async () => {
+      const plain = await encoded();
+      expect(plain.headers["content-encoding"]).toBeUndefined();
+      expect(JSON.parse(plain.body)).toHaveLength(60);
+      const health = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { "accept-encoding": "br" },
+      });
+      expect(health.headers["content-encoding"]).toBeUndefined();
+    });
+  });
 });

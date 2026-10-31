@@ -35,6 +35,7 @@ import {
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  type CommsCount,
   type CommsMetricsView,
   type ContextUsage,
   CREW_DISABLED,
@@ -176,6 +177,7 @@ import {
   threadMessages,
   validateCommsText,
 } from "./comms.ts";
+import { compressResponse } from "./compress.ts";
 import {
   agentIds,
   type CcConfig,
@@ -317,6 +319,8 @@ const TELEMETRY_COMMIT_CONCURRENCY = 4;
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
 const MAX_ISSUE_NUMBER = 2 ** 31 - 1;
+/** The most PR titles one lookup reads. */
+const PR_TITLES_MAX = 50;
 
 export const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", LOOPBACK_HOST]);
 /** The socket addresses of a caller on this machine. */
@@ -1171,6 +1175,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (responseCache.size >= 64) responseCache.clear();
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
+  // After the cache hook above, so the cache keeps plain strings.
+  app.addHook("onSend", compressResponse);
 
   // The configured crew changes only through routes and reloads, which emit one of these topics.
   // Keep a small local revision rather than serialising the full config for every GET /api/crew.
@@ -1580,6 +1586,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return rows.map((row) => storedCommsMessage(row, pins));
       };
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      /** An agent's unread counts, as its page shows them (the page and the counts route share this). */
+      const agentCommsCounts = (id: string) => ({
+        unread: store.commsCounts({ agent: id }, store.commsScopeCursor(`agent-all:${id}`)).unread,
+        // Needs you no longer counts direct-line replies; the thread does (#757)
+        directUnread:
+          id === COMMS_CAPCOM
+            ? 0
+            : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
+                .length,
+      });
       const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
       /** `?limit=&before=` of a Comms read; null when either is malformed (the caller answers 400). */
       const commsPaging = (query: {
@@ -1698,13 +1714,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           contacts,
           inboxCursor,
           inboxUnread: store.commsCounts({ inbox: id }, inboxCursor).unread,
-          // Needs you no longer counts direct-line replies; the thread does (#757)
-          directUnread:
-            id === COMMS_CAPCOM
-              ? 0
-              : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
-                  .length,
+          directUnread: agentCommsCounts(id).directUnread,
         };
+      });
+      // Reader: apps/web/src/comms/CommsNav.tsx (the nav rows' message counts)
+      api.get("/comms/counts", (): CommsCount[] => {
+        const since = now() - 86_400_000;
+        return commsCrew().map((id) => ({
+          id,
+          recent24h: store.commsForAgent(id).filter((row) => row.at >= since).length,
+          ...agentCommsCounts(id),
+        }));
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
@@ -2796,6 +2816,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
           : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
       });
+      // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
+      api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
+        "/repos/:repoId/prs/titles",
+        async (req, reply) => {
+          const parts = typeof req.query.numbers === "string" ? req.query.numbers.split(",") : [];
+          const numbers = [...new Set(parts.map(Number))];
+          if (
+            !parts.every((p) => /^[1-9]\d*$/.test(p) && Number(p) <= MAX_ISSUE_NUMBER) ||
+            numbers.length < 1 ||
+            numbers.length > PR_TITLES_MAX
+          )
+            return reply
+              .code(400)
+              .send({ error: `numbers must be 1 to ${PR_TITLES_MAX} PR numbers, comma-separated` });
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          return store.pullRequestTitles(repo.id, numbers);
+        },
+      );
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's full detail on demand)
       api.get<{ Params: { repoId: string; number: string } }>(
         "/repos/:repoId/prs/:number",
@@ -4487,8 +4526,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/notifications.ts (local notification feed)
-      api.get("/notifications/events", async () => {
-        return notifications.events();
+      // `?after=<id>`: only the events after that id (all of them if it is not in the list).
+      api.get<{ Querystring: { after?: unknown } }>("/notifications/events", async (req, reply) => {
+        const events = notifications.events();
+        const { after } = req.query;
+        if (after === undefined) return events;
+        if (typeof after !== "string" || after.length < 1 || after.length > 100)
+          return reply.code(400).send({ error: "after must be a notification id" });
+        const at = events.findIndex((e) => e.id === after);
+        return at < 0 ? events : events.slice(at + 1);
       });
 
       // Reader: apps/web/src/notifications.ts (Send a test notification)
@@ -4599,14 +4645,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
 
       // Reader: apps/web/src/shell/AwayDigest.tsx
-      api.get("/away/digest", async (req, reply) => {
+      api.get<{ Querystring: { meta?: unknown } }>("/away/digest", async (req, reply) => {
+        const { meta } = req.query;
+        if (meta !== undefined && meta !== "1")
+          return reply.code(400).send({ error: "meta must be 1" });
+        const active = activeAway(store, now(), config.operator.timezone) !== null;
+        // `?meta=1`: whether away is on and when it started, without building the digest.
+        if (meta === "1") {
+          const started = Number(store.getSetting(AWAY_STARTED_SETTING));
+          return started > 0 ? { active, startedAt: started } : { active };
+        }
         const query = z
           .object({ since: z.coerce.number().finite().nonnegative().optional() })
           .safeParse(req.query);
         if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
         return awayDigest(
           store,
-          activeAway(store, now(), config.operator.timezone) !== null,
+          active,
           attentionItems(
             config,
             store,

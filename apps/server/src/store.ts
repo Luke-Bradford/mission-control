@@ -99,6 +99,7 @@ import {
   type PrFileInput,
   type ProfileOverride,
   type PrTestsView,
+  type PrTitle,
   type PullRequestView,
   prCarries,
   QA_RETENTION_DAYS,
@@ -3541,6 +3542,17 @@ export class Store {
             "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR updated_at >= ? OR merged_at >= ?) ORDER BY number DESC",
           ).all(repoId, since, since) as Row[]);
     return this.pullRequestRows(rows);
+  }
+
+  /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
+  pullRequestTitles(repoId: RepoId, numbers: readonly number[]): PrTitle[] {
+    if (numbers.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT number, title FROM pull_requests WHERE repo_id = ? AND number IN (${numbers.map(() => "?").join(", ")}) ORDER BY number ASC`,
+      )
+      .all(repoId, ...numbers) as { number: number; title: string }[];
+    return rows.map((r) => ({ number: r.number, title: r.title }));
   }
 
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
