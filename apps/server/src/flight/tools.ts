@@ -3795,7 +3795,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.syncMain,
-      description: `Merge main into a developer run's branch now (its PR conflicts with main, or the run is parked on a conflict). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
+      description: `Merge main into a developer run's branch now (its PR conflicts with main, the run is parked on a conflict, or its push is not shown on GitHub). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
       inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],
