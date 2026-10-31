@@ -98,6 +98,7 @@ import {
   START_NO_RULES,
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
+  sandboxReadDenies,
   scratchName,
   scratchStartRefusedText,
   seatBusyText,
