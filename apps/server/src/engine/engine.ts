@@ -2638,6 +2638,7 @@ export function createEngine(deps: EngineDeps): Engine {
         };
         if (kind === "budget") {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
+          next.budgetUsdExtra = (next.budgetUsdExtra ?? 0) + (run.profile?.profile.budgetUsd ?? 0);
         }
         if (kind === "review" || kind === "review-ruling") {
           next.phase = opts?.action === "accept" ? "review" : "working";

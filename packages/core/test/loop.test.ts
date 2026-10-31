@@ -681,6 +681,21 @@ describe("state step", () => {
     });
   });
 
+  it("the dollar cap: a resume's allowance raises it, and a parked loop keeps its own park", () => {
+    expect(
+      reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5 }, { budgetUsdExtra: 12.5 })).loop.phase,
+    ).toBe("working");
+    expect(
+      reconcile(snap({ costUsd: 25, budgetUsd: 12.5 }, { budgetUsdExtra: 12.5 })).loop.parked
+        ?.reason,
+    ).toBe("used $25.00 of a $25.00 budget");
+    const review = { kind: "review", reason: "r", ended: false };
+    expect(
+      reconcile(snap({ costUsd: 13, budgetUsd: 12.5 }, { phase: "parked", parked: review })).loop
+        .parked?.kind,
+    ).toBe("review");
+  });
+
   describe("16: silent after three carry-on resumes", () => {
     const keys = ["nudge:r1:0:0:1", "nudge:r1:0:0:2", "nudge:r1:0:0:3"];
     const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>

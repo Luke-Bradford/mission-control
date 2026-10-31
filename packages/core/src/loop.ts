@@ -463,6 +463,7 @@ export const NEW_LOOP: RunLoop = {
   lastRefusal: null,
   epoch: 0,
   budgetExtra: 0,
+  budgetUsdExtra: 0,
   parked: null,
   touches: null,
   cardFor: null,
@@ -889,13 +890,14 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (
+    loop.phase !== "parked" &&
     s.budgetUsd !== null &&
     s.budgetUsd !== undefined &&
     s.costUsd !== null &&
     s.costUsd !== undefined &&
-    s.costUsd >= s.budgetUsd
+    s.costUsd >= s.budgetUsd + (loop.budgetUsdExtra ?? 0)
   ) {
-    const reason = `used $${s.costUsd.toFixed(2)} of a $${s.budgetUsd.toFixed(2)} budget`;
+    const reason = `used $${s.costUsd.toFixed(2)} of a $${(s.budgetUsd + (loop.budgetUsdExtra ?? 0)).toFixed(2)} budget`;
     return {
       loop: {
         ...loop,
