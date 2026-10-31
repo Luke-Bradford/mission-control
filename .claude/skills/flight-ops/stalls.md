@@ -8,7 +8,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - Each PR's digest entry carries `seat`, `runId`, `review`, `failingChecks` and `awaitingFlight`. From them, know who moves it next and what it waits on. Read the PR with `mc gh_read` only when they don't say.
 - Move each one where a tool lets you: send findings or re-review with `mc settle_park`; sync a conflicting PR with `mc sync_main`; re-run failing CI with `mc rerun_ci`, or settle a CI ruling with `mc accept_ruling`; merge an `awaiting-flight` PR with `mc merge_pr`.
-- **Merging.** On superuser repos, `mc merge_pr { pr, basis }` clears an `awaiting-flight` run PR in your lane, and the engine merges it. All `.github/**` files, the Mission Control section, non-collaborator forks and operator holds remain protected. A change to a role file (`roles/**`) or to `.claude/skills/flight-ops/**` is never yours to merge. Read the hard-rule hunk before you clear a PR. Before you clear one that widens your own powers (`apps/server/src/flight/**`, `packages/core/src/flight.ts`), add a Controller check with `mc add_controller_check`, so the controller's verdict reaches the seat.
+- **Merging.** On superuser repos, `mc merge_pr { pr, basis }` clears an `awaiting-flight` run PR in your lane, and the engine merges it. All `.github/**` files, the Mission Control section, non-collaborator forks and operator holds remain protected. A change to a role file (`roles/**`) or to `.claude/skills/flight-ops/**` is never yours to merge. Read the hard-rule hunk before you clear a PR. Before you clear one that widens your own powers (`apps/server/src/flight/**`, `packages/core/src/flight.ts`), add a Controller check with `mc add_controller_check`.
 
 ## Stuck and failed runs
 
@@ -16,7 +16,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 - **An open PR from a crew run that ended or crashed:** its `prs[].seat` is empty. A crew seat worked its ticket (your start decision, or the seat's activity).
   - No tool resumes it: record `Missing power: resume PR #N on <seat>. For the controller:` once, and track it.
   - A PR the controller or a person opened has no seat either; it is not a failed run.
-- **A seat in `error` with no PR:** its crashed ticket stays In progress with no run, and no tool re-queues it.
+- **A seat in `error` with no run:** its crashed ticket stays In progress with no run, and no tool re-queues it.
   - Record `Missing power: re-queue #N (run crashed). For the controller:` once.
   - Then start the seat on its next Ready ticket with `mc start_seat`; the hub never deals to a seat in `error`.
 - **A seat with `seats[].runId` set and no live session** after an error or a hub restart: `mc resume_seat`. A stopped or paused seat follows the role's step 4.
