@@ -281,7 +281,12 @@ it("the checked pairs are kept as one row per checkout, and a fresh instance mer
       rows.set(rowKey(kind, scope, key), value);
     },
   };
-  const prs = [pr("left", left), pr("right", right), pr("orphan", orphan)];
+  git("checkout", "-qb", "third", base);
+  writeFileSync(join(dir, "third.txt"), "third\n");
+  git("add", ".");
+  git("commit", "-qm", "third");
+  const third = git("rev-parse", "HEAD");
+  const prs = [pr("left", left), pr("right", right), pr("third", third)];
   const first = await new MapConflicts(undefined, persist).check(dir, prs);
   expect(rows.size).toBe(1);
   expect(Object.keys(JSON.parse([...rows.values()][0] as string))).toHaveLength(3);
