@@ -725,7 +725,7 @@ function ModernConversation({
           <span>{ticketContext?.owner ?? "Unassigned"}</span>
           {ticketBoardPath && (
             <a href={ticketBoardPath} onClick={(event) => followLink(event, ticketBoardPath)}>
-              Open on Board
+              Open ticket page
             </a>
           )}
         </div>

@@ -1,6 +1,7 @@
 import { type PullRequestView, prPill, type RunPr } from "@mc/core";
+import { ticketPath } from "../router.ts";
 import { Pill } from "./Pill.tsx";
-import { RepoRef } from "./RepoRef.tsx";
+import { parseTicket, RepoRef } from "./RepoRef.tsx";
 import "./PrChip.css";
 
 /**
@@ -46,6 +47,7 @@ export function PrChip({
   const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
   const hold = "hold" in pr ? pr.hold : undefined;
   const url = previewUrl(initialPreview);
+  const ticket = pr.ticket ? parseTicket(pr.ticket) : null;
   return (
     <span className="rpr">
       <RepoRef
@@ -55,6 +57,7 @@ export function PrChip({
         bare={bare}
         title={pr.title ?? undefined}
         url={pr.url}
+        to={ticket ? ticketPath(ticket.repoId, ticket.number) : undefined}
       />
       {showState && pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
       {initialPreview !== undefined &&
