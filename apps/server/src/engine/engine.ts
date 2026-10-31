@@ -63,6 +63,7 @@ import {
   FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
   fixCommsText,
+  fixKey,
   fixSentText,
   fixText,
   gateView,
@@ -602,6 +603,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const woken = Object.keys(store.claimedKeys(run.id))
       .filter((key) => key.startsWith(`wake:${run.id}:`))
       .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
+    const claimed = store.claimedKeys(run.id);
+    const epoch = run.loop?.epoch ?? 0;
     const work = pendingSeatWork({
       lastTurnStartedAt: row.lastTurnStartedAt ?? null,
       reviews: store.reviewsOfRun(run.id),
@@ -611,7 +614,13 @@ export function createEngine(deps: EngineDeps): Engine {
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
-    });
+      // the fix line carries the findings' text and wakes the seat itself, so a findings item
+      // whose fix line is still unsent is left to it
+    }).filter(
+      (x) =>
+        x.kind !== "findings" ||
+        fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
+    );
     if (work.length === 0) return;
     const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
     await send(
@@ -1009,12 +1018,11 @@ export function createEngine(deps: EngineDeps): Engine {
       .reviewsOfRun(runId)
       .filter((r) => r.state === "reported")
       .at(-1);
-    return review
-      ? fixText({
-          retro: seatCallSign(review.seatId),
-          sha: review.sha,
-          findings: store.findingsOf(review.id),
-        })
+    const findings = review
+      ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+      : [];
+    return review && findings.length > 0
+      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
       : `FLIGHT requests rework: ${reason}`;
   }
 
