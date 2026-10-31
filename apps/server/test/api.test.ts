@@ -60,6 +60,7 @@ import {
   type PrCheck,
   type PullRequestView,
   projectAtReset,
+  QA_FLOW_METRICS,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type ReloadResult,
@@ -1479,6 +1480,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/hud-screenshots/:id"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
+  ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
 ];
 
@@ -7979,6 +7981,21 @@ describe("QA board data", () => {
         },
       ],
     });
+  });
+
+  it("serves the QA flow figures with the registry's definitions", async () => {
+    const flow = (await get("/api/qa/flow")).json();
+    expect(flow).toMatchObject({
+      days: 30,
+      escapedDefects: [],
+      reviewTimings: { heads: [], wait: { n: 0, medianMs: null } },
+      rework: { bySeat: [], byModel: [] },
+      testsPerPr: [],
+    });
+    expect(flow.metrics).toEqual(QA_FLOW_METRICS);
+    expect(flow.metrics.escapedDefects.definition).toContain("labelled bug");
+    expect((await get("/api/qa/flow?days=7")).json().days).toBe(7);
+    expect((await get("/api/qa/flow?days=91")).statusCode).toBe(400);
   });
 
   it("serves findings with category and resolution", async () => {

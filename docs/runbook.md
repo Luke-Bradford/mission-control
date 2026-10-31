@@ -1248,6 +1248,23 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
+  window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
+  - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`
+    or its URL), one of its commits (7+ hex characters: its merge commit, head, or a commit the
+    hub made for its branch), or a file that exactly one PR merged in the 90 days before the bug
+    changed (a file two PRs changed is left out). Each carries the originating `seat` and `model`
+    (the branch's author run) and shows on the PR as `escapedDefects`. The link is kept after the
+    card leaves the board.
+  - `reviewTimings`: per reported review (one per head), `reviewWaitMs` (queued to started) and
+    `reviewMs` (started to reported), with median and p85. A review that never started is left out.
+  - `rework`: reported rounds with a blocking finding over all reported rounds, per author seat
+    and per model; under 3 rounds is marked `enough: false`.
+  - `testsPerPr`: test files (`*.test.*`, `*.spec.*`, or under `test/`, `tests/`, `__tests__/`) each
+    merged PR added or changed, from the first 100 files of its diff (`pr_files`). Deleted tests are
+    not counted.
+
+  Escaped defects and diff files are kept 90 days.
 
 ## The HUD
 

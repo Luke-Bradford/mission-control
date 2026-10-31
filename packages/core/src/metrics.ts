@@ -29,6 +29,10 @@ export type MetricUnit =
   | "items"
   | "USD"
   | "characters"
+  | "defects"
+  | "milliseconds"
+  | "rounds"
+  | "test files"
   | "quota percentage points per interval";
 
 export interface MetricDef {
