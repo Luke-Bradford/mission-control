@@ -18,6 +18,7 @@ export const FLIGHT_KIND_LABEL: Readonly<Record<string, string>> = {
   unpark: "Un-parked",
   note: "Noted",
   brief: "Brief",
+  pause: "Pause / resume",
 };
 
 /** The label for a decision kind; a kind the web does not know yet shows as written. */
