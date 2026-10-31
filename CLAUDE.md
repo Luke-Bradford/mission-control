@@ -43,6 +43,14 @@ clean and CI is green.
   capable model.
 - **Tech sweeps:** periodic sweeps catch what a light review missed.
 
+## Skills
+
+The repo's skills are in `.claude/skills/`. Load the one that fits the work; the roles point to them.
+
+- `hud-design`: any plan, build or review that touches `apps/web`.
+- `plain-talk`: any text a person reads (a Comms message, a ticket, PR text, a review finding, a run report, a Needs-you brief).
+- `flight-ops`: FLIGHT loads it once per run, after a context reset, and when a seat, PR, ticket or the hub is stuck.
+
 ## Checks
 
 `pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build` before any PR.

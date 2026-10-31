@@ -16,6 +16,8 @@ import {
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  CALL_FLIGHT_SELF,
+  CALLED_FLIGHT,
   type CheckDrop,
   type CheckState,
   COMMS_CANT_REASON_MAX,
@@ -183,6 +185,7 @@ import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
+import { recordSeatCall } from "../flight/signals.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
@@ -279,6 +282,10 @@ const CommitArgs = z.strictObject({
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const CallArgs = z.strictObject({
+  reason: text(MC_TEXT_MAX),
+  ref: z.string().trim().min(1).max(120).optional(),
+});
 const CommsReadArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
@@ -2007,6 +2014,27 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: ASKED_FLIGHT };
   }
 
+  /**
+   * A seat's call to FLIGHT: a wake reason (a `seat_call` signal) the watch delivers after its
+   * debounce, well inside one 5-minute tick. It writes nothing of FLIGHT's: FLIGHT decides.
+   */
+  async function callFlight(ctx: McToolContext, args: unknown): Promise<Result> {
+    if (isFlight(ctx.seatId)) return { text: CALL_FLIGHT_SELF, isError: true };
+    const parsed = CallArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    const place = seatPlace(config, ctx.seatId);
+    if (live === null || place === null) return { text: MC_RUN_ENDED, isError: true };
+    recordSeatCall(store, place.session.repoId, {
+      seat: ctx.seatId,
+      reason: parsed.data.reason,
+      ref: parsed.data.ref ?? live.run.ticket ?? null,
+      at: now(),
+    });
+    bus.emit("attention");
+    return { text: CALLED_FLIGHT };
+  }
+
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
   function loopRefusal(loop: Run["loop"]): Result | null {
     if (loop === null || loop === undefined) return { text: EVIDENCE_NO_LOOP, isError: true };
@@ -2502,6 +2530,34 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       // FLIGHT is a read-only seat too: it takes decisions to the operator with brief_item
       offeredTo: (seatId) => !isFlight(seatId),
       call: askFlight,
+    },
+    {
+      name: MC_TOOL_NAMES.callFlight,
+      description:
+        "Call FLIGHT, the crew's head agent, to your side: it wakes within 5 minutes with your reason and decides. Use it when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding. It is a call, not a question: for a question FLIGHT answers in a message, use ask_flight.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_TEXT_MAX,
+            description: "Why you are calling, with what FLIGHT needs to act on it.",
+          },
+          ref: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description:
+              "The ticket, PR or seat it is about, e.g. mission-control#1182. Defaults to your ticket.",
+          },
+        },
+        required: ["reason"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      offeredTo: (seatId) => !isFlight(seatId),
+      call: callFlight,
     },
     {
       name: MC_TOOL_NAMES.reportEvidence,

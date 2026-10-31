@@ -408,7 +408,9 @@ What each seat's process starts with:
   tool (`mcp__mc__commit`), which the hub runs in its own clone. When the work is done and
   committed it reports with `mcp__mc__report_evidence`, and the hub's engine pushes the branch and
   opens the draft PR (below). A seat asks FLIGHT, never you, with `mcp__mc__ask_flight`; FLIGHT
-  answers it or briefs it for you, and only a briefed question reaches your Needs you. While FLIGHT
+  answers it or briefs it for you, and only a briefed question reaches your Needs you. A seat
+  that is blocked outside its area, needs a decision it cannot make or disputes a finding calls
+  FLIGHT with `mcp__mc__call_flight { reason, ref }` (below). While FLIGHT
   is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
   (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
   loop).
@@ -992,6 +994,44 @@ FLIGHT has the same power on a superuser repo with `mc hold_pr { runId, action, 
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
 may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
 to hold, or the hold is the controller's and the caller is FLIGHT.
+
+### FLIGHT's wakes: reasons, calls, accountability and pace
+
+The watch checks every 5 minutes (and 20 seconds after a change) and wakes FLIGHT when a reason is new.
+Besides the older reasons (questions, items, free or stopped seats, parks FLIGHT may lift, PRs awaiting
+it, red main, flaky checks, hub errors), the sweep raises these signals, each told once:
+
+| Signal | Raised when |
+|---|---|
+| `idle_seat` | a seat is idle 10 minutes with startable work queued |
+| `old_park` | a run has been parked for 15 minutes |
+| `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
+| `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |
+| `run_no_pr` | a build run ended (crashed or not) with a ticket and no PR, within the last day, and not already a missing report |
+| `controller_unanswered` | a FLIGHT decision carrying "For the controller:" has had no Comms message from CAPCOM to FLIGHT for 15 minutes (a brief or wait on the decision's ref handles it too) |
+| `wait_over` | a `wait_on` time has passed |
+| `seat_call` | a seat called FLIGHT |
+
+**Call FLIGHT.** `mcp__mc__call_flight { reason, ref }` is offered to every writer and read-only seat but FLIGHT (a
+review's scratch seat answers with `report_findings` alone; the seats' briefs say when to use it). It only queues a `seat_call` signal and nudges the watch, so FLIGHT wakes
+within the debounce, always inside one tick, with the seat's reason in the wake. It writes nothing of
+FLIGHT's: FLIGHT decides. The same seat, ref and reason is one call until FLIGHT has been told; a repeat after that is a new call. `ref` defaults to the
+seat's ticket.
+
+**Accountability.** The watch keeps the reasons each wake listed. When FLIGHT's turn ends it checks each:
+a reason is handled if its fact is no longer true (the question answered, the seat started, the park
+lifted), or FLIGHT recorded a decision since the wake that names its target (the ref, seat, run or
+question id, or the key such as `ask:12`, in `ref`, `seat`, `about` or `decision`: an act, a brief, a
+note or a `wait`). The reasons not handled wake FLIGHT once more, after the wake gap, with
+`You left these: …`. If that second wake's turn also leaves them, the watch raises one operator item
+(Needs you, key `flight:left`, the operator's own, never FLIGHT's to triage) listing them. The item clears when
+every reason it lists is handled, not when some later audit is clean. The audit lives in the hub's memory: a restart drops it.
+
+**Wait.** For a reason FLIGHT cannot act on yet: `mcp__mc__wait_on { target, on, until, basis }` records a
+`wait` decision on the target (handled) and wakes FLIGHT again at `until` (at most 7 days) with
+`wait_over`.
+
+**Pace.** FLIGHT re-wakes hourly from its last wake, and only while something waits on it; a live run does not speed that up. The sweep's signals above and a seat's call wake it sooner. The next wake time in `/api/flight` follows the same rule.
 
 ### FLIGHT adds a controller check to a ticket
 

@@ -1,15 +1,25 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  COMMS_CAPCOM,
   FLIGHT_CHAIN_STALL_MS,
+  FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
+  FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_ITEM_RELAPSE_MS,
+  FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
+  FLIGHT_MERGE_STALL_MS,
+  FLIGHT_METRICS_DAY_MS,
+  FLIGHT_OLD_PARK_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
+  FLIGHT_WAITS_SETTING,
   type FlightSignal,
   type FlightState,
   type FlightTriage,
+  FOR_THE_CONTROLLER,
   flakeNoteKey,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -52,6 +62,19 @@ export interface MainCi {
   committedAt?: number;
   checks?: { name: string; url: string | null }[];
   episode?: string | null;
+}
+/** What a seat's `call_flight` kept, until a wake tells FLIGHT. */
+export interface SeatCall {
+  seat: string;
+  reason: string;
+  ref: string | null;
+  at: number;
+}
+/** What FLIGHT's `wait_on` kept: what it waits on, and when it looks again. */
+export interface FlightWait {
+  on: string;
+  until: number;
+  at: number;
 }
 export interface LoopHeartbeat {
   at: number;
@@ -100,7 +123,14 @@ const triageId = (t: Pick<FlightTriage, "ref" | "cause">): string => `${t.ref}:$
 
 function raiseSignal(state: RecordState, signal: FlightSignal, now: number): void {
   const id = signalId(signal);
-  const previous = state.signals[id];
+  const found = state.signals[id];
+  // an item that went away and came back is a new reason, not the one already told
+  const previous =
+    signal.kind === "item_stale" &&
+    found !== undefined &&
+    now - (found.lastSeen ?? found.since) > FLIGHT_ITEM_RELAPSE_MS
+      ? undefined
+      : found;
   state.signals[id] = {
     ...signal,
     since: previous?.since ?? signal.since,
@@ -271,6 +301,11 @@ export function flightSignals(i: {
   store: Store;
   session: CrewSessionConfig;
   seats: FlightState["seats"];
+  aside?: FlightState["aside"];
+  /** Items awaiting FLIGHT's triage, with when each arrived. */
+  triageItems?: { key: string; kind: string; at: number; text: string }[];
+  /** Open PRs whose run reported them ready to merge, with when it did. */
+  readyPrs?: { ref: string; pr: number; at: number }[];
   now: number;
 }): Pick<FlightState, "signals" | "triage"> {
   const { config, store, session, seats, now } = i;
@@ -325,6 +360,8 @@ export function flightSignals(i: {
   }
 
   const parks = new Map<string, { at: number; evidence: string }[]>();
+  /** When each run last parked, for the park that has gone unsettled too long. */
+  const parkedAt = new Map<string, number>();
   const parkPrefix = parkedEventText("");
   for (const event of store.loopEvents(cutoff, repo)) {
     const planned = event.key === `${event.runId}:plan`;
@@ -334,6 +371,7 @@ export function flightSignals(i: {
     if (!run?.ticket || !onBoard.has(run.ticket)) continue;
     if (planned) triage(run.ticket, "plan", event.at, event.text);
     if (parked) {
+      parkedAt.set(event.runId, Math.max(parkedAt.get(event.runId) ?? 0, event.at));
       // a budget park names the tokens it used, which differs every time; group on the ceiling
       const reason = event.text
         .slice(parkPrefix.length)
@@ -528,6 +566,85 @@ export function flightSignals(i: {
         run.endedAt ?? store.seatSession(run.agentId)?.updatedAt ?? now,
         `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report${run.noReport ? `: ${noReportExitReason(run.noReport)}` : ""}`,
       );
+    else if (
+      loop === "build" &&
+      run.endedAt !== null &&
+      now - run.endedAt < FLIGHT_METRICS_DAY_MS &&
+      run.ticket != null &&
+      run.reviewId == null &&
+      run.loop?.phase !== "done" &&
+      run.loop?.prNumber == null &&
+      run.prs.length === 0 &&
+      !store.pullRequests(repo).some((p) => p.ticket === run.ticket && p.state !== "closed")
+    )
+      raise(
+        "run_no_pr",
+        run.id,
+        run.endedAt,
+        `${run.agentId} run ${run.id} (${run.ticket}) ended (${run.status}) at ${new Date(run.endedAt).toISOString()} with no PR`,
+      );
+  }
+
+  for (const parkedRun of [
+    ...seats.flatMap((x) =>
+      x.runId !== null && x.parked !== null ? [{ id: x.runId, at: x.id }] : [],
+    ),
+    ...(i.aside ?? []).flatMap((x) => (x.parked === null ? [] : [{ id: x.runId, at: x.seat }])),
+  ]) {
+    const at = parkedAt.get(parkedRun.id);
+    if (at === undefined || now - at < FLIGHT_OLD_PARK_MS) continue;
+    const run = store.run(parkedRun.id);
+    raise(
+      "old_park",
+      `${parkedRun.id}:${at}`,
+      at,
+      `${parkedRun.at} ${run?.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run?.loop?.parked?.kind ?? "unknown"}, ${run?.loop?.parked?.reason ?? ""}`,
+    );
+  }
+  for (const pr of i.readyPrs ?? []) {
+    if (now - pr.at < FLIGHT_MERGE_STALL_MS) continue;
+    raise(
+      "merge_stalled",
+      `${pr.ref}:${pr.pr}:${pr.at}`,
+      pr.at,
+      `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
+    );
+  }
+  for (const item of i.triageItems ?? []) {
+    // a PR ready to merge has its own check, merge_stalled
+    if (now - item.at < FLIGHT_ITEM_STALE_MS || item.kind === "ready") continue;
+    raise(
+      "item_stale",
+      // an item's key ends in the time it was last raised, which a PR's update moves
+      item.key.replace(/:\d+$/, ""),
+      item.at,
+      `Needs-you item ${item.key} for FLIGHT since ${new Date(item.at).toISOString()}: ${item.text.slice(0, 200)}`,
+    );
+  }
+  const flightId = flightSeatId(config);
+  const answers = store
+    .comms(now - FLIGHT_HOUR_MS * 6)
+    .filter((m) => m.from === COMMS_CAPCOM && m.to === flightId)
+    .map((m) => m.at);
+  for (const d of store.flightDecisions(now - FLIGHT_HOUR_MS * 6, 200)) {
+    if (!d.about.includes(FOR_THE_CONTROLLER) && !d.decision.includes(FOR_THE_CONTROLLER)) continue;
+    if (now - d.at < FLIGHT_CONTROLLER_WAIT_MS || answers.some((at) => at > d.at)) continue;
+    raise(
+      "controller_unanswered",
+      // the request's own ref, when it has one, so a brief or wait on that ref handles it
+      `${d.ref ?? "controller"}:${d.id}`,
+      d.at,
+      `FLIGHT asked the controller at ${new Date(d.at).toISOString()} and has no answer: ${d.about.slice(0, 200)}`,
+    );
+  }
+  for (const [target, wait] of Object.entries(flightWaits(store))) {
+    if (wait.until > now) continue;
+    raise(
+      "wait_over",
+      `${target}:${wait.until}`,
+      wait.until,
+      `${target}: you waited on ${wait.on} until ${new Date(wait.until).toISOString()}; look again`,
+    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {
@@ -551,6 +668,8 @@ export function flightSignals(i: {
       if (
         signal.kind === "repeat_park" ||
         signal.kind === "flaky_test" ||
+        signal.kind === "run_no_pr" ||
+        signal.kind === "controller_unanswered" ||
         (signal.kind === "hub_error" && signal.key.startsWith("report:"))
       )
         signal.toldAt = now;
@@ -596,4 +715,45 @@ export function flightSignalHistory(
     lastSeen: signal.lastSeen ?? signal.since,
     told: toldAt !== null,
   }));
+}
+
+const flightSeatId = (config: CcConfig): string | null =>
+  config.crew?.sessions.flatMap((x) => x.seats).find((x) => seatDef(x).loop === "watch")?.id ??
+  null;
+
+/** The waits FLIGHT recorded with `wait_on`, by target. */
+export function flightWaits(store: Store): Record<string, FlightWait> {
+  return stored<Record<string, FlightWait>>(store, FLIGHT_WAITS_SETTING, {});
+}
+
+/** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
+export function recordFlightWait(store: Store, target: string, wait: FlightWait): void {
+  const waits = flightWaits(store);
+  waits[target] = wait;
+  for (const [key, w] of Object.entries(waits))
+    if (w.until < wait.at - FLIGHT_SIGNAL_KEEP_MS) delete waits[key];
+  store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
+}
+
+/**
+ * A seat's call to FLIGHT: kept as an untold `seat_call` signal, so the next wake lists it with the
+ * seat's reason. The same seat, ref and reason within the hour is one call.
+ */
+export function recordSeatCall(store: Store, repo: string, call: SeatCall): boolean {
+  const state = read(store, repo, call.at);
+  const evidence = `${call.seat} calls FLIGHT${call.ref === null ? "" : ` about ${call.ref}`}: ${call.reason}`;
+  // the same call still waiting to be told is one call; once told, a repeat is a new one
+  if (
+    Object.values(state.signals).some(
+      (x) => x.kind === "seat_call" && x.toldAt === null && x.evidence === evidence,
+    )
+  )
+    return false;
+  raiseSignal(
+    state,
+    { kind: "seat_call", key: `${call.seat}:${call.at}`, since: call.at, evidence },
+    call.at,
+  );
+  save(store, repo, state);
+  return true;
 }

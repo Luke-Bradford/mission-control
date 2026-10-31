@@ -34,6 +34,7 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
@@ -1274,6 +1275,8 @@ function buildAttentionItems(
         : missed(item, triageDueAt);
     }
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
+    // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
+    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
