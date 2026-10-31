@@ -8,6 +8,7 @@ export * from "./crew-pause.ts";
 export * from "./dependencies.ts";
 export * from "./external-text.ts";
 export * from "./flight.ts";
+export * from "./flight-access.ts";
 export * from "./flight-memory.ts";
 export * from "./guard.ts";
 export * from "./hud.ts";

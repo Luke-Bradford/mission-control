@@ -57,6 +57,7 @@ import {
   conflictText,
   crewCliArgs,
   crewMcpConfig,
+  crewProfileOf,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   doneWhenItems,
@@ -1788,6 +1789,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           model,
           effort: info.seat.effort,
           mode: def.mode,
+          profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
           runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(
             (tool) => !def.mcTools.includes(tool),

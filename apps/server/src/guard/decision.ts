@@ -24,11 +24,13 @@ export function crewGuardDecision(
   mcTools: readonly string[] = [],
   worktree?: string,
   commandCwd?: string,
+  fullAccess = false,
 ): GuardVerdict {
   return guardDecision(
     event,
     {
       mode,
+      fullAccess,
       gitDirectoryAllowed:
         worktree === undefined
           ? undefined

@@ -1159,9 +1159,9 @@ it has waited. A chain that has stood still for 30 minutes raises a `chain_stall
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
 repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
-repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
-guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
-operator.
+repo's FLIGHT; each change is a logged decision. The floor is the repo's own rules (guard rules,
+hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
+[FLIGHT approvals](#flight-approvals)) is what lifts one.
 
 | Tool | What it does |
 |---|---|
@@ -1173,6 +1173,48 @@ operator.
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
 | `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+
+Three further tools give FLIGHT the controller's reach without a shell (#1214). Each landed call is a
+FLIGHT decision on the Audit ledger with its route or verb, body and basis, and each is refused during Away:
+
+| Tool | What it does |
+|---|---|
+| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token added by the hub (FLIGHT never holds it). `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots. Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
+| `gh_write` | `{ action, target, number, ... }` runs one `gh` verb on FLIGHT's session repo only: `comment`, `label`, `edit`, `close`, `reopen`, `ready`, or `delete_branch`. Text is scanned for secrets and @mentions as `create_ticket` does; `always_ask` and other-lane tickets are not edited, labelled or closed; a branch is never deleted when it is `main`, `archive/*`, on the repo's keep list, has an open PR or a live run, or when the open PRs could not be read. Merging stays `merge_pr`, board fields `set_fields`. Decision kind `github`. |
+| `crew_tidy` | `remove_worktree { runId }` removes the clean worktree an ended run's branch is checked out in (under the crew's worktree folder, with no live run on the branch and no seat holding it) and keeps the branch, so a seat can start the ticket again; a dirty worktree is refused with nothing removed. `prune_branches` drops the seat clones' local branches that are merged or whose remote is gone. Decision kind `tidy`. |
+
+### FLIGHT's full access
+
+FLIGHT's watch run starts with the `flight-full` profile (`crewProfileOf` in `packages/core/src/runtime.ts`):
+no Bash sandbox, every built-in tool allowed unscoped (shell, `git`, `gh` as the operator, `curl`, the web,
+subagents) and no denied-tool list. Every other seat keeps its sandbox and denies unchanged. The guard hook
+still runs before each of FLIGHT's calls and holds it to the repo's rules only, naming the rule it refused:
+
+- `git push` to `main`, with `--force`, `-f`, `--mirror`, `--all` or a `+refspec`, or without an explicit branch (`git push`, `git push origin` and `git push origin HEAD` are refused, since FLIGHT's checkout may be on `main`; `git push origin <branch>` is allowed; a branch built by `$(...)`, backticks or `@{...}` is refused too); `git commit` (FLIGHT's checkouts are not for commits);
+- `gh pr merge` and `PUT .../merge` (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
+- writes to `.github/**` or `CLAUDE.md` by Edit, Write, a redirect, `tee`, `cp`, `mv`, `rm` or `sed -i` (best effort for a shell; the whole `CLAUDE.md` file is held, not only its Mission Control block);
+- `gh api` with a writing method on branch protection, rulesets, repo settings, collaborators, hooks, keys, environments, pages or Actions secrets and variables;
+- reading or writing the operator token file, or naming `flight/approvals`, the `flight.approvals` setting or the `flight.runaway` setting: approvals and lifting the breaker are a controller's acts; `sqlite3` runs only with `-readonly` and no writing dot-command, since SQL text can always be reworded;
+- `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (every number is read, with flags before or after it; judged on the board the hub last read; refused when a number or the repo's rules cannot be read), and any `gh project item-*` write or `gh api graphql` mutation (use `set_fields` or `edit_card`). A `gh api` write to `repos/<o>/<r>/issues/<n>...` counts as a ticket edit, and a `-R o/r` or `--repo o/r` before the verb is looked through.
+
+`gh_write` refuses an `always_ask` or other-lane ticket, and refuses when the card cannot be read live. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
+a `shell` decision, with credentials redacted. The runaway breaker counts `operator` (POST), `gh_write` and `crew_tidy` calls like any other FLIGHT write; each shell write also counts as one (a loop of the same command trips it), and while the breaker is tripped the guard refuses every FLIGHT shell write until the operator lifts it. The
+operator token and `GH_TOKEN` are not added to FLIGHT's environment: `operator` and the operator's own `gh` login are its routes.
+
+### FLIGHT approvals
+
+A controller (the controller session or the operator) lets FLIGHT go past one rule for one scope until a
+time. Only the operator token can record one; FLIGHT's `operator` tool cannot reach the route:
+
+```
+POST /api/flight/approvals { "rule": "merge-floor" | "repo-rules" | "merge-push",
+                             "scope": "...", "until": "<ISO time, within 7 days>", "reason": "..." }
+```
+
+- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
+- `repo-rules`, `merge-push`: a call the guard refused. The scope is the exact command, or the exact file path for Edit and Write. It lets that one call through once, then it is used up.
+
+Each grant and each use is a decision of kind `approval` on the Audit ledger. The refusal text names the rule.
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run

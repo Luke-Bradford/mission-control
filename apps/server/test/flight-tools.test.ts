@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -141,10 +142,12 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { canonicalArgs, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
+import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
+import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
+import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
@@ -272,6 +275,9 @@ let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
 let resumeCalls: string[];
+let operatorCalls: { method: string; path: string; body?: unknown }[];
+let operatorImpl: () => Promise<{ status: number; body: string }>;
+let tidyImpl: CrewTidy;
 let resumeImpl: (runId: string) => Promise<void>;
 let shotsKnown: string[];
 
@@ -386,6 +392,12 @@ beforeEach(() => {
   aliveNow = [];
   resumeCalls = [];
   resumeImpl = async () => {};
+  operatorCalls = [];
+  operatorImpl = async () => ({ status: 200, body: '{"ok":true}' });
+  tidyImpl = {
+    removeWorktree: async () => ({ ok: true, text: "Removed." }),
+    pruneBranches: async () => ({ ok: true, text: "Pruned." }),
+  };
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
@@ -507,6 +519,14 @@ beforeEach(() => {
       fetchRepos.push(repo.id);
       fetchCalls.push(n);
       return fetchImpl(n);
+    },
+    operator: async (req) => {
+      operatorCalls.push(req);
+      return operatorImpl();
+    },
+    tidy: {
+      removeWorktree: (runId) => tidyImpl.removeWorktree(runId),
+      pruneBranches: () => tidyImpl.pruneBranches(),
     },
     now: () => nowMs,
   });
@@ -1026,6 +1046,9 @@ describe("tool list", () => {
       "dismiss_item",
       "edit_issue",
       "set_fields",
+      "operator",
+      "gh_write",
+      "crew_tidy",
       "draft_reply",
       "track",
       "untrack",
@@ -8986,6 +9009,383 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         true,
       );
       expect(await call("dismiss_item", { key: "note:missing" })).toHaveProperty("isError", true);
+    });
+  });
+});
+
+describe("FLIGHT's full access (#1214)", () => {
+  const call = (name: string, a: object) =>
+    need(tools.find((t) => t.name === name)).call(ctx(), { basis: "Cleared the stall", ...a });
+  const elevated = () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+  };
+
+  describe("operator", () => {
+    beforeEach(elevated);
+
+    it("resumes a run through the hub's own route and records a FLIGHT decision", async () => {
+      live("guido-1", "r-pr");
+      const r = await call("operator", { method: "POST", path: "/api/runs/r-pr/resume" });
+      expect(r.isError).toBeUndefined();
+      expect(operatorCalls).toEqual([{ method: "POST", path: "/api/runs/r-pr/resume" }]);
+      expect(decisions()).toEqual([
+        expect.objectContaining({
+          kind: "operator",
+          about: "POST /api/runs/r-pr/resume",
+          decision: expect.stringContaining("Answer 200"),
+          basis: "Cleared the stall",
+          targetRunId: "r-pr",
+        }),
+      ]);
+    });
+
+    it("records the body, and a refusal from the route is an error that is still on the ledger", async () => {
+      operatorImpl = async () => ({ status: 409, body: '{"error":"nothing to resume"}' });
+      const r = await call("operator", {
+        method: "POST",
+        path: "/api/runs/r-pr/controller-check",
+        body: { verdict: "pass" },
+      });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("409");
+      expect(operatorCalls[0]?.body).toEqual({ verdict: "pass" });
+      expect(decisions()[0]?.decision).toContain('{"verdict":"pass"}');
+    });
+
+    it.each([
+      ["POST", "/api/flight/approvals"],
+      ["POST", "/api/accounts"],
+      ["POST", "/api/repos"],
+      ["POST", "/api/runs/r-pr/resume?x=1"],
+      ["POST", "/api/runs/../accounts"],
+      ["POST", "/api/runs/a/b/resume"],
+      ["GET", "/api/operator/bootstrap"],
+      ["GET", "/api/hud-screenshots/abc"],
+      ["POST", "/mcp"],
+    ])("refuses %s %s, a route outside the list", async (method, path) => {
+      const r = await call("operator", { method, path });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("not a route mc operator calls");
+      expect(operatorCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("counts a GET as a read and a POST as a write for the runaway breaker", () => {
+      expect(isReadCall("operator", { method: "GET", path: "/api/runs" })).toBe(true);
+      expect(isReadCall("operator", { method: "POST", path: "/api/runs/r/resume" })).toBe(false);
+      expect(isReadCall("gh_write", { action: "close" })).toBe(false);
+      expect(isReadCall("crew_tidy", { action: "prune_branches" })).toBe(false);
+    });
+
+    it("reads any other /api path with GET, leaving no decision", async () => {
+      await call("operator", { method: "GET", path: "/api/runs?limit=5" });
+      expect(operatorCalls).toHaveLength(1);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("refuses a call that carries a known secret", async () => {
+      secrets = ["s3cr3t-value"];
+      const r = await call("operator", {
+        method: "POST",
+        path: "/api/seats/guido-1/message",
+        body: { text: "token s3cr3t-value" },
+      });
+      expect(r.isError).toBe(true);
+      expect(operatorCalls).toEqual([]);
+    });
+  });
+
+  describe("merge past the repo rules", () => {
+    const floorPr = (path: string) => {
+      live("guido-1", "r-pr", {
+        branch: "mc/7",
+        ticket: "mc#7",
+        loop: {
+          ...NEW_LOOP,
+          phase: "review",
+          prNumber: 12,
+          awaitingFlight: SHA,
+          touches: { sha: SHA, paths: [path] },
+        },
+      });
+      store.replacePullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 12,
+            title: "Ready",
+            url: "u",
+            branch: "mc/7",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "passing",
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: SHA,
+            mergeable: "MERGEABLE",
+          },
+        ],
+        NOW,
+      );
+      ghImpl = async (a) => ({
+        code: 0,
+        stdout:
+          a[0] === "pr" && a[1] === "view"
+            ? JSON.stringify({
+                author: { login: "me" },
+                isCrossRepository: false,
+                headRefOid: SHA,
+                headRefName: "mc/7",
+              })
+            : "",
+        stderr: "",
+      });
+    };
+    const grant = (over: Partial<Parameters<typeof grantApproval>[1]> = {}) =>
+      grantApproval(
+        store,
+        {
+          rule: "merge-floor",
+          scope: `pr:12@${SHA.slice(0, 12)}`,
+          until: NOW + 3_600_000,
+          reason: "controller read the workflow change",
+          ...over,
+        },
+        NOW,
+      );
+    beforeEach(elevated);
+
+    it("refuses a hard-rule path with no approval, and names how to get one", async () => {
+      floorPr(".github/workflows/ci.yml");
+      const r = await call("merge_pr", { pr: 12 });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("/api/flight/approvals");
+      expect(clearanceCalls).toEqual([]);
+    });
+
+    it("clears the PR once a controller's approval for that head is recorded, and says so on the ledger", async () => {
+      floorPr(".github/workflows/ci.yml");
+      grant();
+      expect((await call("merge_pr", { pr: 12 })).isError).toBeUndefined();
+      expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+      expect(decisions().find((d) => d.kind === "approval")?.decision).toContain(
+        "controller read the workflow change",
+      );
+    });
+
+    it.each([
+      ["another head", { scope: `pr:12@${SHA_B.slice(0, 12)}` }],
+      ["another PR", { scope: `pr:13@${SHA.slice(0, 12)}` }],
+      ["a head named too briefly", { scope: `pr:12@${SHA.slice(0, 3)}` }],
+      ["a different rule", { rule: "repo-rules" as const }],
+      ["an expired window", { until: NOW - 1 }],
+    ])("does not take an approval for %s", async (_name, over) => {
+      floorPr("CLAUDE.md");
+      grant(over);
+      expect((await call("merge_pr", { pr: 12 })).isError).toBe(true);
+      expect(clearanceCalls).toEqual([]);
+    });
+  });
+
+  describe("gh_write", () => {
+    beforeEach(elevated);
+
+    it("closes a PR on FLIGHT's own repo, as a decision", async () => {
+      const r = await call("gh_write", { action: "close", target: "pr", number: 12 });
+      expect(r.isError).toBeUndefined();
+      expect(ghCalls).toEqual([["pr", "close", "12", "--repo=o/mc"]]);
+      expect(decisions()).toEqual([
+        expect.objectContaining({ kind: "github", about: "gh_write close PR #12" }),
+      ]);
+    });
+
+    it("refuses another repo, by name or by id", async () => {
+      for (const repo of ["o/other", "other"]) {
+        const r = await call("gh_write", { action: "close", target: "pr", number: 12, repo });
+        expect(r.isError).toBe(true);
+      }
+      expect(ghCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("comments with the text on stdin, and labels and reopens", async () => {
+      await call("gh_write", { action: "comment", target: "issue", number: 7, text: "Resumed." });
+      expect(ghCalls[0]).toEqual(["issue", "comment", "7", "--repo=o/mc", "--body-file=-"]);
+      expect(ghInputs[0]).toBe("Resumed.");
+      await call("gh_write", {
+        action: "label",
+        target: "pr",
+        number: 12,
+        addLabels: ["a", "b"],
+        removeLabels: ["c"],
+      });
+      expect(ghCalls[1]).toEqual([
+        "pr",
+        "edit",
+        "12",
+        "--repo=o/mc",
+        "--add-label=a,b",
+        "--remove-label=c",
+      ]);
+      await call("gh_write", { action: "reopen", target: "pr", number: 12 });
+      expect(ghCalls[2]).toEqual(["pr", "reopen", "12", "--repo=o/mc"]);
+      await call("gh_write", { action: "ready", target: "pr", number: 12 });
+      expect(ghCalls[3]).toEqual(["pr", "ready", "12", "--repo=o/mc"]);
+    });
+
+    it("refuses an @mention and a secret in the text", async () => {
+      secrets = ["s3cr3t-token-value"];
+      for (const text of ["thanks @someone", "token s3cr3t-token-value"]) {
+        const r = await call("gh_write", { action: "comment", target: "pr", number: 12, text });
+        expect(r.isError).toBe(true);
+      }
+      expect(ghCalls).toEqual([]);
+    });
+
+    it("leaves an always_ask ticket alone", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7, { labels: ["approval:x"] }));
+      const r = await call("gh_write", { action: "close", target: "issue", number: 7 });
+      expect(r.isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+    });
+
+    it("refuses when the card could not be read live, so a rate limit does not open the floor", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7, { labels: ["approval:x"] }));
+      readImpl = () => {
+        throw new Error("rate limited");
+      };
+      const r = await call("gh_write", { action: "close", target: "issue", number: 7 });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("could not be read live");
+      expect(ghCalls).toEqual([]);
+    });
+
+    it("lets an issue that is not on the board through the card check", async () => {
+      readImpl = () => null;
+      expect(
+        (await call("gh_write", { action: "close", target: "issue", number: 99 })).isError,
+      ).toBeUndefined();
+      expect(ghCalls).toHaveLength(1);
+    });
+
+    describe("delete_branch", () => {
+      const del = (branch: string) => call("gh_write", { action: "delete_branch", branch });
+      it.each(["main", "archive/old", "has space", "../x"])("refuses %s", async (branch) => {
+        expect((await del(branch)).isError).toBe(true);
+        expect(ghCalls).toEqual([]);
+      });
+      it("refuses a branch with an open PR and one a live run is on", async () => {
+        ghImpl = async () => ({ code: 0, stdout: '[{"number":3}]', stderr: "" });
+        expect((await del("mc/9")).isError).toBe(true);
+        expect(ghCalls.some((a) => a[0] === "api")).toBe(false);
+        ghImpl = async () => ({ code: 0, stdout: "[]", stderr: "" });
+        live("guido-1", "r-live", { branch: "mc/10" });
+        expect((await del("mc/10")).isError).toBe(true);
+        expect(ghCalls.some((a) => a[0] === "api")).toBe(false);
+      });
+      it("refuses when the open PRs could not be read", async () => {
+        ghImpl = async () => ({ code: 1, stdout: "", stderr: "boom" });
+        expect((await del("mc/9")).isError).toBe(true);
+      });
+      it("deletes a stale branch", async () => {
+        ghImpl = async (a) => ({ code: 0, stdout: a[0] === "pr" ? "[]" : "", stderr: "" });
+        expect((await del("mc/9")).isError).toBeUndefined();
+        expect(ghCalls.at(-1)).toEqual([
+          "api",
+          "--method",
+          "DELETE",
+          "repos/o/mc/git/refs/heads/mc/9",
+        ]);
+      });
+    });
+  });
+
+  describe("crew_tidy", () => {
+    let root: string;
+    const git = (cwd: string, ...a: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], {
+        cwd,
+        encoding: "utf8",
+      });
+    const branches = (clone: string) => git(clone, "branch", "--list").split("\n");
+    beforeEach(() => {
+      elevated();
+      root = mkdtempSync(join(tmpdir(), "mc-tidy-"));
+      const clone = join(root, "clone");
+      execFileSync("git", ["init", "-q", "-b", "main", clone]);
+      git(clone, "commit", "-q", "--allow-empty", "-m", "init");
+      mkdirSync(join(root, "wt"));
+      need(cfg.crew).worktrees = join(root, "wt");
+      need(cfg.crew?.sessions[0]).checkout = clone;
+      tidyImpl = createCrewTidy({ config: cfg, store, pruneLocal: async () => ["mc:mc/old"] });
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    const ended = (id: string, branch: string) =>
+      store.upsertRun(run(id, "guido-1", { branch, endedAt: NOW, status: "ok" }));
+
+    it("removes a clean ended worktree and keeps its branch", async () => {
+      const clone = join(root, "clone");
+      const wt = join(root, "wt", "guido-1-7");
+      git(clone, "worktree", "add", "-q", "-b", "mc/7", wt);
+      ended("r-old", "mc/7");
+      const r = await call("crew_tidy", { action: "remove_worktree", runId: "r-old" });
+      expect(r.isError).toBeUndefined();
+      expect(existsSync(wt)).toBe(false);
+      expect(branches(clone).some((b) => b.includes("mc/7"))).toBe(true);
+      expect(decisions()).toEqual([
+        expect.objectContaining({ kind: "tidy", targetRunId: "r-old" }),
+      ]);
+    });
+
+    it("refuses a dirty worktree and removes nothing", async () => {
+      const clone = join(root, "clone");
+      const wt = join(root, "wt", "guido-1-8");
+      git(clone, "worktree", "add", "-q", "-b", "mc/8", wt);
+      writeFileSync(join(wt, "scratch.txt"), "work");
+      ended("r-dirty", "mc/8");
+      const r = await call("crew_tidy", { action: "remove_worktree", runId: "r-dirty" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("uncommitted");
+      expect(existsSync(wt)).toBe(true);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("refuses a live run's worktree, a run that has not ended, and an unknown run", async () => {
+      const clone = join(root, "clone");
+      git(clone, "worktree", "add", "-q", "-b", "mc/9", join(root, "wt", "guido-1-9"));
+      live("guido-1", "r-live", { branch: "mc/9" });
+      expect(
+        (await call("crew_tidy", { action: "remove_worktree", runId: "r-live" })).isError,
+      ).toBe(true);
+      expect((await call("crew_tidy", { action: "remove_worktree", runId: "nope" })).isError).toBe(
+        true,
+      );
+      expect(existsSync(join(root, "wt", "guido-1-9"))).toBe(true);
+    });
+
+    it("refuses a worktree outside the crew's folder", async () => {
+      const clone = join(root, "clone");
+      const outside = join(root, "elsewhere");
+      git(clone, "worktree", "add", "-q", "-b", "mc/11", outside);
+      ended("r-out", "mc/11");
+      const r = await call("crew_tidy", { action: "remove_worktree", runId: "r-out" });
+      expect(r.isError).toBe(true);
+      expect(existsSync(outside)).toBe(true);
+    });
+
+    it("prunes local branches and says which", async () => {
+      const r = await call("crew_tidy", { action: "prune_branches" });
+      expect(r.text).toContain("mc:mc/old");
+      expect(decisions()[0]).toMatchObject({ kind: "tidy" });
     });
   });
 });

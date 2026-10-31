@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  DEFAULT_REPO_RULES,
+  FLIGHT_RUNAWAY,
   GUARD_BODY_LIMIT,
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
@@ -33,6 +35,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { runawayTrip } from "../src/flight/runaway.ts";
+import { grantApproval } from "../src/flight-approvals.ts";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
@@ -450,6 +454,198 @@ describe("POST /api/guard/check", () => {
   const reason = (body: string) =>
     (JSON.parse(body) as { hookSpecificOutput: { permissionDecisionReason: string } })
       .hookSpecificOutput.permissionDecisionReason;
+
+  describe("FLIGHT's full profile (#1214)", () => {
+    let tokF: string;
+    let flight: FastifyInstance;
+    beforeEach(async () => {
+      tokF = tokens.issue("flight-1", "run-f");
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "a",
+        model: "haiku",
+        area: [],
+      });
+      flight = await build({ config: cfg });
+    });
+    afterEach(async () => {
+      await flight.close();
+    });
+    const shell = () => store.flightDecisions(0, 50).filter((d) => d.kind === "shell");
+    const grant = (rule: "merge-push" | "repo-rules", scope: string) =>
+      grantApproval(store, { rule, scope, until: NOW + 60_000, reason: "controller said so" }, NOW);
+
+    it("lets FLIGHT's shell write and records each write as a shell decision", async () => {
+      expect((await check(tokF, bash("f1", "gh pr close 12"), flight)).body).toBe("{}");
+      expect((await check(tokF, bash("f2", "gh pr view 12"), flight)).body).toBe("{}");
+      expect(shell()).toEqual([
+        expect.objectContaining({
+          about: "gh pr close 12",
+          seatId: "flight-1",
+          targetRunId: "run-f",
+        }),
+      ]);
+    });
+
+    it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        expect((await check(tokF, bash(`r${i}`, "gh pr close 12"), flight)).body).toBe("{}");
+      expect(runawayTrip(store)).not.toBeNull();
+      const held = await check(tokF, bash("r-next", "gh pr close 13"), flight);
+      expect(reason(held.body)).toContain("runaway breaker");
+      // a read still runs
+      expect((await check(tokF, bash("r-read", "git status"), flight)).body).toBe("{}");
+    });
+
+    it("does not count a read toward the breaker", async () => {
+      for (let i = 0; i < 8; i++) await check(tokF, bash(`g${i}`, "gh pr view 12"), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
+    it("redacts a secret from the recorded command", async () => {
+      const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
+      await check(
+        tokF,
+        bash("f1", `curl -X POST -H "Authorization: Bearer ${token}" http://h`),
+        flight,
+      );
+      expect(shell()).toHaveLength(1);
+      expect(JSON.stringify(shell())).not.toContain(token);
+    });
+
+    it("refuses the repo's rules, names the rule, and leaves a guard hit", async () => {
+      const r = await check(tokF, bash("f1", "git push origin main"), flight);
+      expect(reason(r.body)).toContain(GUARD_RULES["merge-push"]);
+      expect(store.guardHits(0).map((h) => h.rule)).toEqual(["merge-push"]);
+      expect(shell()).toEqual([]);
+    });
+
+    it("lets one matching call through on a recorded approval, then refuses again", async () => {
+      const command = "git push origin main";
+      grant("merge-push", command);
+      expect((await check(tokF, bash("f1", command), flight)).body).toBe("{}");
+      expect(store.flightDecisions(0, 50).find((d) => d.kind === "approval")).toMatchObject({
+        basis: "controller said so",
+        seatId: "flight-1",
+      });
+      expect(reason((await check(tokF, bash("f2", command), flight)).body)).toContain(
+        GUARD_RULES["merge-push"],
+      );
+    });
+
+    it("takes a repo-rules approval for a file path, and not for another", async () => {
+      const file = "/w/.github/workflows/ci.yml";
+      grant("repo-rules", file);
+      const other = await check(
+        tokF,
+        pre("f1", "Write", { file_path: "/w/.github/CODEOWNERS" }),
+        flight,
+      );
+      expect(reason(other.body)).toContain(GUARD_RULES["repo-rules"]);
+      expect((await check(tokF, pre("f2", "Write", { file_path: file }), flight)).body).toBe("{}");
+    });
+
+    describe("always_ask tickets and the board", () => {
+      let ask: FastifyInstance;
+      beforeEach(async () => {
+        const cfg = config();
+        cfg.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "a",
+          model: "haiku",
+          area: [],
+        });
+        const item = (n: number, labels: string[]) => ({
+          repoId: "dev",
+          issueNumber: n,
+          title: `T${n}`,
+          status: "Ready",
+          state: "planned",
+          labels,
+          priority: null,
+          updatedAt: NOW,
+          url: "u",
+          stage: null,
+          owner: null,
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: NOW,
+          itemId: `I${n}`,
+          projectId: "P1",
+        });
+        store.replaceBoard("dev", [item(7, ["approval:x"]), item(8, [])] as never);
+        ask = await build({
+          config: cfg,
+          repoRules: async () => ({ ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] }),
+        });
+      });
+      afterEach(async () => {
+        await ask.close();
+      });
+
+      it("refuses an edit or close of an always_ask ticket, and allows an ordinary one", async () => {
+        for (const [i, command] of [
+          "gh issue edit 7 --add-label x",
+          "gh issue close 7",
+          "gh issue view 8 && gh issue close 7",
+          "gh issue close -c done 7",
+          "gh api -X PATCH repos/o/r/issues/7 -f state=closed",
+          "gh -R o/r issue close 7",
+          "gh issue edit -R o/r 7 --add-label x",
+          "gh issue edit 8 7 --add-label x",
+        ].entries()) {
+          const r = await check(tokF, bash(`a${i}`, command), ask);
+          expect(reason(r.body)).toContain("always_ask");
+        }
+        expect((await check(tokF, bash("ok", "gh issue edit 8 --add-label x"), ask)).body).toBe(
+          "{}",
+        );
+        expect((await check(tokF, bash("rd", "gh issue view 7"), ask)).body).toBe("{}");
+      });
+
+      it("refuses a ticket edit whose number it cannot read", async () => {
+        const r = await check(tokF, bash("u1", "gh issue edit --add-label x"), ask);
+        expect(reason(r.body)).toContain("cannot read");
+      });
+
+      it("refuses a board item write in the shell, pointing to set_fields", async () => {
+        const r = await check(tokF, bash("p1", "gh project item-edit --id X --field-id Y"), ask);
+        expect(reason(r.body)).toContain("set_fields");
+      });
+
+      it("refuses a ticket edit when the repo's rules cannot be read", async () => {
+        // `flight` was built with no rules reader
+        const r = await check(tokF, bash("b1", "gh issue edit 8 --add-label x"), flight);
+        expect(reason(r.body)).toContain("could not be read");
+      });
+    });
+
+    it("never lets an approval open the operator token", async () => {
+      const command = "cat /data/operator-token";
+      grant("repo-rules", "cat /data/other");
+      expect(reason((await check(tokF, bash("f1", command), flight)).body)).toContain(
+        GUARD_RULES["repo-rules"],
+      );
+    });
+
+    it("keeps a writer seat sandboxed and its denials unchanged, approval or not", async () => {
+      grant("merge-push", "git push origin main");
+      const r = await check(tokA, bash("w1", "git push origin main"));
+      expect(reason(r.body)).toContain(GUARD_RULES["git-write"]);
+      expect(reason((await check(tokA, bash("w2", "curl http://x"))).body)).toContain(
+        GUARD_RULES.network,
+      );
+      expect(shell()).toEqual([]);
+    });
+  });
 
   describe("a Stop with the run's report missing", () => {
     const stop = { hook_event_name: "Stop" };
@@ -1101,6 +1297,7 @@ describe("POST /api/guard/check", () => {
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });

@@ -57,6 +57,7 @@ const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([
 /** Whether a call only reads: a read tool, or message_seat asked for the seat's focus. */
 export function isReadCall(name: string, args: unknown): boolean {
   if (FLIGHT_READ_TOOLS.has(name)) return true;
+  if (name === MC_TOOL_NAMES.operator) return argsOf(args).method === "GET";
   return name === MC_TOOL_NAMES.messageSeat && argsOf(args).read_focus === true;
 }
 

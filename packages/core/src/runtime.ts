@@ -26,6 +26,27 @@ export type CrewEffort = string;
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
 export type CrewMode = (typeof CREW_MODES)[number];
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run. */
+export const CREW_PROFILES = ["standard", "flight-full"] as const;
+export type CrewProfile = (typeof CREW_PROFILES)[number];
+/** The built-in tools FLIGHT's full profile allows, unscoped: shell, files, the web and subagents. */
+export const FLIGHT_FULL_BUILTINS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "TodoWrite",
+  "Bash",
+  "Skill",
+  "WebFetch",
+  "WebSearch",
+  "Task",
+] as const;
+/** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
+export const crewProfileOf = (role: string, loop: string): CrewProfile =>
+  role === "FLIGHT" && loop === "watch" ? "flight-full" : "standard";
 /** The modes a seat's config may name; every other mode comes from the role. */
 export const CONFIG_SEAT_MODES = ["scratch"] as const;
 export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
@@ -87,6 +108,9 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.releaseHold,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
+  MC_TOOL_NAMES.operator,
+  MC_TOOL_NAMES.ghWrite,
+  MC_TOOL_NAMES.crewTidy,
 ];
 
 /**
@@ -1084,7 +1108,15 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
  * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
-export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
+export function crewSandboxSettings(
+  i: CrewSandboxInput,
+  mode: CrewMode,
+  hook: CrewHook,
+  profile: CrewProfile = "standard",
+): string {
+  if (profile === "flight-full") {
+    return JSON.stringify({ hooks: guardHooks(hook), sandbox: { enabled: false } });
+  }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
   const tempDenies = i.tempRoot === undefined ? [] : [...TEMP_DENY_GLOBS];
@@ -1143,6 +1175,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
 export interface CrewCliInput {
   model: string;
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile; all other seats stay standard. */
+  profile?: CrewProfile;
   /** Absolute path of the role brief, `roles/<CALL>.md`. */
   rolePromptFile: string;
   sessionId: string;
@@ -1251,7 +1285,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
       : [t],
   );
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
-  return [
+  const profile = i.profile ?? "standard";
+  const args = [
     "-p",
     "--input-format",
     "stream-json",
@@ -1263,22 +1298,44 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...(i.effort ? ["--effort", i.effort] : []),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
-    "--tools",
-    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
     "--settings",
-    crewSandboxSettings(i.sandbox, i.mode, i.hook),
+    crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
     "--mcp-config",
     i.mcpConfigFile,
-    "--allowedTools",
-    ...allowed,
-    "--disallowedTools",
-    ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
     "--append-system-prompt-file",
     i.rolePromptFile,
     i.resume ? "--resume" : "--session-id",
     i.sessionId,
   ];
+  if (profile === "flight-full") {
+    // every built-in tool, unscoped, and FLIGHT's mc tools; nothing is denied by name
+    args.splice(
+      args.indexOf("--append-system-prompt-file"),
+      0,
+      "--allowedTools",
+      ...FLIGHT_FULL_BUILTINS,
+      ...allowed.filter((t) => t.startsWith("mcp__")),
+    );
+    return args;
+  }
+  const settingsAt = args.indexOf("--settings");
+  args.splice(
+    settingsAt,
+    0,
+    "--tools",
+    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
+  );
+  const promptAt = args.indexOf("--append-system-prompt-file");
+  args.splice(
+    promptAt,
+    0,
+    "--allowedTools",
+    ...allowed,
+    "--disallowedTools",
+    ...DENIED_TOOLS,
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
+  );
+  return args;
 }
 
 /**

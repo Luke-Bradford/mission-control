@@ -315,6 +315,7 @@ import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
+import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import { seatFocus } from "../focus.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
@@ -353,12 +354,13 @@ import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
-import { createPowerTools } from "./powers.ts";
+import { createPowerTools, type PowerHelpers } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown, recordFlightWait } from "./signals.ts";
@@ -371,6 +373,7 @@ import {
   ownReply,
   stalledSeats,
 } from "./state.ts";
+import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
@@ -436,6 +439,14 @@ export interface FlightToolsDeps {
   };
   /** gh, through its one wrapper (`createGh`): create_ticket and comment_ticket write with it. */
   gh: GhRunner;
+  /** `mc operator`: one request to the hub's own app, in process, with the operator's token. */
+  operator?: (req: {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+  }) => Promise<{ status: number; body: string }>;
+  /** `mc crew_tidy`: the worktree and local-branch housekeeping. */
+  tidy?: CrewTidy;
   /** The DB's path; gh runs in `{DB dir}/crew/`. */
   dbPath: string;
   /** The secrets the ticket and comment scans look for verbatim, read for each call. */
@@ -3158,9 +3169,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const run = prRun(a.pr);
         if (!run?.loop?.awaitingFlight || !deps.engine?.clearFlight)
           return fail("No awaiting-flight run PR in your lane.");
-        if (flightFloorBlocked(run.loop))
-          return fail("Workflows and the Mission Control block need the operator.");
         const sha = run.loop.awaitingFlight;
+        // CLAUDE.md and .github/** are the repo's rules: only a controller's approval for this head lifts them
+        const approval = flightFloorBlocked(run.loop)
+          ? mergeFloorApproval(store, a.pr, sha, now())
+          : undefined;
+        if (flightFloorBlocked(run.loop) && approval === undefined)
+          return fail(
+            `This PR touches CLAUDE.md or .github/**, which are the repo's rules. A controller approves the merge with POST /api/flight/approvals { rule: "merge-floor", scope: "${mergeFloorScope(a.pr, sha.slice(0, 12))}", until, reason }; then call merge_pr again.`,
+          );
         const { value } = await ghObject("merge_pr", [
           "pr",
           "view",
@@ -3202,6 +3219,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         if (!(await deps.engine.clearFlight(run.id, sha)))
           return fail("The merge gates changed; refresh the PR.");
+        if (approval !== undefined) {
+          record(now(), {
+            kind: "approval",
+            about: `merge_pr #${a.pr}`,
+            decision: `Used the controller's approval (${approval.reason}) to clear PR #${a.pr} past the repo rules.`,
+            basis: a.basis,
+            targetRunId: run.id,
+          });
+        }
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const posted = await deps.gh(
           [
@@ -3543,6 +3569,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
   ];
 
+  const powerHelpers: PowerHelpers = {
+    deps,
+    now,
+    fail,
+    repoOf,
+    cardProblem,
+    labelProblem,
+    textProblem,
+    record,
+    superTool: (name, description, schema, kind, act, options) =>
+      superTool(
+        name,
+        description,
+        schema,
+        kind,
+        act as Parameters<typeof superTool>[4],
+        z.toJSONSchema(schema),
+        options,
+      ),
+  };
   /** The tools that can write something and still return an error. */
   const WRITES_BEFORE_FAILING: ReadonlySet<string> = new Set([
     MC_TOOL_NAMES.createTicket,
@@ -3847,25 +3893,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: updateBrief,
     },
     ...superTools,
-    ...createPowerTools({
-      deps,
-      now,
-      fail,
-      repoOf,
-      cardProblem,
-      labelProblem,
-      textProblem,
-      superTool: (name, description, schema, kind, act, options) =>
-        superTool(
-          name,
-          description,
-          schema,
-          kind,
-          act as Parameters<typeof superTool>[4],
-          z.toJSONSchema(schema),
-          options,
-        ),
-    }),
+    ...createPowerTools(powerHelpers),
+    ...createAccessTools(powerHelpers),
     {
       name: MC_TOOL_NAMES.draftReply,
       description: DRAFT_REPLY_DESCRIPTION,
@@ -3988,6 +4017,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.messageSeat,
     MC_TOOL_NAMES.flightState,
     MC_TOOL_NAMES.screenshotHud,
+    MC_TOOL_NAMES.crewTidy,
     MC_TOOL_NAMES.endRun,
     MC_TOOL_NAMES.resumeSeat,
     MC_TOOL_NAMES.dismissItem,
