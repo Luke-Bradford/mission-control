@@ -5,7 +5,6 @@ import {
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
-  type HudState,
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
@@ -27,7 +26,6 @@ import {
   lockSince,
   modelLine,
   type NeedPart,
-  NO_LOOP,
   needLine,
   needsLamp,
   SET_ASIDE_LABEL,
@@ -53,65 +51,21 @@ import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
 import { activityValues } from "./agentActivity.ts";
-import { LoopStep } from "./LoopStep.tsx";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
-const COLUMNS = ["Agent", "Model", "State", "Work", "Loop", "Tokens · 30 min", "Cost", "Context"];
-const LIVE_LOOP_STATES: readonly HudState[] = ["running", "waiting", "blocked", "parked"];
-
-/** The Loop column describes the run in progress, never a completed seat's last run. */
-function hasLiveLoop(row: Crew["rows"][number] | null, needsYou: boolean): boolean {
-  return Boolean(
-    row?.loop &&
-      hasActiveRun(row) &&
-      row.hudState !== "stopped" &&
-      row.hudState !== "error" &&
-      (LIVE_LOOP_STATES.includes(row.hudState) || needsYou),
-  );
-}
-
-function ModelCell({ row, title }: { row: Crew["rows"][number] | null; title?: string }) {
-  const id = row?.run?.model ?? row?.model ?? DASH;
-  const name = cutText(
-    id.startsWith("gpt-")
-      ? id
-      : id
-          .replace(/[- ]\d{8}$/, "")
-          .replace(/^claude-/, "")
-          .replace(/\[1m\]/i, " 1M")
-          .replace(/(\d)-(\d)/g, "$1.$2")
-          .replace(/-/g, " "),
-    24,
-  );
-  return (
-    <span
-      role="cell"
-      className="ellip xs muted agent-model"
-      title={title ?? (row ? modelLine(row) : undefined)}
-    >
-      <span className="ellip">{name}</span>
-      {row?.cli.version && (
-        <span className="agent-cli">{` · v${row.cli.version.replace(/^v/, "")}`}</span>
-      )}
-      {row?.cli.effort && (
-        <span className="agent-effort">
-          {" "}
-          · {row.cli.effort === "medium" ? "med" : row.cli.effort}
-        </span>
-      )}
-    </span>
-  );
-}
-
+const COLUMNS = ["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"];
 function WorkCell({
   row,
   doing,
   note,
+  actions,
 }: {
   row: Crew["rows"][number] | null;
   doing: string;
   note?: ReactNode;
+  /** A row action that used to sit in the Loop column (the review-park waiver). */
+  actions?: ReactNode;
 }) {
   const prs = useReviewPrs(row ?? undefined);
   const prNumber = row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
@@ -122,12 +76,14 @@ function WorkCell({
       .join(" · ");
     return (
       <span role="cell" className="ellip s ticket-cell work-cell muted">
-        <span className="ellip">{refs ? `last ${refs}` : DASH}</span>
-        {note ?? (
-          <span className="ellip xs muted" title={doing}>
-            {doing || DASH}
-          </span>
-        )}
+        {refs && <span className="ellip">last {refs}</span>}
+        {note ??
+          (doing || !refs ? (
+            <span className="ellip xs muted" title={doing}>
+              {doing || DASH}
+            </span>
+          ) : null)}
+        {actions}
       </span>
     );
   }
@@ -145,27 +101,30 @@ function WorkCell({
       .join(" · ") || DASH;
   return (
     <span role="cell" className="ellip s ticket-cell work-cell" title={text}>
-      <span className="ellip">
-        {row?.ticket && <TicketRef ticket={row.ticket} bare />}
-        {prNumber && row && (
-          <>
-            {row.ticket && " · "}
-            <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
-          </>
-        )}
-        {(row?.ticket || prNumber) && title && (
-          <>
-            {" "}
-            · <span>{title}</span>
-          </>
-        )}
-        {!row?.ticket && !prNumber && DASH}
-      </span>
+      {(row?.ticket || prNumber || !note) && (
+        <span className="ellip">
+          {row?.ticket && <TicketRef ticket={row.ticket} bare />}
+          {prNumber && row && (
+            <>
+              {row.ticket && " · "}
+              <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
+            </>
+          )}
+          {(row?.ticket || prNumber) && title && (
+            <>
+              {" "}
+              · <span>{title}</span>
+            </>
+          )}
+          {!row?.ticket && !prNumber && DASH}
+        </span>
+      )}
       {note ?? (
         <span className="ellip xs muted" title={doing}>
           {doing || DASH}
         </span>
       )}
+      {actions}
     </span>
   );
 }
@@ -260,7 +219,7 @@ function FlightRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={row ? modelLine(row) : undefined}>
         <button
           type="button"
           className="rowlink"
@@ -279,15 +238,11 @@ function FlightRow({
           head agent
         </a>
       </span>
-      <ModelCell row={row} />
       <span role="cell" className={row ? "state-cell" : undefined} title={status?.reason ?? label}>
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
             <span>{label}</span>
           </Pill>
-        )}
-        {row && row.stateSince > 0 && (
-          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
         )}
       </span>
       <WorkCell
@@ -299,26 +254,59 @@ function FlightRow({
           ) : undefined
         }
       />
-      <span role="cell" className="min0 loopstep" title={sessionTurns}>
-        {row?.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            hudState={row.hudState}
-            wait={waitText(row.loop, "FLIGHT", lockSince(lock, row.run?.id), now)}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-          />
-        ) : (
-          <span title={sessionTurns}>{DASH}</span>
-        )}
-      </span>
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span role="cell">{DASH}</span>}
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={row ? contextPct(row) : null} />
       </span>
+      <span role="cell" className="num xs" title={sessionTurns}>
+        {row && row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
+      </span>
     </div>
+  );
+}
+
+/**
+ * The observed loops (config.yaml loops, not crew seats) as one compact strip under the roster:
+ * name, state in words and what step they are on. Each opens its Agent page.
+ */
+function LoopsStrip({
+  rows,
+  items,
+  selected,
+}: {
+  rows: Crew["rows"];
+  items: AttentionItem[];
+  selected: string | null;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <nav className="loops-strip" aria-label="Loops">
+      <strong>Loops</strong>
+      {rows.map((row) => {
+        const status = seatStatus(row);
+        const asks = seatItems(row, items).length;
+        const step = row.loop && hasActiveRun(row) ? row.loop.text : null;
+        const to = agentPath(row.id);
+        // A loop waiting on the operator says so in words and takes the warn colour.
+        const tone = asks > 0 ? "warn" : status.tone;
+        const state = asks > 0 ? "needs you" : status.label;
+        return (
+          <a
+            key={row.id}
+            className={`loop-chip tone-${tone}${row.id === selected ? " sel" : ""}`}
+            href={to}
+            title={[callSign(row), state, step, status.reason].filter(Boolean).join(" · ")}
+            onClick={(e) => followLink(e, to)}
+          >
+            <span className="ellip">
+              {callSign(row)} · {step ?? state}
+            </span>
+            {step && <span className="xs muted">{state}</span>}
+          </a>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -410,7 +398,8 @@ function AgentRow({
   const statusTitle = row.crewPause
     ? status.reason
     : lockSince(lock, row.run?.id) !== null
-      ? "Waiting on test lock"
+      ? (row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)) ||
+        "Waiting on test lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Crew is paused"
         : (status.reason ?? statusLabel);
@@ -443,7 +432,7 @@ function AgentRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={identityTitle}>
         <a
           className="rowlink"
           title={callSign(row)}
@@ -461,14 +450,10 @@ function AgentRow({
             : row.loopKind}
         </span>
       </span>
-      <ModelCell row={row} title={identityTitle} />
       <span role="cell" className="state-cell" title={statusTitle}>
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
-        {row.stateSince > 0 && (
-          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
-        )}
       </span>
       <WorkCell
         row={row}
@@ -476,28 +461,15 @@ function AgentRow({
         note={
           needs.length ? <AgentNeeds row={row} items={items} now={now} lock={lock} /> : undefined
         }
+        actions={<ReviewParkSeatActions row={row} />}
       />
-      <span role="cell" className="min0 loopstep">
-        {row.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-            hudState={row.hudState}
-            wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
-          />
-        ) : (
-          <span className="xs fg2" title={NO_LOOP}>
-            {DASH}
-          </span>
-        )}
-        <ReviewParkSeatActions row={row} />
-      </span>
       <AgentActivity row={row} now={now} max={max} />
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={contextPct(row)} />
+      </span>
+      <span role="cell" className="num xs">
+        {row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
       </span>
     </div>
   );
@@ -514,6 +486,7 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
     const park = reviewPark(loops[i]?.data?.loop);
     return park ? [{ runId, park }] : [];
   });
+  if (parks.length === 0) return null;
   return (
     <span className="acts">
       {parks.length === 1 && (
@@ -551,6 +524,9 @@ export function AgentsPanel() {
   const metrics = useMetrics();
   const working = metrics.readings.agentsWorking;
 
+  // Crew seats make the roster; observed loops sit in the Loops strip beneath it.
+  const seatRows = rows?.filter((r) => r.kind === "crew") ?? null;
+  const loopRows = rows?.filter((r) => r.kind === "loop") ?? [];
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
   const placeholders = config
@@ -592,8 +568,7 @@ export function AgentsPanel() {
             <span
               role="columnheader"
               key={label}
-              title={label}
-              className={label === "Loop" ? "loopstep" : undefined}
+              title={label === "Tokens" ? "Tokens · last 30 minutes" : label}
             >
               {label}
             </span>
@@ -609,7 +584,7 @@ export function AgentsPanel() {
           tz={tz}
           lock={lock}
         />
-        {rows?.map((row) => (
+        {seatRows?.map((row) => (
           <AgentRow
             key={row.id}
             row={row}
@@ -640,6 +615,7 @@ export function AgentsPanel() {
             </div>
           ))}
       </div>
+      <LoopsStrip rows={loopRows} items={items} selected={selected} />
     </Panel>
   );
 }

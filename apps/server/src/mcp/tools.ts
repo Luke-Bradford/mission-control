@@ -10,11 +10,15 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  CALL_FLIGHT_SELF,
+  CALLED_FLIGHT,
+  type CheckDrop,
   type CheckState,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
@@ -34,7 +38,11 @@ import {
   commsCutMarker,
   crewAuthorName,
   DEFAULT_PROFILES,
+  DONE_WHEN_STATUSES,
+  type DoneWhenEntry,
+  doneWhenBadLineText,
   doneWhenCount,
+  doneWhenMissingText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -146,6 +154,7 @@ import {
   pushChecksText,
   pushedText,
   pushForeignText,
+  pushPrDoneText,
   pushReferenceText,
   pushSecretText,
   REVERT_STRAYS,
@@ -179,6 +188,7 @@ import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { flightSeat } from "../flight/seat.ts";
+import { recordSeatCall } from "../flight/signals.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
@@ -232,6 +242,8 @@ export interface McToolsDeps {
    * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
    */
   checks: (runId: string) => Promise<readonly string[]>;
+  /** The run's check calls the hub saw start and did not count, with the reasons; none when unset. */
+  checkDrops?: (runId: string) => readonly CheckDrop[];
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -273,6 +285,10 @@ const CommitArgs = z.strictObject({
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const CallArgs = z.strictObject({
+  reason: text(MC_TEXT_MAX),
+  ref: z.string().trim().min(1).max(120).optional(),
+});
 const CommsReadArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
@@ -354,6 +370,16 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  doneWhen: z
+    .array(
+      z.strictObject({
+        line: z.int().min(1).max(REVIEW_FINDINGS_MAX),
+        status: z.enum(DONE_WHEN_STATUSES),
+        evidence: text(MC_TEXT_MAX),
+      }),
+    )
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
   tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
   testsAdded: z
     .array(z.strictObject({ file: text(FINDING_FILE_MAX), failedOnBase: z.boolean() }))
@@ -372,6 +398,22 @@ const ReportedTestSchema = {
     duration: { type: "integer", minimum: 0 },
   },
   required: ["command", "passed", "failed", "skipped", "duration"],
+  additionalProperties: false,
+};
+const DoneWhenAnswerSchema = {
+  type: "object",
+  properties: {
+    line: { type: "integer", minimum: 1, description: "The Done-when line's number, from 1." },
+    status: { type: "string", enum: [...DONE_WHEN_STATUSES] },
+    evidence: {
+      type: "string",
+      minLength: 1,
+      maxLength: MC_TEXT_MAX,
+      description:
+        "met: the test name, file or measurement that proves it. not_met: why you could not meet it.",
+    },
+  },
+  required: ["line", "status", "evidence"],
   additionalProperties: false,
 };
 const TestsAddedSchema = {
@@ -682,28 +724,79 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     }
 
     /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
-    async function unmetChecks(
-      sha: string,
-    ): Promise<
-      { command: string; state: CheckState; recorded: ReturnType<Store["newestCheckRun"]> }[]
+    async function unmetChecks(sha: string): Promise<
+      {
+        command: string;
+        state: CheckState;
+        recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
+      }[]
     > {
       const unmet: {
         command: string;
         state: CheckState;
         recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
       }[] = [];
+      const drops = deps.checkDrops?.(runId) ?? [];
+      // the newest call of this check that was not counted: on the pushed commit first, else any
+      const droppedFor = (command: string): CheckDrop | null => {
+        const mine = drops.filter((x) => x.command === command);
+        return mine.findLast((x) => x.head === sha) ?? mine.at(-1) ?? null;
+      };
       for (const command of await deps.checks(runId)) {
         const last = store.latestCheckRun(runId, command, sha);
         if (last === null)
-          unmet.push({ command, state: "missing", recorded: store.newestCheckRun(runId, command) });
+          unmet.push({
+            command,
+            state: "missing",
+            recorded: store.newestCheckRun(runId, command),
+            dropped: droppedFor(command),
+          });
         else if (!last.ok)
           unmet.push({
             command,
             state: "failed",
             recorded: last,
+            dropped: droppedFor(command),
           });
       }
       return unmet;
+    }
+
+    /**
+     * The run's PR (the one its loop records) when it has merged or closed; "unreadable" when gh
+     * cannot say. A run with no PR yet has none to check.
+     */
+    async function donePr(
+      run: Run,
+    ): Promise<{ number: number; word: "merged" | "closed" } | "unreadable" | null> {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (repo === undefined) return null;
+      const number = run.loop?.prNumber ?? null;
+      if (number === null) {
+        // no PR of this run yet: a branch whose last PR merged (a new run reusing it) stays closed
+        const onBranch = deps.store.pullRequests(run.repoId).filter((p) => p.branch === branch);
+        const newest = onBranch.sort((a, b) => b.number - a.number)[0];
+        return newest?.state === "merged" && !onBranch.some((p) => p.state === "open")
+          ? { number: newest.number, word: "merged" }
+          : null;
+      }
+      const viewed = await deps.gh(
+        ["pr", "view", String(number), `--repo=${repo}`, "--json=state"],
+        { cwd: crewDir(deps.dbPath) },
+      );
+      let state: unknown;
+      try {
+        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+      } catch {
+        state = null;
+      }
+      if (state === "OPEN") return null;
+      if (state === "MERGED") return { number, word: "merged" };
+      if (state === "CLOSED") return { number, word: "closed" };
+      deps.log?.(`mc push: gh pr view ${number} failed (${String(viewed.code)})`);
+      return "unreadable";
     }
 
     async function steps(
@@ -741,9 +834,31 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
           () => false,
         );
 
+      /**
+       * The pushed head becomes the run's newest commit when it contains the one it had (a merge
+       * recorded under an earlier run of the branch, say): the engine compares the push with the
+       * newest commit, and a descendant head would otherwise never match it. Only a head that is
+       * already one of the crew's commits on this branch: a commit someone else put on origin is
+       * never recorded as the crew's.
+       */
+      const adoptHead = async () => {
+        const newest = store.newestRunCommit(runId)?.sha;
+        if (newest === undefined || newest === sha) return;
+        if (!store.branchCommits(run.repoId, branch).has(sha) || !(await has(newest))) return;
+        const contains = await g(["merge-base", "--is-ancestor", newest, sha]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+        if (contains) store.addRunCommit({ runId, repoId: run.repoId, branch, sha, at: now() });
+      };
+
       // 1. origin's tip
       const remote = heads.branchSha;
       if (remote === sha) {
+        await adoptHead();
         store.setRunPush({ runId, sha, at: now() });
         bus.emit("agents");
         return { text: alreadyOnOriginText(sha) };
@@ -761,6 +876,13 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         if (!ancestor) return { text: originMovedText(branch), isError: true };
       }
+
+      // 1b. the run's PR on this branch is merged or closed: GitHub deletes a merged branch, and a
+      // push would bring it back
+      const done = await donePr(run);
+      if (done === "unreadable") return { text: MC_PUSH_FAILED, isError: true };
+      if (done !== null)
+        return { text: pushPrDoneText(branch, done.number, done.word), isError: true };
 
       // 2. the new commits: exactly what this push sends
       if (!(await has(heads.defaultSha))) {
@@ -886,6 +1008,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         throw e;
       }
+      await adoptHead();
       store.setRunPush({ runId, sha, at: now() });
       bus.emit("agents");
       return { text: pushedText(sha, branch) };
@@ -1966,11 +2089,32 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       from: ctx.seatId,
       to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
-      text: parsed.data.question,
+      text: ASK_FLIGHT_COMMS_POINTER,
     });
     bus.emit("attention");
     bus.emit("agents");
     return { text: ASKED_FLIGHT };
+  }
+
+  /**
+   * A seat's call to FLIGHT: a wake reason (a `seat_call` signal) the watch delivers after its
+   * debounce, well inside one 5-minute tick. It writes nothing of FLIGHT's: FLIGHT decides.
+   */
+  async function callFlight(ctx: McToolContext, args: unknown): Promise<Result> {
+    if (isFlight(ctx.seatId)) return { text: CALL_FLIGHT_SELF, isError: true };
+    const parsed = CallArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    const place = seatPlace(config, ctx.seatId);
+    if (live === null || place === null) return { text: MC_RUN_ENDED, isError: true };
+    recordSeatCall(store, place.session.repoId, {
+      seat: ctx.seatId,
+      reason: parsed.data.reason,
+      ref: parsed.data.ref ?? live.run.ticket ?? null,
+      at: now(),
+    });
+    bus.emit("attention");
+    return { text: CALLED_FLIGHT };
   }
 
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
@@ -1986,7 +2130,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded } = parsed.data;
+    const { note, tests, testsAdded, doneWhen } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2065,6 +2209,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
+      // every Done-when line the run started with is answered, so a gap is the seat's to name
+      const lines = store.runDoneWhen(currentRun.id);
+      // only a ruling with no new commit owes no table; a report on a fresh commit always does
+      const rulingOnly = ciRuling && !fresh;
+      // a ruling changes no code, so the table of the last report still stands for the review
+      const answers: DoneWhenEntry[] = rulingOnly ? [...(reported?.doneWhen ?? [])] : [];
+      if (lines.length > 0 && !rulingOnly) {
+        const seen = new Set<number>();
+        for (const a of doneWhen ?? []) {
+          if (a.line > lines.length || seen.has(a.line)) {
+            return { text: doneWhenBadLineText(a.line, lines.length), isError: true };
+          }
+          seen.add(a.line);
+          answers.push({ ...a, text: lines[a.line - 1] ?? "" });
+        }
+        const missing = lines.flatMap((text, i) =>
+          seen.has(i + 1) ? [] : [{ line: i + 1, text }],
+        );
+        if (missing.length > 0) return { text: doneWhenMissingText(missing), isError: true };
+        answers.sort((a, b) => a.line - b.line);
+      }
+
       const problem = prTextProblem(note, {
         repo: repoOf(deps, currentRun),
         issue: issueOf(currentRun),
@@ -2085,7 +2251,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded });
+      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
@@ -2470,9 +2636,37 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       call: askFlight,
     },
     {
+      name: MC_TOOL_NAMES.callFlight,
+      description:
+        "Call FLIGHT, the crew's head agent, to your side: it wakes within 5 minutes with your reason and decides. Use it when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding. It is a call, not a question: for a question FLIGHT answers in a message, use ask_flight.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_TEXT_MAX,
+            description: "Why you are calling, with what FLIGHT needs to act on it.",
+          },
+          ref: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description:
+              "The ticket, PR or seat it is about, e.g. mission-control#1182. Defaults to your ticket.",
+          },
+        },
+        required: ["reason"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      offeredTo: (seatId) => !isFlight(seatId),
+      call: callFlight,
+    },
+    {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note, optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note, one doneWhen entry for every line of the ticket's ## Done when (met with its evidence, or not met with the reason; Mission Control refuses a report that leaves one out), optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2483,6 +2677,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
+          doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
           testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: TestsAddedSchema },
         },

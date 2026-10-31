@@ -2,7 +2,10 @@ import type {
   AgentState,
   AwaySettings,
   BoardItem,
+  Crew,
   CrewRow,
+  CrewSummary,
+  CrewSummaryRow,
   Escalation,
   PullRequestView,
   Run,
@@ -26,6 +29,8 @@ export const READONLY_FILES_NOTE = "Read-only agent: no file changes.";
 export const UP_TO_DATE_MAIN = "Up to date with main.";
 /** Why Update (and Check for updates) is off when the server has no updater. */
 export const UPDATE_UNAVAILABLE = "updates are not available on this server";
+/** `GET /api/update/log` when update.log exists but cannot be read; the errno and path stay in the hub log. */
+export const UPDATE_LOG_UNREADABLE = "could not read update.log";
 /** Why Update (and Check for updates) is off on a preview server. */
 export const PREVIEW_SERVER = "this is a preview server";
 export const FLIGHT_NOT_RUNNING = "FLIGHT is not running yet. It arrives in phase 3.";
@@ -571,3 +576,36 @@ export const DECISION_DEFAULT_WAIT_MS = 40 * 60_000;
 /** The Comms line recording an automatically applied decision. */
 export const defaultAppliedText = (label: string, ask: string): string =>
   `Default applied: ${label} (${ask})`;
+
+/** A crew row cut down to what the Overview reads (see `CrewSummaryRow`). */
+export function crewRowSummary(row: CrewRow): CrewSummaryRow {
+  const { events: _events, digest, asideRuns, ...rest } = row;
+  return {
+    ...rest,
+    digest:
+      digest === null
+        ? null
+        : {
+            lastEventAt: digest.lastEventAt,
+            minuteTokens: digest.minuteTokens,
+            liveTool: digest.liveTool,
+            lastText: digest.lastText,
+            background: digest.background,
+            contextTokens: digest.contextTokens,
+            contextWindow: digest.contextWindow,
+            compactions: digest.compactions,
+          },
+    ...(asideRuns === undefined
+      ? {}
+      : { asideRuns: asideRuns.map(({ events: _aside, ...run }) => run) }),
+  };
+}
+
+export function crewSummary(crew: Crew): CrewSummary {
+  return { rows: crew.rows.map(crewRowSummary), firstRunToday: crew.firstRunToday };
+}
+
+/** A page's first load moves at most this many bytes (gzipped) across all its responses. */
+export const HUD_PAGE_BUDGET_BYTES = 500 * 1024;
+/** No single response of a page's first load is over this many bytes (gzipped). */
+export const HUD_RESPONSE_BUDGET_BYTES = 300 * 1024;

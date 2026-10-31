@@ -20,6 +20,7 @@ import {
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
   asideEventText,
+  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   awayDiffSafe,
@@ -33,6 +34,7 @@ import {
   CI_RERUN_FAILED_TEXT,
   COMMS_CAPCOM,
   COMMS_MC,
+  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
   cardMark,
@@ -41,6 +43,8 @@ import {
   ciVerdict,
   cleanupBranchNoteKey,
   closedIssueText,
+  commsMirror,
+  conflictCommsText,
   conflictKey,
   conflictText,
   controllerCheckFailText,
@@ -55,7 +59,11 @@ import {
   evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
+  fixCommsText,
+  fixKey,
   fixSentText,
   fixText,
   gateView,
@@ -143,7 +151,8 @@ import {
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { wakeDueAsideRun } from "./aside.ts";
+import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
   EMPTY_LOG,
@@ -158,6 +167,7 @@ import {
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
+import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
@@ -593,6 +603,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const woken = Object.keys(store.claimedKeys(run.id))
       .filter((key) => key.startsWith(`wake:${run.id}:`))
       .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
+    const claimed = store.claimedKeys(run.id);
+    const epoch = run.loop?.epoch ?? 0;
     const work = pendingSeatWork({
       lastTurnStartedAt: row.lastTurnStartedAt ?? null,
       reviews: store.reviewsOfRun(run.id),
@@ -602,7 +614,13 @@ export function createEngine(deps: EngineDeps): Engine {
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
-    });
+      // the fix line carries the findings' text and wakes the seat itself, so a findings item
+      // whose fix line is still unsent is left to it
+    }).filter(
+      (x) =>
+        x.kind !== "findings" ||
+        fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
+    );
     if (work.length === 0) return;
     const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
     await send(
@@ -871,6 +889,7 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
         : {}),
@@ -994,6 +1013,20 @@ export function createEngine(deps: EngineDeps): Engine {
     "delete-local-branch",
     "update-branch",
   ]);
+
+  /** RETRO's latest reported findings as the author's fix list, else FLIGHT's own request. */
+  function reworkFindings(runId: string, reason: string): string {
+    const review = store
+      .reviewsOfRun(runId)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    const findings = review
+      ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+      : [];
+    return review && findings.length > 0
+      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
+      : `FLIGHT requests rework: ${reason}`;
+  }
 
   /**
    * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
@@ -1139,7 +1172,10 @@ export function createEngine(deps: EngineDeps): Engine {
           // a park for no progress then explains itself
           cur.lastRefusal = text;
           if (sent === "sent") {
-            handOff(COMMS_MC, text);
+            handOff(
+              COMMS_MC,
+              commsMirror(text, "Push checks failed; the full command list was sent to the seat."),
+            );
             // running checks makes no commit, so the push clock starts over: a full window from the message
             cur.pushStartedAt = at;
           }
@@ -1184,18 +1220,26 @@ export function createEngine(deps: EngineDeps): Engine {
         const sent = await send(run.id, a.key, a.text);
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
-          const rv = store.review(id);
-          if (rv !== null) {
+          const review = store.review(id);
+          if (review !== null) {
             store.addLoopEvent(
               reviewEventKey(run.id, id, "fix"),
               run.id,
-              fixSentText(rv.blocking, seatCallSign(run.agentId)),
+              fixSentText(review.blocking, seatCallSign(run.agentId)),
               at,
             );
-            handOff(rv.seatId, a.text);
+            handOff(
+              review.seatId,
+              fixCommsText({
+                retro: seatCallSign(review.seatId),
+                sha: review.sha,
+                findings: store.findingsOf(review.id),
+              }),
+            );
           }
         }
-        if (sent === "sent" && a.key.startsWith("conflict:")) handOff(COMMS_MC, a.text);
+        if (sent === "sent" && a.key.startsWith("conflict:"))
+          handOff(COMMS_MC, commsMirror(a.text, conflictCommsText(cur.mainMerge?.files ?? [])));
         return;
       }
       case "ci-excerpt": {
@@ -1204,7 +1248,13 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a real excerpt is kept: a failed read or an empty answer is asked for again
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
-        const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
+        const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
+        const shortened = "\n[CI output shortened; inspect the CI log.]";
+        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+        const text =
+          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+            ? intro + excerpt
+            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
         const sent = await send(run.id, a.key, text);
         if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
@@ -1317,7 +1367,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const row = store.review(a.reviewId);
         if (row === null) return;
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
         await kickReviews();
         return;
       }
@@ -1325,7 +1375,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
-        cur.aside = { worktree, wake: false };
+        // (a run set aside mid-build is due back as soon as the rework is out of the way)
+        cur.aside = { worktree, wake: cur.phase === "working" };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1337,7 +1388,11 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "ci" ? asideInCiEventText(call) : asideEventText(call),
+          cur.phase === "working"
+            ? asideForReworkEventText(call)
+            : cur.phase === "ci"
+              ? asideInCiEventText(call)
+              : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1364,8 +1419,18 @@ export function createEngine(deps: EngineDeps): Engine {
         try {
           await supervisor.wakeRun(run.id);
         } catch (e) {
-          // the seat is busy or the hub is stopping: the next pass tries again
-          if (isTransientStart(e)) return;
+          // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
+          // seat is looked at now, to give way to this rework if its turn has ended
+          if (isTransientStart(e)) {
+            const holder = supervisor.seat(run.agentId)?.runId ?? null;
+            if (
+              holder !== null &&
+              holder !== run.id &&
+              store.run(holder)?.loop?.phase === "working"
+            )
+              void reconcileRun(holder);
+            return;
+          }
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
@@ -1831,9 +1896,19 @@ export function createEngine(deps: EngineDeps): Engine {
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }
 
+  const ticks = tickLogOf(store);
+
   const reconcileRun = (runId: string): Promise<void> => {
     if (!live()) return Promise.resolve();
-    return onChain(runId, () => pass(runId));
+    return onChain(runId, async () => {
+      const run = store.run(runId);
+      const done = ticks.step(`reconcile ${run?.repoId} ${runId} ${run?.loop?.phase ?? "no loop"}`);
+      try {
+        await pass(runId);
+      } finally {
+        done();
+      }
+    });
   };
 
   /** Whether an ended run's Blocked move and note are settled, or no longer wanted. */
@@ -1963,9 +2038,9 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Ends the review's run when it has one that has not ended. */
-  async function endReviewRun(row: ReviewRow): Promise<void> {
+  async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
-    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId);
+    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId, reason);
   }
 
   /** Whether the review's author run is in review on the sha the hub pushed, its PR open at that head. */
@@ -2156,7 +2231,13 @@ export function createEngine(deps: EngineDeps): Engine {
       const phase = author?.loop?.phase;
       if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
         dropReview(row);
-        await endReviewRun(row);
+        await endReviewRun(row, "superseded");
+        continue;
+      }
+      // a run that ended while its review is no longer wanted (the head moved) was cut short by
+      // that, not a failure of its own
+      if (rrun.endedAt !== null && !reviewWanted(row)) {
+        dropReview(row);
         continue;
       }
       let seatRow: ReturnType<Supervisor["seat"]>;
@@ -2329,7 +2410,7 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const repoId of new Set(runs.map((r) => r.repoId))) await rulesFor(repoId);
   }
 
-  return {
+  const engine: Engine = {
     start() {
       if (!deps.enabled || started) return;
       started = true;
@@ -2391,27 +2472,68 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const cache = {
-        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
-        notes: store.notes(),
+      const startedAt = now();
+      ticks.begin(startedAt);
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      // a tick past its interval is logged once, with what it is on (the scheduler skips the next)
+      const noteOverrun = () => {
+        const steps = ticks.overrun();
+        if (steps !== null) log(overrunText(startedAt, steps));
       };
-      await tickCache.run(cache, async () => {
-        const runs = loopRuns();
-        const notes = cache.notes;
-        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-        await Promise.all(
-          store
-            .runsActiveSince(now())
-            .filter((r) => r.loop !== null && r.loop !== undefined)
-            .map((run) => watchGreenEvidence(run, notes)),
-        );
-        await Promise.all(runs.map((r) => reconcileRun(r.id)));
-        await refreshRuleNotes(runs);
-        await sweepNotes(notes);
-        untakeStale();
-        await takeForSeats();
-        await kickReviews();
-      });
+      // work that blocks the event loop starves the timer, so each step also checks the clock
+      const phase = async <T>(label: string, fn: () => Promise<T> | T): Promise<T> => {
+        const done = ticks.step(label);
+        try {
+          return await fn();
+        } finally {
+          if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+          done();
+        }
+      };
+      try {
+        timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
+        timer.unref();
+        const notes = await phase("load notes", () => store.notes());
+        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
+        await tickCache.run(cache, async () => {
+          const runs = await phase("list runs", loopRuns);
+          await phase("wake pending work", () =>
+            Promise.all(runs.map((r) => wakePendingWork(r.id))),
+          );
+          await phase("watch green evidence", () =>
+            Promise.all(
+              store
+                .runsActiveSince(now())
+                .filter((r) => r.loop !== null && r.loop !== undefined)
+                .map((run) => watchGreenEvidence(run, notes)),
+            ),
+          );
+          await Promise.all(runs.map((r) => reconcileRun(r.id)));
+          await phase("refresh rule notes", () => refreshRuleNotes(runs));
+          await phase("sweep notes", () => sweepNotes(notes));
+          await phase("untake stale", untakeStale);
+          await phase("release dependents", () =>
+            releaseDependents({
+              store,
+              config,
+              now,
+              move: deps.board.move,
+              syncMain: engine.syncMain,
+              rules: deps.rules,
+              fetchTicket: deps.fetchTicket,
+              prsFor,
+              ...(deps.pollGithub ? { pollGithub: deps.pollGithub } : {}),
+              log,
+            }),
+          );
+          await phase("take for seats", takeForSeats);
+          await phase("kick reviews", kickReviews);
+        });
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+        if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+        ticks.end(now());
+      }
     },
 
     reconcileRun,
@@ -2476,7 +2598,12 @@ export function createEngine(deps: EngineDeps): Engine {
             return refuse("wrong-action");
           if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
             return refuse("round-granted");
-          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1)
+          if (
+            opts.action === "rework" &&
+            ((loop.flightReworks?.[pushed.sha] ?? 0) >= FLIGHT_REWORKS_PER_HEAD ||
+              Object.values(loop.flightReworks ?? {}).reduce((n, v) => n + v, 0) >=
+                FLIGHT_REWORKS_PER_RUN)
+          )
             return refuse("round-granted");
           if (opts.action === "accept") {
             const review = store
@@ -2548,33 +2675,51 @@ export function createEngine(deps: EngineDeps): Engine {
                 ...loop.flightReworks,
                 [pushed.sha]: (loop.flightReworks?.[pushed.sha] ?? 0) + 1,
               };
+            const findings = reworkFindings(run.id, loop.parked.reason);
+            const message =
+              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
+            // a run set aside is woken first; its seat on another run (a 409) queues the rework
+            let queue = false;
             if (next.aside) {
               try {
                 await supervisor.wakeRun(run.id);
-              } catch {
-                return refuse("rework-undelivered");
+                next.aside = null;
+              } catch (e) {
+                if ((e as { status?: unknown }).status !== 409) return refuse("rework-undelivered");
+                queue = true;
               }
-              next.aside = null;
             }
-            const review = store
-              .reviewsOfRun(run.id)
-              .filter((r) => r.state === "reported")
-              .at(-1);
-            const findings = review
-              ? fixText({
-                  retro: seatCallSign(review.seatId),
-                  sha: review.sha,
-                  findings: store.findingsOf(review.id),
-                })
-              : `FLIGHT requests rework: ${loop.parked.reason}`;
-            const message =
-              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
-            const sent = await supervisor.send(
-              run.id,
-              `${run.id}:flight-rework:${next.epoch}`,
-              message,
-            );
-            if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            if (queue && next.aside) {
+              // the rework waits in Comms for this run, and the engine wakes it, in working, once
+              // its seat is free (as a failed controller check does)
+              const stored = store.addComms({
+                at,
+                // the rework is FLIGHT's request, filed from its seat
+                from:
+                  config.crew?.sessions
+                    .flatMap((x) => x.seats)
+                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_CAPCOM,
+                to: run.agentId,
+                ticket: run.ticket ?? null,
+                ref: run.ticket ?? null,
+                targetRunId: run.id,
+                text: commsMirror(
+                  message,
+                  "FLIGHT requested rework; the full request was sent to the seat.",
+                ),
+              });
+              if (stored === null) return refuse("rework-undelivered");
+              store.markCommsInboxRead(run.agentId, [stored.id]);
+              next.pendingLine = { key: `${run.id}:flight-rework:${next.epoch}`, text: message };
+              next.aside = { ...next.aside, wake: true };
+            } else {
+              const sent = await supervisor.send(
+                run.id,
+                `${run.id}:flight-rework:${next.epoch}`,
+                message,
+              );
+              if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            }
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
@@ -2649,7 +2794,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ticket: run.ticket ?? null,
             ref: run.ticket ?? null,
             targetRunId: run.id,
-            text,
+            text: commsMirror(text, "Controller check failed; the full note was sent to the seat."),
           };
           if (loop.aside) {
             // off its seat (the seat may hold another run now): the note waits in Comms for the
@@ -3047,4 +3192,5 @@ export function createEngine(deps: EngineDeps): Engine {
       return { on: live(), note: notes.length === 0 ? null : notes.join("; ") };
     },
   };
+  return engine;
 }

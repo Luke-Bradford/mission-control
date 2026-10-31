@@ -123,13 +123,13 @@ describe("doing lines and run rows (hud.css)", () => {
     expect(rule(String.raw`\.runrow button\.rsummary`)).toContain("line-height: inherit");
   });
 
-  it("fits all eight Crew columns at the controller's docked and wide viewport widths", () => {
+  it("fits all seven Crew columns at the controller's docked and wide viewport widths", () => {
     for (const [viewport, dock] of [
       [1440, true],
       [2000, false],
     ] as const) {
       const main = viewport - 32 - (dock ? 392 : 0);
-      const panel = main - Math.max(260, main * 0.28) - 12 - 18;
+      const panel = main - main * (viewport >= 1920 ? 0.27 : 0.31) - 12 - 18;
       const selector = String.raw`#agentsList \.trow`;
       const cssAtWidth =
         panel < 900
@@ -142,9 +142,9 @@ describe("doing lines and run rows (hud.css)", () => {
       const gap = panel < 900 ? 4 : 6;
       const available = panel - 16;
       const widths = solve(tracks, available, gap);
-      expect(tracks).toHaveLength(8);
-      expect(widths[3]).toBeGreaterThan(100);
-      expect(widths.reduce((a, b) => a + b, 0) + gap * 7).toBeLessThanOrEqual(available + 0.01);
+      expect(tracks).toHaveLength(7);
+      expect(widths[2]).toBeGreaterThan(100);
+      expect(widths.reduce((a, b) => a + b, 0) + gap * 6).toBeLessThanOrEqual(available + 0.01);
     }
     expect(rule("#agentsList")).toContain("overflow-x: hidden");
   });

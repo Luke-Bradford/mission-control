@@ -12,6 +12,8 @@ export const MC_TOOL_NAMES = {
   push: "push",
   draftPr: "draft_pr",
   askFlight: "ask_flight",
+  callFlight: "call_flight",
+  waitOn: "wait_on",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
   restoreFile: "restore_file",
@@ -29,6 +31,7 @@ export const MC_TOOL_NAMES = {
   flightState: "flight_state",
   promote: "promote",
   endRun: "end_run",
+  resumeSeat: "resume_seat",
   acceptRuling: "accept_ruling",
   mergePr: "merge_pr",
   settlePark: "settle_park",
@@ -57,6 +60,8 @@ export const MC_TOOL_NAMES = {
   holdItem: "hold_item",
   releaseHold: "release_hold",
   screenshotHud: "screenshot_hud",
+  editIssue: "edit_issue",
+  setFields: "set_fields",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -71,6 +76,8 @@ export const MC_TOOLS = {
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askFlight: mcTool(MC_TOOL_NAMES.askFlight),
+  callFlight: mcTool(MC_TOOL_NAMES.callFlight),
+  waitOn: mcTool(MC_TOOL_NAMES.waitOn),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
   restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
@@ -88,6 +95,7 @@ export const MC_TOOLS = {
   flightState: mcTool(MC_TOOL_NAMES.flightState),
   promote: mcTool(MC_TOOL_NAMES.promote),
   endRun: mcTool(MC_TOOL_NAMES.endRun),
+  resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
   acceptRuling: mcTool(MC_TOOL_NAMES.acceptRuling),
   mergePr: mcTool(MC_TOOL_NAMES.mergePr),
   settlePark: mcTool(MC_TOOL_NAMES.settlePark),
@@ -116,6 +124,8 @@ export const MC_TOOLS = {
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
+  editIssue: mcTool(MC_TOOL_NAMES.editIssue),
+  setFields: mcTool(MC_TOOL_NAMES.setFields),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -244,6 +254,16 @@ export const MC_COMMIT_TOO_BIG =
 
 export const ASKED_FLIGHT =
   "Asked FLIGHT. It answers, or takes the question to the operator with its brief; the answer arrives as a message. Carry on with what you can meanwhile.";
+export const CALLED_FLIGHT =
+  "Called FLIGHT. It wakes within 5 minutes with your reason and decides; an answer arrives as a message. Carry on with what you can meanwhile.";
+/** call_flight from FLIGHT itself. */
+export const CALL_FLIGHT_SELF = "Not called: you are FLIGHT.";
+/** The Comms mirror of an ask_flight question; the full question is kept in the question record. */
+export const ASK_FLIGHT_COMMS_POINTER =
+  "Question recorded for FLIGHT.\nFull question is in the structured question record.";
+/** The Comms mirror of an oversized FLIGHT answer; the full answer is kept in the decision record. */
+export const FLIGHT_ANSWER_COMMS_POINTER =
+  "FLIGHT answered your question.\nFull answer is in FLIGHT's structured decision record.";
 /** A seat's comms_send to CAPCOM labelled `question`: a seat's questions go to FLIGHT (#758). */
 export const COMMS_QUESTION_TO_FLIGHT =
   "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";
@@ -310,6 +330,9 @@ export const pushForeignText = (shas: readonly string[]): string =>
 /** origin's branch has commits the local branch lacks; also git's own non-fast-forward refusal. */
 export const originMovedText = (branch: string): string =>
   `Not pushed: origin's ${branch} has commits this run doesn't have. If they are not wanted, reset origin's branch to the run's last push, then message the seat; if they are, end the run.`;
+/** The run's PR on the branch has merged or closed: nothing more goes to that branch. */
+export const pushPrDoneText = (branch: string, pr: number, state: "merged" | "closed"): string =>
+  `Not pushed: PR #${pr} on ${branch} is ${state}, so the branch takes no more commits. Start new work on a new branch.`;
 export const MC_PUSH_MERGE =
   "Not pushed: the branch has a merge commit Mission Control did not make, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
 /** The worktree has a merge in progress that the engine did not start. */
@@ -365,6 +388,60 @@ export const MC_PUSH_CHECKS =
 export type CheckState = "missing" | "failed";
 const CHECKS_ADVICE =
   "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again.";
+
+/** Claude's Bash tool kills a call at this many ms when the call names no `timeout`. */
+export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
+/** The `timeout` a seat gives a check call: the lock wait and both checks fit well inside it. */
+export const CHECK_BASH_TIMEOUT_MS = 600_000;
+/** Why the hub did not count a started check call. */
+export const CHECK_DROP_REASONS = [
+  "not-plain",
+  "dirty-start",
+  "dirty-end",
+  "head-moved",
+  "turn-ended",
+  "background",
+  "timeout",
+  "unreadable",
+] as const;
+export type CheckDropReason = (typeof CHECK_DROP_REASONS)[number];
+/** A check call the hub saw start and did not count: which check, on which commit, and why. */
+export interface CheckDrop {
+  reason: CheckDropReason;
+  /** The configured check the call ran. */
+  command: string;
+  /** The commit the call started on; null when the clone could not be read. */
+  head: string | null;
+  /** The shell command the seat ran. */
+  invoked: string;
+  at: number;
+}
+const sha7 = (sha: string | null): string =>
+  sha === null ? "an unreadable commit" : sha.slice(0, 7);
+/** One sentence on why a check call was not counted, for the push refusal. */
+export const checkDropText = (d: CheckDrop): string => {
+  switch (d.reason) {
+    case "not-plain":
+      return `the call \`${d.invoked}\` was not counted: it chains the check with a pipe, ||, ;, a line break or another command. Run it exactly as written.`;
+    case "dirty-start":
+      return `the call started on ${sha7(d.head)} with uncommitted or untracked files in the tree, so it was not counted. Commit or delete them, then run the check again.`;
+    case "dirty-end":
+      return `the call left uncommitted or untracked files in the tree (on ${sha7(d.head)}), so it was not counted. Commit or delete them, then run the check again.`;
+    case "head-moved":
+      return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
+    case "turn-ended":
+      return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "background":
+      return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
+    case "timeout":
+      return `the call ran past its Bash timeout and was killed (on ${sha7(d.head)}). Run it again with the Bash timeout parameter set to ${CHECK_BASH_TIMEOUT_MS}; a check can wait for the test lock before it runs.`;
+    case "unreadable":
+      return "the hub could not read the seat's clone when the call started, so it was not counted. Run the check again.";
+  }
+};
+/** The line for a check the hub never saw start: the hub restarted, or the call never reached it. */
+export const CHECK_NO_START_TEXT =
+  "the hub saw no start of this check on this run (it may have restarted, or the call never reached it). Run it again in the foreground with the Bash timeout parameter set to 600000.";
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,
@@ -378,15 +455,26 @@ export const pushChecksText = (
       exitCode: number | null;
       at: number;
     } | null;
+    /** The newest call of this check the hub saw start and did not count, if any. */
+    dropped?: CheckDrop | null;
   }[],
 ): string => {
   const lines = found.map((c) => {
     const result = c.state === "failed" ? "failed" : "not run";
-    return `- ${result}: ${c.command}\n  ${
+    const recorded =
       c.recorded == null
-        ? "nothing recorded"
-        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
-    }`;
+        ? null
+        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`;
+    const why = c.dropped == null ? null : checkDropText(c.dropped);
+    const detail = [
+      recorded,
+      why !== null
+        ? `not counted: ${why}`
+        : c.state === "missing"
+          ? `nothing recorded on ${head.slice(0, 7)}: ${CHECK_NO_START_TEXT}`
+          : null,
+    ].filter((l): l is string => l !== null);
+    return `- ${result}: ${c.command}\n  ${detail.join("\n  ")}`;
   });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;
 };
@@ -490,10 +578,47 @@ function sectionLines(text: string, level: number, title: RegExp): string[] | nu
   return inside ? out : null;
 }
 
+/** The ticket's `## Done when` bullets, each with its list marker and checkbox cut off. */
+export function doneWhenItems(body: string): string[] {
+  return (sectionLines(body, 2, /^done when$/i) ?? [])
+    .filter((l) => LIST_ITEM.test(l))
+    .map((l) =>
+      l
+        .replace(/^ {0,1}(?:[-*+]|\d+[.)])[ \t]+/, "")
+        .replace(/^\[[ xX]\][ \t]*/, "")
+        .trim(),
+    );
+}
+
 /** How many bullets the ticket's `## Done when` holds. */
 export function doneWhenCount(body: string): number {
-  return (sectionLines(body, 2, /^done when$/i) ?? []).filter((l) => LIST_ITEM.test(l)).length;
+  return doneWhenItems(body).length;
 }
+
+/** How a report answers one Done-when line: met with its evidence, or not met with the reason. */
+export const DONE_WHEN_STATUSES = ["met", "not_met"] as const;
+export type DoneWhenStatus = (typeof DONE_WHEN_STATUSES)[number];
+
+/** One Done-when line as the author answered it; `text` is the ticket's line, set by the hub. */
+export interface DoneWhenEntry {
+  line: number;
+  text: string;
+  status: DoneWhenStatus;
+  /** For `met`: a test name, a file or a measurement. For `not_met`: why it could not be met. */
+  evidence: string;
+}
+
+/** The longest quote of a Done-when line in a refusal. */
+const DONE_WHEN_QUOTE_MAX = 200;
+const quoteLine = (n: number, text: string): string =>
+  `${n}. "${text.length > DONE_WHEN_QUOTE_MAX ? `${text.slice(0, DONE_WHEN_QUOTE_MAX)}…` : text}"`;
+
+/** The report leaves these Done-when lines unaddressed. */
+export const doneWhenMissingText = (missing: readonly { line: number; text: string }[]): string =>
+  `Not recorded: your report leaves ${missing.length === 1 ? "this Done-when line" : `these ${missing.length} Done-when lines`} unaddressed:\n${missing.map((m) => quoteLine(m.line, m.text)).join("\n")}\nAdd a doneWhen entry for each: { line, status: "met", evidence: the test name, file or measurement } or { line, status: "not_met", evidence: why you could not meet it }.`;
+/** A doneWhen entry names a line the ticket does not have, or names one twice. */
+export const doneWhenBadLineText = (line: number, lines: number): string =>
+  `Not recorded: doneWhen line ${line} is not one of the ticket's ${lines} Done-when ${lines === 1 ? "line" : "lines"} (numbered from 1), or is named twice.`;
 
 /** How many entries the plan's `### Tests` part holds, or null when it has no such part. */
 export function planTestCount(plan: string): number | null {

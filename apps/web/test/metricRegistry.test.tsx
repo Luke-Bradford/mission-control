@@ -184,7 +184,7 @@ describe("the metric registry across pages", () => {
         "/api/config": SESSION_CONFIG,
         "/api/overview?session=site-builder-session": LEGACY["/api/overview"],
         "/api/metrics?session=site-builder-session": session,
-        "/api/crew": {
+        "/api/crew?shape=summary": {
           rows: [
             seatRow({ id: "guido-1", sessionId: "shop-app-session", hudState: "blocked" }),
             seatRow({

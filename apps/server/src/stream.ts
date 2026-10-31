@@ -239,9 +239,24 @@ export function readStream(
   limit: number,
   vendor?: CrewVendor,
 ): { events: StreamEvent[]; truncated: boolean } {
+  const { events, truncated } = readStreamPage(path, limit, vendor);
+  return { events, truncated };
+}
+
+/**
+ * `readStream`, and with `before` (an event's id) the `limit` events ahead of that one. `more` says
+ * older events remain beyond what it returned, so the dock can offer them on scroll.
+ */
+export function readStreamPage(
+  path: string,
+  limit: number,
+  vendor?: CrewVendor,
+  before?: string,
+): { events: StreamEvent[]; truncated: boolean; more: boolean } {
   const fd = openTranscript(path);
   try {
     const size = fd.size;
+    const cut = before === undefined ? null : /^(\d+):(\d+)$/.exec(before);
     if (vendor === undefined) {
       const first = Buffer.alloc(Math.min(size, STREAM_CHUNK_BYTES));
       fd.read(first, 0, first.length, 0);
@@ -256,8 +271,26 @@ export function readStream(
       }
     }
     let pos = size;
+    if (cut !== null) {
+      // Only the line the event sits on and the ones before it: end the read at that line's end.
+      pos = Number(cut[1]);
+      const probe = Buffer.allocUnsafe(STREAM_CHUNK_BYTES);
+      for (;;) {
+        const n = fd.read(probe, 0, Math.min(probe.length, size - pos), pos);
+        if (n === 0) break;
+        const nl = probe.subarray(0, n).indexOf(NEWLINE);
+        if (nl !== -1) {
+          pos += nl;
+          break;
+        }
+        pos += n;
+      }
+    }
+    // The event the page starts before is read too, then dropped.
+    const want = cut === null ? limit : limit + 1;
     let scanned = 0;
     let count = 0;
+    let firstTaken = false;
     /** Lines' items, newest line first. */
     const lines: Keyed[][] = [];
     /** Results already met (newer than anything still to read), so their call is not counted again. */
@@ -275,7 +308,7 @@ export function readStream(
       lines.push(items);
     };
 
-    while (pos > 0 && count < limit && scanned < STREAM_SCAN_BYTES) {
+    while (pos > 0 && count < want && scanned < STREAM_SCAN_BYTES) {
       const len = Math.min(STREAM_CHUNK_BYTES, pos, STREAM_SCAN_BYTES - scanned);
       pos -= len;
       scanned += len;
@@ -287,7 +320,7 @@ export function readStream(
         got += n;
       }
       let end = got;
-      while (end > 0 && count < limit) {
+      while (end > 0 && count < want) {
         const nl = chunk.lastIndexOf(NEWLINE, end - 1);
         if (nl === -1) break;
         take(Buffer.concat([chunk.subarray(nl + 1, end), ...carry]), pos + nl + 1);
@@ -297,10 +330,23 @@ export function readStream(
       carry.unshift(chunk.subarray(0, end));
     }
     // The file's first line, complete once the read reached offset 0.
-    if (pos === 0 && count < limit) take(Buffer.concat(carry), 0);
+    if (pos === 0 && count < want) {
+      take(Buffer.concat(carry), 0);
+      firstTaken = true;
+    }
 
     const items = lines.reverse().flat();
-    return { events: toEvents(items).slice(-limit), truncated: pos > 0 && count < limit };
+    const older = (id: string): boolean => {
+      if (cut === null) return true;
+      const [offset = 0, block = 0] = id.split(":").map(Number);
+      return offset < Number(cut[1]) || (offset === Number(cut[1]) && block < Number(cut[2]));
+    };
+    const events = toEvents(items).filter((e) => older(e.id));
+    return {
+      events: events.slice(-limit),
+      truncated: pos > 0 && count < want,
+      more: events.length > limit || pos > 0 || (!firstTaken && carry.some((b) => b.length > 0)),
+    };
   } finally {
     fd.close();
   }

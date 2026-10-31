@@ -70,9 +70,12 @@ describe("untrusted text renders literally", () => {
         }),
       ],
       "/api/boards/site-builder": [],
-      "/api/repos/shop-app/prs?linked=1": [],
-      "/api/repos/site-builder/prs?linked=1": [],
-      "/api/crew": { rows: [crewRow({ ticket: "shop-app#3349" })], firstRunToday: null },
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [],
+      "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ ticket: "shop-app#3349" })],
+        firstRunToday: null,
+      },
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
@@ -115,7 +118,7 @@ describe("untrusted text renders literally", () => {
           },
         }),
       ],
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/config": CONFIG,
     });
     const { container } = render(<ItemPanel />);
@@ -132,41 +135,38 @@ describe("untrusted text renders literally", () => {
   });
 
   it("agent stream: every kind's text, tool name, input and result; subagents and files", async () => {
+    const agentRow = crewRow({
+      ticketTitle: PAYLOAD,
+      digest: {
+        toolCalls: 1,
+        turns: 1,
+        lastEventAt: NOW,
+        model: SCRIPT,
+        contextTokens: null,
+        contextWindow: null,
+        liveTool: { name: PAYLOAD, since: NOW },
+        tools: {},
+        subagents: [
+          {
+            taskId: "t",
+            type: SCRIPT,
+            description: PAYLOAD,
+            status: "running",
+            tokens: null,
+            toolUses: null,
+            durationMs: null,
+          },
+        ],
+        minuteTokens: [],
+        turnUsage: [],
+        background: [{ taskId: "b", description: PAYLOAD, type: SCRIPT }],
+        compactions: 0,
+      },
+    });
     stubFetch({
       "/api/config": CONFIG,
-      "/api/crew": {
-        rows: [
-          crewRow({
-            ticketTitle: PAYLOAD,
-            digest: {
-              toolCalls: 1,
-              turns: 1,
-              lastEventAt: NOW,
-              model: SCRIPT,
-              contextTokens: null,
-              contextWindow: null,
-              liveTool: { name: PAYLOAD, since: NOW },
-              tools: {},
-              subagents: [
-                {
-                  taskId: "t",
-                  type: SCRIPT,
-                  description: PAYLOAD,
-                  status: "running",
-                  tokens: null,
-                  toolUses: null,
-                  durationMs: null,
-                },
-              ],
-              minuteTokens: [],
-              turnUsage: [],
-              background: [{ taskId: "b", description: PAYLOAD, type: SCRIPT }],
-              compactions: 0,
-            },
-          }),
-        ],
-        firstRunToday: null,
-      },
+      "/api/crew?shape=summary": { rows: [agentRow], firstRunToday: null },
+      "/api/crew/shop-app-ta": agentRow,
       "/api/attention": [],
       "/api/limits": [],
       "/api/agents/shop-app-ta/runs?limit=50": [run({ ticket: PAYLOAD })],
@@ -174,7 +174,7 @@ describe("untrusted text renders literally", () => {
         files: [{ path: PAYLOAD, add: 1, del: 0, state: "untracked" }],
         note: SCRIPT,
       },
-      "/api/agents/shop-app-ta/stream": {
+      "/api/agents/shop-app-ta/stream?limit=20": {
         runId: "r-12",
         events: (["op", "msg", "think", "sys"] as const)
           .map((kind, i) => ({

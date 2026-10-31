@@ -441,6 +441,7 @@ describe("startWatch", () => {
     ).toEqual([
       ...READONLY_TOOLS,
       "mcp__mc__log_decision",
+      "mcp__mc__wait_on",
       "mcp__mc__read_ticket",
       "mcp__mc__answer_question",
       "mcp__mc__start_seat",
@@ -450,6 +451,7 @@ describe("startWatch", () => {
       "mcp__mc__screenshot_hud",
       "mcp__mc__promote",
       "mcp__mc__end_run",
+      "mcp__mc__resume_seat",
       "mcp__mc__accept_ruling",
       "mcp__mc__merge_pr",
       "mcp__mc__settle_park",
@@ -477,6 +479,8 @@ describe("startWatch", () => {
       "mcp__mc__recall",
       "mcp__mc__hold_item",
       "mcp__mc__release_hold",
+      "mcp__mc__edit_issue",
+      "mcp__mc__set_fields",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
@@ -655,6 +659,65 @@ describe("startReview", () => {
     );
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
+  });
+
+  it("a review brief carries the Done-when table from the author's report", async () => {
+    const r = reviewOfPush();
+    store.addEvidence(r.author.id, "done", 1, {
+      doneWhen: [{ line: 1, text: "Test: x", status: "met", evidence: "x.test.ts" }],
+    });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("## The author's Done-when table");
+    expect(brief).toContain('1. "Test: x" — met: x.test.ts');
+  });
+
+  it("a round-two review records the files changed since the last one, so a finding on an untouched file is late", async () => {
+    const r = reviewOfPush({ state: "queued" });
+    store.setReviewState(r.reviewId, ["queued"], "running", { at: 2, runId: "retro:round-1" });
+    const finding = {
+      severity: "Critical" as const,
+      file: "a.txt",
+      line: 1,
+      summary: "s",
+      scenario: "w",
+      fix: "f",
+    };
+    store.recordFindings(r.reviewId, "retro:round-1", {
+      verdict: { spec: "fail", quality: "fail" },
+      summary: "s",
+      findings: [finding],
+      at: 3,
+    });
+    const second = store.requestReview({
+      authorRunId: r.author.id,
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 9,
+      sha: r.sha,
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: 4,
+    }) as number;
+    store.setReviewState(second, ["queued"], "starting", { at: 5 });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", second);
+    // the engine marks it running; both reviews are of the same sha, so nothing changed between them
+    store.setReviewState(second, ["starting"], "running", { at: 6, runId });
+    expect(
+      store.recordFindings(second, runId, {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings: [finding],
+        at: 6,
+      }),
+    ).toBe(true);
+    expect(store.findingsOf(second)[0]?.late).toBe(true);
   });
 
   it("a round-two brief names the prior review's id and its findings' positions", async () => {
@@ -1063,6 +1126,13 @@ describe("a run set aside in review", () => {
     await until(() => expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false));
     expect(store.run(runId)).toMatchObject({ endedAt: null, status: "running" });
     expect(store.seatSession("guido-1")?.state).toBe("idle");
+  });
+
+  it("endRunByEngine ends a set-aside run endedBy superseded when told to", async () => {
+    const { sup, runId } = await aside();
+    await sup.endRunByEngine(runId, "superseded");
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "superseded" });
+    expect(store.run(runId)?.noReport ?? null).toBeNull();
   });
 
   it("setAside answers null mid-turn, for an ended run and for a run the seat does not hold", async () => {

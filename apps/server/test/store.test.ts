@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AuditRunKind,
   AuditView,
   BoardItem,
   Escalation,
@@ -600,6 +601,7 @@ describe("Store", () => {
         { ref: "other#12", closed: false },
         { ref: `${repoId}#3`, closed: true },
       ],
+      after: { issues: [n + 1], prs: [7] },
       milestone: `m'${n}`,
       size: `S${n}`,
       closed: n % 2 === 0,
@@ -967,6 +969,7 @@ describe("Store", () => {
       assignees: ["a", "b"],
       checks: [],
       closingIssues: [1, 3],
+      base: "feature/other",
       additions: 12,
       deletions: 4,
       changedFiles: 3,
@@ -1075,6 +1078,274 @@ describe("Store", () => {
     expect(audit.refusalsByRule).toEqual([{ rule: "read-only", count: 1 }]);
     expect(audit.questions).toEqual({ asked: 1, answered: 1, answerMs: 60 });
     expect(store.audit(201, 300).questions).toEqual({ asked: 0, answered: 0, answerMs: null });
+  });
+
+  describe("token overuse", () => {
+    const DAY = 86_400_000;
+    const until = 30 * DAY;
+    const boardItem = (n: number, size: string | null): BoardItem => ({
+      repoId: "repo",
+      issueNumber: n,
+      title: `t${n}`,
+      status: "Todo",
+      state: "planned",
+      labels: [],
+      priority: null,
+      updatedAt: 1,
+      url: "u",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: { done: 0, total: 0 },
+      assignees: [],
+      blockedBy: [],
+      milestone: null,
+      size,
+      closed: false,
+      prioritySource: null,
+      createdAt: 1,
+      itemId: `i${n}`,
+      projectId: "p",
+    });
+    const tokens = (total: number) => ({
+      input: total - 1000,
+      output: 1000,
+      cacheRead: 5_000_000,
+      cacheCreate: 200,
+    });
+    const ended = (n: number, startedAt: number, total: number, over: Partial<Run> = {}) =>
+      store.upsertRun(
+        run({
+          id: `m${n}`,
+          ticket: `repo#${n}`,
+          startedAt,
+          endedAt: startedAt + 10,
+          status: "ok",
+          tokens: tokens(total),
+          loopKind: "build",
+          ...over,
+        }),
+      );
+    const review = (author: string, round: number, findings: ReviewFinding[]) => {
+      const id = store.requestReview({
+        authorRunId: author,
+        repoId: "repo",
+        seatId: "retro",
+        prNumber: 1,
+        sha: `${author}-${round}`,
+        epoch: 0,
+        attempt: 1,
+        round,
+        at: 1,
+      }) as number;
+      store.setReviewState(id, ["queued"], "running", { at: 2, runId: `rv-${id}` });
+      store.recordFindings(id, `rv-${id}`, {
+        verdict: { spec: "pass", quality: findings.length > 0 ? "fail" : "pass" },
+        summary: "s",
+        findings,
+        at: until - DAY,
+      });
+    };
+    const finding = (
+      category: ReviewFinding["category"],
+      severity: "Critical" | "Minor" = "Critical",
+    ) =>
+      ({
+        severity,
+        file: "f",
+        line: 1,
+        summary: "s",
+        scenario: "s",
+        fix: "f",
+        category,
+      }) as ReviewFinding;
+
+    const builders = new Map<string, AuditRunKind>([
+      ["a1", "build"],
+      ["guido", "build"],
+      ["planner", "plan"],
+      ["flight", "watch"],
+      ["ebull", "observed"],
+    ]);
+    const overuse = () => {
+      const t = store.audit(until - 7 * DAY, until, builders).tokenOveruse;
+      if (t === undefined) throw new Error("audit has no tokenOveruse");
+      return t;
+    };
+
+    beforeEach(() => {
+      // five recent size M runs around 100k tokens: about 150k expected for size M
+      store.replaceBoard(
+        "repo",
+        [1, 2, 3, 4, 5, 6, 7].map((n) => boardItem(n, "M")),
+      );
+      for (const [i, t] of [90_000, 95_000, 100_000, 105_000, 110_000].entries()) {
+        ended(i + 1, until - 3 * DAY + i, t);
+      }
+    });
+
+    it("raises one finding for a run past its size's expected use, with why", () => {
+      ended(6, until - 2 * DAY, 300_000, { agentId: "guido" });
+      store.setDigest("m6", digest({ turns: 77 }));
+      review("m6", 1, [
+        finding("scope"),
+        finding("spec"),
+        finding("scope"),
+        finding("style", "Minor"),
+      ]);
+      review("m6", 2, [finding("scope")]);
+      review("m6", 3, []);
+
+      const t = overuse();
+      expect(t.runs).toHaveLength(1);
+      expect(t.runs[0]).toMatchObject({
+        runId: "m6",
+        agentId: "guido",
+        ticket: "repo#6",
+        size: "M",
+        ended: true,
+        tokens: 300_000,
+        input: 299_000,
+        output: 1000,
+        cacheRead: 5_000_000,
+        cacheCreate: 200,
+        expected: 153_750,
+        reviewRounds: 3,
+        blocking: 4,
+        blockingByCategory: { scope: 3, spec: 1 },
+        turns: 77,
+        cause: "plan-gap",
+        prevention: { kind: "plan-rule" },
+      });
+      // one run is not a repeat
+      expect(t.groups).toEqual([]);
+      expect(t.expected).toContainEqual({ size: "M", tokens: 153_750, measured: true });
+    });
+
+    it("leaves a run within its expected use alone, and does not stop an open one", () => {
+      ended(6, until - 2 * DAY, 140_000);
+      store.upsertRun(
+        run({
+          id: "open",
+          ticket: "repo#7",
+          startedAt: until - DAY,
+          tokens: tokens(500_000),
+        }),
+      );
+      const t = overuse();
+      expect(t.runs.map((r) => [r.runId, r.ended])).toEqual([["open", false]]);
+      expect(store.run("open")?.status).toBe("running");
+    });
+
+    it("uses 400000 for a size with fewer than five recent runs, and counts only the last 14 days", () => {
+      store.replaceBoard("repo", [boardItem(6, "L"), boardItem(7, "M")]);
+      ended(6, until - 2 * DAY, 390_000);
+      ended(8, until - 2 * DAY, 450_000, { ticket: "repo#6" });
+      // size M runs older than two weeks do not count toward its baseline
+      store.upsertRun(
+        run({
+          id: "old",
+          ticket: "repo#1",
+          startedAt: until - 20 * DAY,
+          endedAt: until - 20 * DAY + 1,
+          status: "ok",
+          tokens: tokens(10),
+        }),
+      );
+      const t = overuse();
+      expect(t.runs.map((r) => [r.runId, r.expected, r.cause])).toEqual([
+        ["m8", 400_000, "wide-ticket"],
+      ]);
+      expect(t.expected).toContainEqual({ size: "L", tokens: 400_000, measured: false });
+    });
+
+    it("counts only build runs, in the findings and in the baseline", () => {
+      for (const [id, agentId, total] of [
+        ["flight", "flight", 3_000_000],
+        ["obs", "ebull", 900_000],
+        ["unknown", "gone", 900_000],
+      ] as const) {
+        ended(0, until - DAY, total, {
+          id,
+          agentId,
+          ticket: null,
+          loopKind: id === "flight" ? "watch" : null,
+        });
+      }
+      // planner runs on size M tickets would drag its median down to 1k
+      for (const n of [1, 2, 3, 4, 5, 6]) {
+        ended(n, until - DAY + n, 1_000, { id: `plan${n}`, agentId: "planner", loopKind: "plan" });
+      }
+      ended(6, until - 2 * DAY, 300_000);
+      const t = overuse();
+      expect(t.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
+    });
+
+    it("keeps a retired build seat's run in the findings and the baseline", () => {
+      ended(6, until - 2 * DAY, 300_000);
+      const t = store.audit(until - 7 * DAY, until, new Map()).tokenOveruse;
+      expect(t?.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
+    });
+
+    it("backfills the loop kind of older runs, so a seat removed later still counts", () => {
+      // runs and a baseline stored before loop_kind existed
+      store.replaceBoard(
+        "repo",
+        [6, 7, 8, 9, 10, 11].map((n) => boardItem(n, "M")),
+      );
+      for (const [i, total] of [90_000, 95_000, 100_000, 105_000, 110_000].entries()) {
+        ended(20 + i, until - 3 * DAY + i, total, { loopKind: null, ticket: `repo#${6 + i}` });
+      }
+      ended(30, until - 2 * DAY, 900_000, { loopKind: null, ticket: "repo#11", agentId: "gone" });
+      const gone = new Map<string, AuditRunKind>();
+      expect(store.audit(until - 7 * DAY, until, gone).tokenOveruse?.runs).toEqual([]);
+
+      expect(store.backfillRunLoopKinds(new Map([["gone", "build"]]))).toBe(1);
+      // a kind already stored is kept
+      expect(store.backfillRunLoopKinds(new Map([["gone", "plan"]]))).toBe(0);
+      store.backfillRunLoopKinds(new Map([["a1", "build"]]));
+
+      const runs = store.audit(until - 7 * DAY, until, gone).tokenOveruse?.runs ?? [];
+      expect(runs.map((r) => r.runId)).toEqual(["m30"]);
+    });
+
+    it("returns every qualifying run, however many", () => {
+      for (let n = 0; n < 101; n++) {
+        store.upsertRun(
+          run({
+            id: `open${n}`,
+            ticket: "repo#7",
+            startedAt: until - DAY + n,
+            tokens: tokens(500_000 + n),
+            loopKind: "build",
+          }),
+        );
+      }
+      const t = overuse();
+      expect(t.runs).toHaveLength(101);
+      expect(t.groups[0]?.runIds).toHaveLength(101);
+    });
+
+    it("groups repeat causes across runs", () => {
+      ended(6, until - 2 * DAY, 300_000);
+      ended(7, until - 2 * DAY, 320_000);
+      review("m6", 1, [finding("correctness")]);
+      review("m6", 2, [finding("correctness")]);
+      review("m6", 3, [finding("correctness")]);
+      review("m6", 4, [finding("correctness")]);
+      review("m7", 1, [finding("correctness")]);
+      review("m7", 2, [finding("correctness")]);
+      review("m7", 3, [finding("correctness")]);
+      review("m7", 4, [finding("correctness")]);
+      const { groups } = overuse();
+      expect(groups).toEqual([
+        expect.objectContaining({
+          cause: "rework-churn",
+          runIds: ["m7", "m6"],
+          prevention: expect.objectContaining({ kind: "lesson" }),
+        }),
+      ]);
+    });
   });
 
   it("says whether each long runner ended, its kind, and whether the operator can act on it", () => {
@@ -2063,6 +2334,32 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
   });
 
+  it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
+    const aside = { worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));
+    expect(store.hasPendingStart()).toBe(false);
+    expect(store.hasActiveRun()).toBe(false);
+    store.upsertRun(run({ id: "live", seq: 2, ticket: "repo#2", loop: { ...NEW_LOOP } }));
+    expect(store.hasPendingStart()).toBe(true);
+    expect(store.hasActiveRun()).toBe(true);
+    store.upsertRun(
+      run({ id: "live", seq: 2, ticket: "repo#2", endedAt: 5, loop: { ...NEW_LOOP } }),
+    );
+    expect(store.hasPendingStart()).toBe(false);
+    store.requestReview({
+      authorRunId: "set-aside",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 1,
+      sha: "s",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    });
+    expect(store.hasPendingStart()).toBe(true);
+  });
+
   it("asideRuns: unended runs with an aside, oldest first", () => {
     const aside = { worktree: "/w/x", wake: false };
     store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));
@@ -2366,6 +2663,75 @@ describe("reviews", () => {
     expect(store.recordFindings(third, "r2", { verdict, summary: "x", findings, at: 4 })).toBe(
       false,
     );
+  });
+
+  describe("late findings", () => {
+    const review = (round: number, runId: string, changed: string[] | null) => {
+      const id = store.requestReview(
+        request({ round, attempt: round, sha: String(round).repeat(40) }),
+      );
+      if (id === null) throw new Error("no id");
+      store.setReviewState(id, ["queued"], "starting", { at: 110 * round });
+      store.setReviewState(id, ["starting"], "running", { at: 120 * round, runId });
+      if (changed !== null) store.setReviewChangedSince(id, changed);
+      return id;
+    };
+    const report = (id: number, runId: string, findings: ReviewFinding[]) =>
+      store.recordFindings(id, runId, { verdict, summary: "s", findings, at: 500 });
+
+    it("tags a round 2 finding on a file unchanged since round 1, and not one on a changed file", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      const second = review(2, "rev-2", ["b.ts"]);
+      report(second, "rev-2", [finding({ file: "a.ts" }), finding({ file: "b.ts" })]);
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", true],
+        ["b.ts", false],
+      ]);
+    });
+
+    it("tags nothing in round 1, or when the changed files are unknown", () => {
+      const first = review(1, "rev-1", []);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", null);
+      report(second, "rev-2", [finding()]);
+      expect(store.findingsOf(first).map((f) => f.late)).toEqual([false]);
+      expect(store.findingsOf(second).map((f) => f.late)).toEqual([false]);
+    });
+
+    it("audits PRs by round count and late findings per reviewer and model", () => {
+      const asRun = (id: string, model: string) =>
+        store.upsertRun(run({ id, agentId: "retro", model, startedAt: 100 }));
+      asRun("rev-1", "opus");
+      asRun("rev-2", "opus");
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding()]);
+      const second = review(2, "rev-2", []);
+      report(second, "rev-2", [finding(), finding({ severity: "Minor" })]);
+      const { reviewRounds } = store.audit(0, 1000) as unknown as AuditView;
+      // blocking findings only: the Minor one is not counted
+      expect(reviewRounds).toEqual({
+        prs: [{ rounds: 2, count: 1 }],
+        late: [{ seatId: "retro", model: "opus", findings: 2, late: 1 }],
+      });
+    });
+
+    it("does not tag a finding the reviewer holds from the last round", () => {
+      const first = review(1, "rev-1", null);
+      report(first, "rev-1", [finding({ file: "a.ts" })]);
+      const second = review(2, "rev-2", []);
+      store.recordFindings(second, "rev-2", {
+        verdict,
+        summary: "s",
+        findings: [finding({ file: "a.ts" }), finding({ file: "c.ts" })],
+        resolutions: [{ findingRef: { reviewId: first, pos: 0 }, outcome: "held" }],
+        at: 500,
+      });
+      expect(store.findingsOf(second).map((f) => [f.file, f.late])).toEqual([
+        ["a.ts", false],
+        ["c.ts", true],
+      ]);
+    });
   });
 
   describe("finding resolutions", () => {
@@ -3280,7 +3646,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 13; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",

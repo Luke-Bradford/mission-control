@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
@@ -22,7 +23,9 @@ import {
   LOOP_TEXT_REVIEW_PR,
   LOOP_TEXT_WORKING,
   loopText,
+  MERGE_MAIN_TEXT,
   MERGE_STEP_WORDS,
+  mergeMainKey,
   mergeStepFailedText,
   NEW_LOOP,
   NO_CI_AFTER_MS,
@@ -406,6 +409,38 @@ describe("state step", () => {
     }
   });
 
+  it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    expect(stopped.parked?.kind).toBe("stuck");
+    // the stored PR row later carries the pushed head
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, stopped));
+    expect(r.loop).toMatchObject({
+      phase: "ci",
+      parked: null,
+      pushStartedAt: NOW,
+      pushFor: SHA,
+      unparkedAt: NOW,
+    });
+    expect(events(r.actions)).toEqual([`PR #12 shows ${SHA.slice(0, 7)}; back to CI`]);
+  });
+
+  it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
+    const stopped = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
+    ).loop;
+    for (const over of [
+      { pr: pr({ headSha: SHA2 }) },
+      { pr: pr({ headSha: null }) },
+      { pr: null },
+      { pr: pr({ state: "closed" as const }) },
+      { headCommit: SHA2 },
+    ] as Partial<LoopSnapshot>[]) {
+      expect(reconcile(inCi(over, stopped)).loop.phase).toBe("parked");
+    }
+  });
+
   it("9: a push or PR not there yet, within ten minutes, waits", () => {
     for (const over of [
       { pushed: null },
@@ -422,9 +457,13 @@ describe("state step", () => {
     expect(r.loop.phase).toBe("ci");
   });
 
-  it("10: a conflicting PR parks", () => {
-    const r = reconcile(inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) }));
-    expect(r.loop.parked).toEqual({
+  it("10: a conflicting PR sends the seat to merge main; told once, it parks", () => {
+    const s = inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("working");
+    expect(r.loop.parked).toBeNull();
+    expect(r.loop.pendingLine).toEqual({ key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT });
+    expect(reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.parked).toEqual({
       kind: "conflict",
       reason: "PR #12 conflicts with main",
       ended: false,
@@ -1086,7 +1125,10 @@ describe("sequences", () => {
   });
 
   it("a crash after a park repeats the card move and the note", () => {
-    const s = inCi({ pr: pr({ mergeable: "CONFLICTING" }) });
+    const s = inCi({
+      pr: pr({ mergeable: "CONFLICTING" }),
+      claimed: { [mergeMainKey("r1", SHA)]: NOW },
+    });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("parked");
     const next = again(s, r.loop);
@@ -1307,6 +1349,14 @@ describe("review round", () => {
       inCi({ pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: old + 1 }) }),
     );
     expect(fresh.loop.phase).toBe("ci");
+  });
+
+  it("15: a run past the default expected use keeps working until the ceiling", () => {
+    // the budget is the runaway ceiling; passing AUDIT_EXPECTED_TOKENS_DEFAULT is an Audit finding only
+    const past = AUDIT_EXPECTED_TOKENS_DEFAULT + 1;
+    expect(reconcile({ ...snap({ tokens: past }), budget: 1_500_000 }).loop.phase).toBe("working");
+    const over = reconcile({ ...snap({ tokens: 1_500_001 }), budget: 1_500_000 });
+    expect(over.loop.parked?.kind).toBe("budget");
   });
 
   it("15: only a working run parks over budget", () => {
@@ -1859,6 +1909,22 @@ describe("review decisions", () => {
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
+  it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");
+    expect(send).toMatchObject({
+      kind: "send",
+      text: expect.stringContaining(`a.ts:3 — ${finding.summary}`),
+    });
+    expect((send as { text: string }).text).toContain(`Suggested fix: ${finding.fix}`);
+  });
+
+  it("a blocking review with no stored finding text wakes the author with nothing", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const r = reconcile(inReview(withReview(rows, [])));
+    expect(kinds(r.actions, "send")).toEqual([]);
+  });
+
   it("sends an answered finding back to RETRO on the same head", () => {
     const rows = [fact({ id: 5, blocking: 1 })];
     const replied = inReview(
@@ -2161,6 +2227,46 @@ describe("set aside", () => {
 
   it("no review seat: held", () => {
     expect(kindsOf(reconcile(base({ asideOk: false })).actions)).not.toContain("set-aside");
+  });
+
+  describe("rework due on the seat", () => {
+    /** A new ticket being built, its seat between turns, another run of the seat due back. */
+    const building = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, reworkDue: true, ...over },
+        { phase: "working", cardFor: "working:0", ...loop },
+      );
+      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
+    };
+
+    it("sets the working run aside at its turn end, with no review seat needed", () => {
+      for (const s of [building(), building({ asideOk: false })]) {
+        const r = reconcile(s);
+        expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+        expect(r.loop.phase).toBe("working");
+      }
+    });
+
+    it("waits for the turn to end, and for the seat to be free of questions", () => {
+      const b = building();
+      const cases: [string, LoopSnapshot][] = [
+        ["in turn", building({ seat: { ...b.seat, inTurn: true } })],
+        ["open question", building({ seat: { ...b.seat, openQuestion: true } })],
+        ["not idle", building({ seat: { ...b.seat, state: "running" } })],
+        ["seat does not hold the run", building({ seat: { ...b.seat, holdsRun: false } })],
+        ["no rework due", building({ reworkDue: false })],
+        ["already pushed", building({ pushed: { sha: SHA, at: NOW - 60_000 } })],
+        ["ended", building({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("the displaced run is flagged to come back, behind the rework", () => {
+      const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
+      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
   });
 
   it("not set aside", () => {

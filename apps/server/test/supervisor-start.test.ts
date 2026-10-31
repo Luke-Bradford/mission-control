@@ -36,6 +36,7 @@ import {
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
+  estimateTokens,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -61,20 +62,26 @@ import {
   startClosedText,
   startMissingNeedsText,
   type TicketView,
+  TOOL_OUTPUT_DIR,
   ticketHasRunText,
   twoAreasText,
   waitsOnText,
+  wakeKey,
+  wakeLine,
   wrongAreaText,
 } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
+import { flightState, flightWake } from "../src/flight/state.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
+import { textBytes, wakePieces } from "../src/prompt-cost.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
@@ -86,6 +93,7 @@ import {
   type Supervisor,
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
+import { seatToolchainDirs } from "../src/runtime/toolchain.ts";
 import {
   crewCodexDir,
   crewKeeperDir,
@@ -299,6 +307,21 @@ describe("startRun eligibility", () => {
     });
   });
 
+  it("records the ticket's Done-when lines for a build run, for report_evidence to hold it to", async () => {
+    onBoard(boardCard(42, { size: "M" }));
+    const { sup } = make({
+      fetchTicket: ticketWith({
+        body: "## Done when\n\n- [ ] Test: a report missing a line is refused\n- [x] Audit shows rounds\n",
+      }),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.runDoneWhen(runId)).toEqual([
+      "Test: a report missing a line is refused",
+      "Audit shows rounds",
+    ]);
+  });
+
   it("10: starts Size M with no plan so its seat can write it", async () => {
     onBoard(boardCard(42, { size: "M" }));
     const { sup } = make();
@@ -326,6 +349,13 @@ describe("startRun eligibility", () => {
     await sup.startRun("guido-1", 42);
     expect(store.seatSession("guido-1")).not.toBeNull();
     expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
+  });
+
+  it("stores the seat's loop kind on the run it starts", async () => {
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+    expect(store.run(out.runId)?.loopKind).toBe("build");
   });
 });
 
@@ -434,6 +464,28 @@ describe("startRun profiles", () => {
 });
 
 describe("startRun", () => {
+  it("records the start prompt's sections, adding up to the prompt file and brief", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const wakes = store.promptWakes(runId);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]?.wake).toBe(0);
+    const sections = wakes[0]?.sections ?? [];
+    expect(sections.map((x) => x.section)).toEqual(["role", "rules", "orders", "ticket"]);
+    for (const x of sections) expect(Object.keys(x).sort()).toEqual(["bytes", "section", "tokens"]);
+    const total =
+      textBytes(readFileSync(crewPromptPath(dbPath, runId), "utf8")) +
+      textBytes(userLines()[0] as string);
+    expect(sections.reduce((n, x) => n + x.bytes, 0)).toBe(total);
+    expect(sections.find((x) => x.section === "ticket")?.bytes).toBe(textBytes(TICKET.body));
+    const tokens = sections.reduce((n, x) => n + x.tokens, 0);
+    expect(Math.abs(tokens - estimateTokens(total))).toBeLessThanOrEqual(
+      estimateTokens(total) * 0.01,
+    );
+  });
+
   it("tells the seat in its first message when the collector cut the ticket body", async () => {
     const { sup } = make({
       fetchTicket: async () => ({
@@ -705,7 +757,7 @@ describe("startRun", () => {
       const parent = dirname(tmp);
       expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([
+      expect(settings.sandbox.filesystem.allowRead.slice(0, 2)).toEqual([
         realpathSync(tmp),
         join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       ]);
@@ -848,6 +900,31 @@ describe("startRun", () => {
     expect(text).not.toContain("INJECTED");
   });
 
+  it("denies the operator's home to a seat and re-allows its worktree, toolchain, store and crew.allow_read (#487)", async () => {
+    const { sup, cfg } = make();
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.allowRead = [join(dir, "tools-config")];
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
+    const common = join(clone, ".git");
+    expect(fs.denyRead).toContain(homedir());
+    expect(fs.allowRead).toEqual(
+      expect.arrayContaining([
+        `${root}/mc-crew/guido-1-42`,
+        common,
+        `${common}/worktrees/guido-1-42`,
+        join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
+        ...seatToolchainDirs(process.execPath, process.env.PATH ?? "", homedir(), fs.denyRead),
+        join(homedir(), ".gitconfig"),
+        join(dir, "tools-config"),
+      ]),
+    );
+    expect(fs.allowRead).not.toContain(homedir());
+  });
+
   it("passes a sandbox that writes no git state, for the seat's worktree", async () => {
     const { sup } = make();
     sup.start();
@@ -866,7 +943,12 @@ describe("startRun", () => {
       join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
+      // the trim hook writes here outside the sandbox: the hub made it, the seat cannot swap it
+      `${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`,
     ]);
+    expect(
+      lstatSync(`${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`).isDirectory(),
+    ).toBe(true);
     // the DB, transcripts and prompt files: no seat reads another's (or its own)
     expect(fs.denyRead).toContain(join(dir, "db"));
     // then the hub's own checkout and its git dir (no loops, no other session, no crew.deny_read)
@@ -1182,7 +1264,11 @@ describe("startRun", () => {
     const out = await sup.startRun("fao-1", 42);
     expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     const wt = join(root, "mc-crew", "fao-1-42");
-    expect(store.run(out.runId)).toMatchObject({ branch: null, ticket: "mc#42" });
+    expect(store.run(out.runId)).toMatchObject({
+      branch: null,
+      ticket: "mc#42",
+      loopKind: "plan",
+    });
     expect(store.seatSession("fao-1")?.worktree).toBe(wt);
     expect(() => git(wt, "symbolic-ref", "--quiet", "HEAD")).toThrow();
     await until(() => expect(recorded().length).toBeGreaterThan(0));
@@ -1943,9 +2029,15 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
+    // the trim hook (#1045): after every tool, never given the token
+    expect(hooks.PostToolUse?.[1]?.matcher).toBe("*");
+    const trim = hooks.PostToolUse?.[1]?.hooks[0]?.command ?? "";
+    expect(trim).toContain(`'${join(HUB_ROOT, TRIM_ENTRY)}' '`);
+    expect(trim).toMatch(/\/tool-output'$/);
+    expect(trim).not.toContain(tokenOf(runId));
     expect(hooks.PreToolUse?.[0]?.hooks[0]?.timeout).toBe(GUARD_HOOK_TIMEOUT_S);
     expect(hookCommand()).not.toContain(tokenOf(runId));
   });
@@ -2329,6 +2421,68 @@ describe("repo guidance at launch", () => {
     };
   };
   const launches = () => recorded().filter((line) => Array.isArray(line.argv));
+
+  it("records FLIGHT's start and each wake by section, with tool results on the current wake", async () => {
+    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    sup.start();
+    const state = flightState({ config: cfg, store, busy: [], now: Date.now() });
+    const { digest } = flightWake(state);
+    const first = wakeLine(state, digest);
+    const { runId } = await sup.startWatch("flight-1", {
+      first,
+      firstPieces: wakePieces(digest),
+    });
+    await until(() => expect(userLines()).toHaveLength(1));
+    const start = store.promptWakes(runId)[0];
+    expect(start?.wake).toBe(0);
+    const names = start?.sections.map((x) => x.section) ?? [];
+    for (const name of ["role", "rules", "orders", "digest"]) expect(names).toContain(name);
+    const total =
+      textBytes(readFileSync(crewPromptPath(dbPath, runId), "utf8")) +
+      textBytes(userLines()[0] as string);
+    expect(start?.sections.reduce((n, x) => n + x.bytes, 0)).toBe(total);
+    const tokens = start?.sections.reduce((n, x) => n + x.tokens, 0) ?? 0;
+    expect(Math.abs(tokens - estimateTokens(total))).toBeLessThanOrEqual(
+      estimateTokens(total) * 0.01,
+    );
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+
+    const line = wakeLine(state, digest);
+    const cost = { wake: 1, pieces: wakePieces(digest) };
+    expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("sent");
+    const wake = store.promptWakes(runId).find((w) => w.wake === 1);
+    const kinds = wake?.sections.map((x) => x.section) ?? [];
+    expect(kinds).toContain("digest");
+    await until(() => expect(userLines()).toHaveLength(2));
+    expect(wake?.sections.reduce((n, x) => n + x.bytes, 0)).toBe(
+      textBytes(userLines()[1] as string),
+    );
+    // the turn must end first: a send into a turn is "busy" before it is checked for a repeat
+    await until(async () =>
+      expect(await sup.send(runId, wakeKey(runId, 1), line, cost)).toBe("dup"),
+    );
+    expect(store.promptWakes(runId)).toHaveLength(2);
+
+    await sup.message("flight-1", "TOOLGAP", { interrupt: false });
+    await until(() => expect(userLines()).toHaveLength(3));
+    await sup.message("flight-1", "cue: the call ends", { interrupt: false });
+    await until(() =>
+      expect(
+        store
+          .promptWakes(runId)
+          .find((w) => w.wake === 1)
+          ?.sections.map((x) => x.section),
+      ).toContain("tool_results"),
+    );
+    const after = store.promptWakes(runId);
+    expect(
+      after.find((w) => w.wake === 1)?.sections.find((x) => x.section === "tool_results"),
+    ).toMatchObject({ bytes: 2 });
+    expect(after.find((w) => w.wake === 0)?.sections.map((x) => x.section)).not.toContain(
+      "tool_results",
+    );
+    await sup.message("flight-1", "cue: the turn ends", { interrupt: false });
+  });
 
   it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
     const { sup, cfg } = make({ extraSeat: FLIGHT });

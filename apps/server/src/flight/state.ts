@@ -5,16 +5,23 @@
  */
 import { createHash } from "node:crypto";
 import {
+  ATTENTION_KINDS,
   type AttentionItem,
+  type BoardItem,
+  carriedFrom,
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
+  FLIGHT_IDLE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
+  FLIGHT_LEFT_HEAD,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
   FLIGHT_MEMORY_KINDS,
@@ -35,6 +42,7 @@ import {
   FLIGHT_TICKETS_LISTED,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
+  FLIGHT_VIEW_MS,
   FLIGHT_WAKE_SETTING,
   type FlightArrivalDisposition,
   type FlightArrivalOperation,
@@ -49,8 +57,10 @@ import {
   type FlightState,
   type FlightView,
   type FlightWake,
+  type FlightWakeHistory,
   type FlightWakeList,
   type FlightWakeStatus,
+  flightContextText,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -62,6 +72,7 @@ import {
   READY_LABEL,
   RULING_PARK,
   type Run,
+  STUCK_PARK,
   seatCallSign,
   seatDef,
   type TestLockState,
@@ -71,8 +82,22 @@ import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
+import { readCrewPause } from "../crew-pause.ts";
+import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
+import {
+  attentionItems,
+  crew,
+  NO_CLI_VERSION,
+  NO_LOCK,
+  NOTE_KEY,
+  questionWithOperator,
+} from "../hud.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "../machine-capacity.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -116,7 +141,10 @@ export function operatorItems(
     hubLogin,
   ).filter(
     (i) =>
-      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) && i.key !== FLIGHT_NOT_TRIAGING_KEY,
+      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) &&
+      i.key !== FLIGHT_NOT_TRIAGING_KEY &&
+      // what FLIGHT left undecided is the operator's to read, never FLIGHT's to triage
+      i.key !== `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`,
   );
 }
 
@@ -261,6 +289,44 @@ export function recordFlightWake(store: Store, repo: string, at: number, wokeOn:
   store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
 }
 
+/** The fact category a wake cause names: "q (1)" is q; a re-wake for left reasons is "left". */
+const causeReason = (cause: string): string =>
+  cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
+
+/** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
+export function recordWakeReasons(store: Store, runId: string, at: number, causes: string[]): void {
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))]);
+}
+
+/** The last day's wakes, by reason and by hour (24 buckets, the last one ending at `now`). */
+export function flightWakeHistory(store: Store, now: number): FlightWakeHistory {
+  const since = now - FLIGHT_METRICS_DAY_MS;
+  const wakes = store.flightWakes(since).filter((w) => w.at <= now);
+  const total = new Map<string, number>();
+  const perHour = Array.from({ length: 24 }, (_, i) => ({
+    at: since + i * FLIGHT_HOUR_MS,
+    n: 0,
+    byReason: {} as Record<string, number>,
+  }));
+  for (const w of wakes) {
+    const hour = perHour[Math.min(23, Math.floor((w.at - since) / FLIGHT_HOUR_MS))];
+    if (hour === undefined) continue;
+    hour.n++;
+    for (const reason of w.reasons) {
+      hour.byReason[reason] = (hour.byReason[reason] ?? 0) + 1;
+      total.set(reason, (total.get(reason) ?? 0) + 1);
+    }
+  }
+  return {
+    since,
+    total: wakes.length,
+    byReason: [...total]
+      .map(([reason, n]) => ({ reason, n }))
+      .sort((a, b) => b.n - a.n || a.reason.localeCompare(b.reason)),
+    perHour,
+  };
+}
+
 /** Records when FLIGHT will next wake (null when nothing is scheduled); only changes are written. */
 export function recordNextFlightWake(store: Store, repo: string, next: number | null): void {
   const r = readWakeRecord(store, repo);
@@ -268,7 +334,10 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
   store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify({ ...r, next }));
 }
 
-/** The next wake the state schedules: the re-wake backstop while work is pending, or a planned entry. */
+/**
+ * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
+ * planned entry.
+ */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   lastWakeAt: number,
@@ -301,6 +370,7 @@ export function flightView(
   const live = found === null ? false : flightLive(config, store, alive);
   const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
   const controller = found === null ? [] : controllerDecisions(decisions);
+  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
   return {
     seat:
       found === null
@@ -315,12 +385,34 @@ export function flightView(
               runId === null
                 ? null
                 : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
+            context:
+              runId === null
+                ? null
+                : {
+                    tokens: contextTokens,
+                    rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+                    text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
+                  },
           },
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
+    ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now) }),
+    promptWakes:
+      found === null
+        ? []
+        : store.agentPromptWakes(found.seat.id, now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
+    ...(found === null
+      ? {}
+      : { blocked: blockedWork(store, found.session.repoId, now, inThisLane(config)) }),
   };
 }
+
+/** Whether a card is in the hub's lane, as the wake lists cards. */
+const inThisLane =
+  (config: CcConfig) =>
+  (card: Pick<BoardItem, "labels">): boolean =>
+    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false);
 
 /** All nine sections of a session's brief, in order; one never written (or no session) is empty. */
 export function flightBriefSections(store: Store, sessionId: string | null): FlightBriefSection[] {
@@ -549,6 +641,7 @@ export function flightState(i: {
       discussions,
       signals: [],
       triage: [],
+      blocked: [],
       time: clockHm(now, tz),
       repo: "",
       lane: config.crew?.lane ?? null,
@@ -560,6 +653,9 @@ export function flightState(i: {
       prs: [],
       items: [],
       holds: [],
+      reviewQueue: { queued: 0, running: 0, seats: [] },
+      mergeQueue: [],
+      flowHolds: [],
       recent,
       limits,
       brief,
@@ -629,7 +725,34 @@ export function flightState(i: {
       ageMin: Math.floor((now - q.at) / 60_000),
     }));
 
+  const reviewRows = store
+    .reviewsIn(["queued", "starting", "running"])
+    .filter((row) => row.repoId === session.repoId);
+  const reviewSeats = mine.filter((s) => seatDef(s).loop === "review");
+  const reviewQueue = {
+    queued: reviewRows.filter((row) => row.state === "queued").length,
+    running: reviewRows.filter((row) => row.state === "starting" || row.state === "running").length,
+    waitMin: Math.max(
+      0,
+      ...reviewRows
+        .filter((row) => row.state === "queued")
+        .map((row) => Math.floor((now - row.createdAt) / 60_000)),
+    ),
+    seats: reviewSeats.map((seat) => {
+      const reviews = reviewRows.filter((row) => row.seatId === seat.id);
+      const held = unended(seat.id);
+      return {
+        seat: seat.id,
+        queued: reviews.filter((row) => row.state === "queued").length,
+        running: reviews.filter((row) => row.state === "starting" || row.state === "running")
+          .length,
+        idle: !seatUnavailable(seat) && held === null && !busy.some((b) => b.seatId === seat.id),
+      };
+    }),
+  };
+
   const active = store.activeTickets();
+  const waitsOf = waitReader(store, session.repoId);
   const tickets = board
     .filter(
       (b) =>
@@ -637,7 +760,7 @@ export function flightState(i: {
         inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&
-        !b.blockedBy.some((x) => !x.closed),
+        waitsOf(b).length === 0,
     )
     .sort(
       (a, b) =>
@@ -685,12 +808,19 @@ export function flightState(i: {
   const prs = store
     .pullRequests(session.repoId)
     .filter(
-      (p) => p.state === "open" || (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_HOUR_MS),
+      // a merge no longer wakes FLIGHT, so an unshown one waits a day for the next wake to carry it
+      (p) =>
+        p.state === "open" ||
+        (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_METRICS_DAY_MS),
     )
     .sort((a, b) => a.number - b.number)
     .map((p) => {
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
       const reviewed = store.latestReportedReview(session.repoId, p.number);
+      const carried =
+        p.headSha === null
+          ? null
+          : carriedFrom(holder?.loop?.carry, holder?.loop?.reviewWaivedSha, p.headSha);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -709,12 +839,38 @@ export function flightState(i: {
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
         review:
-          reviewed?.verdict == null
+          reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
       };
     });
+
+  const mergeFacts = new Map(
+    store
+      .pullRequests(session.repoId)
+      .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
+  );
+  const mergeQueue = prs
+    .filter((p) => p.state === "open")
+    .map((p) => {
+      const facts = mergeFacts.get(p.pr);
+      const pendingChecks = facts?.checks.filter((check) => check.state === "pending") ?? [];
+      const waitsOn = [
+        ...(p.failingChecks.length > 0 ? [`CI: ${p.failingChecks.join(", ")}`] : []),
+        ...(pendingChecks.length
+          ? [`CI pending: ${pendingChecks.map((check) => check.name).join(", ")}`]
+          : []),
+        ...(facts?.mergeable === "CONFLICTING" ? ["merge conflict"] : []),
+        ...(p.review === null ? ["review"] : []),
+        ...(p.review?.blocking
+          ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
+          : []),
+        ...(p.awaitingFlight === null || p.awaitingFlight === undefined ? [] : ["FLIGHT merge"]),
+      ];
+      return { pr: p.pr, waitsOn };
+    })
+    .filter((p) => p.waitsOn.length > 0);
 
   const aside = store
     .loopRuns(now)
@@ -765,6 +921,105 @@ export function flightState(i: {
     ];
   });
 
+  const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+  const capacity = machineCapacity(
+    store.machineSamples(machineCapacitySince(now, capacityConfig)),
+    now,
+    capacityConfig,
+  );
+  const queuedReviews = reviewQueue.queued;
+  const idleReviewers = reviewQueue.seats.filter((seat) => seat.idle).length;
+  const eligibleBuilds = tickets.filter((ticket) => ticket.ready).length;
+  const idleBuilds = seats.filter((seat) => seat.loop === "build" && seat.free).length;
+  const machineBlocks = [
+    ...(queuedReviews > 0
+      ? [
+          `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`,
+        ]
+      : []),
+    ...(eligibleBuilds > 0
+      ? [
+          `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+        ]
+      : []),
+  ].join("; ");
+  const flowHolds: NonNullable<FlightState["flowHolds"]> = [
+    ...(capacity.blocked && capacity.reason !== null
+      ? [
+          {
+            kind: "machine" as const,
+            reason: capacity.reason,
+            blocks: machineBlocks,
+            ...(queuedReviews > 0
+              ? { feedbackLoop: "the hold blocks reviews; held reviews cannot merge" }
+              : {}),
+            blocking: queuedReviews > 0 || eligibleBuilds > 0,
+          },
+        ]
+      : []),
+    ...(() => {
+      const pause = readCrewPause(store);
+      if (pause === null) return [];
+      const pausedReviews = reviewQueue.seats.filter((seat) =>
+        pause.seats === "all" ? true : pause.seats.includes(seat.seat),
+      );
+      const pausedBuilds = seats.filter(
+        (seat) => seat.loop === "build" && (pause.seats === "all" || pause.seats.includes(seat.id)),
+      );
+      const pausedQueuedReviews = pausedReviews.reduce((total, seat) => total + seat.queued, 0);
+      return [
+        {
+          kind: "crew-pause" as const,
+          reason: pause.reason,
+          blocks: `${pausedBuilds.length} build seat${pausedBuilds.length === 1 ? "" : "s"}, ${pausedReviews.length} review seat${pausedReviews.length === 1 ? "" : "s"} and ${pausedQueuedReviews} queued review${pausedQueuedReviews === 1 ? "" : "s"}`,
+          blocking: (pausedBuilds.length > 0 && eligibleBuilds > 0) || pausedQueuedReviews > 0,
+        },
+      ];
+    })(),
+    ...seats
+      .filter((seat) => seat.atStop)
+      .map((seat) => {
+        const accountId = mine.find((source) => source.id === seat.id)?.accountId;
+        const account = config.accounts.find((source) => source.id === accountId);
+        const reading =
+          account === undefined || accountId === undefined
+            ? null
+            : (["5h", "7d"] as const)
+                .map((window) => ({ window, usage: store.latestUsage(accountId, window) }))
+                .find(
+                  ({ usage }) =>
+                    usage !== null && usage.resetAt > now && usage.pct >= account.stopAt,
+                );
+        const reason =
+          reading === null ||
+          reading === undefined ||
+          reading.usage === null ||
+          account === undefined
+            ? `${seat.call}'s account is at its quota stop`
+            : `${seat.call}'s ${reading.window} quota is ${reading.usage.pct}% (stop ${account.stopAt}%)`;
+        return {
+          kind: "quota" as const,
+          reason,
+          blocks: `${seat.loop} work assigned to ${seat.call}`,
+          blocking:
+            (seat.loop === "build" && eligibleBuilds > 0) ||
+            (seat.loop === "review" &&
+              reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
+        };
+      }),
+    ...seats
+      .filter((seat) => seat.state === "stopped")
+      .map((seat) => ({
+        kind: "seat-stopped" as const,
+        reason: `${seat.call} is stopped`,
+        blocks: `${seat.loop} work assigned to ${seat.call}`,
+        blocking:
+          (seat.loop === "build" && eligibleBuilds > 0) ||
+          (seat.loop === "review" &&
+            reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
+      })),
+  ];
+
   const outcomes = store.flightIncoming();
   const digestMatches = store.notifications().flatMap((n) => {
     const message = n.message;
@@ -810,7 +1065,8 @@ export function flightState(i: {
     ];
   });
 
-  const items = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
+  const triageAll = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock);
+  const items = triageAll
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -825,7 +1081,23 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   return {
-    ...flightSignals({ config, store, session, seats, now }),
+    ...flightSignals({
+      config,
+      store,
+      session,
+      seats,
+      aside,
+      triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
+      readyPrs: prs.flatMap((p) => {
+        const at = store
+          .notes()
+          .find((n) => n.kind === "ready" && n.runId === p.runId && p.runId !== "")?.at;
+        return p.state === "open" && p.ready && at !== undefined
+          ? [{ ref: p.ref, pr: p.pr, at }]
+          : [];
+      }),
+      now,
+    }),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
@@ -846,9 +1118,13 @@ export function flightState(i: {
     aside,
     questions,
     tickets,
+    blocked: blockedWork(store, session.repoId, now, inThisLane(config)),
     prs,
     items,
     holds,
+    reviewQueue,
+    mergeQueue,
+    flowHolds,
     recent,
     limits,
     brief,
@@ -1028,7 +1304,11 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
   return park;
 };
 
-/** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
+/**
+ * What a wake is about, as a stable string (no times): it changes only when something new needs
+ * FLIGHT's judgement. Routine pipeline steps (CI, review and merge moving, a park the engine
+ * clears) are in the digest but not here; a timed signal wakes FLIGHT when one stands still.
+ */
 export function wakeFacts(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): string {
@@ -1037,6 +1317,11 @@ export function wakeFacts(
     startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
+  // a review just queued waits for its seat to start it; only one that has stood still is a fault
+  const reviewFault =
+    (s.reviewQueue?.queued ?? 0) > 0 &&
+    (s.reviewQueue?.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS &&
+    s.reviewQueue?.seats.some((seat) => seat.idle);
   return JSON.stringify({
     retrospective: s.retrospective ? [s.retrospective.day] : [],
     signals: s.signals
@@ -1052,27 +1337,40 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
+    // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
       ...s.seats
-        .filter((x) => x.parked !== null)
+        .filter((x) => x.parked !== null && flightParkKind(x.parked.kind))
         .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`),
       ...s.aside
-        .filter((x) => x.parked !== null)
+        .filter((x) => x.parked !== null && flightParkKind(x.parked.kind))
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
+    reviews: reviewFault ? ["idle-reviewers"] : [],
+    holdsInForce:
+      s.flowHolds
+        ?.filter((hold) => hold.blocking)
+        .map((hold) => hold.kind)
+        .sort() ?? [],
+    // CI, review and merge steps are digest-only; merge_stalled says when a ready PR has stood still
     prs: s.prs
+      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null)
       .map(
         (p) =>
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
       )
       .sort(),
-    items: s.items
+    items: wakeItems(s)
       .map((x) => (x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key))
       .sort(),
     release: releasable(s),
   });
 }
+
+/** The items that wake FLIGHT: a PR ready to merge is a routine step, and merge_stalled says when it stands still. */
+const wakeItems = (s: FlightState): FlightState["items"] =>
+  s.items.filter((x) => x.kind !== "ready");
 
 /** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
 const releasable = (s: FlightState): string[] =>
@@ -1090,9 +1388,10 @@ const stoppedSeats = (s: FlightState): string[] =>
 
 /** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
 const flightParkKind = (kind: string): boolean =>
-  kind === RULING_PARK ||
-  kind === "review-failed" ||
-  (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
+  kind !== STUCK_PARK && // the engine lifts it once the PR shows the push; push_unseen says when it has not
+  (kind === RULING_PARK ||
+    kind === "review-failed" ||
+    (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind));
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(
@@ -1107,11 +1406,165 @@ export function pending(
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
-    s.items.length > 0 ||
+    wakeItems(s).length > 0 ||
     releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );
+}
+
+/** One thing a wake woke FLIGHT for: its fact id, a label, and what a decision on it would name. */
+export interface WakeReason {
+  id: string;
+  label: string;
+  targets: string[];
+}
+
+type Facts = Record<string, unknown[]>;
+/** Reasons that stay open until FLIGHT decides, because nothing in the state shows them settled. */
+const decisionOnly = (id: string): boolean =>
+  id.startsWith("triage:") || id.startsWith('signals:"seat_call:');
+/** A fact that is only a name for what a decision names, not a target. */
+const NOT_A_TARGET = new Set(["true", "false", "open", "merged", "closed", "null"]);
+
+/** Words that name a kind of fact, not the thing it is about: never a target of their own. */
+const GENERIC = new Set<string>([
+  "report",
+  "watch",
+  "loop",
+  "ask",
+  "note",
+  "controller",
+  ...ATTENTION_KINDS,
+]);
+
+/**
+ * What a decision on this fact would name. A signal's kind and its times are not targets (two
+ * signals of one kind share them); a park's kind is not either. What is left is the seat, run, ref,
+ * question or item key the fact is about.
+ */
+const factTargets = (category: string, item: unknown): string[] => {
+  const first = Array.isArray(item) ? item[0] : item;
+  // a question's decision may name it as its item key, ask:<id>
+  if (typeof first !== "string")
+    return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  let parts = first.split(":");
+  if (category === "signals") parts = parts.slice(1);
+  if (category === "parked") parts = parts.slice(0, -1);
+  const whole = parts.join(":");
+  return [whole, ...parts].filter(
+    (t, i, all) =>
+      t !== "" &&
+      !NOT_A_TARGET.has(t) &&
+      !GENERIC.has(t) &&
+      !/^\d{10,}$/.test(t) &&
+      all.indexOf(t) === i,
+  );
+};
+
+/** The words of a decision's text, lower-cased, trailing punctuation off: a target matches a whole word. */
+const wordsOf = (text: string): Set<string> =>
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[\s,;()"'`]+/)
+      .map((w) => w.replace(/[.:]+$/, ""))
+      .filter((w) => w !== "")
+      // #12 and repo#12 both name 12, kept as "#12"
+      .flatMap((w) => (w.includes("#") ? [w, w.slice(w.lastIndexOf("#"))] : [w])),
+  );
+
+/** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
+const accountable = (category: string, item: unknown): boolean => {
+  if (category === "t") return false;
+  if (category === "prs") {
+    const [, , ready, state, awaiting, away] = String(item).split(":");
+    return (ready === "true" && state === "open") || !!awaiting || !!away;
+  }
+  if (category === "parked") {
+    const kind = String(item).split(":").at(-1) ?? "";
+    return flightParkKind(kind);
+  }
+  return true;
+};
+
+/** What a wake newly lists, as reasons: the facts in `current` that `previous` did not have. */
+/** The tickets of the item a fact is about: the item itself, or the item an item_stale signal names. */
+const itemTickets = (
+  category: string,
+  item: unknown,
+  itemRefs: readonly { key: string; ticket: string | null }[],
+): string[] => {
+  const stale = typeof item === "string" && item.startsWith("item_stale:");
+  const key = stale ? item.slice("item_stale:".length) : item;
+  if (category !== "items" && !(category === "signals" && stale)) return [];
+  return itemRefs.flatMap((x) =>
+    x.ticket !== null && (stale ? x.key.replace(/:\d+$/, "") : x.key) === key ? [x.ticket] : [],
+  );
+};
+
+export function wakeReasons(
+  previous: string,
+  current: string,
+  itemRefs: readonly { key: string; ticket: string | null }[] = [],
+): WakeReason[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return Object.entries(after).flatMap(([category, items]) => {
+    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+    return items
+      .filter((item) => !old.has(JSON.stringify(item)) && accountable(category, item))
+      .map((item) => ({
+        id: `${category}:${JSON.stringify(item)}`,
+        label: `${category} ${typeof item === "string" ? item : JSON.stringify(item)}`.slice(
+          0,
+          200,
+        ),
+        // an item's ticket is a target too: a brief or wait on the ticket handles the item
+        targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
+      }));
+  });
+}
+
+/** The ids of the reasons still open in this state; a delivered signal stays open while it holds. */
+export function openReasonIds(
+  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+): Set<string> {
+  const facts = JSON.parse(wakeFacts(s)) as Facts;
+  facts.signals = s.signals.filter((x) => x.kind !== "seat_call").map((x) => `${x.kind}:${x.key}`);
+  return new Set(
+    Object.entries(facts).flatMap(([category, items]) =>
+      items.map((item) => `${category}:${JSON.stringify(item)}`),
+    ),
+  );
+}
+
+/**
+ * The reasons of a wake that FLIGHT left alone: not settled in the state, and with no decision since
+ * the wake that names one of their targets (a ref, seat, run, question, or the target in its text).
+ */
+export function unhandledReasons(
+  store: Store,
+  reasons: readonly WakeReason[],
+  wokeAt: number,
+  open: ReadonlySet<string>,
+): WakeReason[] {
+  const decisions = store.flightDecisions(wokeAt, 500);
+  const words = decisions.map((d) => wordsOf(`${d.about} ${d.decision}`));
+  return reasons.filter((r) => {
+    if (!decisionOnly(r.id) && !open.has(r.id)) return false;
+    return !decisions.some((d, i) =>
+      r.targets.some(
+        (t) =>
+          d.ref === t ||
+          d.seatId === t ||
+          d.targetRunId === t ||
+          (d.questionId !== null && String(d.questionId) === t) ||
+          (t.length >= 2 && words[i]?.has(t.toLowerCase()) === true) ||
+          (/^\d+$/.test(t) && words[i]?.has(`#${t}`) === true),
+      ),
+    );
+  });
 }

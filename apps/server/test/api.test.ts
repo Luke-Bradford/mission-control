@@ -60,6 +60,7 @@ import {
   type PrCheck,
   type PullRequestView,
   projectAtReset,
+  QA_FLOW_METRICS,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type ReloadResult,
@@ -68,7 +69,9 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
+  TICKET_SIZES,
   TYPE_LABELS,
+  UPDATE_LOG_UNREADABLE,
   type UsageSample,
   type VersionInfo,
 } from "@mc/core";
@@ -92,17 +95,20 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
+import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStream } from "../src/stream.ts";
+import { readStreamPage } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
@@ -145,6 +151,8 @@ let updaterVersion: VersionInfo;
 let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
+let updaterLogError: Error | null = null;
+let dropUpdateResponse: boolean;
 const stubUpdater = (): Updater => ({
   changes: async () => null,
   version: async () => {
@@ -161,6 +169,11 @@ const stubUpdater = (): Updater => ({
     return updaterVersion;
   },
   restart: () => void updaterCalls.push("restart"),
+  log: async () => {
+    updaterCalls.push("log");
+    if (updaterLogError) throw updaterLogError;
+    return "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n";
+  },
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
 /** A map transcript fixture stamped now: the ring reads only the window the map shows. */
@@ -237,7 +250,7 @@ const stubSupervisor = (): Supervisor => {
     inClone: (_checkout, fn) => fn(),
   };
 };
-let streamReads: ReturnType<typeof vi.fn<typeof readStream>>;
+let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
 /** The app's config.yaml: a copy of the example (the in-memory `config` is the fixture's own). */
 let configPath: string;
 const EXAMPLE_CONFIG = resolve(import.meta.dirname, "../../../config.example.yaml");
@@ -316,6 +329,7 @@ beforeEach(async () => {
   updaterResult = async () => ({ upToDate: true });
   updaterCalls = [];
   updaterCheckError = null;
+  dropUpdateResponse = false;
   clock = NOW;
   logs = [];
   projectFields = [{ name: "Status", options: [{ name: "Todo" }] }];
@@ -328,7 +342,7 @@ beforeEach(async () => {
   gqlNoOwner = false;
   gqlFailField = null;
   refreshed = 0;
-  streamReads = vi.fn(readStream);
+  streamReads = vi.fn(readStreamPage);
   issueNode = (n) => ({ number: n, title: "t", url: "", state: "OPEN", body: "" });
   const fakeGql: Gql = async (query, vars) => {
     gqlCalls.push({ query, vars });
@@ -402,11 +416,19 @@ beforeEach(async () => {
     now: () => clock,
     logger: { stream: { write: (s: string) => void logs.push(s) } },
     heartbeatMs: 50,
-    readStream: (path, limit, vendor) => streamReads(path, limit, vendor),
+    readStream: (path, limit, vendor, before) =>
+      before === undefined
+        ? streamReads(path, limit, vendor)
+        : streamReads(path, limit, vendor, before),
     configPath,
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
     updater: stubUpdater(),
+  });
+  app.addHook("onSend", async (req) => {
+    if (dropUpdateResponse && req.url === "/api/update") {
+      throw new Error("client disconnected");
+    }
   });
   // The /api plugin registers its routes at ready(), so this sees every one of them.
   apiRoutes = [];
@@ -451,6 +473,16 @@ describe("audit", () => {
     chatter: [],
     flakes: [],
     changes: [],
+    tokenOveruse: {
+      runs: [],
+      groups: [],
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: 400_000,
+        measured: false,
+      })),
+    },
+    reviewRounds: { prs: [], late: [] },
     surgeonProposals: [],
   });
 
@@ -517,6 +549,18 @@ describe("audit", () => {
     expect(byId.stale).toMatchObject({ endedAt: null, kind: "build", actionable: false });
     expect(byId.watch).toMatchObject({ endedAt: null, kind: "watch", actionable: false });
     expect(byId.loop).toMatchObject({ endedAt: null, kind: "observed", actionable: false });
+  });
+
+  // #1192: until the Audit page is redesigned, each list answers with its first 50 and says how many it cut.
+  it("caps each list at 50 and reports the full counts of the lists it cut", async () => {
+    for (let i = 0; i < 60; i++)
+      store.upsertRun(run({ id: `long-${i}`, startedAt: NOW - HOUR - i * 1000, endedAt: NOW }));
+    const audit = (await get("/api/audit")).json<AuditView & { capped?: Record<string, number> }>();
+    expect(audit.longRunners).toHaveLength(50);
+    // each run also records a model, so that timeline is cut too
+    expect(audit.capped).toEqual({ longRunners: 60, modelPromptTimeline: 60 });
+    const sorted = audit.longRunners.map((r) => r.durationMs);
+    expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
   });
 
   it("rejects an invalid range", async () => {
@@ -750,6 +794,22 @@ describe("Comms API", () => {
         to: "alpha",
         count: 1,
         lastText: "back",
+      });
+    });
+  });
+
+  it("reports each sender's p95 message length over the shared 24-hour Comms range", async () => {
+    commsRow("alpha", "crew", "a");
+    commsRow("alpha", "crew", "x".repeat(101));
+    commsRow("beta", "crew", "z".repeat(20));
+    commsRow("alpha", "crew", "old", clock - 25 * 60 * 60 * 1000);
+    await withCommsApp(async (comms) => {
+      const metrics = (await comms.inject({ method: "GET", url: "/api/comms/metrics" })).json();
+      expect(metrics).toMatchObject({
+        p95BySeat: [
+          { seatId: "alpha", p95: 96, n: 2 },
+          { seatId: "beta", p95: 20, n: 1 },
+        ],
       });
     });
   });
@@ -1250,6 +1310,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/mentions/seen", { ids: [] }],
   ["GET", "/api/comms/pins"],
   ["GET", "/api/comms/links"],
+  ["GET", "/api/comms/metrics"],
   ["GET", "/api/comms/traffic"],
   ["GET", "/api/comms/chatter"],
   ["GET", "/api/comms/open"],
@@ -1265,6 +1326,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits"],
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
+  ["GET", "/api/previews"],
+  ["POST", "/api/previews", { pr: 41 }],
+  ["DELETE", "/api/previews/41", {}],
+  ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
   [
@@ -1294,9 +1359,12 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/items/7"],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
+  ["GET", "/api/repos/shop-app/prs/4"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
+  ["GET", "/api/repos/shop-app/map/tree"],
+  ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1340,6 +1408,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/pause"],
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
+  ["GET", "/api/crew/shop-app-ta"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
   ["GET", "/api/metrics"],
@@ -1350,6 +1419,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
+  ["GET", "/api/update/log"],
   ["GET", "/api/seats/guido-1/focus"],
   ["POST", "/api/seats/guido-1/focus", { focus: "lane:work" }],
   ["POST", "/api/seats/guido-1/queue/reorder", { move: "shop-app#2", above: "shop-app#1" }],
@@ -1414,6 +1484,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/hud-screenshots/:id"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
+  ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
 ];
 
@@ -1559,6 +1630,7 @@ describe("add a repo (POST /api/repos)", () => {
       requiredChecks: [],
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
+      keepBranches: [],
       autonomy: "draft",
       flightPowers: "standard",
     });
@@ -2134,6 +2206,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -2164,6 +2237,11 @@ describe("local access", () => {
       }
       if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/prs/4") {
+        // the fixture has no such PR: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
@@ -2225,7 +2303,12 @@ describe("local access", () => {
         expect(r.json()).toEqual({ error: "map collector unavailable" });
         continue;
       }
-      if (url === "/api/repos/shop-app/map/conflicts" || url === "/api/repos/shop-app/map") {
+      if (
+        url === "/api/repos/shop-app/map/conflicts" ||
+        url === "/api/repos/shop-app/map" ||
+        url === "/api/repos/shop-app/map/tree" ||
+        url === "/api/repos/shop-app/map/live"
+      ) {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
@@ -2444,14 +2527,18 @@ describe("local access", () => {
             .replace("/comms/agents/guido-1", "/comms/agents/:id")
             .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
             .replace("/comms/tickets/%237", "/comms/tickets/:ref")
+            .replace(/\/crew\/shop-app-ta$/, "/crew/:id")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
+            .replace("/previews/41/activity", "/previews/:pr/activity")
+            .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/prs\/4$/, "/prs/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
@@ -2814,6 +2901,7 @@ describe("agent stream", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "hello" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });
@@ -2849,6 +2937,21 @@ describe("agent stream", () => {
     store.upsertRun(run({ id: "r2", startedAt: NOW, transcriptPath: "" }));
     expect((await stream("/api/agents/shop-app-ta/stream")).reason).toBe("transcript not found");
     expect(streamReads).not.toHaveBeenCalled();
+  });
+
+  it("pages the stream older: ?before an event's id returns the events ahead of it", async () => {
+    const lines = [1, 2, 3, 4, 5].map((i) => line(`e${i}`, NOW - (6 - i) * 1000));
+    const p = transcript("page.jsonl", lines.join(""), NOW - 1000);
+    store.upsertRun(run({ id: "r1", transcriptPath: p }));
+    const newest = await stream("/api/agents/shop-app-ta/stream?limit=2");
+    expect(newest.events.map((e: { text: string }) => e.text)).toEqual(["e4", "e5"]);
+    expect(newest.hasMore).toBe(true);
+    const older = await stream(
+      `/api/agents/shop-app-ta/stream?limit=2&before=${newest.events[0].id}`,
+    );
+    expect(older.events.map((e: { text: string }) => e.text)).toEqual(["e2", "e3"]);
+    expect(older.hasMore).toBe(true);
+    expect((await get("/api/agents/shop-app-ta/stream?before=abc")).statusCode).toBe(400);
   });
 
   it("validates limit (1..500, default 200) and 404s an unknown agent", async () => {
@@ -3002,6 +3105,46 @@ describe("crew and attention", () => {
     expect(c.rows[0]?.prs).toEqual([]);
     expect(c.rows[0]?.summary).toBeNull();
     expect(c.rows[1]).toMatchObject({ ticket: null, prs: [], summary: null });
+  });
+
+  // #1192: the Overview reads a summary row; the full row (events, whole digest) is one request away.
+  it("GET /api/crew?shape=summary drops each row's events and digest bulk; /api/crew/:id is the full row", async () => {
+    store.upsertRun(run({ id: "a", startedAt: NOW - 30 * 60e3, ticket: "shop-app#7" }));
+    store.setDigest(
+      "a",
+      digest({
+        lastEventAt: NOW - 1000,
+        minuteTokens: [[NOW - 60e3, 500]],
+        lastText: "Reading the plan.",
+        contextTokens: 900,
+        turnUsage: Array.from({ length: 60 }, () => ({ input: 1, output: 2, cacheRead: 3 })),
+        tools: { Bash: { calls: 3, failed: 0, durationsMs: [1, 2, 3] } },
+      }),
+    );
+    const full = (await get("/api/crew")).json() as Crew;
+    expect(full.rows[0]?.digest?.turnUsage).toHaveLength(60);
+    const res = await get("/api/crew?shape=summary");
+    expect(res.statusCode).toBe(200);
+    const summary = res.json() as Crew;
+    const row = summary.rows[0];
+    expect(row).toMatchObject({ id: "shop-app-ta", hudState: "running", ticket: "shop-app#7" });
+    expect(row?.run?.id).toBe("a");
+    expect(row?.events).toBeUndefined();
+    expect(row?.digest).toEqual({
+      lastEventAt: NOW - 1000,
+      minuteTokens: [[NOW - 60e3, 500]],
+      liveTool: null,
+      lastText: "Reading the plan.",
+      background: [],
+      contextTokens: 900,
+      contextWindow: null,
+      compactions: 0,
+    });
+    expect(summary.firstRunToday).toBe(full.firstRunToday);
+    expect((await get("/api/crew?shape=other")).statusCode).toBe(400);
+    const one = await get("/api/crew/shop-app-ta");
+    expect(one.json()).toEqual(full.rows[0]);
+    expect((await get("/api/crew/nope")).statusCode).toBe(404);
   });
 
   const boardItem = (issueNumber: number, title: string): BoardItem => ({
@@ -4034,6 +4177,140 @@ describe("boards, escalations, health", () => {
     }
   });
 
+  describe("the map's tree is built once per default-branch head", () => {
+    const commitOnDefault = (checkout: string, file: string) => {
+      const git = (...args: string[]) =>
+        execFileSync("git", [
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ]);
+      writeFileSync(join(checkout, file), "export const added = 1;\n");
+      git("add", ".");
+      git("commit", "-qm", `add ${file}`);
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+    };
+    const openMap = (transcriptPath: string) => {
+      withCrew();
+      const session = config.crew?.sessions[0];
+      if (!session) throw new Error("fixture session missing");
+      const checkout = mapCheckout(dir);
+      session.checkout = checkout;
+      writeFileSync(transcriptPath, "");
+      store.upsertRun(run({ id: "tree-run", agentId: "guido-1", transcriptPath }));
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "tree-run",
+        cliSessionId: null,
+        vendor: "claude",
+        state: "running",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      const builds: string[] = [];
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        supervisor: stubSupervisor(),
+        // a slow build: a rebuild on every load would blow the 500 ms budget
+        mapTree: async (...args) => {
+          builds.push(args[0]);
+          await new Promise((r) => setTimeout(r, 600));
+          return await mapTree(...args);
+        },
+      });
+      return { a, builds, checkout };
+    };
+    const call = (name: string, input: Record<string, string>) =>
+      `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: name, name: "Read", input }] } })}\n`;
+
+    it("builds the tree once however often the map loads, and again when the head moves", async () => {
+      const { a, builds, checkout } = openMap(join(dir, "tree.jsonl"));
+      try {
+        for (let i = 0; i < 3; i++) {
+          clock += 5000;
+          const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+          expect(r.statusCode).toBe(200);
+        }
+        expect(builds).toHaveLength(1);
+        commitOnDefault(checkout, "added.ts");
+        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        expect(builds).toHaveLength(2);
+        expect(moved.json().tree).toContainEqual(expect.objectContaining({ path: "added.ts" }));
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("answers a repeat tree request with 304 and a seat's move rebuilds only the live part", async () => {
+      const transcriptPath = join(dir, "move.jsonl");
+      const { a, builds } = openMap(transcriptPath);
+      try {
+        const tree = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/tree" });
+        expect(tree.statusCode).toBe(200);
+        const etag = tree.headers.etag as string;
+        expect(etag).toBeTruthy();
+        expect(tree.json()).not.toHaveProperty("seats");
+        const repeat = await a.inject({
+          method: "GET",
+          url: "/api/repos/shop-app/map/tree",
+          headers: { "if-none-match": etag },
+        });
+        expect(repeat.statusCode).toBe(304);
+
+        const before = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(before.json()).not.toHaveProperty("tree");
+        expect(before.json().seats[0].recent).toEqual([]);
+        appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
+        clock += 5000;
+        const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
+          "packages/core/src/map.ts",
+        ]);
+        appendFileSync(transcriptPath, call("r2", { file_path: "packages/core/src/types.ts" }));
+        clock += 5000;
+        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(moved.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
+          "packages/core/src/map.ts",
+          "packages/core/src/types.ts",
+        ]);
+        const same = await a.inject({
+          method: "GET",
+          url: "/api/repos/shop-app/map/tree",
+          headers: { "if-none-match": etag },
+        });
+        expect(same.statusCode).toBe(304);
+        expect(builds).toHaveLength(1);
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("answers the map in under 500 ms once the tree is cached", async () => {
+      const { a, builds } = openMap(join(dir, "fast.jsonl"));
+      try {
+        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        // past the whole-payload cache, so only the tree cache can keep this load fast
+        clock += 16_000;
+        const start = performance.now();
+        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        expect(performance.now() - start).toBeLessThan(500);
+        expect(builds).toHaveLength(1);
+      } finally {
+        await a.close();
+      }
+    });
+  });
+
   it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
@@ -4676,7 +4953,7 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([pr]);
+    expect(r.json()).toEqual([{ ...pr, preview: null }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
@@ -4705,14 +4982,100 @@ describe("boards, escalations, health", () => {
       closingIssues: [] as number[],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
-    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);
+    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
+      { ...pr(4, "shop-app#9"), preview: null },
+    ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      pr(5, null),
-      pr(4, "shop-app#9"),
+      { ...pr(5, null), preview: null },
+      { ...pr(4, "shop-app#9"), preview: null },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
     expect(bad.json()).toEqual({ error: "linked must be 1" });
+  });
+
+  // #1192: a list answers with open PRs and the last week, in a summary shape; detail on demand.
+  it("repos/:repoId/prs lists open PRs plus the last 7 days, summary checks, full detail by number", async () => {
+    const DAY = 86_400_000;
+    const check = (name: string) => ({
+      id: `node-${name}`,
+      workflow: "CI",
+      name,
+      kind: "check" as const,
+      state: "passing" as const,
+      conclusion: "success",
+      attempt: 1,
+      url: `https://github.com/o/shop-app/runs/${name}`,
+    });
+    const pr = (number: number, state: "open" | "merged", ageDays: number) => ({
+      repoId: "shop-app",
+      number,
+      title: `t${number}`,
+      url: `https://github.com/o/shop-app/pull/${number}`,
+      branch: "chore/x",
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: clock - (ageDays + 1) * DAY,
+      updatedAt: clock - ageDays * DAY,
+      mergedAt: state === "merged" ? clock - ageDays * DAY : null,
+      mergeCommitSha: null,
+      headSha: null,
+      mergeable: null,
+      author: null,
+      assignees: [] as string[],
+      checks: [check("lint"), check("test")],
+      closingIssues: [] as number[],
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [pr(1, "merged", 40), pr(2, "merged", 3), pr(3, "open", 90), pr(4, "merged", 8)],
+      0,
+    );
+    const numbers = async (query: string) =>
+      ((await get(`/api/repos/shop-app/prs${query}`)).json() as { number: number }[]).map(
+        (p) => p.number,
+      );
+    expect(await numbers("")).toEqual([3, 2]);
+    expect(await numbers("?days=10")).toEqual([4, 3, 2]);
+    expect(await numbers("?all=1")).toEqual([4, 3, 2, 1]);
+    const [listed] = (await get("/api/repos/shop-app/prs")).json();
+    expect(listed.checks).toEqual([
+      { name: "lint", kind: "check", state: "passing", attempt: 1 },
+      { name: "test", kind: "check", state: "passing", attempt: 1 },
+    ]);
+    expect((await get("/api/repos/shop-app/prs?detail=1")).json()[0].checks[0]).toEqual(
+      check("lint"),
+    );
+    // `?shape=summary`: the list's own fields, no checks, no detail that grows with the PR.
+    const [slim] = (await get("/api/repos/shop-app/prs?shape=summary")).json();
+    expect(Object.keys(slim).sort()).toEqual(
+      [
+        "repoId",
+        "number",
+        "title",
+        "url",
+        "branch",
+        "headSha",
+        "ticket",
+        "state",
+        "isDraft",
+        "review",
+        "ci",
+        "createdAt",
+        "updatedAt",
+        "mergedAt",
+        "preview",
+      ].sort(),
+    );
+    expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
+    const one = await get("/api/repos/shop-app/prs/3");
+    expect(one.json().checks[0]).toEqual(check("lint"));
+    expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);
+    expect((await get("/api/repos/shop-app/prs?days=0")).statusCode).toBe(400);
+    expect((await get("/api/repos/shop-app/prs?all=2")).statusCode).toBe(400);
   });
 
   it("repos returns the configured repos as id, github, project and projectUrl", async () => {
@@ -4759,6 +5122,19 @@ describe("boards, escalations, health", () => {
     ];
     expect(await urlsOf("/api/repos")).toEqual(want);
     expect(await urlsOf("/api/repos/profiles")).toEqual(want);
+  });
+
+  it("health carries the engine's recent tick durations", async () => {
+    const ticks = tickLogOf(store);
+    ticks.begin(1000);
+    ticks.end(1450);
+    const row = (await get("/api/health"))
+      .json()
+      .find((h: { collector: string }) => h.collector === "engine:ticks");
+    expect(row).toMatchObject({
+      ok: true,
+      ticks: [{ startedAt: 1000, endedAt: 1450, durationMs: 450, overranOn: null }],
+    });
   });
 
   it("escalations and health return the store rows", async () => {
@@ -6151,7 +6527,12 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
+      expect(r.json()).toEqual({
+        seat: null,
+        decisions: [],
+        controllerDecisions: [],
+        promptWakes: [],
+      });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6187,8 +6568,35 @@ describe("crew routes", () => {
         state: null,
         live: false,
         turns: null,
+        context: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("GET /api/flight returns FLIGHT's wakes by section", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1" }));
+      const now = Date.now();
+      const sections = (n: number) => [{ section: "digest" as const, bytes: n * 4, tokens: n }];
+      store.recordPromptSections("flight-run", 0, now - 3000, sections(100));
+      store.recordPromptSections("flight-run", 1, now - 1000, [
+        ...sections(50),
+        { section: "tool_results", bytes: 8, tokens: 2 },
+      ]);
+      store.recordPromptSections("flight-run", 2, now - 25 * 60 * 60_000, sections(1));
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.promptWakes?.map((w) => w.wake)).toEqual([1, 0]);
+      expect(body.promptWakes?.[0]?.sections.map((x) => x.section)).toEqual([
+        "digest",
+        "tool_results",
+      ]);
+      expect(body.promptWakes?.[1]?.sections).toEqual(sections(100));
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -6609,11 +7017,12 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
-  it("answers 202 { restarting }, and asks for the restart only after the response", async () => {
+  it("restarts a successful Update when the client disconnects before its response", async () => {
     updaterResult = async () => ({ restarting: true });
-    const r = await post("/api/update");
-    expect(r.statusCode).toBe(202);
-    expect(r.json()).toEqual({ restarting: true });
+    dropUpdateResponse = true;
+
+    await post("/api/update");
+
     expect(updaterCalls).toEqual(["update", "restart"]);
   });
 
@@ -6639,10 +7048,34 @@ describe("update routes", () => {
       };
       const r = await post("/api/update");
       expect(r.statusCode).toBe(status);
-      expect(r.json()).toEqual({ error: text });
+      expect(r.json()).toEqual({ error: text, logged: false });
     }
     expect(updaterCalls).not.toContain("restart");
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("answers the last update's log, so the page can show why it failed", async () => {
+    const r = await get("/api/update/log");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n" });
+    expect(updaterCalls).toEqual(["log"]);
+  });
+
+  it("answers a log it cannot read with fixed text, never the errno or the path", async () => {
+    updaterLogError = Object.assign(
+      new Error("EACCES: permission denied, open '/Users/someone/update.log'"),
+      {
+        code: "EACCES",
+      },
+    );
+    try {
+      const r = await get("/api/update/log");
+      expect(r.statusCode).toBe(500);
+      expect(r.json()).toEqual({ error: UPDATE_LOG_UNREADABLE });
+      expect(r.body).not.toContain("someone");
+    } finally {
+      updaterLogError = null;
+    }
   });
 
   it("hides an unexpected error behind fixed text", async () => {
@@ -6651,7 +7084,7 @@ describe("update routes", () => {
     };
     const r = await post("/api/update");
     expect(r.statusCode).toBe(500);
-    expect(r.json()).toEqual({ error: "update failed; see update.log" });
+    expect(r.json()).toEqual({ error: "update failed; see update.log", logged: false });
   });
 
   it("refuses a body other than {} with 400 and updates nothing", async () => {
@@ -6683,7 +7116,10 @@ describe("update routes", () => {
     });
     const u = await a.inject({ method: "POST", url: "/api/update", headers: json, payload: {} });
     expect(u.statusCode).toBe(409);
-    expect(u.json()).toEqual({ error: "updates are not available on this server" });
+    expect(u.json()).toEqual({ error: "updates are not available on this server", logged: false });
+    expect((await a.inject({ method: "GET", url: "/api/update/log" })).json()).toEqual({
+      text: null,
+    });
     const c = await a.inject({
       method: "POST",
       url: "/api/version/check",
@@ -6722,6 +7158,7 @@ describe("seat ids in the agent routes", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "brief read" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });
@@ -7496,6 +7933,29 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/newer-run/loop")).json().endedAt).toBeNull();
   });
 
+  it("GET /api/runs/:id/loop returns the run's prompt sections", async () => {
+    store.upsertRun(run({ id: "costed", agentId: "guido-1" }));
+    store.upsertRun(run({ id: "uncosted", agentId: "guido-1" }));
+    // stored out of order: the answer follows PROMPT_SECTIONS
+    store.recordPromptSections("costed", 0, NOW, [
+      { section: "ticket", bytes: 40, tokens: 10 },
+      { section: "role", bytes: 400, tokens: 100 },
+    ]);
+    const body = (await get("/api/runs/costed/loop")).json();
+    expect(body.prompt).toEqual([
+      {
+        runId: "costed",
+        wake: 0,
+        at: NOW,
+        sections: [
+          { section: "role", bytes: 400, tokens: 100 },
+          { section: "ticket", bytes: 40, tokens: 10 },
+        ],
+      },
+    ]);
+    expect((await get("/api/runs/uncosted/loop")).json().prompt).toEqual([]);
+  });
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -7549,6 +8009,7 @@ describe("the first loop's engine", () => {
       round: null,
       budget: null,
       review: null,
+      prompt: [],
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
   });
@@ -7720,6 +8181,21 @@ describe("QA board data", () => {
         },
       ],
     });
+  });
+
+  it("serves the QA flow figures with the registry's definitions", async () => {
+    const flow = (await get("/api/qa/flow")).json();
+    expect(flow).toMatchObject({
+      days: 30,
+      escapedDefects: [],
+      reviewTimings: { heads: [], wait: { n: 0, medianMs: null } },
+      rework: { bySeat: [], byModel: [] },
+      testsPerPr: [],
+    });
+    expect(flow.metrics).toEqual(QA_FLOW_METRICS);
+    expect(flow.metrics.escapedDefects.definition).toContain("labelled bug");
+    expect((await get("/api/qa/flow?days=7")).json().days).toBe(7);
+    expect((await get("/api/qa/flow?days=91")).statusCode).toBe(400);
   });
 
   it("serves findings with category and resolution", async () => {
@@ -8683,6 +9159,175 @@ it("labels the test lock route's holder and waiting entries", async () => {
     const view = (await a.inject("/api/test-lock")).json();
     expect(view.holder.label).toBe("make check");
     expect(view.waiting[0].label).toBe("make verify");
+  } finally {
+    await a.close();
+  }
+});
+
+it("starts, lists and closes an operator-only PR preview", async () => {
+  withCrew();
+  store.replacePullRequests(
+    "shop-app",
+    [
+      {
+        repoId: "shop-app",
+        number: 41,
+        title: "Preview me",
+        url: "https://example.test/pr/41",
+        branch: "feature/41",
+        ticket: null,
+        state: "open",
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      },
+    ],
+    NOW,
+  );
+  store.replacePullRequests(
+    "site-builder",
+    store.pullRequests("shop-app").map((pr) => ({ ...pr, repoId: "site-builder" })),
+    NOW,
+  );
+  const [openPr] = store.pullRequests("shop-app");
+  if (!openPr) throw new Error("preview fixture is missing its open PR");
+  store.replacePullRequests(
+    "shop-app",
+    [
+      ...store.pullRequests("shop-app"),
+      {
+        ...openPr,
+        number: 42,
+        branch: "closed/42",
+        state: "closed",
+      },
+    ],
+    NOW,
+  );
+  const heldPreviews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
+    start: async () => ({ stop: () => {} }),
+    remove: async () => {},
+  });
+  const heldApp = buildApp({
+    config,
+    store,
+    bus,
+    previews: heldPreviews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
+  try {
+    const held = await heldApp.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers: { [OPERATOR_HEADER]: "preview-token", ...json },
+      payload: { pr: 41 },
+    });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toMatchObject({ code: "capacity" });
+  } finally {
+    await heldApp.close();
+  }
+  const stop = vi.fn();
+  let activityToken = "";
+  const previews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: false, reason: null }),
+    start: async ({ token }) => {
+      activityToken = token;
+      return { stop, dbPath: join(dir, "preview.sqlite") };
+    },
+    remove: async () => {},
+  });
+  const a = buildApp({
+    config,
+    store,
+    bus,
+    previews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
+  try {
+    expect((await a.inject("/api/previews")).statusCode).toBe(401);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers: json, payload: { pr: 41 } }))
+        .statusCode,
+    ).toBe(401);
+    const headers = { [OPERATOR_HEADER]: "preview-token", ...json };
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 42 } }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
+        .statusCode,
+    ).toBe(404);
+    const started = await a.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers,
+      payload: { pr: 41 },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect(
+      (await a.inject("/api/repos/shop-app/prs"))
+        .json()
+        .find((pr: { number: number }) => pr.number === 41),
+    ).toMatchObject({
+      number: 41,
+      preview: { url: "http://127.0.0.1:7431", port: 7431 },
+    });
+    expect((await a.inject({ method: "GET", url: "/api/previews", headers })).json()).toHaveLength(
+      1,
+    );
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: activityToken },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: "wrong" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await a.inject({ method: "DELETE", url: "/api/previews/41" })).statusCode).toBe(401);
+    expect(
+      (
+        await a.inject({
+          method: "DELETE",
+          url: "/api/previews/41",
+          headers: { [OPERATOR_HEADER]: "preview-token" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(stop).toHaveBeenCalledOnce();
+  } finally {
+    await a.close();
+  }
+});
+
+it("reports ordinary child-preview requests to the parent activity callback", async () => {
+  const previewActivity = vi.fn();
+  const a = buildApp({ config, store, bus, previewActivity });
+  try {
+    expect((await a.inject("/api/health")).statusCode).toBe(200);
+    expect(previewActivity).toHaveBeenCalledOnce();
   } finally {
     await a.close();
   }

@@ -310,7 +310,7 @@ describe("QaReadiness", () => {
         "/api/repos/mission-control/prs": [pr()],
         "/api/qa/ci-runs?days=90": { runs: [] },
         "/api/qa/findings?days=90": { findings: [] },
-        "/api/crew": { rows: [] },
+        "/api/crew?shape=summary": { rows: [] },
         [MAP]: map(),
         ...extra,
       });

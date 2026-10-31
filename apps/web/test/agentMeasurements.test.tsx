@@ -34,18 +34,13 @@ it("sums measured retries once and shows each attempt and timeline tokens, inclu
   const { container } = render(
     <LoopSteps row={row} view={view} prs={[]} limits={{ tries: 3, rounds: 3 }} now={NOW} />,
   );
-  expect(container.querySelector(".vmeta")?.textContent).toBe("1.5k · 5m");
+  expect(container.querySelector(".vmeta")?.textContent).toBe("5m · 1.5k");
+  // identical outcomes in a row are one line, summing only the measured tokens
+  fireEvent.click(container.querySelector("button.vhead") as HTMLElement);
   expect([...container.querySelectorAll(".att")].map((e) => e.textContent)).toEqual([
-    "try 1pass1.2k1m",
-    "try 2pass3001m",
-    "try 3pass01m",
-    "try 4pass—1m",
-    "try 5pass—1m",
+    "tries 1–5pass×55m1.5k",
   ]);
-  expect(container.textContent).toContain(RETRY_NOTE);
-  // every step is open: there is no header to fold
-  expect(container.querySelector("button.vhead")).toBeNull();
-  expect(container.querySelectorAll(".att")).toHaveLength(5);
+  expect(container.textContent).not.toContain(RETRY_NOTE);
   expect(stepTokens([attempt(null, 1), attempt(undefined, 2)])).toBeNull();
   expect(stepTokens([attempt(0, 1)])).toBe(0);
   const timeline = render(
@@ -66,7 +61,7 @@ describe("live Plan", () => {
   it.each(["loading", "failed", "another run", "no run"])(
     "keeps the Plan count unknown for %s",
     async (state) => {
-      const streamPath = `/api/agents/${row.id}/stream`;
+      const streamPath = `/api/agents/${row.id}/stream?limit=20`;
       const fetch = stubFetch({
         [streamPath]: () => ({
           status: state === "failed" ? 503 : 200,
@@ -92,7 +87,7 @@ describe("live Plan", () => {
     async (empty) => {
       let failed = false;
       stubFetch({
-        [`/api/agents/${row.id}/stream`]: () => ({
+        [`/api/agents/${row.id}/stream?limit=20`]: () => ({
           status: failed ? 503 : 200,
           body: failed
             ? { error: "Stream unavailable" }
@@ -107,7 +102,7 @@ describe("live Plan", () => {
       render(<SideTabs row={row} />);
       await screen.findByRole("button", { name: empty ? "Plan 0/0" : "Plan 1/1" });
       failed = true;
-      act(() => hub.refetch(`/api/agents/${row.id}/stream`));
+      act(() => hub.refetch(`/api/agents/${row.id}/stream?limit=20`));
       expect(
         await screen.findByText("Could not refresh the task list: Stream unavailable"),
       ).toBeTruthy();
@@ -130,9 +125,9 @@ describe("live Plan", () => {
       reason: null,
     };
     stubFetch({
-      [`/api/agents/${row.id}/stream`]: () => ({ status: 200, body: stream }),
+      [`/api/agents/${row.id}/stream?limit=20`]: () => ({ status: 200, body: stream }),
       [`/api/agents/${row.id}/files`]: { files: [], note: null },
-      "/api/agents/other/stream": { ...stream, runId: "other-run", tasks: [] },
+      "/api/agents/other/stream?limit=20": { ...stream, runId: "other-run", tasks: [] },
       "/api/agents/other/files": { files: [], note: null },
     });
     const page = render(<SideTabs row={row} />);
@@ -143,7 +138,7 @@ describe("live Plan", () => {
       "The agent's own task list: Claude's task tools or Codex plan updates, replayed from its stream.",
     );
     stream = { ...stream, tasks: stream.tasks?.map((t) => ({ ...t, status: "done" })) };
-    act(() => hub.refetch(`/api/agents/${row.id}/stream`));
+    act(() => hub.refetch(`/api/agents/${row.id}/stream?limit=20`));
     await screen.findByRole("button", { name: "Plan 2/2" });
     expect(page.container.textContent).toContain("✓ doneCheck widgets");
     page.rerender(<SideTabs row={{ ...row, run: { ...run(), id: "new-run" } }} />);
@@ -159,7 +154,7 @@ describe("live Plan", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((path: string) =>
-        path.endsWith("/stream")
+        path.endsWith("/stream?limit=20")
           ? new Promise<Response>((r) => {
               resolve = r;
             })
@@ -179,7 +174,7 @@ describe("live Plan", () => {
 
 it("shows distinct per-file commits and dirty labels while keeping diff buttons keyboard accessible", async () => {
   stubFetch({
-    [`/api/agents/${row.id}/stream`]: { runId: null, tasks: [], events: [] },
+    [`/api/agents/${row.id}/stream?limit=20`]: { runId: null, tasks: [], events: [] },
     [`/api/agents/${row.id}/files`]: {
       files: [
         { path: "a.ts", add: 0, del: 0, state: "committed", commitSha: "abc123456789" },

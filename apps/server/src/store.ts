@@ -2,20 +2,31 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
-import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
+import type {
+  ItemChatMessage,
+  ItemDiscussion,
+  PersonMessage,
+  PersonSource,
+  PromptSection,
+  PromptSectionCost,
+  PromptWakeCost,
+} from "@mc/core";
 import {
   type AccountId,
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
   type AuditMetrics,
+  type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditTokenOveruse,
   type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
@@ -31,9 +42,14 @@ import {
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  classifyOveruse,
   commsCutMarker,
   DECISION_DEFAULT_WAIT_MS,
+  type DefectRefs,
+  type DefectVia,
+  type DoneWhenEntry,
   type Escalation,
+  estimateTokens,
   type FindingResolution,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
@@ -53,9 +69,9 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
-  type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
+  type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
   type FlowIssue,
@@ -64,19 +80,32 @@ import {
   GUARD_RULES,
   type GuardHit,
   type GuardRule,
+  groupOveruse,
   type HealthRow,
+  type HudColumn,
   type HudState,
   inferTicket,
+  isBugLabelled,
   type LoopEvent,
+  type LoopKind,
+  linkEscapedDefect,
   type MachineSample,
-  type MoveColumn,
+  type MergedPrFacts,
   memoryTopicKey,
+  overusePrevention,
+  PROMPT_BYTES_PER_TOKEN,
+  PROMPT_SECTIONS,
   type PrCheck,
+  type PrFileInput,
   type ProfileOverride,
+  type PrTestsView,
   type PullRequestView,
+  prCarries,
   QA_RETENTION_DAYS,
   type QaFindingView,
+  type QaFlowView,
   type QaReviewRoundView,
+  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -91,14 +120,19 @@ import {
   type RunDigest,
   type RunLoop,
   type RunStatus,
+  reviewTimings,
+  reworkRatios,
   type SeatSessionRow,
   type SeatState,
   type StoredFinding,
   type StrayKind,
   type Telemetry,
   type TestLockRun,
+  TICKET_SIZES,
   TITLE_MARKERS,
   type TokenUsage,
+  testsTouched,
+  tokenBaselines,
   type UsageSample,
   validateMemoryNote,
   wakeKeyPrefix,
@@ -164,6 +198,20 @@ CREATE TABLE IF NOT EXISTS pr_history (
   PRIMARY KEY (repo_id, number)
 );
 CREATE INDEX IF NOT EXISTS pr_history_merged ON pr_history(repo_id, merged_at);
+-- A PR's diff files as GitHub read them (first PR_FILES_MAX); the tests-per-PR count and the
+-- file route of escaped defects read them.
+CREATE TABLE IF NOT EXISTS pr_files (
+  repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL, path TEXT NOT NULL, change_type TEXT NOT NULL,
+  PRIMARY KEY (repo_id, pr_number, path)
+);
+-- A bug filed after a PR merged that names it, a commit of it or a file only it changed. Kept
+-- after the card leaves the board; seat and model are the PR branch's author run.
+CREATE TABLE IF NOT EXISTS escaped_defects (
+  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, pr_number INTEGER NOT NULL,
+  via TEXT NOT NULL, filed_at INTEGER NOT NULL, merged_at INTEGER NOT NULL, seat TEXT, model TEXT,
+  PRIMARY KEY (repo_id, issue_number, pr_number)
+);
+CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)
@@ -171,6 +219,12 @@ CREATE TABLE IF NOT EXISTS retrospectives (
 CREATE TABLE IF NOT EXISTS prompt_versions (
   hash TEXT PRIMARY KEY, path TEXT NOT NULL, first_seen INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS prompt_sections (
+  run_id TEXT NOT NULL, wake INTEGER NOT NULL, section TEXT NOT NULL,
+  bytes INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, wake, section)
+);
+CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
@@ -206,6 +260,10 @@ CREATE TABLE IF NOT EXISTS run_evidence (
   tests TEXT NOT NULL DEFAULT '[]', tests_added TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS run_evidence_run ON run_evidence(run_id);
+-- The ticket's Done-when lines as they stood when a run started; a report must answer each one.
+CREATE TABLE IF NOT EXISTS run_done_when (
+  run_id TEXT NOT NULL, pos INTEGER NOT NULL, line TEXT NOT NULL, PRIMARY KEY (run_id, pos)
+);
 -- One review of a run's pushed sha (7b-1); attempt counts the tries of one sha within a loop epoch.
 CREATE TABLE IF NOT EXISTS reviews (
   id INTEGER PRIMARY KEY, author_run_id TEXT NOT NULL, repo_id TEXT NOT NULL, seat_id TEXT NOT NULL,
@@ -310,6 +368,15 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+-- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
+CREATE TABLE IF NOT EXISTS run_reads (
+  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
+  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, path)
+);
+CREATE TABLE IF NOT EXISTS run_rereads (
+  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
+);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
@@ -418,6 +485,10 @@ CREATE TABLE IF NOT EXISTS flight_watch (
 CREATE TABLE IF NOT EXISTS flight_plans (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
+);
+-- One row per FLIGHT wake: the run it woke and the fact categories that woke it.
+CREATE TABLE IF NOT EXISTS flight_wakes (
+  run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, PRIMARY KEY (run_id, at)
 );
 CREATE TABLE IF NOT EXISTS flight_incoming (
   id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,
@@ -696,7 +767,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn | FlightMoveColumn;
+  column: HudColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -729,6 +800,12 @@ export interface CommsRow {
   replyTo: string | null;
   mentions: string[];
 }
+/** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
+export type CommsReadScope =
+  | { crew: true }
+  | { pair: readonly [string, string] }
+  | { agent: string }
+  | { inbox: string };
 export interface NewCommsRow {
   at: number;
   from: string;
@@ -799,7 +876,19 @@ export interface Evidence {
   at: number;
   tests: ReportedTest[];
   testsAdded: { file: string; failedOnBase: boolean }[];
+  /** The author's answer to each of the ticket's Done-when lines; empty for an older report. */
+  doneWhen: DoneWhenEntry[];
 }
+
+const evidenceOf = (r: Row): Evidence => ({
+  id: r.id as number,
+  runId: r.run_id as string,
+  note: r.note as string,
+  at: r.at as number,
+  tests: JSON.parse(r.tests as string) as ReportedTest[],
+  testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
+  doneWhen: JSON.parse(r.done_when as string) as DoneWhenEntry[],
+});
 
 /** One issue in a seat's queue; `takenAt` is set while the seat holds it. */
 export interface QueueRow {
@@ -879,6 +968,7 @@ const toRun = (r: Row): Run => ({
     : { cliVersion: r.cli_version as string }),
   ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
   ...(r.effort == null ? {} : { effort: r.effort as string }),
+  ...(r.loop_kind == null ? {} : { loopKind: r.loop_kind as LoopKind }),
   ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
@@ -1225,6 +1315,10 @@ export class Store {
     for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
     // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
     this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
+    // What the issue body waits on (`{ issues, prs }` JSON), null for none; the next poll fills it.
+    this.addColumn("board_items", "after_deps", "TEXT");
+    // What a bug card's body names (`{ prs, shas, paths }` JSON), null for none.
+    this.addColumn("board_items", "defect_refs", "TEXT");
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
@@ -1252,6 +1346,8 @@ export class Store {
       ["account_id", "TEXT"],
       ["effort", "TEXT"],
       ["prompt_hash", "TEXT"],
+      // The seat's loop kind at the start; `upsertRun` keeps the first value.
+      ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1311,6 +1407,9 @@ export class Store {
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("reviews", "changed_since", "TEXT");
+    this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("review_findings", "category", "TEXT");
     this.addColumn("review_findings", "resolution", "TEXT");
     this.addColumn("review_findings", "resolved_review_id", "INTEGER");
@@ -1319,6 +1418,8 @@ export class Store {
     this.addColumn("pull_requests", "additions", "INTEGER");
     this.addColumn("pull_requests", "deletions", "INTEGER");
     this.addColumn("pull_requests", "changed_files", "INTEGER");
+    // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
+    this.addColumn("pull_requests", "base", "TEXT");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1499,8 +1600,8 @@ export class Store {
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
            ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           account_id, effort, prompt_hash, loop_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1513,7 +1614,8 @@ export class Store {
            latest_plan = COALESCE(excluded.latest_plan, latest_plan),
            account_id = COALESCE(account_id, excluded.account_id),
            effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash)`,
+           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
+           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
       )
       .run(
         r.id,
@@ -1545,7 +1647,22 @@ export class Store {
         r.accountId ?? null,
         r.effort ?? null,
         r.promptHash ?? null,
+        r.loopKind ?? null,
       );
+  }
+
+  /**
+   * Gives runs stored before `loop_kind` existed the loop kind of their seat as configured now, so
+   * a seat removed later still shows as a build seat in Audit. A run that has one keeps it.
+   * Returns how many rows it set.
+   */
+  backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
+    const set = this.db.prepare(
+      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
+    );
+    let n = 0;
+    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
+    return n;
   }
 
   /** Completes immutable launch metadata once the generated prompt file exists. */
@@ -1556,6 +1673,89 @@ export class Store {
     this.db
       .prepare("INSERT OR IGNORE INTO prompt_versions (hash, path, first_seen) VALUES (?, ?, ?)")
       .run(hash, path, at);
+  }
+
+  /** What one prompt took, by section; a wake recorded twice keeps its first rows. */
+  recordPromptSections(
+    runId: string,
+    wake: number,
+    at: number,
+    sections: readonly PromptSectionCost[],
+  ): void {
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
+  }
+
+  /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
+  addToolResultBytes(runId: string, bytes: number, at: number): void {
+    const last = this.db
+      .prepare(
+        `SELECT wake, MIN(at) AS at FROM prompt_sections WHERE run_id = ?
+         AND wake = (SELECT MAX(wake) FROM prompt_sections WHERE run_id = ?)`,
+      )
+      .get(runId, runId) as { wake: number | null; at: number | null };
+    const wake = last.wake ?? 0;
+    const section: PromptSection = "tool_results";
+    this.db
+      .prepare(
+        `INSERT INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (run_id, wake, section) DO UPDATE SET bytes = bytes + excluded.bytes,
+           tokens = CAST(ROUND((bytes + excluded.bytes) / ${PROMPT_BYTES_PER_TOKEN}.0) AS INTEGER)`,
+      )
+      .run(runId, wake, section, bytes, estimateTokens(bytes), last.at ?? at);
+  }
+
+  private wakesOf(
+    rows: {
+      run_id: string;
+      wake: number;
+      section: PromptSection;
+      bytes: number;
+      tokens: number;
+      at: number;
+    }[],
+  ): PromptWakeCost[] {
+    const wakes = new Map<string, PromptWakeCost>();
+    for (const r of rows) {
+      const key = `${r.run_id}\0${r.wake}`;
+      let w = wakes.get(key);
+      if (w === undefined) {
+        w = { runId: r.run_id, wake: r.wake, at: r.at, sections: [] };
+        wakes.set(key, w);
+      }
+      w.at = Math.min(w.at, r.at);
+      w.sections.push({ section: r.section, bytes: r.bytes, tokens: r.tokens });
+    }
+    for (const w of wakes.values()) {
+      w.sections.sort(
+        (a, b) => PROMPT_SECTIONS.indexOf(a.section) - PROMPT_SECTIONS.indexOf(b.section),
+      );
+    }
+    return [...wakes.values()];
+  }
+
+  /** A run's prompts by section, oldest first. */
+  promptWakes(runId: string): PromptWakeCost[] {
+    return this.wakesOf(
+      this.db
+        .prepare("SELECT * FROM prompt_sections WHERE run_id = ? ORDER BY wake")
+        .all(runId) as never,
+    );
+  }
+
+  /** An agent's prompts since `since`, newest first, at most `limit` wakes. */
+  agentPromptWakes(agentId: string, since: number, limit: number): PromptWakeCost[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.* FROM prompt_sections p JOIN runs r ON r.id = p.run_id
+         WHERE r.agent_id = ? AND p.at >= ?`,
+      )
+      .all(agentId, since) as never;
+    return this.wakesOf(rows)
+      .sort((a, b) => b.at - a.at || b.wake - a.wake)
+      .slice(0, limit);
   }
 
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
@@ -1725,6 +1925,33 @@ export class Store {
       )
       .all() as Row[];
     return new Set(rows.map((r) => r.ticket as string));
+  }
+
+  /**
+   * True while crew work stands at the machine guard or has just passed it: a queued ticket, a
+   * queued review, or a ticket run (a review's included) that has not ended and is not set aside.
+   */
+  hasPendingStart(): boolean {
+    const found = (sql: string, ...params: string[]): boolean =>
+      this.db.prepare(sql).get(...params) !== undefined;
+    return (
+      found("SELECT 1 FROM queues WHERE taken_at IS NULL LIMIT 1") ||
+      found("SELECT 1 FROM reviews WHERE state = ? LIMIT 1", "queued") ||
+      found(
+        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+      )
+    );
+  }
+
+  /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  hasActiveRun(): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+        )
+        .get() !== undefined
+    );
   }
 
   /**
@@ -1944,7 +2171,74 @@ export class Store {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
       | undefined;
-    return row ? parseDigest(row.digest) : null;
+    if (!row) return null;
+    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
+  }
+
+  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
+    return r ? { ...d, rereads: r } : d;
+  }
+
+  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
+  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
+    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
+    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
+      const ids = runIds.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
+      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
+    }
+    return out;
+  }
+
+  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
+  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
+    const r = this.db
+      .prepare(
+        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
+      )
+      .get(runId, agentId, path) as
+      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
+      | undefined;
+    return (
+      r && {
+        size: r.size,
+        mtimeMs: r.mtime_ms,
+        compactions: r.compactions,
+        toolUseId: r.tool_use_id,
+        at: r.at,
+      }
+    );
+  }
+
+  /** Remembers the run's whole read of `path`, replacing an earlier one. */
+  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
+           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
+      )
+      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
+  }
+
+  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
+  forgetRunRead(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
+  /** Counts one refused re-read that saved about `tokens`. */
+  addReread(runId: string, tokens: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
+         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
+      )
+      .run(runId, tokens);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
@@ -1955,6 +2249,10 @@ export class Store {
         `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
       ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
+    }
+    for (const [id, r] of this.rereads(runIds)) {
+      const d = out.get(id);
+      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -2070,7 +2368,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn | FlightMoveColumn,
+      column: r.board_column as HudColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,
@@ -2093,6 +2391,18 @@ export class Store {
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
+    this.db
+      .prepare("DELETE FROM escaped_defects WHERE merged_at < ?")
+      .run(now - QA_RETENTION_DAYS * day);
+    this.db
+      .prepare(
+        `DELETE FROM pr_files WHERE NOT EXISTS (
+           SELECT 1 FROM pull_requests p WHERE p.repo_id = pr_files.repo_id AND p.number = pr_files.pr_number)
+         AND NOT EXISTS (
+           SELECT 1 FROM pr_history h WHERE h.repo_id = pr_files.repo_id AND h.number = pr_files.pr_number
+             AND h.merged_at >= ?)`,
+      )
+      .run(now - QA_RETENTION_DAYS * day);
     let batches = 0;
     // These rows are operational traces, not durable Audit and QA records. One bounded batch per
     // table keeps an upgrade's first maintenance pass within the same sweep budget as run history.
@@ -2111,6 +2421,7 @@ export class Store {
       ],
       ["guard_hits", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["flight_wakes", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
@@ -2172,7 +2483,14 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
+              for (const child of [
+                "run_commits",
+                "run_pushes",
+                "run_attempts",
+                "run_digests",
+                "run_reads",
+                "run_rereads",
+              ])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
@@ -2350,8 +2668,9 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees, author)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees, author, after_deps,
+           defect_refs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -2361,7 +2680,8 @@ export class Store {
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
            item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees, author = excluded.author`,
+           assignees = excluded.assignees, author = excluded.author,
+           after_deps = excluded.after_deps, defect_refs = excluded.defect_refs`,
       );
       for (const i of items) {
         ins.run(
@@ -2389,8 +2709,13 @@ export class Store {
           i.projectId,
           JSON.stringify(i.assignees ?? []),
           i.author ?? null,
+          i.after && (i.after.issues.length > 0 || i.after.prs.length > 0)
+            ? JSON.stringify(i.after)
+            : null,
+          i.defectRefs ? JSON.stringify(i.defectRefs) : null,
         );
       }
+      this.captureEscapedDefects(repoId);
     });
   }
 
@@ -2416,6 +2741,12 @@ export class Store {
       subIssues:
         r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
       blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
+      ...(typeof r.after_deps === "string"
+        ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
+        : {}),
+      ...(typeof r.defect_refs === "string"
+        ? { defectRefs: JSON.parse(r.defect_refs) as DefectRefs }
+        : {}),
       milestone: r.milestone as string | null,
       size: r.size as string | null,
       closed: r.closed === 1,
@@ -2459,9 +2790,10 @@ export class Store {
         ).map((r) => [r.number, r.read_at]),
       );
       const seen = new Set(prs.map((p) => p.number));
+      const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && at < readAt) del.run(repoId, number);
+        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
       }
       this.writePullRequests(
         repoId,
@@ -2471,12 +2803,28 @@ export class Store {
     });
   }
 
+  /**
+   * The PRs an open card waits on by name (`After PR N`) or through the issue they carry
+   * (`Depends on`): the sweep keeps them, or the wait would flicker each time it dropped one.
+   */
+  private namedPullRequests(repoId: RepoId): Set<number> {
+    const open = this.board(repoId).filter((c) => !c.closed);
+    const issues = new Set(open.flatMap((c) => c.after?.issues ?? []));
+    const named = new Set(open.flatMap((c) => c.after?.prs ?? []));
+    if (issues.size === 0) return named;
+    for (const p of this.pullRequests(repoId)) {
+      if ([...issues].some((n) => prCarries(p, repoId, n))) named.add(p.number);
+    }
+    return named;
+  }
+
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
+         base)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2486,7 +2834,11 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
+    );
+    const deleteFiles = this.db.prepare("DELETE FROM pr_files WHERE repo_id = ? AND pr_number = ?");
+    const addFile = this.db.prepare(
+      "INSERT OR REPLACE INTO pr_files (repo_id, pr_number, path, change_type) VALUES (?, ?, ?, ?)",
     );
     const addHistory = this.db.prepare(
       "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
@@ -2550,6 +2902,10 @@ export class Store {
             mergeCommitSha: p.mergeCommitSha ?? null,
           });
       }
+      if (p.files !== undefined) {
+        deleteFiles.run(repoId, p.number);
+        for (const f of p.files) addFile.run(repoId, p.number, f.path, f.changeType);
+      }
       ins.run(
         repoId,
         p.number,
@@ -2575,9 +2931,11 @@ export class Store {
         p.additions ?? null,
         p.deletions ?? null,
         p.changedFiles ?? null,
+        p.base ?? null,
       );
       if (p.mergedAt !== null) {
-        addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(p));
+        const { files: _files, escapedDefects: _defects, ...record } = p;
+        addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(record));
         const additions = p.additions ?? null;
         const deletions = p.deletions ?? null;
         const changedFiles = p.changedFiles ?? null;
@@ -2593,6 +2951,170 @@ export class Store {
         );
       }
     }
+    this.captureEscapedDefects(repoId);
+  }
+
+  /**
+   * Records each bug card against the PRs merged within QA_RETENTION_DAYS before it was filed that
+   * it names (see linkEscapedDefect). Rerun on every board and PR write, so a bug read before its
+   * PR's diff still links on the next poll; a recorded link is never rewritten.
+   */
+  private captureEscapedDefects(repoId: RepoId): void {
+    const bugs = (
+      this.db
+        .prepare(
+          "SELECT issue_number, labels, created_at, defect_refs FROM board_items WHERE repo_id = ? AND defect_refs IS NOT NULL",
+        )
+        .all(repoId) as Row[]
+    ).filter((b) => isBugLabelled(JSON.parse(b.labels as string) as string[]));
+    if (bugs.length === 0) return;
+    const newest = Math.max(...bugs.map((b) => b.created_at as number));
+    const oldest = Math.min(...bugs.map((b) => b.created_at as number));
+    const merged = this.db
+      .prepare(
+        `SELECT h.number, h.merged_at, json_extract(h.record, '$.branch') AS branch,
+           COALESCE(p.head_sha, json_extract(h.record, '$.headSha')) AS head_sha,
+           COALESCE(p.merge_commit_sha, json_extract(h.record, '$.mergeCommitSha')) AS merge_sha
+         FROM pr_history h LEFT JOIN pull_requests p ON p.repo_id = h.repo_id AND p.number = h.number
+         WHERE h.repo_id = ? AND h.merged_at >= ? AND h.merged_at <= ?`,
+      )
+      .all(repoId, oldest - QA_RETENTION_DAYS * DAY_MS, newest) as Row[];
+    if (merged.length === 0) return;
+    const filesOf = this.db.prepare(
+      "SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ?",
+    );
+    const commitsOf = this.db.prepare(
+      "SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?",
+    );
+    const facts = new Map<number, MergedPrFacts & { branch: string }>();
+    for (const m of merged) {
+      const branch = (m.branch as string | null) ?? "";
+      facts.set(m.number as number, {
+        number: m.number as number,
+        mergedAt: m.merged_at as number,
+        branch,
+        shas: [
+          ...[m.head_sha, m.merge_sha].filter((x): x is string => typeof x === "string"),
+          ...(commitsOf.all(repoId, branch) as Row[]).map((c) => c.sha as string),
+        ],
+        files: (filesOf.all(repoId, m.number) as Row[]).map((f) => f.path as string),
+      });
+    }
+    const authorOf = this.db.prepare(
+      `SELECT agent_id, model FROM runs WHERE repo_id = ? AND branch = ? AND id NOT IN (
+         SELECT run_id FROM reviews WHERE run_id IS NOT NULL) ORDER BY started_at DESC LIMIT 1`,
+    );
+    const add = this.db.prepare(
+      `INSERT OR IGNORE INTO escaped_defects
+         (repo_id, issue_number, pr_number, via, filed_at, merged_at, seat, model)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const b of bugs) {
+      const filedAt = b.created_at as number;
+      const window = [...facts.values()].filter(
+        (f) => f.mergedAt >= filedAt - QA_RETENTION_DAYS * DAY_MS,
+      );
+      const refs = JSON.parse(b.defect_refs as string) as DefectRefs;
+      for (const link of linkEscapedDefect({ createdAt: filedAt, refs }, window)) {
+        const f = facts.get(link.prNumber);
+        if (f === undefined) continue;
+        const author = authorOf.get(repoId, f.branch) as Row | undefined;
+        add.run(
+          repoId,
+          b.issue_number as number,
+          f.number,
+          link.via,
+          filedAt,
+          f.mergedAt,
+          (author?.agent_id as string | undefined) ?? null,
+          (author?.model as string | undefined) ?? null,
+        );
+      }
+    }
+  }
+
+  /**
+   * The QA board's workflow figures for work that ended or merged at or after `since`: escaped
+   * defects, review wait and time per head, rework ratio per seat and model, tests per PR.
+   */
+  qaFlow(since: number): Omit<QaFlowView, "days" | "since" | "metrics"> {
+    const escapedDefects = (
+      this.db
+        .prepare(
+          "SELECT * FROM escaped_defects WHERE merged_at >= ? ORDER BY filed_at DESC, issue_number DESC, pr_number",
+        )
+        .all(since) as Row[]
+    ).map((r) => ({
+      repoId: r.repo_id as string,
+      issueNumber: r.issue_number as number,
+      prNumber: r.pr_number as number,
+      via: r.via as DefectVia,
+      filedAt: r.filed_at as number,
+      mergedAt: r.merged_at as number,
+      seat: r.seat as string | null,
+      model: r.model as string | null,
+    }));
+    const reviews = this.db
+      .prepare(
+        `SELECT v.id, v.repo_id, v.pr_number, v.sha, v.created_at, v.started_at, v.ended_at,
+           v.blocking, r.agent_id, r.model FROM reviews v LEFT JOIN runs r ON r.id = v.author_run_id
+         WHERE v.state = 'reported' AND v.ended_at >= ? ORDER BY v.ended_at DESC, v.id DESC`,
+      )
+      .all(since) as Row[];
+    const timings = reviewTimings(
+      reviews.map((v) => ({
+        reviewId: v.id as number,
+        createdAt: v.created_at as number,
+        startedAt: v.started_at as number | null,
+        endedAt: v.ended_at as number | null,
+      })),
+    );
+    const reviewOf = new Map(reviews.map((v) => [v.id as number, v]));
+    const heads = timings.heads.map((h) => {
+      const v = reviewOf.get(h.reviewId);
+      return {
+        ...h,
+        repoId: v?.repo_id as string,
+        prNumber: v?.pr_number as number,
+        sha: v?.sha as string,
+      };
+    });
+    const files = this.db
+      .prepare(
+        `SELECT h.repo_id, h.number, h.merged_at, f.path, f.change_type FROM pr_history h
+         JOIN pr_files f ON f.repo_id = h.repo_id AND f.pr_number = h.number
+         WHERE h.merged_at >= ? ORDER BY h.merged_at DESC, h.repo_id, h.number`,
+      )
+      .all(since) as Row[];
+    const byPr = new Map<string, PrTestsView & { files: PrFileInput[] }>();
+    for (const f of files) {
+      const key = `${f.repo_id}#${f.number}`;
+      const row = byPr.get(key) ?? {
+        repoId: f.repo_id as string,
+        prNumber: f.number as number,
+        mergedAt: f.merged_at as number,
+        added: 0,
+        changed: 0,
+        files: [],
+      };
+      row.files.push({ path: f.path as string, changeType: f.change_type as string });
+      byPr.set(key, row);
+    }
+    return {
+      escapedDefects,
+      reviewTimings: { ...timings, heads },
+      rework: reworkRatios(
+        reviews.map((v) => ({
+          seat: (v.agent_id as string | null) ?? "unknown",
+          model: (v.model as string | null) ?? "unknown",
+          blocking: v.blocking as number,
+        })),
+      ),
+      testsPerPr: [...byPr.values()].map(({ files: diff, ...pr }) => ({
+        ...pr,
+        ...testsTouched(diff),
+      })),
+    };
   }
 
   /** Merged PR snapshots are immutable once any size fields missing at migration are filled. */
@@ -2679,6 +3201,28 @@ export class Store {
         since,
         until,
       ) as unknown as AuditView["reworkRounds"],
+      reviewRounds: {
+        prs: rows(
+          `SELECT rounds, COUNT(*) AS count FROM (
+             SELECT MAX(round) AS rounds FROM reviews
+             WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
+             GROUP BY author_run_id, pr_number
+           ) GROUP BY rounds ORDER BY rounds`,
+          since,
+          until,
+        ) as unknown as { rounds: number; count: number }[],
+        late: rows(
+          `SELECT v.seat_id AS seatId, r.model AS model, COUNT(*) AS findings, SUM(f.late) AS late
+           FROM review_findings f JOIN reviews v ON v.id = f.review_id
+           LEFT JOIN runs r ON r.id = v.run_id
+           WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+             AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
+           GROUP BY v.seat_id, r.model ORDER BY late DESC, v.seat_id, r.model`,
+          since,
+          until,
+          ...BLOCKING_SEVERITIES,
+        ) as unknown as { seatId: string; model: string | null; findings: number; late: number }[],
+      },
       refusalsByRule: rows(
         `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
         since,
@@ -2735,6 +3279,7 @@ export class Store {
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
+      tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       surgeonProposals: [],
     };
   }
@@ -2835,6 +3380,113 @@ export class Store {
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
   }
 
+  /**
+   * Runs started in range whose input + output tokens pass their size's expected use (see
+   * `tokenBaselines`, built from build runs of the last `AUDIT_BASELINE_DAYS` days), largest first.
+   * Only runs of agents `kinds` marks as build count: watch, plan and review seats and observed
+   * loops have other shapes of use.
+   * A finding only: it reads the run, never changes it.
+   */
+  private auditTokenOveruse(
+    since: number,
+    until: number,
+    kinds: ReadonlyMap<string, AuditRunKind>,
+  ): AuditView["tokenOveruse"] {
+    const runRows = (sql: string, ...args: SQLInputValue[]) =>
+      this.db.prepare(sql).all(...args) as Row[];
+    // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
+    const from = `FROM runs r LEFT JOIN board_items b
+         ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
+       WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
+    // the loop kind stored at the run's start; a seat since removed still counts, and a row from
+    // before it was stored falls back to the seat's kind now
+    const isBuild = (r: Row): boolean => (r.loopKind ?? kinds.get(r.agentId as string)) === "build";
+    const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
+    const baselines = tokenBaselines(
+      runRows(
+        `SELECT r.agent_id AS agentId, r.loop_kind AS loopKind, b.size AS size, r.tokens AS tokens ${from}
+           AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
+        until - AUDIT_BASELINE_DAYS * DAY_MS,
+        until,
+      )
+        .filter(isBuild)
+        .map((r) => ({
+          size: r.size as string | null,
+          tokens: usage(r).input + usage(r).output,
+        })),
+    );
+    const blocking = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const runs: AuditTokenOveruse[] = [];
+    for (const r of runRows(
+      `SELECT r.id AS id, r.agent_id AS agentId, r.ticket AS ticket, r.started_at AS startedAt,
+         r.ended_at AS endedAt, r.loop_kind AS loopKind, r.tokens AS tokens, b.size AS size ${from}
+         AND r.started_at >= ? AND r.started_at <= ? ORDER BY r.started_at DESC`,
+      since,
+      until,
+    )) {
+      if (!isBuild(r)) continue;
+      const tokens = usage(r);
+      const total = tokens.input + tokens.output;
+      const size = r.size as string | null;
+      const expected = baselines.expected(size);
+      if (total <= expected) continue;
+      const id = r.id as string;
+      const rounds = this.db
+        .prepare("SELECT COUNT(*) AS n FROM reviews WHERE author_run_id = ? AND state = 'reported'")
+        .get(id) as { n: number };
+      const byCategory: AuditOveruseFacts["blockingByCategory"] = {};
+      let blockingTotal = 0;
+      for (const f of this.db
+        .prepare(
+          `SELECT COALESCE(category, 'uncategorised') AS category, COUNT(*) AS n FROM review_findings
+           WHERE author_run_id = ? AND severity IN (${blocking}) GROUP BY category`,
+        )
+        .all(id, ...BLOCKING_SEVERITIES) as { category: keyof typeof byCategory; n: number }[]) {
+        byCategory[f.category] = f.n;
+        blockingTotal += f.n;
+      }
+      const digest = this.db
+        .prepare(
+          "SELECT json_extract(digest, '$.turns') AS turns FROM run_digests WHERE run_id = ?",
+        )
+        .get(id) as { turns: number | null } | undefined;
+      const facts: AuditOveruseFacts = {
+        size,
+        reviewRounds: rounds.n,
+        blocking: blockingTotal,
+        blockingByCategory: byCategory,
+        turns: digest?.turns ?? null,
+      };
+      const cause = classifyOveruse(facts);
+      runs.push({
+        runId: id,
+        agentId: r.agentId as string,
+        ticket: r.ticket as string | null,
+        startedAt: r.startedAt as number,
+        ended: r.endedAt !== null,
+        tokens: total,
+        input: tokens.input,
+        output: tokens.output,
+        cacheRead: tokens.cacheRead,
+        cacheCreate: tokens.cacheCreate,
+        expected,
+        ...facts,
+        cause,
+        prevention: overusePrevention(cause),
+      });
+    }
+    runs.sort((a, b) => b.tokens - a.tokens || a.runId.localeCompare(b.runId));
+    return {
+      runs,
+      groups: groupOveruse(runs),
+      expected: [...TICKET_SIZES, null].map((size) => ({
+        size,
+        tokens: baselines.expected(size),
+        measured: baselines.bySize.has(size ?? ""),
+      })),
+    };
+  }
+
   /** Crew-wide metrics over one window, both ends inclusive. */
   private auditMetrics(from: number, to: number): AuditMetrics {
     const merged = this.db
@@ -2878,6 +3530,27 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The repo's open PRs and those updated at or after `since` (all of them when null), newest number first. */
+  pullRequestsSince(repoId: RepoId, since: number | null): PullRequestView[] {
+    const rows =
+      since === null
+        ? (this.statement("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC").all(
+            repoId,
+          ) as Row[])
+        : (this.statement(
+            "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR updated_at >= ? OR merged_at >= ?) ORDER BY number DESC",
+          ).all(repoId, since, since) as Row[]);
+    return this.pullRequestRows(rows);
+  }
+
+  pullRequest(repoId: RepoId, number: number): PullRequestView | null {
+    const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
+      repoId,
+      number,
+    ) as Row | undefined;
+    return row === undefined ? null : (this.pullRequestRows([row])[0] ?? null);
+  }
+
   /** Pull requests for configured repos, indexed after one table read for the HUD. */
   pullRequestsForRepos(repoIds: readonly RepoId[]): Map<RepoId, PullRequestView[]> {
     const out = new Map<RepoId, PullRequestView[]>();
@@ -2913,7 +3586,24 @@ export class Store {
   }
 
   private pullRequestRows(rows: Row[]): PullRequestView[] {
+    const defects = new Map<string, NonNullable<PullRequestView["escapedDefects"]>>();
+    for (const d of this.statement(
+      "SELECT repo_id, pr_number, issue_number, via, filed_at FROM escaped_defects ORDER BY filed_at",
+    ).all() as Row[]) {
+      const key = `${d.repo_id}#${d.pr_number}`;
+      defects.set(key, [
+        ...(defects.get(key) ?? []),
+        {
+          issueNumber: d.issue_number as number,
+          via: d.via as DefectVia,
+          filedAt: d.filed_at as number,
+        },
+      ]);
+    }
     return rows.map((r) => ({
+      ...(defects.has(`${r.repo_id}#${r.number}`)
+        ? { escapedDefects: defects.get(`${r.repo_id}#${r.number}`) }
+        : {}),
       repoId: r.repo_id as string,
       number: r.number as number,
       title: r.title as string,
@@ -2937,6 +3627,7 @@ export class Store {
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
+      ...(r.base == null ? {} : { base: r.base as string }),
     }));
   }
 
@@ -3452,11 +4143,12 @@ export class Store {
     details: {
       tests?: ReportedTest[];
       testsAdded?: { file: string; failedOnBase: boolean }[];
+      doneWhen?: DoneWhenEntry[];
     } = {},
   ): number {
     const r = this.db
       .prepare(
-        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added, done_when) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(
         runId,
@@ -3464,6 +4156,7 @@ export class Store {
         at,
         JSON.stringify(details.tests ?? []),
         JSON.stringify(details.testsAdded ?? []),
+        JSON.stringify(details.doneWhen ?? []),
       );
     this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
@@ -3473,16 +4166,29 @@ export class Store {
     const r = this.db
       .prepare("SELECT * FROM run_evidence WHERE run_id = ? ORDER BY id DESC LIMIT 1")
       .get(runId) as Row | undefined;
-    return r
-      ? {
-          id: r.id as number,
-          runId: r.run_id as string,
-          note: r.note as string,
-          at: r.at as number,
-          tests: JSON.parse(r.tests as string) as ReportedTest[],
-          testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-        }
-      : null;
+    return r ? evidenceOf(r) : null;
+  }
+
+  /** Records the ticket's Done-when lines for a run, replacing any recorded before (none: no rule). */
+  setRunDoneWhen(runId: string, lines: readonly string[]): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM run_done_when WHERE run_id = ?").run(runId);
+      const insert = this.db.prepare(
+        "INSERT INTO run_done_when (run_id, pos, line) VALUES (?, ?, ?)",
+      );
+      lines.forEach((line, pos) => {
+        insert.run(runId, pos, line);
+      });
+    }, true);
+  }
+
+  /** The run's recorded Done-when lines in ticket order; empty when none were recorded. */
+  runDoneWhen(runId: string): string[] {
+    return (
+      this.db
+        .prepare("SELECT line FROM run_done_when WHERE run_id = ? ORDER BY pos")
+        .all(runId) as Row[]
+    ).map((r) => r.line as string);
   }
 
   /** Every note the run's seat reported, oldest first. */
@@ -3490,14 +4196,7 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM run_evidence WHERE run_id = ? ORDER BY id")
       .all(runId) as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      runId: r.run_id as string,
-      note: r.note as string,
-      at: r.at as number,
-      tests: JSON.parse(r.tests as string) as ReportedTest[],
-      testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-    }));
+    return rows.map(evidenceOf);
   }
 
   /** Queues a review; its id, or null when the (run, sha, epoch, attempt) key already exists. */
@@ -3638,13 +4337,30 @@ export class Store {
           runId,
         );
       if (res.changes !== 1) return;
-      const author = (
-        this.db.prepare("SELECT author_run_id FROM reviews WHERE id = ?").get(reviewId) as Row
-      ).author_run_id as string;
+      const row = this.db
+        .prepare("SELECT author_run_id, round, changed_since FROM reviews WHERE id = ?")
+        .get(reviewId) as Row;
+      const author = row.author_run_id as string;
+      // late: a later round's finding on a file the author did not touch since the last review
+      const changed =
+        (row.round as number) >= 2 && row.changed_since !== null
+          ? new Set(JSON.parse(row.changed_since as string) as string[])
+          : null;
+      // a finding the reviewer holds from the last round was raised then, so it is carried, not late
+      const heldFile = this.db.prepare(
+        "SELECT file FROM review_findings WHERE review_id = ? AND pos = ?",
+      );
+      const held = new Set<string>();
+      for (const x of r.resolutions ?? []) {
+        if (x.outcome !== "held") continue;
+        const file = (heldFile.get(x.findingRef.reviewId, x.findingRef.pos) as Row | undefined)
+          ?.file;
+        if (typeof file === "string") held.add(file);
+      }
       const insert = this.db.prepare(
         `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
-           scenario, fix, category, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           scenario, fix, category, state, late)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       r.findings.forEach((f, pos) => {
         insert.run(
@@ -3659,6 +4375,7 @@ export class Store {
           f.fix,
           f.category ?? null,
           isBlocking(f) ? "open" : "logged",
+          changed !== null && !changed.has(f.file) && !held.has(f.file) ? 1 : 0,
         );
       });
       const insertCheck = this.db.prepare(
@@ -3725,6 +4442,13 @@ export class Store {
     return recorded;
   }
 
+  /** The files the author changed since the previous reviewed sha, for tagging late findings. */
+  setReviewChangedSince(reviewId: number, files: readonly string[]): void {
+    this.db
+      .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
+      .run(JSON.stringify(files), reviewId);
+  }
+
   findingsOf(reviewId: number): StoredFinding[] {
     const rows = this.db
       .prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY pos")
@@ -3739,6 +4463,7 @@ export class Store {
       fix: r.fix as string,
       category: (r.category as StoredFinding["category"]) ?? undefined,
       state: r.state as StoredFinding["state"],
+      late: r.late === 1,
       resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
       resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
     }));
@@ -4233,6 +4958,73 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+  private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
+    if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
+    if ("pair" in scope) {
+      const [a, b] = scope.pair;
+      return { where: "((from_id=? AND to_id=?) OR (from_id=? AND to_id=?))", args: [a, b, b, a] };
+    }
+    if ("agent" in scope)
+      return { where: "(from_id=? OR to_id=?)", args: [scope.agent, scope.agent] };
+    const id = scope.inbox;
+    return {
+      where: `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      args: [id, id, id],
+    };
+  }
+  /**
+   * The newest `limit` messages of a scope, oldest first, strictly older than `before` when given.
+   * `hasMore` says older ones remain, so the HUD can offer "load older".
+   */
+  commsPage(
+    scope: CommsReadScope,
+    limit: number,
+    before?: string,
+  ): { rows: CommsRow[]; hasMore: boolean } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const beforeId = before === undefined ? null : commsMessageNumber(before);
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM comms WHERE ${where}${
+            beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
+          } ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
+    ).map((r) => this.commsRow(r));
+    const hasMore = rows.length > limit;
+    return { rows: rows.slice(0, limit).reverse(), hasMore };
+  }
+  /** How many messages a scope holds, and how many of them come after the read cursor. */
+  commsCounts(scope: CommsReadScope, cursor: string | null): { count: number; unread: number } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+      )
+      .get(offset, ...args) as { count: number; unread: number };
+    return { count: r.count, unread: r.unread };
+  }
+  /** Everyone `id` has exchanged messages with, in first-contact order. */
+  commsContactIds(id: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT CASE WHEN from_id=? THEN to_id ELSE from_id END AS contact
+          FROM comms WHERE from_id=? OR to_id=? GROUP BY contact ORDER BY MIN(id)`,
+        )
+        .all(id, id, id) as { contact: string }[]
+    ).map((r) => r.contact);
   }
   commsForRefs(refs: string[]): CommsRow[] {
     if (!refs.length) return [];
@@ -5745,6 +6537,25 @@ export class Store {
           .prepare("INSERT INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
           .run(session, entry.id, JSON.stringify(entry));
     };
+  }
+
+  /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
+  addFlightWake(runId: string, at: number, reasons: string[]): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons) VALUES (?, ?, ?)")
+      .run(runId, at, JSON.stringify(reasons));
+  }
+
+  /** FLIGHT's wakes at or after `since`, oldest first. */
+  flightWakes(since: number): FlightWakeRecord[] {
+    const rows = this.db
+      .prepare("SELECT run_id, at, reasons FROM flight_wakes WHERE at >= ? ORDER BY at, run_id")
+      .all(since) as { run_id: string; at: number; reasons: string }[];
+    return rows.map((r) => ({
+      runId: r.run_id,
+      at: r.at,
+      reasons: JSON.parse(r.reasons) as string[],
+    }));
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {

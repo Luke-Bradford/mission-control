@@ -17,7 +17,7 @@ function stubWidth(narrow: boolean) {
 
 function stub() {
   stubFetch({
-    "/api/crew": { rows: [seatRow()], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [seatRow()], firstRunToday: null },
     "/api/config": CONFIG,
   });
 }

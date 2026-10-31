@@ -110,6 +110,11 @@ export interface ReviewFinding {
 export interface StoredFinding extends ReviewFinding {
   pos: number;
   state: "open" | "logged";
+  /**
+   * Set by the hub: a finding in round 2 or later on a file unchanged since the previous review,
+   * one an earlier round could have raised.
+   */
+  late?: boolean;
   /** How it ended: set when a later round reports, by RETRO's resolutions or by the engine. */
   resolution?: FindingResolutionOutcome;
   /** The later review that resolved it. */
@@ -222,6 +227,19 @@ export function fixText(i: {
   let kept = 0;
   while (kept < entries.length && build(kept + 1).length <= FIX_TEXT_MAX) kept++;
   return build(kept);
+}
+
+/** RETRO's Comms mirror of findings; the full fix list is delivered to the author seat. */
+export function fixCommsText(i: {
+  retro: string;
+  sha: string;
+  findings: readonly ReviewFinding[];
+}): string {
+  const counts = FINDING_SEVERITIES.flatMap((severity) => {
+    const n = i.findings.filter((f) => f.severity === severity).length;
+    return n === 0 ? [] : [`${n} ${severity}`];
+  });
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
 }
 
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";

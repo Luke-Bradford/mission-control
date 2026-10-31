@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -27,11 +28,14 @@ import {
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_PAGE_DEFAULT,
+  COMMS_PAGE_MAX,
   COMMS_REACTIONS,
   COMMS_REF,
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  type CommsMetricsView,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -40,9 +44,13 @@ import {
   type CrewPause,
   type CrewRow,
   type CrewSessionFolders,
+  type CrewVendor,
+  capAudit,
+  crewSummary,
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
+  ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
   fixesSent,
@@ -59,6 +67,7 @@ import {
   type GuardHitsView,
   guardAckKey,
   guardDenyOutput,
+  guardStopOutput,
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   type LimitRow,
@@ -67,7 +76,9 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapLive,
   type MapSnapshot,
+  type MapTree,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -76,21 +87,32 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  PR_LIST_DAYS,
+  PR_LIST_DAYS_MAX,
+  type PullRequestListRow,
+  type PullRequestSummary,
   type PullRequestView,
   pace5h,
+  percentile,
   projectAtReset,
+  QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
+  type QaFlowView,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
+  type RepoId,
   type RepoProfile,
   type RepoView,
   type RunLoopView,
   type RunView,
   reviewStatusOf,
+  STOP_BLOCK_TRIES,
+  type StreamEvent,
   seatCallSign,
   seatDef,
   startOfLocalDay,
+  stopBlockReason,
   stopForecast,
   TELEMETRY_RANGES,
   TEST_LOCK_UNAVAILABLE_TEXT,
@@ -100,7 +122,9 @@ import {
   type TestLockView,
   type Topic,
   TYPE_LABELS,
+  UPDATE_LOG_UNREADABLE,
   UPDATE_UNAVAILABLE,
+  type UpdateLog,
   type UsageSample,
   type VersionInfo,
   watchStartRefusedText,
@@ -195,6 +219,7 @@ import {
 } from "./crew-pause.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   changedFiles,
   committedLines,
@@ -212,6 +237,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
+import { rereadDenial } from "./guard/rereads.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -239,6 +265,7 @@ import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from 
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
   proposeQueueReorder,
@@ -256,6 +283,7 @@ import {
 import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
+import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import {
   type BoardTitleCache,
@@ -266,8 +294,15 @@ import {
   runView,
 } from "./runview.ts";
 import { setSeatFocus } from "./seat-focus.ts";
-import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
-import { lastOutputAt, readStream } from "./stream.ts";
+import {
+  type CommsReadScope,
+  commsMessageNumber,
+  commsPosition,
+  crewDir,
+  crewPrBodyPath,
+  type Store,
+} from "./store.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
@@ -337,10 +372,18 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
+  previews?: PreviewManager;
+  /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
+  previewRepoId?: RepoId;
+  /** A child preview reports browser activity to its parent without exposing an operator token. */
+  previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
+  /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
+  mapTree?: typeof mapTree;
   /** Build each repo's map payload in the background once the app is ready (the hub's start). */
   warmMap?: boolean;
   config: CcConfig;
@@ -374,8 +417,13 @@ export interface AppDeps {
   refreshBoards?: () => void;
   /** The built web app (apps/web/dist), served for unmatched GET/HEAD outside /api; absent: none. */
   webRoot?: string;
-  /** Reads a transcript for `/api/agents/:id/stream`; default: `readStream`. */
-  readStream?: typeof readStream;
+  /** Reads a transcript for `/api/agents/:id/stream`; default: `readStreamPage`. */
+  readStream?: (
+    path: string,
+    limit: number,
+    vendor?: CrewVendor,
+    before?: string,
+  ) => { events: StreamEvent[]; truncated: boolean; more?: boolean };
   /** Reads a worktree's changed files for `/api/agents/:id/files`; default: read-only git. */
   changedFiles?: (worktree: string, exec?: GitExec) => Promise<ChangedFiles>;
   /** Reads one listed file's diff for `/api/agents/:id/files/diff`; default: read-only git. */
@@ -451,6 +499,12 @@ const StartBody = z.strictObject({
   /** An operator may explicitly start through a temporary machine-capacity hold. */
   force: z.boolean().optional(),
 });
+const PreviewBody = z.strictObject({
+  pr: z
+    .int()
+    .min(1)
+    .max(2 ** 31 - 1),
+});
 
 /**
  * `POST /api/seats/:id/message`. The text is sent on as typed; it only has to
@@ -500,15 +554,28 @@ const EndBody = z.strictObject({
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
  * event carries no input.
  */
+const isStopEvent = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  (body as { hook_event_name?: unknown }).hook_event_name === "Stop";
+
+/** A Stop: the event alone. */
+const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
+
 const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
+  agent_id: z.string().min(1).max(256).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      pages: z.string().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
+      timeout: z.number().optional(),
     })
     .optional(),
 });
@@ -548,7 +615,8 @@ interface StreamCacheEntry {
   size: number;
   mtimeMs: number;
   limit: number;
-  result: ReturnType<typeof readStream>;
+  before: string | undefined;
+  result: ReturnType<NonNullable<AppDeps["readStream"]>>;
 }
 
 /** Projection applies to 7d windows only (ruling); a 5h row shows `used` and `resetAt`. */
@@ -571,6 +639,37 @@ const isLocalOrigin = (origin: string): boolean => {
 
 const errCode = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code;
 
+/** A PR as `?shape=summary` sends it: the fields a list shows, the checks as the `ci` rollup. */
+function prSummaryRow(pr: PullRequestView): PullRequestSummary {
+  return {
+    repoId: pr.repoId,
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    branch: pr.branch,
+    headSha: pr.headSha,
+    ticket: pr.ticket,
+    state: pr.state,
+    isDraft: pr.isDraft,
+    review: pr.review,
+    ci: pr.ci,
+    createdAt: pr.createdAt,
+    updatedAt: pr.updatedAt,
+    mergedAt: pr.mergedAt,
+  };
+}
+
+/** A PR as a list sends it by default: its checks by name and state only. */
+function prSummary(pr: PullRequestView): PullRequestListRow {
+  const { checks, ...rest } = pr;
+  return checks === undefined
+    ? rest
+    : {
+        ...rest,
+        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+      };
+}
+
 /** `?limit=` as an integer 1..max (absent: `fallback`), or null when invalid. */
 function parseLimit(raw: unknown, fallback: number, max: number): number | null {
   if (raw === undefined) return fallback;
@@ -584,6 +683,9 @@ const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
 /** Longest a map payload is reused: the backstop for fields that age without any input changing. */
 const MAP_CACHE_MS = 15_000;
+/** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
+const MAP_TREE_MS = 60 * 60_000;
+type MapTreeBuilt = { etag: string; tree: MapTree };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -651,16 +753,71 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.mapCachePut(kind, scope, key, value, exclusive),
   };
   const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapSnapshot> }>();
-  const buildMapPayload = async (
+  const mapTrees = new Map<string, { key: string; at: number; built: Promise<MapTreeBuilt> }>();
+  const buildTree = deps.mapTree ?? mapTree;
+  /** The tree part for the default-branch `head`: built once, kept until an input of it moves. */
+  const mapTreeFor = async (
     repo: (typeof config.repos)[number],
+    checkout: string,
+    head: string,
+    prs: PullRequestView[],
+    board: BoardItem[],
+  ): Promise<MapTreeBuilt> => {
+    // The tree reads only the head, the merged PRs and the bug-labelled tickets (the history),
+    // and the rules: nothing about the crew, so a seat moving never reaches this key.
+    const key = JSON.stringify([
+      head,
+      prs
+        .filter((p) => p.state === "merged" && p.mergeCommitSha)
+        .map((p) => [p.number, p.mergeCommitSha, p.mergedAt, p.branch, p.ticket]),
+      board.filter((item) => item.labels.includes("bug")).map((item) => item.issueNumber),
+      flightPowersOf(config, repo.id),
+      repo.rules,
+    ]);
+    const at = now();
+    const cached = mapTrees.get(repo.id);
+    if (cached && cached.key === key && at - cached.at < MAP_TREE_MS) return await cached.built;
+    const built = (async (): Promise<MapTreeBuilt> => {
+      const tree = await buildTree(checkout, "origin/HEAD", prs, board, at, mapStore);
+      const read = await readRepoRules(repo.github, checkout, repo.rules);
+      // Unreadable repo rules leave the configured ones: the map still draws.
+      const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
+      return {
+        etag: `"${createHash("sha256").update(`${key}@${at}`).digest("hex").slice(0, 32)}"`,
+        tree: {
+          repoId: repo.id,
+          ...tree,
+          rules: {
+            areas: rules.areas,
+            hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
+          },
+        },
+      };
+    })();
+    const entry = { key, at, built };
+    mapTrees.set(repo.id, entry);
+    built.catch(() => {
+      if (mapTrees.get(repo.id) === entry) mapTrees.delete(repo.id);
+    });
+    return await built;
+  };
+  /** The crew's rows for the map: the summary view, which builds no event timelines. */
+  const mapCrewRows = (repo: (typeof config.repos)[number]) => {
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
+    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
+    const rows = crew(config, store, now(), lock, undefined, true)
+      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
+      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
+    return { rows, lock };
+  };
+  const buildMapLive = async (
     checkout: string,
     crewRows: CrewRow[],
     lock: typeof NO_LOCK,
     prs: PullRequestView[],
-    board: BoardItem[],
     log: FastifyBaseLogger,
-  ): Promise<MapSnapshot> => {
-    const tree = await mapTree(checkout, "origin/HEAD", prs, board, now(), mapStore);
+  ): Promise<MapLive> => {
     const data = mapSeats(
       crewRows,
       store,
@@ -682,24 +839,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seat.context = context ? { total: context.total, window: context.window } : null;
     }
     const conflicts = await mapConflicts.check(checkout, prs);
-    const read = await readRepoRules(repo.github, checkout, repo.rules);
-    // Unreadable repo rules leave the configured ones: the map still draws.
-    const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
     for (const failure of conflicts.failures)
       log.warn(failure, "map conflict check failed for a pair; reported unchecked");
     return {
-      repoId: repo.id,
-      ...tree,
       ...data,
       conflicts: conflicts.conflicts,
       conflictsUnchecked: conflicts.unchecked,
-      rules: {
-        areas: rules.areas,
-        hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
-      },
       // Slice 1b will publish sequenced deltas; none have been emitted yet.
       seq: 0,
     };
+  };
+  /** Starts the ring on first use and brings it up to date: the live part reads from it. */
+  const mapRingReady = () => {
+    if (!stopMapRing) stopMapRing = mapRing.start();
+    mapRing.poll();
+  };
+  /** The tree part and its ETag: built once per default-branch head, however many ask. */
+  const mapTreePayload = async (
+    repo: (typeof config.repos)[number],
+    checkout: string,
+  ): Promise<MapTreeBuilt> =>
+    await mapTreeFor(
+      repo,
+      checkout,
+      await mapHead(checkout),
+      store.pullRequests(repo.id),
+      store.board(repo.id),
+    );
+  /** The live part, built per request from the map ring: seats, findings and conflicts. */
+  const mapLivePayload = async (
+    repo: (typeof config.repos)[number],
+    checkout: string,
+    log: FastifyBaseLogger,
+  ): Promise<MapLive> => {
+    mapRingReady();
+    const { rows, lock } = mapCrewRows(repo);
+    return await buildMapLive(checkout, rows, lock, store.pullRequests(repo.id), log);
   };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
@@ -708,14 +883,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     log: FastifyBaseLogger,
   ): Promise<MapSnapshot> => {
     const head = await mapHead(checkout);
-    if (!stopMapRing) stopMapRing = mapRing.start();
-    mapRing.poll();
-    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
-    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
-    const crewRows = crew(config, store, now(), deps.lock?.state() ?? NO_LOCK)
-      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
-      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
-    const lock = deps.lock?.state() ?? NO_LOCK;
+    mapRingReady();
+    const { rows: crewRows, lock } = mapCrewRows(repo);
     const prs = store.pullRequests(repo.id);
     const board = store.board(repo.id);
     // reused until the default branch, the ring, the seats (rows and lock), the PRs, the
@@ -733,7 +902,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const at = now();
     const cached = mapPayloads.get(repo.id);
     if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
-    const payload = buildMapPayload(repo, checkout, crewRows, lock, prs, board, log);
+    // the tree part is its own cache: a changed seat or ring rebuilds only the live part
+    const payload = (async (): Promise<MapSnapshot> => {
+      const [{ tree }, live] = await Promise.all([
+        mapTreeFor(repo, checkout, head, prs, board),
+        buildMapLive(checkout, crewRows, lock, prs, log),
+      ]);
+      return { ...tree, ...live };
+    })();
     const entry = { key, at, payload };
     mapPayloads.set(repo.id, entry);
     payload.catch(() => {
@@ -804,7 +980,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   };
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
-  const readTranscript = deps.readStream ?? readStream;
+  const readTranscript = deps.readStream ?? readStreamPage;
   const worktreeFiles = deps.changedFiles ?? changedFiles;
   const worktreeDiff = deps.fileDiff ?? fileDiff;
   const streamCache = new Map<string, StreamCacheEntry>();
@@ -866,9 +1042,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const hasBody =
       Number(req.headers["content-length"] ?? 0) > 0 ||
       req.headers["transfer-encoding"] !== undefined;
+    const previewActivity = req.routeOptions.url === "/api/previews/:pr/activity";
     if (
       mutating &&
       (req.method !== "DELETE" || hasBody) &&
+      !previewActivity &&
       mediaType(req.headers["content-type"]) !== "application/json"
     ) {
       return reply
@@ -900,6 +1078,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A preview child owns no live loop. Its parent uses these pings only to expire an unused child.
+  app.addHook("onRequest", async () => deps.previewActivity?.());
+
   // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
   // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
   // check keeps its own run token; /mcp is outside /api.
@@ -913,6 +1094,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         req.method !== "OPTIONS" &&
         path.startsWith("/api/") &&
         path !== GUARD_CHECK_PATH &&
+        !(
+          path === "/api/previews/:pr/activity" &&
+          req.headers[PREVIEW_ACTIVITY_HEADER] !== undefined
+        ) &&
         !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
       ) {
         return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
@@ -1013,8 +1198,46 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return crewMemo.value;
   };
 
+  let crewSummaryMemo:
+    | { bucket: number; revision: number; lockKey: string; value: Crew }
+    | undefined;
+  /** The Overview's crew: built without event timelines, so a many-run hub does not pay for them. */
+  const sharedCrewSummary = (at = now()): Crew => {
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewSummaryMemo?.bucket !== bucket ||
+      crewSummaryMemo.revision !== crewRevision ||
+      crewSummaryMemo.lockKey !== lockKey
+    )
+      crewSummaryMemo = {
+        bucket,
+        revision: crewRevision,
+        lockKey,
+        value: crew(config, store, at, lock, undefined, true),
+      };
+    return crewSummaryMemo.value;
+  };
+
+  /**
+   * The rows the notification reconcile builds attention from: the full crew when one is already
+   * built for this moment (a browser's read), else the summary, which skips the event timelines
+   * attention never reads.
+   */
+  const attentionRows = (at: number): CrewRow[] => {
+    const lockKey = JSON.stringify(deps.lock?.state() ?? NO_LOCK);
+    if (
+      crewMemo?.bucket === Math.floor(at / HUD_MEMO_MS) &&
+      crewMemo.revision === crewRevision &&
+      crewMemo.lockKey === lockKey
+    )
+      return crewMemo.value.rows;
+    return sharedCrewSummary(at).rows;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
-  const sharedAttention = (): AttentionItem[] => {
+  const sharedAttention = (light = false): AttentionItem[] => {
     const at = now();
     if (!attentionMemo || at - attentionMemo.at >= HUD_MEMO_MS) {
       attentionMemo = {
@@ -1024,7 +1247,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          sharedCrew(at).rows,
+          light ? attentionRows(at) : sharedCrew(at).rows,
           deps.hubLogin?.() ?? null,
         ),
       };
@@ -1032,7 +1255,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return attentionMemo.items;
   };
   const notifications = new LocalNotifications(store, config, bus, now);
-  const reconcileNotifications = () => notifications.reconcile(sharedAttention());
+  const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   const scheduleNotifications = () => {
@@ -1103,7 +1326,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
       // text, never the path.
-      api.get<{ Params: { id: string }; Querystring: { limit?: unknown } }>(
+      // `?before=<event id>`: the events ahead of that one, for the dock's older-on-scroll (#1192).
+      api.get<{ Params: { id: string }; Querystring: { limit?: unknown; before?: unknown } }>(
         "/agents/:id/stream",
         async (req, reply): Promise<AgentStream | FastifyReply> => {
           const limit = parseLimit(req.query.limit, DEFAULT_STREAM_LIMIT, MAX_STREAM_LIMIT);
@@ -1111,6 +1335,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(400)
               .send({ error: `limit must be an integer 1..${MAX_STREAM_LIMIT}` });
+          }
+          const { before } = req.query;
+          if (before !== undefined && (typeof before !== "string" || !/^\d+:\d+$/.test(before))) {
+            return reply.code(400).send({ error: "before must be an event id" });
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
@@ -1144,15 +1372,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             entry.path !== path ||
             entry.size !== size ||
             entry.mtimeMs !== mtimeMs ||
-            entry.limit !== limit
+            entry.limit !== limit ||
+            entry.before !== before
           ) {
             let result: StreamCacheEntry["result"];
             try {
-              result = readTranscript(path, limit, run.vendor);
+              result =
+                before === undefined
+                  ? readTranscript(path, limit, run.vendor)
+                  : readTranscript(path, limit, run.vendor, before);
             } catch {
               return missing();
             }
-            entry = { path, size, mtimeMs, limit, result };
+            entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
           return {
@@ -1160,6 +1392,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
             truncated: entry.result.truncated,
+            hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
           };
@@ -1330,22 +1563,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (operator pins)
       api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
 
-      const storedCommsMessage = (row: ReturnType<Store["commsMessage"]>) => {
+      const storedCommsMessage = (
+        row: ReturnType<Store["commsMessage"]>,
+        pins: ReadonlySet<string> = new Set(store.commsPins().map((pin) => pin.id)),
+      ) => {
         if (row === null) throw new Error("Unknown Comms message.");
         return {
           ...row,
           reactions: store.commsReactions(row.id),
-          pinned: store.commsPins().some((pin) => pin.id === row.id),
+          pinned: pins.has(row.id),
           operator: row.from === COMMS_CAPCOM,
         };
       };
-      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
-        rows.map((row) => storedCommsMessage(row));
+      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) => {
+        const pins = new Set(store.commsPins().map((pin) => pin.id));
+        return rows.map((row) => storedCommsMessage(row, pins));
+      };
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
       const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
-      const unreadAfter = (rows: ReturnType<Store["commsForCrew"]>, cursor: string | null) => {
-        const offset = cursor === null ? 0 : Number(cursor.slice("comms:".length));
-        return rows.filter((row) => Number(row.id.slice("comms:".length)) > offset).length;
+      /** `?limit=&before=` of a Comms read; null when either is malformed (the caller answers 400). */
+      const commsPaging = (query: {
+        limit?: unknown;
+        before?: unknown;
+      }): { limit: number; before: string | undefined } | null => {
+        const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
+        const { before } = query;
+        if (limit === null) return null;
+        if (
+          before !== undefined &&
+          (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
+        )
+          return null;
+        return { limit, before };
+      };
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
+      const commsScopePage = (
+        scope: CommsReadScope,
+        cursorKey: string,
+        paging: { limit: number; before: string | undefined },
+        countsOnly = false,
+      ) => {
+        const page = countsOnly
+          ? { rows: [], hasMore: false }
+          : store.commsPage(scope, paging.limit, paging.before);
+        const cursor = store.commsScopeCursor(cursorKey);
+        return {
+          messages: storedCommsMessages(page.rows),
+          hasMore: page.hasMore,
+          cursor,
+          unread: store.commsCounts(scope, cursor).unread,
+        };
       };
       const commsScope = (
         scope: string,
@@ -1370,47 +1638,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get("/comms/crew", () => {
-        const rows = store.commsForCrew();
-        const cursor = store.commsScopeCursor("crew");
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-      });
+      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+        "/comms/crew",
+        (req, reply) => {
+          const paging = commsPaging(req.query);
+          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+          return commsScopePage({ crew: true }, "crew", paging);
+        },
+      );
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get("/comms/flight", () => {
-        const flight = flightSeat(config)?.seat.id;
-        const rows = flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight);
-        const cursor = store.commsScopeCursor("flight");
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-      });
+      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+        "/comms/flight",
+        (req, reply) => {
+          const paging = commsPaging(req.query);
+          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+          const flight = flightSeat(config)?.seat.id;
+          if (flight === undefined)
+            return { messages: [], hasMore: false, cursor: null, unread: 0 };
+          return commsScopePage({ pair: [COMMS_CAPCOM, flight] }, "flight", paging);
+        },
+      );
       // Reader: apps/web/src/App.tsx#App (agent Comms)
-      api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
+      api.get<{
+        Params: { id: string };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+      }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
-        const rows = store.commsForAgent(id);
-        const inboxRows = store.commsInbox(id);
-        const messages = storedCommsMessages(rows);
-        const inbox = storedCommsMessages(inboxRows);
-        const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        const { summary } = req.query;
+        if (summary !== undefined && summary !== "1")
+          return reply.code(400).send({ error: "summary must be 1" });
+        // `?summary=1`: the conversation list and counts only, no messages (the nav rows' read).
+        const none = { rows: [], hasMore: false };
+        const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
+        const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
+        const inbox =
+          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+        // The conversation list: one line per contact, from counts, never their histories.
+        const contacts = store
+          .commsContactIds(id)
           .filter((contact) => contact !== id && contact !== COMMS_CREW)
           .map((contact) => {
-            const contactRows = store.commsForPair(id, contact);
-            const cursor = store.commsScopeCursor(pairScope(id, contact));
-            const contactMessages = storedCommsMessages(contactRows);
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
+            const last = store.commsPage(scope, 1).rows[0];
             return {
               id: contact,
-              lastMessage: contactMessages.at(-1) ?? null,
-              count: contactMessages.length,
-              unread: unreadAfter(contactRows, cursor),
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              unread: counts.unread,
             };
           });
         return {
-          messages,
-          inbox,
+          ...all,
+          inbox: storedCommsMessages(inbox.rows),
+          inboxHasMore: inbox.hasMore,
           contacts,
-          cursor: store.commsScopeCursor(`agent-all:${id}`),
-          unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
-          inboxCursor: store.commsScopeCursor(`inbox:${id}`),
-          inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
+          inboxCursor,
+          inboxUnread: store.commsCounts({ inbox: id }, inboxCursor).unread,
           // Needs you no longer counts direct-line replies; the thread does (#757)
           directUnread:
             id === COMMS_CAPCOM
@@ -1420,23 +1707,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
-      api.get<{ Params: { id: string; contact: string } }>(
-        "/comms/agents/:id/contacts/:contact",
-        (req, reply) => {
-          if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
-            return reply.code(404).send({ error: "unknown Comms agent" });
-          const rows = store.commsForPair(req.params.id, req.params.contact);
-          const cursor = store.commsScopeCursor(pairScope(req.params.id, req.params.contact));
-          return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-        },
-      );
+      api.get<{
+        Params: { id: string; contact: string };
+        Querystring: { limit?: unknown; before?: unknown };
+      }>("/comms/agents/:id/contacts/:contact", (req, reply) => {
+        if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
+          return reply.code(404).send({ error: "unknown Comms agent" });
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        return commsScopePage(
+          { pair: [req.params.id, req.params.contact] },
+          pairScope(req.params.id, req.params.contact),
+          paging,
+        );
+      });
       // Reader: apps/web/src/App.tsx#App (pair Comms)
-      api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
+      api.get<{
+        Params: { a: string; b: string };
+        Querystring: { limit?: unknown; before?: unknown };
+      }>("/comms/pairs/:a/:b", (req, reply) => {
         if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
           return reply.code(404).send({ error: "unknown Comms agent" });
-        const rows = store.commsForPair(req.params.a, req.params.b);
-        const cursor = store.commsScopeCursor(pairScope(req.params.a, req.params.b));
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        return commsScopePage(
+          { pair: [req.params.a, req.params.b] },
+          pairScope(req.params.a, req.params.b),
+          paging,
+        );
       });
       // Reader: apps/web/src/App.tsx#App (ticket Comms)
       api.get<{ Params: { ref: string }; Querystring: { ticket?: string } }>(
@@ -1508,6 +1806,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/comms/traffic", () => ({
         hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
       }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx#CommsGraph (per-seat Comms length p95)
+      api.get("/comms/metrics", (): CommsMetricsView => {
+        const to = now();
+        const from = to - 24 * 60 * 60 * 1000;
+        const lengths = new Map<string, number[]>();
+        for (const row of store.comms(from)) {
+          const values = lengths.get(row.from) ?? [];
+          values.push(Array.from(row.text).length);
+          lengths.set(row.from, values);
+        }
+        return {
+          from,
+          to,
+          p95BySeat: [...lengths]
+            .map(([seatId, values]) => ({ seatId, p95: percentile(values, 95), n: values.length }))
+            .sort((a, b) => a.seatId.localeCompare(b.seatId)),
+        };
+      });
       // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
       api.get("/comms/chatter", () => ({
         pairs: store.commsChatter(
@@ -1653,6 +1969,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const checks = deps.checks;
       const seatMode = deps.seatMode ?? (() => "read-only");
       const caller = (req: FastifyRequest) => tokens?.resolve(bearer(req)) ?? null;
+      // Stops blocked so far, by run and the report the loop last took in: a report starts afresh
+      const stopBlocks = new Map<string, number>();
+      // A seat that stops with its report missing and checklist items open is sent back to them,
+      // up to STOP_BLOCK_TRIES times; Codex seats have no Stop hook and keep the hub's resume.
+      const stopVerdict = (runId: string): string => {
+        const run = store.run(runId);
+        const loop = run?.loopKind;
+        if (run === null || loop == null || loop === "none" || loop === "watch") {
+          return GUARD_ALLOW_OUTPUT;
+        }
+        if (runReported(store, run, loop)) return GUARD_ALLOW_OUTPUT;
+        // a run in review, in CI, parked or done owes no work now: a budget or operator hold is not
+        // for the seat to push through, and its report would be refused
+        if (run.loop != null && run.loop.phase !== "working") return GUARD_ALLOW_OUTPUT;
+        // the seat asked a question and waits for the answer: that stop is not an early one
+        if (store.openQuestions().some((q) => q.runId === runId)) return GUARD_ALLOW_OUTPUT;
+        const open = (store.digest(runId)?.tasks ?? [])
+          .filter((t) => t.status !== "done")
+          .map((t) => t.text);
+        if (open.length === 0) return GUARD_ALLOW_OUTPUT;
+        const key = `${runId}:${store.latestEvidence(runId)?.id ?? 0}`;
+        const used = stopBlocks.get(key) ?? 0;
+        if (used >= STOP_BLOCK_TRIES) return GUARD_ALLOW_OUTPUT;
+        stopBlocks.set(key, used + 1);
+        return guardStopOutput(stopBlockReason(open));
+      };
       // Reader: apps/server/src/guard/hook.ts (the guard hook each seat's CLI runs before every tool call)
       api.post(
         GUARD_CHECK_ROUTE,
@@ -1672,6 +2014,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (who === null || seat === undefined) {
             return reply.code(401).send({ error: UNKNOWN_RUN });
           }
+          // a Stop names no tool: it is the seat ending a turn, and may carry it on
+          if (isStopEvent(req.body)) {
+            const stop = GuardStopBody.safeParse(req.body);
+            if (!stop.success) return reply.code(400).send({ error: zodError(stop.error) });
+            return reply.type("application/json").send(stopVerdict(who.runId));
+          }
           const body = GuardCheckBody.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           const key = { runId: who.runId, toolUseId: body.data.tool_use_id };
@@ -1682,6 +2030,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
+            // a read that failed gave the seat nothing to scroll back to
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
             return answer();
@@ -1695,6 +2045,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a large file this run already read whole, unchanged, is not given again
+          if (verdict.kind === "allow") {
+            const reread = rereadDenial(
+              store,
+              { ...key, agentId: body.data.agent_id ?? "" },
+              store.seatSession(who.seatId)?.worktree ?? undefined,
+              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              now(),
+            );
+            if (reread !== null) return answer(reread);
+          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
@@ -1706,14 +2067,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const check = await checks?.lockedBy(who.runId, command);
             if (check) verdict = { kind: "lock", command: check };
           }
-          if (
-            verdict.kind !== "deny" &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string"
-          ) {
-            await checks?.begin(key, command);
+          // the check's record starts when the call does: after any wait for the test lock
+          const startCheck = async () => {
+            if (body.data.tool_name !== "Bash" || typeof command !== "string") return;
+            await checks?.begin(key, command, [], {
+              background: body.data.tool_input?.run_in_background === true,
+              timeoutMs: body.data.tool_input?.timeout,
+            });
+          };
+          if (verdict.kind === "allow") {
+            await startCheck();
+            return answer();
           }
-          if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {
             store.addGuardHit({
               agentId: who.seatId,
@@ -1754,6 +2119,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               res.once("close", () => {
                 if (!delivered) lock.release(key);
               });
+              await startCheck();
               return answer();
             }
             // a grant that landed after the hang-up: nobody will run that call
@@ -1817,6 +2183,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
           const since = now() - days * DAY_MS;
           return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (escaped defects, review queue age, rework ratio and tests per PR, each with its definition)
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/qa/flow",
+        async (req, reply): Promise<QaFlowView | FastifyReply> => {
+          const days = qaDays(req.query.days, 30);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          const since = now() - days * DAY_MS;
+          return { days, since, metrics: QA_FLOW_METRICS, ...store.qaFlow(since) };
         },
       );
 
@@ -2281,10 +2658,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map",
-        async (req, reply): Promise<MapSnapshot | FastifyReply> => {
+      /** Answers a map route for a known repo with a readable checkout; 404 / 503 otherwise. */
+      const mapRoute =
+        <T>(
+          read: (
+            repo: (typeof config.repos)[number],
+            checkout: string,
+            req: FastifyRequest<{ Params: { repoId: string } }>,
+            reply: FastifyReply,
+          ) => Promise<T>,
+        ) =>
+        async (
+          req: FastifyRequest<{ Params: { repoId: string } }>,
+          reply: FastifyReply,
+        ): Promise<T | FastifyReply> => {
           const repo = config.repos.find((r) => r.id === req.params.repoId);
           if (!repo) return reply.code(404).send({ error: "unknown repo" });
           const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
@@ -2293,7 +2680,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            return await mapPayloadFor(repo, checkout, reply.log);
+            return await read(repo, checkout, req, reply);
           } catch (e) {
             reply.log.warn(
               { reason: e instanceof Error ? e.message : String(e) },
@@ -2301,7 +2688,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             return reply.code(503).send({ error: "map snapshot unavailable" });
           }
-        },
+        };
+
+      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map",
+        mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
+      );
+
+      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/tree",
+        mapRoute(async (repo, checkout, req, reply): Promise<MapTree | FastifyReply> => {
+          const { etag, tree } = await mapTreePayload(repo, checkout);
+          reply.header("etag", etag).header("cache-control", "no-cache");
+          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+          return tree;
+        }),
+      );
+
+      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/live",
+        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
       );
 
       // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
@@ -2342,19 +2751,130 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
-      api.get<{ Params: { repoId: string }; Querystring: { linked?: unknown } }>(
-        "/repos/:repoId/prs",
+      // A list is the open PRs plus those updated in the last PR_LIST_DAYS (`?days=N` reaches
+      // back further, `?all=1` is every one), each with its checks as name and state; `?detail=1`
+      // or the PR's own route carries the full row; `?shape=summary` is the list's own fields only (#1192).
+      api.get<{
+        Params: { repoId: string };
+        Querystring: {
+          linked?: unknown;
+          days?: unknown;
+          all?: unknown;
+          detail?: unknown;
+          shape?: unknown;
+        };
+      }>("/repos/:repoId/prs", async (req, reply) => {
+        const { linked, days, all, detail, shape } = req.query;
+        if (shape !== undefined && shape !== "summary") {
+          return reply.code(400).send({ error: "shape must be summary" });
+        }
+        if (linked !== undefined && linked !== "1") {
+          return reply.code(400).send({ error: "linked must be 1" });
+        }
+        if (all !== undefined && all !== "1") {
+          return reply.code(400).send({ error: "all must be 1" });
+        }
+        if (detail !== undefined && detail !== "1") {
+          return reply.code(400).send({ error: "detail must be 1" });
+        }
+        const window = parseLimit(days, PR_LIST_DAYS, PR_LIST_DAYS_MAX);
+        if (window === null) {
+          return reply.code(400).send({ error: `days must be an integer 1..${PR_LIST_DAYS_MAX}` });
+        }
+        const repo = config.repos.find((r) => r.id === req.params.repoId);
+        if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const listed = store.pullRequestsSince(
+          repo.id,
+          all === "1" ? null : now() - window * 86_400_000,
+        );
+        const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
+        const previewFor = (number: number) =>
+          repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
+        if (shape === "summary")
+          return prs.map((pr) => ({ ...prSummaryRow(pr), preview: previewFor(pr.number) }));
+        return detail === "1"
+          ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
+          : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
+      });
+      // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's full detail on demand)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/repos/:repoId/prs/:number",
         async (req, reply) => {
-          const { linked } = req.query;
-          if (linked !== undefined && linked !== "1") {
-            return reply.code(400).send({ error: "linked must be 1" });
-          }
           const repo = config.repos.find((r) => r.id === req.params.repoId);
           if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const prs = store.pullRequests(repo.id);
-          return linked === "1" ? prs.filter((p) => p.ticket !== null) : prs;
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return {
+            ...pr,
+            preview:
+              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+          };
         },
       );
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.get("/previews", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return deps.previews?.list() ?? [];
+      });
+
+      // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
+      api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
+        const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
+        const token = req.headers[PREVIEW_ACTIVITY_HEADER];
+        if (pr === 0 || typeof token !== "string" || !deps.previews?.activity(pr, token))
+          return reply.code(404).send({ error: "preview not found" });
+        return reply.code(204).send();
+      });
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.post("/previews", async (req, reply) => {
+        const parsed = PreviewBody.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send({ error: z.prettifyError(parsed.error) });
+        if (!deps.previews)
+          return reply.code(409).send({ error: "previews are unavailable on this server" });
+        const repo = config.repos.find((candidate) => candidate.id === deps.previewRepoId);
+        if (!repo)
+          return reply.code(409).send({ error: "previews run Mission Control branches only" });
+        const pr = store
+          .pullRequests(repo.id)
+          .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
+        if (!pr) return reply.code(404).send({ error: "open PR not found" });
+        const match = {
+          repo,
+          pr,
+          checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
+        };
+        if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
+        try {
+          return await deps.previews.start({
+            pr: match.pr.number,
+            branch: match.pr.branch,
+            checkout: match.checkout,
+          });
+        } catch (e) {
+          if (e instanceof PreviewHubError)
+            return reply.code(409).send({ error: e.message, code: e.code });
+          throw e;
+        }
+      });
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.delete<{ Params: { pr: string } }>("/previews/:pr", async (req, reply) => {
+        const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
+        if (pr === 0) return reply.code(404).send({ error: "preview not found" });
+        if (!deps.previews)
+          return reply.code(409).send({ error: "previews are unavailable on this server" });
+        if (!(await deps.previews.close(pr)))
+          return reply.code(404).send({ error: "preview not found" });
+        return reply.code(204).send();
+      });
 
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
@@ -2473,7 +2993,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       }
 
-      api.get("/health", async () => store.status());
+      api.get("/health", async () => {
+        const ticks = tickLogOf(store);
+        const recent = ticks.recent();
+        const last = recent.at(-1);
+        const running = ticks.running();
+        if (recent.length === 0 && running === null) return store.status();
+        return [
+          ...store.status(),
+          // the engine's recent tick durations; `error` names a tick still running past its interval
+          {
+            collector: TICKS_COLLECTOR,
+            ok: running === null || now() - running.startedAt < ENGINE_TICK_MS,
+            error: running === null ? null : overrunText(running.startedAt, running.steps),
+            at: last?.endedAt ?? 0,
+            lastOkAt: last?.endedAt ?? null,
+            ticks: recent,
+          },
+        ];
+      });
       // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
       api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
         const range = req.query.range ?? "30d";
@@ -2486,7 +3024,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
           ]),
         );
-        return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
+        return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
       });
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
@@ -3631,6 +4169,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,
+          prompt: store.promptWakes(run.id),
         };
         return view;
       });
@@ -3663,7 +4202,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/overview/timeline", async () => overviewTimeline(config, store, now()));
 
-      api.get("/crew", async (): Promise<Crew> => sharedCrew());
+      // `?shape=summary`: what the Overview reads, without each row's event timelines and whole
+      // digest (#1192); `/crew/:id` is one row in full, for the Agent page.
+      api.get<{ Querystring: { shape?: unknown } }>("/crew", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "summary")
+          return reply.code(400).send({ error: "shape must be summary" });
+        return shape === "summary" ? crewSummary(sharedCrewSummary()) : sharedCrew();
+      });
+      // Reader: docs/hud-response-budgets.md#crew (one crew row in full)
+      api.get<{ Params: { id: string } }>("/crew/:id", async (req, reply) => {
+        const row = sharedCrew().rows.find((r) => r.id === req.params.id);
+        return row ?? reply.code(404).send({ error: "unknown agent" });
+      });
 
       // The header's session filter: its repo, else every repo (the pipeline: the crew's repos).
       const viewScope = (selected: string | undefined) => {
@@ -3697,7 +4248,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       });
 
-      // The Update button. Texts are fixed; the commands' output goes to update.log only.
+      // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
+      // /update/log returns as raw output (paths and stderr included) with credentials redacted.
       const updater = deps.updater;
       const unavailableVersion: VersionInfo = {
         sha: "",
@@ -3725,30 +4277,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(500).send({ error: CHECK_FAILED });
         }
       });
-      api.post(
-        "/update",
-        {
-          // The exit is scheduled only once the 202 has gone out.
-          onResponse: async (_req, reply) => {
-            if (reply.statusCode === 202) updater?.restart();
-          },
-        },
-        async (req, reply) => {
-          const body = NoBody.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-          if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
-          try {
-            const out = await updater.update();
-            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
-            return "restarting" in out ? reply.code(202).send(out) : out;
-          } catch (e) {
-            captureError(reply, e);
-            if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
-            reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
-            return reply.code(500).send({ error: UPDATE_FAILED });
-          }
-        },
-      );
+      api.post("/update", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE, logged: false });
+        try {
+          const out = await updater.update();
+          if ("restarting" in out) updater.restart();
+          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          return "restarting" in out ? reply.code(202).send(out) : out;
+        } catch (e) {
+          captureError(reply, e);
+          // logged: update.log says why (the page opens it); false for a refusal before the log
+          if (e instanceof UpdateError)
+            return reply.code(e.status).send({ error: e.message, logged: e.logged });
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
+          return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        }
+      });
+      // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
+      api.get("/update/log", async (_req, reply) => {
+        try {
+          const log: UpdateLog = { text: updater ? await updater.log() : null };
+          return log;
+        } catch (e) {
+          // never the errno text or the path: the page says only that it could not be read
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update log read failed");
+          return reply.code(500).send({ error: UPDATE_LOG_UNREADABLE });
+        }
+      });
 
       api.get(
         "/attention",

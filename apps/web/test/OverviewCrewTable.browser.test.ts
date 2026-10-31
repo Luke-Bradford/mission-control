@@ -38,6 +38,7 @@ const crew: Crew = {
       hudState: "running",
     }),
     crewRow({
+      kind: "crew",
       id: "guido-2",
       ticket: null,
       ticketTitle: null,
@@ -45,15 +46,23 @@ const crew: Crew = {
       hudState: "idle",
       run: null,
     }),
-    crewRow({ id: "inco-1", ticketTitle: "Short", loop: loop("Editing"), hudState: "running" }),
-    // parked on RETRO's findings: the Loop cell offers the waiver beside its step bar
     crewRow({
+      kind: "crew",
+      id: "inco-1",
+      ticketTitle: "Short",
+      loop: loop("Editing"),
+      hudState: "running",
+    }),
+    // parked on RETRO's findings: the Work cell offers the waiver under its lines
+    crewRow({
+      kind: "crew",
       id: "retro-1",
       loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
       hudState: "parked",
     }),
     // a parked current run plus two parked set-aside runs: one menu lists all three waivers
     crewRow({
+      kind: "crew",
       id: "retro-2",
       loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
       hudState: "parked",
@@ -73,7 +82,7 @@ const api = {
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
-  "/api/crew": crew,
+  "/api/crew?shape=summary": crew,
   "/api/runs/r-12/loop": {
     loop: { phase: "parked", parked: PARK, pushFor: "c74cdfc0123456789", prNumber: null },
   },
@@ -95,7 +104,7 @@ const api = {
   "/api/config": CONFIG,
   "/api/test-lock": { holder: null, waiting: [] },
   "/api/crew/status": { enabled: true, note: null },
-  "/api/repos/shop-app/prs?linked=1": [],
+  "/api/repos/shop-app/prs?linked=1&shape=summary": [],
 };
 
 describeRendered("Overview Crew table with very long text, rendered", () => {

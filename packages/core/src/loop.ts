@@ -81,7 +81,7 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
 export function evidenceCanUnpark(
@@ -126,6 +126,8 @@ export const REFUSAL_TRIES = 3;
 export const CI_PENDING_MAX_MS = 30 * 60_000;
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
+/** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
+export const STUCK_PARK = "stuck";
 
 /** The engine reconciles every looped run this often. */
 export const ENGINE_TICK_MS = 60_000;
@@ -383,6 +385,13 @@ export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
 export const conflictText = (files: readonly string[]): string =>
   `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** The line a PR that conflicts with main sends its seat, keyed so it goes once per pushed sha. */
+export const mergeMainKey = (runId: string, sha: string): string => `merge-main:${runId}:${sha}`;
+export const MERGE_MAIN_TEXT =
+  "Your PR conflicts with main. Call mc sync_main to merge main into your branch, resolve any conflicts it names, then call mc commit and mc report_evidence.";
+/** A Comms pointer to a conflict list delivered directly to the author seat. */
+export const conflictCommsText = (files: readonly string[]): string =>
+  `Merging main conflicted in ${files.length} files; the list was sent to the seat.`;
 /** The Activity rows for merging main into a run's branch. */
 export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
@@ -468,6 +477,9 @@ export const asideEventText = (call: string): string =>
 /** A run in CI leaves its seat once its PR is open and its turn has ended. */
 export const asideInCiEventText = (call: string): string =>
   `in CI; ${call} is free for its next ticket`;
+/** A run still being built leaves its seat for rework due on another of the seat's PRs. */
+export const asideForReworkEventText = (call: string): string =>
+  `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -583,6 +595,8 @@ export interface LoopSnapshot {
   };
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
+  /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
+  reworkDue?: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
@@ -901,6 +915,32 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [],
     };
   }
+  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
+  // a conflict stop lifts the same way once the PR no longer conflicts
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === STUCK_PARK ||
+      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "ci",
+        parked: null,
+        pushStartedAt: now,
+        pushFor: headCommit,
+        unparkedAt: now,
+        transient: 0,
+        lastRefusal: null,
+      },
+      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
@@ -1016,7 +1056,7 @@ function stateStep(s: LoopSnapshot): Step {
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(
           loop,
-          "stuck",
+          STUCK_PARK,
           `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
         );
       }
@@ -1030,7 +1070,18 @@ function stateStep(s: LoopSnapshot): Step {
       if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
         return unchanged(loop);
       }
-      return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
+      // already on the seat, is the operator's
+      const key = mergeMainKey(s.runId, pushed.sha);
+      if (loop.mainMerge || key in s.claimed) {
+        return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      }
+      return {
+        loop: { ...loop, phase: "working", pendingLine: { key, text: MERGE_MAIN_TEXT } },
+        actions: [
+          { kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` },
+        ],
+      };
     }
     if (pr.ci === "passing") {
       const flaked = loop.rerun?.sha === pushed.sha;
@@ -1246,6 +1297,8 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.P !== null &&
     rv.cur !== null &&
     rv.blocked &&
+    // a blocking count with no stored text is never sent: the author would have nothing to fix
+    rv.R.findings.length > 0 &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
     fixesSent(s.claimed, s.runId, loop.epoch) + 1 < reviewRoundLimit(s, loop, rv.P)
   );
@@ -1282,6 +1335,26 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
     !owesReport({ ...s, loop })
+  );
+}
+
+/**
+ * Whether the run being built leaves its seat at this turn end because rework is due on another of
+ * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
+ */
+function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat } = s;
+  return (
+    s.reworkDue === true &&
+    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
+    s.pushed === null &&
+    loop.phase === "working" &&
+    !loop.aside &&
+    s.ended === null &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn &&
+    !seat.openQuestion
   );
 }
 
@@ -1514,7 +1587,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop)
+          : asideDue(s, loop) || displaceDue(s, loop)
             ? { kind: "set-aside" }
             : dueLine(s, loop);
     if (line !== null) actions.push(line);

@@ -1,0 +1,84 @@
+.prompt-cost {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* The bar: each section is a segment in its own colour, with a hairline between, and the legend names it. */
+.prompt-cost-bar {
+  display: flex;
+  height: var(--sp-4);
+  overflow: hidden;
+  border-radius: var(--r);
+  background: var(--line);
+}
+
+.prompt-cost-bar i {
+  display: block;
+  background: var(--section);
+  flex: none;
+  min-width: 0;
+  height: 100%;
+}
+
+.prompt-cost-bar i + i {
+  box-shadow: inset 1px 0 var(--surface);
+}
+
+.prompt-cost [data-section="role"] {
+  --section: var(--r1);
+}
+.prompt-cost [data-section="rules"] {
+  --section: var(--r2);
+}
+.prompt-cost [data-section="orders"] {
+  --section: var(--r3);
+}
+.prompt-cost [data-section="lessons"] {
+  --section: var(--r4);
+}
+.prompt-cost [data-section="ticket"] {
+  --section: var(--r5);
+}
+.prompt-cost [data-section="digest"] {
+  --section: var(--r6);
+}
+.prompt-cost [data-section="tool_results"] {
+  --section: var(--r7);
+}
+
+.prompt-cost-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prompt-cost-legend li {
+  display: grid;
+  grid-template-columns: var(--sp-3) minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.prompt-cost-swatch {
+  width: var(--sp-3);
+  height: var(--sp-3);
+  border-radius: var(--r-s);
+  background: var(--section);
+}
+
+.prompt-cost-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.prompt-cost-total {
+  margin: 0;
+}

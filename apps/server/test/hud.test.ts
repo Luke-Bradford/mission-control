@@ -1568,6 +1568,21 @@ describe("crew seats in the rows", () => {
         start({ phase: "review", aside: { ...aside, wake: true } });
         expect(waitOf(withCrew())).toBe("seat");
       });
+      it("seat: the text names the ticket the seat is on, while it is on one", () => {
+        start({ phase: "review", aside: { ...aside, wake: true } });
+        const textOf = () =>
+          crew(withCrew(), store, NOW).rows.find((r) => r.id === "GUIDO-1")?.loop?.waitText;
+        // the seat is free: nothing holds the rework up
+        store.setSeatSession(seat({ runId: null, state: "idle" }));
+        expect(textOf() ?? null).toBeNull();
+        store.upsertRun(crewRun({ id: "c2", ticket: "shop-app#12", startedAt: NOW - MIN }));
+        store.setSeatSession(seat({ runId: "c2" }));
+        const text = crew(withCrew(), store, NOW)
+          .rows.flatMap((r) => [r, ...(r.asideRuns ?? [])])
+          .map((r) => (r as { loop?: { waitText?: string | null } }).loop?.waitText)
+          .find((w) => w);
+        expect(text).toBe("rework waiting on GUIDO-1 (behind #12)");
+      });
       it("ci: the run is in CI", () => {
         start({ phase: "ci" });
         expect(waitOf(withCrew())).toBe("ci");

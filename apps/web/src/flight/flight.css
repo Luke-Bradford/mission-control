@@ -371,7 +371,7 @@
 button.flight-link {
   padding: var(--sp-1) var(--sp-1);
   color: var(--accent);
-  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -887,7 +887,7 @@ button.flight-link:hover {
   position: relative;
   padding: var(--sp-2) var(--sp-2);
   color: var(--fg-2);
-  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
   letter-spacing: 0.08em;
   text-decoration: none;
   text-transform: uppercase;
@@ -937,6 +937,11 @@ button.flight-link:hover {
 }
 
 .flight-note-heading h3 a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+  font-size: var(--fs-s);
   color: var(--fg);
   text-decoration: none;
 }
@@ -959,9 +964,11 @@ button.flight-link:hover {
 }
 
 .flight-markdown-source summary {
-  padding-top: var(--sp-1);
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--muted);
-  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1392,4 +1399,18 @@ button.flight-link:hover {
 /* An ask's Full brief toggle sits at the start of its row, not centred in the grid. */
 .drow .fullbrief {
   justify-self: start;
+}
+
+.flight-prompt-wakes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: var(--sp-4);
+  list-style: none;
+}
+
+.flight-prompt-wakes h3 {
+  margin: 0 0 var(--sp-2);
+  font-weight: 600;
 }

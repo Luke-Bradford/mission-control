@@ -4,8 +4,10 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
+import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
 import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
+import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -104,10 +106,12 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
+  loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
-  endedBy?: "operator" | "engine" | "exit" | null;
+  endedBy?: "operator" | "engine" | "superseded" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
   noReport?: NoReport | null;
 }
@@ -290,6 +294,8 @@ export interface RunLoopView {
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
+  /** What each prompt the run was sent took, by section, oldest first; empty before any was recorded. */
+  prompt?: PromptWakeCost[];
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
@@ -378,6 +384,13 @@ export interface BoardItem {
   subIssues: { done: number; total: number } | null;
   /** `ref` is `repo#number`; closed blockers are kept and flagged. */
   blockedBy: { ref: string; closed: boolean }[];
+  /**
+   * What the issue body says it waits on: issues on `Depends on` lines, PRs on `After PR` lines.
+   * Absent means none (a card stored before the field, or built by hand).
+   */
+  after?: { issues: number[]; prs: number[] };
+  /** What a `bug` card's body names (PRs, commits, files); absent when it names none. */
+  defectRefs?: DefectRefs;
   milestone: string | null;
   /** The project's single-select `Size` field; null when the project has none or the item has no value. */
   size: string | null;
@@ -405,12 +418,42 @@ export interface PrCheck {
   url: string | null;
 }
 
+/** A check as a PR list shows it: the name and state, not the run's ids and links. */
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+
+/** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
+export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
+
+/**
+ * A PR as `?shape=summary` sends it: what a list shows (number, title, state, head, checks rollup,
+ * review state), nothing that grows with the PR. The full row is the PR's own route.
+ */
+export type PullRequestSummary = Pick<
+  PullRequestView,
+  | "repoId"
+  | "number"
+  | "title"
+  | "url"
+  | "branch"
+  | "headSha"
+  | "ticket"
+  | "state"
+  | "isDraft"
+  | "review"
+  | "ci"
+  | "createdAt"
+  | "updatedAt"
+  | "mergedAt"
+>;
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
   title: string;
   url: string;
   branch: string;
+  /** The branch the PR merges into; another open PR's branch means it is stacked on that PR. Absent before it was read. */
+  base?: string | null;
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";
@@ -438,6 +481,10 @@ export interface PullRequestView {
   additions?: number | null;
   deletions?: number | null;
   changedFiles?: number | null;
+  /** The diff's first files as GitHub reads them; set by the poll, never served from the store. */
+  files?: PrFileInput[];
+  /** Bugs recorded against this PR as escaped defects; absent when none. */
+  escapedDefects?: { issueNumber: number; via: DefectVia; filedAt: number }[];
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -603,6 +650,11 @@ export interface RunDigest {
    * measured only when both timestamps exist.
    */
   speed?: { tokensPerSec: number | null; turnMs: number | null; firstTokenMs?: number | null };
+  /**
+   * Whole-file re-reads of a large unchanged file the guard refused this run, and the tokens that
+   * saved (the file's size at about 4 bytes a token). Absent when there are none.
+   */
+  rereads?: { count: number; tokensSaved: number };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
@@ -647,6 +699,8 @@ export interface AgentStream {
   events: StreamEvent[];
   /** The scan stopped at its byte cap before reaching `limit` events. */
   truncated: boolean;
+  /** Older events remain: ask again with `?before=` the first event's id. Absent when no read happened. */
+  hasMore?: boolean;
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
@@ -822,6 +876,8 @@ export interface HealthRow {
   lastOkAt: number | null;
   /** When its current run of failures began, UTC ms; null while it succeeds. */
   failingSince?: number | null;
+  /** The `engine:ticks` row only: the last engine ticks, oldest first. */
+  ticks?: EngineTick[];
 }
 
 /**
@@ -847,6 +903,8 @@ export interface CrewLoop {
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
+  /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
+  waitText?: string | null;
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */
@@ -968,6 +1026,31 @@ export interface CrewRow {
 export interface Crew {
   rows: CrewRow[];
   /** Earliest run start since local midnight (operator timezone) across loops, for the MET clock. */
+  firstRunToday: number | null;
+}
+
+/** The digest fields the Overview reads: activity, the tool in flight, context. */
+export type CrewSummaryDigest = Pick<
+  RunDigest,
+  | "lastEventAt"
+  | "minuteTokens"
+  | "liveTool"
+  | "lastText"
+  | "background"
+  | "contextTokens"
+  | "contextWindow"
+  | "compactions"
+>;
+
+/** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns"> & {
+  digest: CrewSummaryDigest | null;
+  asideRuns?: Omit<CrewAsideRun, "events">[];
+};
+
+/** `GET /api/crew?shape=summary`. */
+export interface CrewSummary {
+  rows: CrewSummaryRow[];
   firstRunToday: number | null;
 }
 
@@ -1215,6 +1298,11 @@ export interface VersionInfo {
   reason: string | null;
 }
 
+/** `GET /api/update/log`: the last update's commands and output; null before any update. */
+export interface UpdateLog {
+  text: string | null;
+}
+
 /** Provider CLI status in the same binding used by usage collection. */
 export interface CliAccountStatus {
   accountId: AccountId;
@@ -1344,4 +1432,13 @@ export interface AttentionHold {
   by: string;
   at: number;
   releasedAt?: number;
+}
+
+/** One finished engine tick, as `/api/health` serves it. */
+export interface EngineTick {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  /** The steps it was still on when it passed its interval; null for a tick that stayed within it. */
+  overranOn: string[] | null;
 }

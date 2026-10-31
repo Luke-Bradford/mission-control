@@ -17,12 +17,12 @@ function CrewProbe() {
 }
 
 const crewFetches = (fetch: ReturnType<typeof stubFetch>) =>
-  fetch.mock.calls.filter(([url]) => url === "/api/crew").length;
+  fetch.mock.calls.filter(([url]) => url === "/api/crew?shape=summary").length;
 
 describe("PauseButton", () => {
   it("shows the server's text for a 503, and refetches the crew", async () => {
     const fetch = stubFetch({
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "POST /api/agents/shop-app-ta/pause": () => ({
         status: 503,
         body: { error: "could not update pause state" },
@@ -45,7 +45,7 @@ describe("PauseButton", () => {
 
   it("shows the server's own text for a 409 (the preview guard), and refetches the crew", async () => {
     const fetch = stubFetch({
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "POST /api/agents/shop-app-ta/pause": () => ({
         status: 409,
         body: { error: "loop writes are disabled on this server" },
@@ -71,7 +71,7 @@ describe("PauseButton", () => {
     let calls = 0;
     const fetch = vi.fn(async (url: string) => {
       calls++;
-      if (url === "/api/crew") {
+      if (url === "/api/crew?shape=summary") {
         return new Response(JSON.stringify({ rows: [], firstRunToday: null }), { status: 200 });
       }
       throw new TypeError("network down");
@@ -87,7 +87,7 @@ describe("PauseButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "pause" }));
     expect(await screen.findByText("server unreachable")).toBeTruthy();
     await vi.waitFor(() =>
-      expect(fetch.mock.calls.filter(([u]) => u === "/api/crew").length).toBe(2),
+      expect(fetch.mock.calls.filter(([u]) => u === "/api/crew?shape=summary").length).toBe(2),
     );
   });
 

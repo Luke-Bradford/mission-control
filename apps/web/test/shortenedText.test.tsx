@@ -22,7 +22,7 @@ it("expands the complete multiline wake text", async () => {
   stubFetch({
     "/api/config": CONFIG,
     "/api/flight": { seat: { id: "flight" }, decisions: [] },
-    "/api/agents/flight/stream": {
+    "/api/agents/flight/stream?limit=20": {
       events: [{ id: "a", kind: "op", at: 1, text: `${MC_LINE_PREFIX} ${text}` }],
     },
   });
@@ -79,7 +79,7 @@ it("expands Activity text and preserves its inline formatting", async () => {
   const text = `${"Activity detail ".repeat(40)}**final words**`;
   stubFetch({
     "/api/config": CONFIG,
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/activity": [
       {
         at: 1,

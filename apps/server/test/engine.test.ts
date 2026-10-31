@@ -13,12 +13,12 @@ import {
   type BoardItem,
   CI_EXCERPT_MAX,
   CODEX_REVIEW_TOKEN_BUDGET,
+  COMMS_MESSAGE_MAX,
   COMMS_TEXT_MAX,
   CONTROLLER_CHECK_HEADING,
   CONTROLLER_CHECK_PARK,
   cleanupBranchNoteKey,
   closedIssueText,
-  commsCutMarker,
   conflictKey,
   controllerCheckFailText,
   controllerCheckParkText,
@@ -32,6 +32,8 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -131,6 +133,7 @@ import {
 import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -154,6 +157,7 @@ const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const SHA_C = "c".repeat(40);
+const SHA_D = "d".repeat(40);
 const MIN = 60_000;
 
 let dir: string;
@@ -288,6 +292,7 @@ interface Harness {
   excerpts: string[];
   moves: Move[];
   ended: string[];
+  endedReasons: Record<string, string | undefined>;
   taken: string[];
   /** Calls to the queue refill, and what it saw of `taken` each time (order checks). */
   refills: number[];
@@ -389,6 +394,7 @@ function harness(): Harness {
     excerpts: [],
     moves: [],
     ended: [],
+    endedReasons: {},
     taken: [],
     refills: [],
     listeners: new Set(),
@@ -620,11 +626,12 @@ function harness(): Harness {
             return store.seatSession(id);
           },
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
-          async endRunByEngine(runId) {
+          async endRunByEngine(runId, reason) {
             const r = store.run(runId);
             if (r === null || r.endedAt !== null || x.endBlocked) return;
             x.ended.push(runId);
-            store.setRunEnded(runId, clock, "ok", "engine");
+            x.endedReasons[runId] = reason;
+            store.setRunEnded(runId, clock, "ok", reason ?? "engine");
             if (store.seatSession(r.agentId)?.runId === runId) seatIdle(null, r.agentId);
           },
           async setAside(runId) {
@@ -785,52 +792,6 @@ afterEach(() => {
 });
 
 describe("idle-seat wakes", () => {
-  it("wakes once when failing findings arrived during the turn", async () => {
-    store.setSeatTurnStarted(SEAT, clock);
-    const id = store.requestReview({
-      authorRunId: RUN,
-      repoId: REPO,
-      seatId: RETRO,
-      prNumber: 12,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 2,
-      at: clock,
-    }) as number;
-    store.setReviewState(id, ["queued"], "running", { at: clock, runId: "retro-run" });
-    clock += 9 * MIN;
-    expect(
-      store.recordFindings(id, "retro-run", {
-        verdict: { spec: "fail", quality: "pass" },
-        summary: "broken",
-        findings: [
-          {
-            severity: "Important",
-            file: "apps/a.ts",
-            line: 1,
-            summary: "bad",
-            scenario: "breaks",
-            fix: "fix",
-          },
-        ],
-        at: clock,
-      }),
-    ).toBe(true);
-    expect(store.seatSession(SEAT)?.lastTurnStartedAt).toBe(START + 10 * MIN);
-    expect(store.reviewsOfRun(RUN)[0]?.endedAt).toBe(clock);
-    for (const listener of h.listeners)
-      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
-    await vi.waitFor(() =>
-      expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1),
-    );
-    expect(h.sent.at(-1)?.text).toContain("RETRO round 2 findings");
-    for (const listener of h.listeners)
-      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
-    await Promise.resolve();
-    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1);
-  });
-
   it("reminds once for a green head without evidence, then raises Needs-you", async () => {
     setLoop({
       phase: "working",
@@ -1256,7 +1217,7 @@ describe("CI and review", () => {
   });
 
   it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
-    "delivers a %i-character CI excerpt whole without parking and bounds only its stored copy",
+    "shortens a %i-character CI excerpt to the Comms limit without parking",
     async (length) => {
       await inCi();
       await failCi();
@@ -1265,12 +1226,9 @@ describe("CI and review", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
       const text = h.sent[0]?.text ?? "";
-      expect(text.endsWith(excerpt)).toBe(true);
-      expect(store.comms(0)[0]?.text).toBe(
-        text.length <= COMMS_TEXT_MAX
-          ? text
-          : `${text.slice(0, COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, text.length)}`,
-      );
+      expect(Array.from(text)).toHaveLength(COMMS_MESSAGE_MAX);
+      expect(text.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
+      expect(store.comms(0)[0]?.text).toBe(text);
       expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
@@ -1447,7 +1405,12 @@ describe("refusals", () => {
   });
 
   it("a push refused for its checks goes to the seat as a hand-off, once, and does not park the run", async () => {
-    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    const commands = Array.from({ length: 10 }, (_, i) => ({
+      command: `pnpm -s check-${i}-${"x".repeat(180)}`,
+      state: "missing" as const,
+    }));
+    const text = pushChecksText("a".repeat(40), commands);
+    expect(Array.from(text).length).toBeGreaterThan(COMMS_MESSAGE_MAX);
     h.pushResults = [
       { ok: false, text, transient: false },
       { ok: false, text, transient: false },
@@ -1459,7 +1422,10 @@ describe("refusals", () => {
     expect(loopOf().phase).not.toBe("parked");
     expect(loopOf().parked ?? null).toBeNull();
     expect(h.sent.filter((s) => s.text === text)).toHaveLength(1);
-    expect(store.comms(0).map((c) => c.text)).toEqual([text]);
+    expect(store.comms(0).map((c) => c.text)).toEqual([
+      "Push checks failed; the full command list was sent to the seat.",
+    ]);
+    expect(store.comms(0).every((c) => Array.from(c.text).length <= COMMS_MESSAGE_MAX)).toBe(true);
     expect(store.notes()).toEqual([]);
     expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
   });
@@ -1481,6 +1447,19 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
     expect(loopOf().parked?.reason).toContain(text);
+  });
+
+  it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
+    setPr({ ci: "passing", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "pending", headSha: SHA });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null, unparkedAt: clock });
   });
 
   describe("the note's text is written for the operator", () => {
@@ -2726,6 +2705,68 @@ describe("review round", () => {
     expect(loopOf()).toMatchObject({ phase: "ci", reportedEvidenceId: 1 });
   });
 
+  describe("tick diagnostics", () => {
+    it("records each tick's start, end and duration", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += 700;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      const startedAt = clock;
+      await h.engine.tick();
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        { startedAt, endedAt: startedAt + 700, durationMs: 700, overranOn: null },
+      ]);
+      expect(tickLogOf(store).running()).toBeNull();
+    });
+
+    it("logs a tick whose synchronous work starved the timer, naming that work", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += ENGINE_TICK_MS + 1;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      await h.engine.tick();
+      expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+        expect.stringContaining("on load notes"),
+      ]);
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        expect.objectContaining({ overranOn: ["load notes"] }),
+      ]);
+    });
+
+    it("finishes the tick it records when the tick throws", async () => {
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        throw new Error("db gone");
+      });
+      const before = tickLogOf(store).recent().length;
+      await expect(h.engine.tick()).rejects.toThrow("db gone");
+      expect(tickLogOf(store).running()).toBeNull();
+      expect(tickLogOf(store).recent()).toHaveLength(before + 1);
+    });
+
+    it("logs a tick still running past its interval once, with the run it is on", async () => {
+      report();
+      h.pushHang = true;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        void h.engine.tick();
+        await vi.advanceTimersByTimeAsync(ENGINE_TICK_MS - 1);
+        expect(h.logs.filter((l) => l.includes("still running"))).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(3 * ENGINE_TICK_MS);
+        const lines = h.logs.filter((l) => l.includes("still running"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(`reconcile ${REPO} ${RUN} `);
+        expect(tickLogOf(store).running()?.steps.join()).toContain(RUN);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("an ended run settles only when both the move and the note have landed", () => {
     const stop = () => {
       store.setRunEnded(RUN, clock, "ok", "operator");
@@ -2928,6 +2969,27 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("wakes an author idle after a failed review with the findings' text, not a bare notice", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    const id = first().id;
+    expect(
+      store.recordFindings(id, need(store.review(id)?.runId), {
+        verdict: { spec: "pass", quality: "fail" },
+        summary: "broken",
+        findings: [finding("Important")],
+        at: clock,
+      }),
+    ).toBe(true);
+    emit({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toEqual([]);
+    expect(h.sent[0]?.key).toMatch(/^fix:/);
+    expect(h.sent[0]?.text).toContain("a Important thing");
+  });
+
   it("does not make a HUD design check a readiness gate", async () => {
     h.gate = { ...need(h.gate), webChanged: true };
     await toReview();
@@ -3876,12 +3938,12 @@ describe("the engine runs reviews", () => {
         from: RETRO,
         to: SEAT,
         ticket: `${REPO}#7`,
-        text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
+        text: "RETRO-1 reviewed aaaaaaa: 1 Critical, 1 Important, 1 Minor.\nFindings are in RETRO-1's report_findings record; address Critical and Important findings, then report_evidence.",
       },
     ]);
   });
 
-  it("stores a long review hand-off whole without parking the author", async () => {
+  it("stores a concise review hand-off without parking the author", async () => {
     await toReview();
     const findings = Array.from({ length: 6 }, () => ({
       ...finding("Important"),
@@ -3890,10 +3952,10 @@ describe("the engine runs reviews", () => {
     reported(first().id, findings);
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     const text = need(h.sent[0]).text;
-    expect(text.length).toBeGreaterThan(CI_EXCERPT_MAX);
     expect(text.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
-    expect(FIX_TEXT_MAX).toBeLessThan(COMMS_TEXT_MAX);
-    expect(store.comms(0)[0]?.text).toBe(text);
+    expect(text).toContain("a Important thing");
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(store.comms(0)[0]?.text).toContain("6 Important");
     expect(loopOf().parked).toBeNull();
   });
 
@@ -4777,7 +4839,7 @@ describe("the engine runs reviews", () => {
         });
       });
 
-      it("a carried blocking review sends its findings in the fix line", async () => {
+      it("a carried blocking review sends its findings count in the fix line", async () => {
         h.busyList = [{ seatId: RETRO, state: "running" }];
         await toReview();
         await h.engine.reconcileRun(RUN);
@@ -4802,8 +4864,9 @@ describe("the engine runs reviews", () => {
       });
 
       it("a conflict is left for the seat, and the line goes once", async () => {
+        const files = Array.from({ length: 60 }, (_, i) => `apps/${"x".repeat(40)}-${i}.ts`);
         behindMain();
-        h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+        h.updateResults = [{ ok: true, kind: "conflict", files }];
         // a busy seat is offered the line again, and nothing is recorded until it goes through
         h.busy = true;
         await conflictingReview();
@@ -4816,11 +4879,11 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(sentKeys()).toContain(`conflict:${RUN}:${MAIN}`));
         expect(loopOf()).toMatchObject({
           phase: "working",
-          mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
+          mainMerge: { mainSha: MAIN, files },
         });
-        expect(loopTexts()).toContain(`merging main ${MAIN.slice(0, 7)} conflicted in 2 files`);
+        expect(loopTexts()).toContain(`merging main ${MAIN.slice(0, 7)} conflicted in 60 files`);
         expect(h.sent.find((s) => s.key.startsWith("conflict:"))?.text).toContain(
-          "conflicted in: apps/a.ts, apps/b.ts",
+          `conflicted in: ${files.join(", ")}`,
         );
         await h.engine.tick();
         expect(sentKeys().filter((k) => k.startsWith("conflict:"))).toHaveLength(1);
@@ -4831,9 +4894,12 @@ describe("the engine runs reviews", () => {
             from: "MC",
             to: SEAT,
             ticket: `${REPO}#7`,
-            text: expect.stringContaining("conflicted in: apps/a.ts, apps/b.ts"),
+            text: "Merging main conflicted in 60 files; the list was sent to the seat.",
           },
         ]);
+        expect(store.comms(0).every((c) => Array.from(c.text).length <= COMMS_MESSAGE_MAX)).toBe(
+          true,
+        );
       });
 
       it("a conflicting PR in ci is merged with main", async () => {
@@ -5074,7 +5140,23 @@ describe("the engine runs reviews", () => {
       },
     );
 
-    it("grants one capped rework per head and appends FLIGHT's fix list", async () => {
+    it("sends FLIGHT's own reason when the review holds no blocking finding text", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      draftWorkspace();
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Minor")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review round cap", ended: false },
+      });
+      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+      expect(h.sent.at(-1)?.text).toBe("FLIGHT requests rework: review round cap");
+      expect(h.sent.at(-1)?.text).not.toContain("found 0");
+    });
+
+    it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       await h.engine.reconcileRun(RUN);
@@ -5100,9 +5182,38 @@ describe("the engine runs reviews", () => {
         "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
       );
 
+      // further rounds are granted on the same head, up to the raised cap
+      for (let n = 2; n <= FLIGHT_REWORKS_PER_HEAD; n++) {
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf().flightReworks).toEqual({ [SHA]: n });
+      }
       setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
       expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
       expect(loopOf().parked).not.toBeNull();
+    });
+
+    const parkedForRework = async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
+    };
+
+    it("stops granting rework once the run has had its cap over all its heads", async () => {
+      await parkedForRework();
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "again", ended: false },
+        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: FLIGHT_REWORKS_PER_RUN - 6 },
+      });
+      const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        kinds: ["review"],
+        action: "rework",
+      });
+      expect(result).toEqual({ lifted: false, reason: "round-granted" });
     });
 
     it("lift verifies that the current head descends from the push", async () => {
@@ -5193,8 +5304,11 @@ describe("the engine runs reviews", () => {
 
       it("round already granted on this head", async () => {
         await parkedReview();
-        expect(await operate(RUN, "FLIGHT", { action: "rework" })).toBe(true);
-        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        setLoop({
+          phase: "parked",
+          parked: { kind: "review", reason: "again", ended: false },
+          flightReworks: { [SHA]: FLIGHT_REWORKS_PER_HEAD },
+        });
         expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
       });
 
@@ -5798,8 +5912,28 @@ describe("the engine runs reviews", () => {
     await h.engine.reconcileRun(RUN);
     expect(first().state).toBe("superseded");
     expect(h.ended).toContain(need(rv.runId));
+    expect(h.endedReasons[need(rv.runId)]).toBe("superseded");
     expect(loopTexts()).toContain(reviewDroppedText(SHA));
     expect(noteKeys()).toContain(`headmoved:${RUN}:${SHA_B}`);
+  });
+
+  it("a review run that ends after the PR head moved is superseded, not failed", async () => {
+    await toReview();
+    const one = first();
+    expect(one.state).toBe("running");
+    // let the pass that follows toReview settle, so the run's end is what superviseReviews sees first
+    await h.engine.tick();
+    await new Promise((r) => setTimeout(r, 20));
+    setPr({ ci: "passing", headSha: SHA_B });
+    store.setRunEnded(need(one.runId), clock, "failed", "exit");
+    seatIdle(null, RETRO);
+    emit({ kind: "idle", seatId: RETRO, runId: need(one.runId), resumed: false });
+    await vi.waitFor(() => expect(first().state).not.toBe("running"));
+    expect(first().state).toBe("superseded");
+    expect(loopTexts()).not.toContain(
+      reviewFailedText(CALL, SHA, "the review run ended (the process crashed)"),
+    );
+    expect(loopTexts()).toContain(reviewDroppedText(SHA));
   });
 
   it("the author's run ending supersedes the review and ends its run", async () => {
@@ -6097,6 +6231,8 @@ describe("the engine runs reviews", () => {
       const other = "guido-1:other";
       store.upsertRun(run({ id: other, seq: 2 }));
       seatIdle(other);
+      // mid-turn: a run between turns would give way to this rework at once
+      h.facts = { inTurn: true, resumedAt: clock, rateLimitedUntil: null };
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
       await h.engine.onOperatorMessage(RUN);
       await h.engine.reconcileRun(RUN);
@@ -6133,13 +6269,15 @@ describe("the engine runs reviews", () => {
       store.upsertRun(run({ id: other, seq: 2 }));
       seatIdle(other);
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
-      expect(await h.engine.controllerCheck(RUN, "fail", SHA, "swatch 3 is unreadable")).toEqual({
+      const detail = "x".repeat(1200);
+      expect(await h.engine.controllerCheck(RUN, "fail", SHA, detail)).toEqual({
         lifted: true,
       });
       expect(loopOf()).toMatchObject({ phase: "working", aside: { worktree: WT, wake: true } });
       expect(h.sent).toEqual([]);
       const note = store.comms(0, RUN).at(-1);
-      expect(note?.text).toBe(controllerCheckFailText(SHA, "swatch 3 is unreadable"));
+      expect(note?.text).toBe("Controller check failed; the full note was sent to the seat.");
+      expect(Array.from(note?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
       h.wakeError = null;
       h.asideOn = false;
       store.setRunEnded(other, clock, "ok", "operator");
@@ -6148,13 +6286,62 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(loopOf().aside).toBeNull());
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       // the woken run is sent the note, once; the inbox does not repeat it
-      const text = controllerCheckFailText(SHA, "swatch 3 is unreadable");
+      const text = controllerCheckFailText(SHA, detail);
       await vi.waitFor(() => expect(h.sent.at(-1)?.text).toBe(text));
       await h.engine.reconcileRun(RUN);
       expect(h.sent.filter((m) => m.text === text)).toHaveLength(1);
       expect(loopOf().pendingLine ?? null).toBeNull();
       const noted = store.commsInbox(SEAT).filter((m) => m.text === text);
       expect(noted.every((m) => store.commsInboxRead(SEAT, m.id))).toBe(true);
+    });
+
+    it("queues FLIGHT's rework for a run set aside while its seat is on another run", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      seats().push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      await setAside();
+      const other = "guido-1:other";
+      store.upsertRun(run({ id: other, seq: 2 }));
+      seatIdle(other);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "findings", ended: false } });
+      const detail = "x".repeat(2000);
+      expect(
+        await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework", note: detail }),
+      ).toBe(true);
+      // refused before; now queued: it waits in Comms and the aside flag wakes it later
+      const rework = () => h.sent.filter((l) => l.key.includes("flight-rework"));
+      expect(rework()).toEqual([]);
+      expect(loopOf()).toMatchObject({
+        phase: "working",
+        aside: { worktree: WT, wake: true },
+        pendingLine: { text: expect.stringContaining(`FLIGHT fix list: ${detail}`) },
+        flightReworks: { [SHA]: 1 },
+      });
+      expect(store.comms(0, RUN).at(-1)?.text).toBe(
+        "FLIGHT requested rework; the full request was sent to the seat.",
+      );
+      expect(Array.from(store.comms(0, RUN).at(-1)?.text ?? "").length).toBeLessThanOrEqual(
+        COMMS_MESSAGE_MAX,
+      );
+      // filed from FLIGHT's seat, not the controller's
+      expect(store.comms(0, RUN).at(-1)?.from).toBe("flight-1");
+      // the seat frees: the run is woken and sent the rework, once
+      h.wakeError = null;
+      h.asideOn = false;
+      store.setRunEnded(other, clock, "ok", "operator");
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+      emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
+      await vi.waitFor(() => expect(loopOf().aside).toBeNull());
+      await vi.waitFor(() => expect(rework()).toHaveLength(1));
+      expect(rework()[0]?.text).toContain(`FLIGHT fix list: ${detail}`);
     });
 
     it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {
@@ -6378,6 +6565,71 @@ describe("the engine runs reviews", () => {
       expect(asideRun()).toEqual({ worktree: WT, wake: false });
     });
 
+    /** A second ticket the seat is building (no PR yet), between turns. */
+    function building(id: string, issue: number, startedAt = START + MIN): void {
+      store.upsertRun(
+        run({
+          id,
+          startedAt,
+          seq: 2,
+          ticket: `${REPO}#${issue}`,
+          branch: `feature/${issue}-new`,
+          loop: { ...NEW_LOOP, phase: "working" },
+        }),
+      );
+      seatIdle(id);
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: join(dir, `wt-${id}`) });
+    }
+
+    it("findings on a set-aside PR set the ticket being built aside at its turn end, then wake the rework", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 7);
+      const takesBefore = h.taken.length;
+      // the seat is busy with b until b is set aside, as the real wake answers
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.asides).toContain(b));
+      await vi.waitFor(() => expect(store.run(b)?.loop?.aside).toMatchObject({ wake: true }));
+      h.wakeError = null;
+      await h.engine.reconcileRun(RUN);
+      // the rework is back on the seat first; the new ticket waits behind it
+      await vi.waitFor(() => expect(asideRun()).toBeNull());
+      expect(h.wakes.at(-1)).toBe(RUN);
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      expect(h.taken).toHaveLength(takesBefore);
+    });
+
+    it("the ticket being built is not set aside while its turn runs", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 7);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      h.facts = { inTurn: true, resumedAt: clock, rateLimitedUntil: null };
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(asideRun()?.wake).toBe(true));
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([RUN]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+    });
+
+    it("two set-aside reworks come back oldest first", async () => {
+      await setAside();
+      const younger = "guido-1:younger";
+      store.upsertRun(
+        run({
+          id: younger,
+          startedAt: START + MIN,
+          seq: 3,
+          ticket: `${REPO}#8`,
+          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/y", wake: true } },
+        }),
+      );
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+      expect(store.run(younger)?.loop?.aside?.wake).toBe(true);
+    });
+
     it("an older run already done does not hold up a younger rework", async () => {
       await setAside();
       store.upsertRun(
@@ -6445,6 +6697,32 @@ describe("the engine runs reviews", () => {
       expect(loopOf().aside).toBeNull();
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toEqual([SEAT]);
+    });
+
+    it("two reworks on one seat do not set each other aside at every turn end", async () => {
+      await inCi();
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+      // a younger run of the seat has findings waiting; the woken one's turn ends
+      store.upsertRun(
+        run({
+          id: "guido-1:younger",
+          startedAt: START + MIN,
+          seq: 3,
+          ticket: `${REPO}#8`,
+          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/y", wake: true } },
+        }),
+      );
+      h.facts = { inTurn: false, resumedAt: clock, rateLimitedUntil: null };
+      seatIdle(RUN);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(h.asides).toEqual([RUN]);
+      expect(h.wakes).toEqual([RUN]);
     });
   });
 });

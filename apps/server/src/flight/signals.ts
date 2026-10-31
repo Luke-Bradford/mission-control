@@ -1,14 +1,27 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  BLOCKING_SEVERITIES,
+  COMMS_CAPCOM,
+  FLIGHT_CHAIN_STALL_MS,
+  FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
+  FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_ITEM_RELAPSE_MS,
+  FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
+  FLIGHT_MERGE_STALL_MS,
+  FLIGHT_METRICS_DAY_MS,
+  FLIGHT_OLD_PARK_MS,
+  FLIGHT_PUSH_UNSEEN_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
+  FLIGHT_WAITS_SETTING,
   type FlightSignal,
   type FlightState,
   type FlightTriage,
+  FOR_THE_CONTROLLER,
   flakeNoteKey,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -18,9 +31,12 @@ import {
   noReportExitReason,
   type PullRequestView,
   parkedEventText,
+  STUCK_PARK,
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
+import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
+import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -41,7 +57,6 @@ interface RecordState {
     }
   >;
   flakes: Record<string, { key: string; at: number; evidence: string }>;
-  dependencies: Record<string, { open: string[]; at: number }>;
 }
 export interface MainCi {
   sha: string;
@@ -51,7 +66,20 @@ export interface MainCi {
   checks?: { name: string; url: string | null }[];
   episode?: string | null;
 }
-interface LoopHeartbeat {
+/** What a seat's `call_flight` kept, until a wake tells FLIGHT. */
+export interface SeatCall {
+  seat: string;
+  reason: string;
+  ref: string | null;
+  at: number;
+}
+/** What FLIGHT's `wait_on` kept: what it waits on, and when it looks again. */
+export interface FlightWait {
+  on: string;
+  until: number;
+  at: number;
+}
+export interface LoopHeartbeat {
   at: number;
   interval: number;
   completed: boolean;
@@ -72,7 +100,6 @@ function read(store: Store, repo: string, now: number): RecordState {
     triage: {},
     checks: {},
     flakes: {},
-    dependencies: {},
     ...stored<Partial<RecordState>>(store, `${FLIGHT_SIGNALS_SETTING}:${repo}`, {}),
   } as RecordState;
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
@@ -84,7 +111,7 @@ function read(store: Store, repo: string, now: number): RecordState {
     if (main?.ci === "failing" && (main.episode ?? main.sha) === entry.key) continue;
     if ((entry.lastSeen ?? entry.toldAt ?? entry.since) < cutoff) delete state.signals[key];
   }
-  for (const entries of [state.triage, state.checks, state.flakes, state.dependencies]) {
+  for (const entries of [state.triage, state.checks, state.flakes]) {
     for (const [key, entry] of Object.entries(entries)) if (entry.at < cutoff) delete entries[key];
   }
   return state;
@@ -99,7 +126,14 @@ const triageId = (t: Pick<FlightTriage, "ref" | "cause">): string => `${t.ref}:$
 
 function raiseSignal(state: RecordState, signal: FlightSignal, now: number): void {
   const id = signalId(signal);
-  const previous = state.signals[id];
+  const found = state.signals[id];
+  // an item that went away and came back is a new reason, not the one already told
+  const previous =
+    signal.kind === "item_stale" &&
+    found !== undefined &&
+    now - (found.lastSeen ?? found.since) > FLIGHT_ITEM_RELAPSE_MS
+      ? undefined
+      : found;
   state.signals[id] = {
     ...signal,
     since: previous?.since ?? signal.since,
@@ -234,6 +268,17 @@ function heartbeats(store: Store) {
   return cache;
 }
 
+/** What the engine's running tick is on, or the last tick that overran; for a silent engine's evidence. */
+function tickCause(store: Store): string {
+  const ticks = tickLogOf(store);
+  const running = ticks.running();
+  if (running !== null) return `; ${overrunText(running.startedAt, running.steps)}`;
+  const last = ticks.lastOverrun();
+  return last === null
+    ? ""
+    : `; its tick at ${new Date(last.startedAt).toISOString()} ran ${last.durationMs} ms, on ${last.overranOn?.join(", ") || "no step"}`;
+}
+
 /** A scheduled hub loop's first due time or last completion, and its interval. */
 export function flightLoopHeartbeat(
   store: Store,
@@ -259,6 +304,11 @@ export function flightSignals(i: {
   store: Store;
   session: CrewSessionConfig;
   seats: FlightState["seats"];
+  aside?: FlightState["aside"];
+  /** Items awaiting FLIGHT's triage, with when each arrived. */
+  triageItems?: { key: string; kind: string; at: number; text: string }[];
+  /** Open PRs whose run reported them ready to merge, with when it did. */
+  readyPrs?: { ref: string; pr: number; at: number }[];
   now: number;
 }): Pick<FlightState, "signals" | "triage"> {
   const { config, store, session, seats, now } = i;
@@ -301,16 +351,20 @@ export function flightSignals(i: {
     if (column === "Backlog" || column === "Refinement") {
       triage(ref, "new", now, `${ref} arrived in ${column}: ${card.title}`);
     }
-    const open = card.blockedBy.filter((d) => !d.closed).map((d) => d.ref);
-    const previous = state.dependencies[ref];
-    const resolved =
-      previous?.open.filter((dep) => card.blockedBy.some((d) => d.ref === dep && d.closed)) ?? [];
-    if (resolved.length > 0)
-      triage(ref, "dependency", now, `${ref}: dependencies resolved: ${resolved.join(", ")}`);
-    state.dependencies[ref] = { open, at: now };
+  }
+  // a wait that ended wakes FLIGHT once, naming what merged and the tickets it freed
+  const record = observeWaits(store, repo, now);
+  const verb = endedVerb(store, repo);
+  for (const line of releasedLines(
+    record.released.filter((r) => onBoard.has(r.ref)),
+    verb,
+  )) {
+    triage(line.ref, "dependency", line.at, line.text);
   }
 
   const parks = new Map<string, { at: number; evidence: string }[]>();
+  /** When each run last parked, for the park that has gone unsettled too long. */
+  const parkedAt = new Map<string, number>();
   const parkPrefix = parkedEventText("");
   for (const event of store.loopEvents(cutoff, repo)) {
     const planned = event.key === `${event.runId}:plan`;
@@ -320,6 +374,7 @@ export function flightSignals(i: {
     if (!run?.ticket || !onBoard.has(run.ticket)) continue;
     if (planned) triage(run.ticket, "plan", event.at, event.text);
     if (parked) {
+      parkedAt.set(event.runId, Math.max(parkedAt.get(event.runId) ?? 0, event.at));
       // a budget park names the tokens it used, which differs every time; group on the ceiling
       const reason = event.text
         .slice(parkPrefix.length)
@@ -449,6 +504,30 @@ export function flightSignals(i: {
       );
     }
   }
+  // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
+  // ended before FLIGHT heard of it is dropped, not told
+  const stalled = blockedWork(store, repo, now, (card) =>
+    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false),
+  ).filter((b) => b.waitedMin * 60_000 >= FLIGHT_CHAIN_STALL_MS);
+  for (const b of stalled) {
+    // a chain that is the tail of a longer one is told with the longer one
+    const tail = stalled.some(
+      (o) =>
+        o !== b && o.chain.length > b.chain.length && o.chain.join(">").endsWith(b.chain.join(">")),
+    );
+    if (tail) continue;
+    raise(
+      "chain_stalled",
+      b.chain.join(">"),
+      now - b.waitedMin * 60_000,
+      `${b.chain.join(" waits on ")} has stood still for ${b.waitedMin} min: ${b.ref} waits on ${b.waitsOn.join(", ")}`,
+    );
+  }
+  for (const [id, signal] of Object.entries(state.signals)) {
+    if (signal.kind === "chain_stalled" && signal.toldAt === null && !active.has(id)) {
+      delete state.signals[id];
+    }
+  }
   for (const seat of session.seats) {
     const row = store.seatSession(seat.id);
     if (seatDef(seat).loop === "watch" && row?.state === "error" && row.reason) {
@@ -457,7 +536,7 @@ export function flightSignals(i: {
     }
   }
   for (const run of store.runsOverlapping(cutoff, now + 1)) {
-    if (run.repoId !== repo || run.endedBy === "operator") continue;
+    if (run.repoId !== repo || run.endedBy === "operator" || run.endedBy === "superseded") continue;
     const seat = session.seats.find((s) => s.id === run.agentId);
     if (!seat) continue;
     const loop = seatDef(seat).loop;
@@ -490,6 +569,117 @@ export function flightSignals(i: {
         run.endedAt ?? store.seatSession(run.agentId)?.updatedAt ?? now,
         `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report${run.noReport ? `: ${noReportExitReason(run.noReport)}` : ""}`,
       );
+    else if (
+      loop === "build" &&
+      run.endedAt !== null &&
+      now - run.endedAt < FLIGHT_METRICS_DAY_MS &&
+      run.ticket != null &&
+      run.reviewId == null &&
+      run.loop?.phase !== "done" &&
+      run.loop?.prNumber == null &&
+      run.prs.length === 0 &&
+      !store.pullRequests(repo).some((p) => p.ticket === run.ticket && p.state !== "closed")
+    )
+      raise(
+        "run_no_pr",
+        run.id,
+        run.endedAt,
+        `${run.agentId} run ${run.id} (${run.ticket}) ended (${run.status}) at ${new Date(run.endedAt).toISOString()} with no PR`,
+      );
+  }
+
+  // a failed review that counts blocking findings but holds none is never sent to the author
+  for (const run of store.runsOverlapping(cutoff, now + 1)) {
+    if (run.repoId !== repo || run.endedAt !== null) continue;
+    const review = store
+      .reviewsOfRun(run.id)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    if (
+      review &&
+      review.blocking > 0 &&
+      !store.findingsOf(review.id).some((f) => BLOCKING_SEVERITIES.includes(f.severity))
+    )
+      raise(
+        "hub_error",
+        `findings:${run.id}:${review.id}`,
+        review.endedAt ?? now,
+        `${run.agentId} run ${run.id} (${run.ticket ?? "no ticket"}): review ${review.id} on ${review.sha.slice(0, 7)} counts ${review.blocking} blocking, but no finding text is stored, so the author was not woken for rework`,
+      );
+  }
+
+  for (const parkedRun of [
+    ...seats.flatMap((x) =>
+      x.runId !== null && x.parked !== null ? [{ id: x.runId, at: x.id }] : [],
+    ),
+    ...(i.aside ?? []).flatMap((x) => (x.parked === null ? [] : [{ id: x.runId, at: x.seat }])),
+  ]) {
+    const at = parkedAt.get(parkedRun.id);
+    if (at === undefined) continue;
+    const run = store.run(parkedRun.id);
+    if (run?.loop?.parked?.kind === STUCK_PARK) {
+      // the engine lifts this park the pass the PR shows the push; one still standing needs a decision
+      if (now - at >= FLIGHT_PUSH_UNSEEN_MS)
+        raise(
+          "push_unseen",
+          `${parkedRun.id}:${at}`,
+          at,
+          `${parkedRun.at} ${run.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run.loop.parked.reason}`,
+        );
+      continue;
+    }
+    if (now - at < FLIGHT_OLD_PARK_MS) continue;
+    raise(
+      "old_park",
+      `${parkedRun.id}:${at}`,
+      at,
+      `${parkedRun.at} ${run?.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run?.loop?.parked?.kind ?? "unknown"}, ${run?.loop?.parked?.reason ?? ""}`,
+    );
+  }
+  for (const pr of i.readyPrs ?? []) {
+    if (now - pr.at < FLIGHT_MERGE_STALL_MS) continue;
+    raise(
+      "merge_stalled",
+      `${pr.ref}:${pr.pr}:${pr.at}`,
+      pr.at,
+      `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
+    );
+  }
+  for (const item of i.triageItems ?? []) {
+    // a PR ready to merge has its own check, merge_stalled
+    if (now - item.at < FLIGHT_ITEM_STALE_MS || item.kind === "ready") continue;
+    raise(
+      "item_stale",
+      // an item's key ends in the time it was last raised, which a PR's update moves
+      item.key.replace(/:\d+$/, ""),
+      item.at,
+      `Needs-you item ${item.key} for FLIGHT since ${new Date(item.at).toISOString()}: ${item.text.slice(0, 200)}`,
+    );
+  }
+  const flightId = flightSeatId(config);
+  const answers = store
+    .comms(now - FLIGHT_HOUR_MS * 6)
+    .filter((m) => m.from === COMMS_CAPCOM && m.to === flightId)
+    .map((m) => m.at);
+  for (const d of store.flightDecisions(now - FLIGHT_HOUR_MS * 6, 200)) {
+    if (!d.about.includes(FOR_THE_CONTROLLER) && !d.decision.includes(FOR_THE_CONTROLLER)) continue;
+    if (now - d.at < FLIGHT_CONTROLLER_WAIT_MS || answers.some((at) => at > d.at)) continue;
+    raise(
+      "controller_unanswered",
+      // the request's own ref, when it has one, so a brief or wait on that ref handles it
+      `${d.ref ?? "controller"}:${d.id}`,
+      d.at,
+      `FLIGHT asked the controller at ${new Date(d.at).toISOString()} and has no answer: ${d.about.slice(0, 200)}`,
+    );
+  }
+  for (const [target, wait] of Object.entries(flightWaits(store))) {
+    if (wait.until > now) continue;
+    raise(
+      "wait_over",
+      `${target}:${wait.until}`,
+      wait.until,
+      `${target}: you waited on ${wait.on} until ${new Date(wait.until).toISOString()}; look again`,
+    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {
@@ -504,7 +694,7 @@ export function flightSignals(i: {
         "hub_error",
         `loop:${source}:${loop.at}`,
         loop.at,
-        `${source} ${loop.completed ? "last completed" : "first due"} ${new Date(loop.at).toISOString()}; silent for twice its ${loop.interval} ms interval`,
+        `${source} ${loop.completed ? "last completed" : "first due"} ${new Date(loop.at).toISOString()}; silent for twice its ${loop.interval} ms interval${source === "engine" ? tickCause(store) : ""}`,
       );
     }
   }
@@ -513,6 +703,8 @@ export function flightSignals(i: {
       if (
         signal.kind === "repeat_park" ||
         signal.kind === "flaky_test" ||
+        signal.kind === "run_no_pr" ||
+        signal.kind === "controller_unanswered" ||
         (signal.kind === "hub_error" && signal.key.startsWith("report:"))
       )
         signal.toldAt = now;
@@ -558,4 +750,45 @@ export function flightSignalHistory(
     lastSeen: signal.lastSeen ?? signal.since,
     told: toldAt !== null,
   }));
+}
+
+const flightSeatId = (config: CcConfig): string | null =>
+  config.crew?.sessions.flatMap((x) => x.seats).find((x) => seatDef(x).loop === "watch")?.id ??
+  null;
+
+/** The waits FLIGHT recorded with `wait_on`, by target. */
+export function flightWaits(store: Store): Record<string, FlightWait> {
+  return stored<Record<string, FlightWait>>(store, FLIGHT_WAITS_SETTING, {});
+}
+
+/** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
+export function recordFlightWait(store: Store, target: string, wait: FlightWait): void {
+  const waits = flightWaits(store);
+  waits[target] = wait;
+  for (const [key, w] of Object.entries(waits))
+    if (w.until < wait.at - FLIGHT_SIGNAL_KEEP_MS) delete waits[key];
+  store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
+}
+
+/**
+ * A seat's call to FLIGHT: kept as an untold `seat_call` signal, so the next wake lists it with the
+ * seat's reason. The same seat, ref and reason within the hour is one call.
+ */
+export function recordSeatCall(store: Store, repo: string, call: SeatCall): boolean {
+  const state = read(store, repo, call.at);
+  const evidence = `${call.seat} calls FLIGHT${call.ref === null ? "" : ` about ${call.ref}`}: ${call.reason}`;
+  // the same call still waiting to be told is one call; once told, a repeat is a new one
+  if (
+    Object.values(state.signals).some(
+      (x) => x.kind === "seat_call" && x.toldAt === null && x.evidence === evidence,
+    )
+  )
+    return false;
+  raiseSignal(
+    state,
+    { kind: "seat_call", key: `${call.seat}:${call.at}`, since: call.at, evidence },
+    call.at,
+  );
+  save(store, repo, state);
+  return true;
 }

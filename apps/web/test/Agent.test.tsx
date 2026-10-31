@@ -153,7 +153,7 @@ interface Data {
 function stub(d: Data = {}) {
   const rows = d.rows ?? [crewRow({ digest: digest(), contextWindow: 200_000 }), studio()];
   const routes: Record<string, unknown> = {
-    "/api/crew": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/attention": d.items ?? [],
     "/api/limits": d.limits ?? [limit5h()],
     "/api/config": CONFIG,
@@ -162,7 +162,12 @@ function stub(d: Data = {}) {
   for (const r of rows) {
     const enc = encodeURIComponent(r.id);
     const streamNow = d.streamNow;
-    routes[`/api/agents/${enc}/stream`] = streamNow
+    // The page's own row follows `rows`, which a test swaps as the seat changes.
+    routes[`/api/crew/${enc}`] = () => ({
+      status: 200,
+      body: rows.find((x) => x.id === r.id) ?? r,
+    });
+    routes[`/api/agents/${enc}/stream?limit=20`] = streamNow
       ? () => ({ status: 200, body: streamNow() })
       : (d.stream ?? STREAM);
     routes[`/api/agents/${enc}/runs?limit=50`] = d.runs ?? [
@@ -254,6 +259,21 @@ describe("Agent page: header before the timezone loads", () => {
   });
 });
 
+describe("Agent page: first load", () => {
+  it("lists the crew by summary and reads the shown seat's row and stream in the budgeted forms", async () => {
+    const f = stub();
+    render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const asked = f.mock.calls.map(([p]) => String(p));
+    expect(asked).toContain("/api/crew?shape=summary");
+    expect(asked).toContain("/api/crew/shop-app-ta");
+    expect(asked).toContain("/api/agents/shop-app-ta/stream?limit=20");
+    expect(asked).not.toContain("/api/crew");
+    // The page asks for no seat's full row but the one it shows.
+    expect(asked).not.toContain("/api/crew/studio");
+  });
+});
+
 describe("Agent page: static run rows", () => {
   it("does not re-render a completed row on a clock tick", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -338,7 +358,7 @@ describe("Agent page: what the seat is doing", () => {
         seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] }),
       ],
       extra: {
-        "/api/repos/shop-app/prs?linked=1": [
+        "/api/repos/shop-app/prs?linked=1&shape=summary": [
           prView({ number: 166, title: "Backfill the quote cache" }),
         ],
       },
@@ -472,7 +492,7 @@ describe("Agent page: what past runs were", () => {
       rows: [seatRow({ hudState: "idle" })],
       runs: [rv({ id: "r-5", seq: 5, branch: "feature/77-cache", ticket: null, prs: [] })],
       extra: {
-        "/api/repos/shop-app/prs?linked=1": [
+        "/api/repos/shop-app/prs?linked=1&shape=summary": [
           prView({ number: 77, branch: "feature/77-cache" }),
           prView({ number: 9, branch: "other" }),
         ],
@@ -482,6 +502,55 @@ describe("Agent page: what past runs were", () => {
     const chip = await within(container).findByRole("link", { name: "shop-app PR #77" });
     expect(chip.closest(".rref")?.getAttribute("title")).toBe("Cache quotes");
     expect(within(container).queryByRole("link", { name: "shop-app PR #9" })).toBeNull();
+  });
+
+  it("updates a run PR from Start preview to Preview when its PR row arrives", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    const runPr = {
+      repoId: "shop-app",
+      number: 77,
+      title: "Cache quotes",
+      url: "https://github.com/octo-org/shop-app/pull/77",
+      state: "open" as const,
+      ticket: null,
+    };
+    const view = render(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "shop-app PR #77" })).toBeTruthy();
+
+    view.rerender(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        previewPrs={[
+          {
+            ...prView({
+              number: 77,
+            }),
+            preview: {
+              pr: 77,
+              branch: "feature/77-cache",
+              port: 5175,
+              url: "http://127.0.0.1:5175",
+              startedAt: NOW,
+            },
+          } as ReturnType<typeof prView> & { preview: object },
+        ]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Open preview for PR #77" })).toBeTruthy();
   });
 });
 
@@ -870,6 +939,27 @@ describe("Agent page: header and tiles", () => {
     expect(now.textContent).not.toContain("Last");
   });
 
+  it("a parked loop's header status is one line, with the whole park text behind details", async () => {
+    const park = `RETRO-CX reviewed c74cdfc and found 1 issue to resolve. ${"Fix it, then explain. ".repeat(40)}`;
+    stub({
+      rows: [
+        crewRow({
+          hudState: "idle",
+          loop: { phase: "parked", text: `Blocked: ${park}`, prNumber: 77, parked: park },
+          digest: digest(),
+          contextWindow: 200_000,
+        }),
+      ],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
+    const line = $(container, "#ahead .doing") as HTMLElement;
+    expect(line.textContent).toContain("Parked · review findings on c74cdfc · 1 held");
+    expect(line.textContent).not.toContain("Fix it, then explain");
+    fireEvent.click(within(line).getByRole("button", { name: "details" }));
+    expect($(container, "#ahead .vdetail")?.textContent).toContain("Fix it, then explain");
+  });
+
   it("has no Pause (or any loop control) for a studio loop, only Pop out", async () => {
     stub();
     const { container } = render(<Agent id="studio-builder" />);
@@ -1044,6 +1134,31 @@ describe("Agent page: header and tiles", () => {
     );
     expect(ctx?.textContent).toContain("(phase 2) · 1 compaction");
     expect(ctx?.textContent).not.toContain("1 compactions");
+  });
+
+  it.each([
+    ["missing", undefined, null],
+    ["zero", { count: 0, tokensSaved: 0 }, null],
+    [
+      "few, under 1k tokens",
+      { count: 3, tokensSaved: 950 },
+      "Re-reads avoided: 3, about 1k tokens saved",
+    ],
+    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4k tokens saved"],
+    [
+      "many",
+      { count: 128, tokensSaved: 1_234_000 },
+      "Re-reads avoided: 128, about 1234k tokens saved",
+    ],
+  ])("context tile re-reads line: %s", async (_name, rereads, line) => {
+    stub({
+      rows: [crewRow({ digest: digest({ rereads }), contextWindow: 200_000 })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const ctx = tileOf(container, "Context");
+    if (line === null) expect(ctx?.textContent).not.toContain("Re-reads");
+    else expect(ctx?.textContent).toContain(line);
   });
 
   it("context tile shows — for compactions when there is no digest, not 0", async () => {
@@ -1473,7 +1588,7 @@ describe("Agent page: activity stream", () => {
       events: [tool("10:0", "Beta", NOW - 2 * MIN), tool("20:0", "Gamma", NOW - MIN)],
     };
     const before = fetch.mock.calls.length;
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
     await screen.findByText("Gamma");
     expect(open()).toEqual(["Beta"]);
@@ -1495,7 +1610,7 @@ describe("Agent page: activity stream", () => {
     (first.querySelector("details") as HTMLDetailsElement).open = true;
     current = { ...STREAM, runId: "r-13", events: [tool("0:0", "Omega", NOW)] };
     const before = fetch.mock.calls.length;
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
     await screen.findByText("Omega");
     const rows = container.querySelectorAll<HTMLElement>("#stream .ev");
@@ -1523,10 +1638,10 @@ describe("Agent page: activity stream", () => {
       },
     });
     const streamFetches = () =>
-      fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length;
+      fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream?limit=20").length;
     const refetch = async () => {
       const before = streamFetches();
-      act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+      act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
       await vi.waitFor(() => expect(streamFetches()).toBe(before + 1));
       await act(async () => {});
     };
@@ -1577,13 +1692,15 @@ describe("Agent page: activity stream", () => {
     });
     fireEvent.scroll(box); // at the bottom: the panel will follow a changed signature
     top = 790; // still within reach of the bottom, but not on it; no scroll event, so still "at bottom"
-    const before = fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length;
+    const before = fetch.mock.calls.filter(
+      ([u]) => u === "/api/agents/shop-app-ta/stream?limit=20",
+    ).length;
     current = { ...STREAM, events: [...STREAM.events] }; // a fresh object, the same content
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() =>
-      expect(fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length).toBe(
-        before + 1,
-      ),
+      expect(
+        fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream?limit=20").length,
+      ).toBe(before + 1),
     );
     await act(async () => {});
     expect(top).toBe(790);
@@ -2038,7 +2155,7 @@ describe("Agent page: loop steps", () => {
 
   describe("from the run's loop view", () => {
     const LOOP_ROUTE = "/api/runs/r-12/loop";
-    const PRS_ROUTE = "/api/repos/shop-app/prs?linked=1";
+    const PRS_ROUTE = "/api/repos/shop-app/prs?linked=1&shape=summary";
     const PUSH = "abc1234def5678";
     const triesAt = (
       step: LoopTry["step"],
@@ -2101,7 +2218,7 @@ describe("Agent page: loop steps", () => {
       await waitFor(() => expect(quiet.querySelector(".vsteps")).not.toBeNull());
     });
 
-    it("shows every step open: passed with outcome and time, current with tries, to come with its rule", async () => {
+    it("lists steps with time and tries; a step's tries open on click, a step to come has none", async () => {
       const tries = [
         triesAt("working", 1, "pass"),
         triesAt("ci", 1, "fail", { reason: "lint" }),
@@ -2109,34 +2226,36 @@ describe("Agent page: loop steps", () => {
       ];
       const panel = await openLoop(
         loopOf({ phase: "ci", text: "CI is running", prNumber: 77 }),
-        viewOf("ci", tries),
+        viewOf("ci", tries, { round: null }),
         { prs: [pr77({ ci: "pending" })] },
       );
-      await waitFor(() => expect(panel.querySelector(".vsteps .att")).not.toBeNull());
+      await waitFor(() => expect(panel.querySelector(".vsteps .vmeta")).not.toBeNull());
       const steps = [...panel.querySelectorAll<HTMLElement>(".vstep")];
       expect(steps.map((s) => $(s, ".vname")?.textContent)).toEqual([
         "Working",
-        "Checks×2",
+        "Checks2 tries",
         "In review",
         "Done",
       ]);
-      // a passed step: its try, outcome and duration, no click needed
+      // tries are folded until asked for
+      expect(panel.querySelector(".att")).toBeNull();
       const passed = steps[0] as HTMLElement;
       expect(passed.className).toContain("done");
+      fireEvent.click(within(passed).getByRole("button", { name: /Working/ }));
       expect($(passed, ".att")?.textContent).toContain("pass");
       expect($(passed, ".att")?.textContent).toContain("10m");
-      // the current step: live text, both tries, time in step
+      // the current step: live text, time in step, both tries once opened
       const current = steps[1] as HTMLElement;
       expect(current.getAttribute("aria-current")).toBe("step");
       expect(current.textContent).toContain("CI is running");
+      fireEvent.click(within(current).getByRole("button", { name: /Checks/ }));
       expect(current.querySelectorAll(".att")).toHaveLength(2);
       expect($(current, ".vmeta")?.textContent).toContain("13m");
-      expect(panel.querySelector("button[aria-expanded]")?.textContent).not.toBe("Checks");
-      // a step still to come: its rule, muted by the todo class
+      // a step still to come: muted, with no tries and nothing to open
       const future = steps[2] as HTMLElement;
       expect(future.className).toContain("todo");
-      expect($(future, ".vrule")?.textContent).toBeTruthy();
       expect(future.querySelector(".att")).toBeNull();
+      expect(future.querySelector("button")?.hasAttribute("disabled")).toBe(true);
     });
 
     it("review round 2 of 3", async () => {
@@ -2206,6 +2325,9 @@ describe("Agent page: loop steps", () => {
         const waive = await within(panel).findByRole("button", {
           name: "Waive findings on abc1234 and resume",
         });
+        // the findings sit behind "details", not in the panel by default
+        expect(panel.textContent).not.toContain("RETRO found a missing regression test");
+        fireEvent.click(within(panel).getByRole("button", { name: "details" }));
         expect(panel.textContent).toContain("RETRO found a missing regression test");
         expect(screen.getByRole("button", { name: "Send rework message" })).toBeTruthy();
         expect(screen.getByText(/does not waive them/)).toBeTruthy();
@@ -2284,7 +2406,7 @@ describe("Agent page: loop steps", () => {
     it("the loop's own counter", async () => {
       const panel = await open(loopOf({ phase: "ci", tries: { n: 2, max: 3 } }));
       const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
-      expect($(ci, ".titer")?.textContent).toBe("×2");
+      expect($(ci, ".titer")?.textContent).toBe("2 tries");
     });
 
     it("budget header", async () => {
@@ -2508,7 +2630,7 @@ describe("Agent page: loop steps", () => {
       loopOf({ phase: "parked", text: "Held: CI failed twice", parked: "CI failed twice" }),
     );
     const held = $(panel, ".vhold") as HTMLElement;
-    expect(held.textContent).toContain("Held: CI failed twice");
+    expect(held.textContent).toContain("parked: CI failed twice");
     expect(held.textContent).toContain("!");
     expect(panel.textContent).not.toContain("●");
     expect(panel.querySelectorAll(".vstep")).toHaveLength(4);
@@ -2586,8 +2708,8 @@ describe("Agent page: loop steps", () => {
       run: { ...live, id: runId },
     });
     const f = stub({ rows: [next], runs: [] });
-    act(() => hub.refetch("/api/crew"));
-    await settled(f, "/api/crew");
+    act(() => hub.refetchCrew(next.id));
+    await settled(f, `/api/crew/${next.id}`);
   };
   const title = (panel: HTMLElement) => within(panel).getByRole("heading").textContent;
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
@@ -3126,7 +3248,7 @@ describe("Agent page: header and tile mockup", () => {
     expect(rows[0]?.run).toBe(row.run);
     const posts = f.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts.map(([path]) => path)).toEqual(["/api/crew/sessions/s1/seats"]);
-    for (const path of ["/api/config", "/api/crew", "/api/crew/changes"]) {
+    for (const path of ["/api/config", "/api/crew?shape=summary", "/api/crew/changes"]) {
       expect(f.mock.calls.filter(([p]) => p === path).length).toBeGreaterThan(1);
     }
   });
@@ -3841,7 +3963,7 @@ it("refreshes a Codex plan from live stream tasks", async () => {
     { id: "1", text: "Check the catalogue", status: "done" },
     { id: "2", text: "Verify the form", status: "in_progress" },
   ];
-  act(() => hub.refetch("/api/agents/guido-1/stream"));
+  act(() => hub.refetch("/api/agents/guido-1/stream?limit=20"));
   expect(await screen.findByRole("button", { name: "Plan 1/2" })).toBeTruthy();
   expect(screen.getByText("Verify the form")).toBeTruthy();
 });

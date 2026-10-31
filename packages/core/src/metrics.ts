@@ -28,6 +28,11 @@ export type MetricUnit =
   | "hours"
   | "items"
   | "USD"
+  | "characters"
+  | "defects"
+  | "milliseconds"
+  | "rounds"
+  | "test files"
   | "quota percentage points per interval";
 
 export interface MetricDef {
@@ -166,6 +171,26 @@ export const TELEMETRY_METRICS = {
     from: "server",
   },
 } as const satisfies Readonly<Record<string, MetricDef>>;
+
+/** Range-scoped Comms figures, shared by the Comms page and the hub route. */
+export const COMMS_METRICS = {
+  messageLengthP95: {
+    label: "Message length p95",
+    window: "24h",
+    unit: "characters",
+    definition:
+      "The 95th-percentile message length for each sender over the shared 24-hour Comms range. Messages sent before the range are left out.",
+    source: "GET /api/comms/metrics (p95BySeat)",
+    from: "server",
+  },
+} as const satisfies Readonly<Record<string, MetricDef>>;
+
+export interface CommsMetricsView {
+  /** Matches the shared 24-hour Comms graph range. */
+  from: number;
+  to: number;
+  p95BySeat: { seatId: string; p95: number | null; n: number }[];
+}
 
 /** A figure's label with its window: "Merged · 24h". */
 export const metricLabel = (id: MetricId): string => `${METRICS[id].label} · ${METRICS[id].window}`;

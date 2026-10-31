@@ -34,6 +34,7 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
@@ -173,6 +174,36 @@ function readStop(store: Store, loopId: string): DriverStop | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What turns a row's state with no run behind it: each loop's collector status and note, pause
+ * flag, driver stop and newest run, the escalations, and each crew seat's session. Two equal signals mean no
+ * such input changed between them. Reads what `loopViews` reads.
+ */
+export function stateInputs(config: CcConfig, store: Store): string {
+  const status = new Map(store.status().map((s) => [s.collector, s]));
+  const agents = configuredAgents(config);
+  const seats = store.seatSessions(agents.filter((a) => a.kind === "crew").map((a) => a.id));
+  return JSON.stringify([
+    agents.map((agent) => {
+      if (agent.kind === "crew") {
+        const s = seats.get(agent.id);
+        return [s?.state, s?.reason, s?.runId, s?.updatedAt, s?.errorSince];
+      }
+      const loop = agent.loop;
+      return [
+        status.get(collectorName(loop.kind, loop.id))?.ok,
+        status.get(collectorName(loop.kind, loop.id))?.error,
+        status.get(noteCollectorName(loop.kind, loop.id))?.error,
+        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
+        // a late line can turn the newest ended run blocked
+        store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
+      ];
+    }),
+    store.escalations().map((e) => [e.repoId, e.source, e.id]),
+  ]);
 }
 
 function loopViews(
@@ -371,6 +402,16 @@ export function runWait(
   return null;
 }
 
+/** What a rework due on a seat that is on another ticket reads: null when nothing holds it up. */
+function reworkWaitText(store: Store, run: Run): string | null {
+  const holder = store.seatSession(run.agentId)?.runId ?? null;
+  if (holder === null || holder === run.id) return null;
+  const held = store.run(holder);
+  if (held === null || held.endedAt !== null || held.ticket === null) return null;
+  const issue = held.ticket.slice(held.ticket.lastIndexOf("#"));
+  return `rework waiting on ${seatCallSign(run.agentId)} (behind ${issue})`;
+}
+
 /** The current step's try and its limit, else null. */
 function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewLoop["tries"] {
   if (loop.phase === "ci")
@@ -481,12 +522,14 @@ export function crew(
   lock: TestLockState = NO_LOCK,
   /** The CLI version; tests pass a stub. */
   cliVersion: () => string | null = claudeVersion,
+  /** The Overview's rows: no event timelines are built, current or set-aside (see `crewSummary`). */
+  summary = false,
 ): Crew {
   const { value, ...basis } = memoised(
     store,
     now,
-    ["crew", config, lock, identityOf(cliVersion)],
-    () => buildCrew(config, store, now, lock, cliVersion),
+    ["crew", config, lock, identityOf(cliVersion), summary],
+    () => buildCrew(config, store, now, lock, cliVersion, summary),
   );
   rowOrigins.set(value.rows, basis);
   return value;
@@ -498,6 +541,7 @@ function buildCrew(
   now: number,
   lock: TestLockState,
   cliVersion: () => string | null,
+  summary: boolean,
 ): Crew {
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
@@ -535,26 +579,28 @@ function buildCrew(
   const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
-  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null =>
-    run.loop
-      ? {
-          phase: run.loop.phase,
-          text: loopText(ticket, run.loop),
-          prNumber: run.loop.prNumber,
-          parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
-          tries: runTries(store, run, run.loop),
-          wait: runWait(config, store, run, run.loop, lock),
-          ...(run.profile
-            ? {
-                profile: run.profile.profile.name,
-                step: profileStep(run.profile.profile, run.loop.phase),
-                steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
-                planned: store.planLanded(run),
-              }
-            : {}),
-        }
-      : null;
-  const eventIndex = runEventsIndex(store, now);
+  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null => {
+    if (!run.loop) return null;
+    const wait = runWait(config, store, run, run.loop, lock);
+    return {
+      phase: run.loop.phase,
+      text: loopText(ticket, run.loop),
+      prNumber: run.loop.prNumber,
+      parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+      tries: runTries(store, run, run.loop),
+      wait,
+      ...(wait === "seat" ? { waitText: reworkWaitText(store, run) } : {}),
+      ...(run.profile
+        ? {
+            profile: run.profile.profile.name,
+            step: profileStep(run.profile.profile, run.loop.phase),
+            steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
+            planned: store.planLanded(run),
+          }
+        : {}),
+    };
+  };
+  const eventIndex = summary ? null : runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
   const rows = loopViews(config, store, now, lock, runsByAgent, seatRows, digestByRun).map(
@@ -611,7 +657,9 @@ function buildCrew(
         repoId: agent.repoId,
         index,
         hudState: state,
-        events: latest ? runEvents(store, latest, now, eventIndex) : [],
+        ...(eventIndex === null
+          ? {}
+          : { events: latest ? runEvents(store, latest, now, eventIndex) : [] }),
         stateSince,
         accountId: view.accountId,
         kind: view.kind,
@@ -658,7 +706,9 @@ function buildCrew(
                     ? [
                         {
                           runId: r.id,
-                          events: runEvents(store, r, now, eventIndex),
+                          ...(eventIndex === null
+                            ? {}
+                            : { events: runEvents(store, r, now, eventIndex) }),
                           stateSince:
                             store.loopEventsOfRun(r.id).at(-1)?.at ?? r.endedAt ?? r.startedAt,
                           ticket: t,
@@ -931,7 +981,8 @@ export function attentionItems(
   hubLogin: string | null = null,
   includeHeld = false,
 ): AttentionItem[] {
-  const given = rows ?? crew(config, store, now, lock).rows;
+  // no caller's rows: the summary crew, since attention never reads the event timelines
+  const given = rows ?? crew(config, store, now, lock, undefined, true).rows;
   const origin = rowOrigins.get(given);
   return memoised(
     store,
@@ -1229,6 +1280,8 @@ function buildAttentionItems(
         : missed(item, triageDueAt);
     }
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
+    // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
+    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
