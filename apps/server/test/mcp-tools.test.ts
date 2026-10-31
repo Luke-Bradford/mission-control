@@ -5882,6 +5882,28 @@ describe("preview_browser", () => {
     expect(store.reviewShots(reviewId)).toEqual([]);
   });
 
+  it("answers before a Codex tool timeout while the preview is still building", async () => {
+    vi.useFakeTimers();
+    try {
+      const ts = make({
+        config: cfg,
+        previewBrowser: {
+          ready: () => new Promise(() => {}),
+          browse: browse as never,
+          saveShot: () => "a".repeat(32),
+        },
+      });
+      const pending = tool(MC_TOOL_NAMES.previewBrowser, ts).call(ctx, { path: "/" });
+      await vi.advanceTimersByTimeAsync(40_000);
+      const r = await pending;
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("still building");
+      expect(browse).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says there is no preview for a review without one", async () => {
     const r = await call({ path: "/" }, null);
     expect(r.isError).toBe(true);

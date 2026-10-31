@@ -1405,7 +1405,7 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   when the run ends (a preview the operator started for that PR is used and left running). If the
   preview cannot start (capacity, the two-preview limit, a failed build), `preview_browser` says
   so and RETRO notes the live-data check was not run. RETRO's
-  `preview_browser` tool waits for it (up to 5 minutes), opens a page, sets the width (320..3840) and theme, and runs up to
+  `preview_browser` tool waits up to 40 s for a building preview, then answers "still building" so RETRO calls again (Codex ends a tool call at 60 s); once it is up the tool opens a page, sets the width (320..3840) and theme, and runs up to
   20 steps (click, type, read, measure, screenshot). Chrome runs behind a proxy that reaches only
   the preview's `host:port`; every other request, the operator-token bootstrap and the live
   stream included, is refused. Each call starts on a fresh page. A screenshot is kept in

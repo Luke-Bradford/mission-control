@@ -194,6 +194,7 @@ import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
 import { runPathGrants } from "../path-grants.ts";
 import {
+  PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
   PREVIEW_STEPS_MAX,
   PREVIEW_THEMES,
@@ -1608,7 +1609,26 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (review === null || review.runId !== live.run.id || review.state !== "running")
       return { text: FINDINGS_NOT_A_REVIEW, isError: true };
     const browser = deps.previewBrowser;
-    const preview = browser === undefined ? null : await browser.ready(ctx.runId);
+    let preview: Awaited<ReturnType<NonNullable<typeof browser>["ready"]>> | "building" | null =
+      null;
+    if (browser !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        preview = await Promise.race([
+          browser.ready(ctx.runId),
+          new Promise<"building">((resolve) => {
+            timer = setTimeout(() => resolve("building"), PREVIEW_READY_WAIT_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (preview === "building")
+      return {
+        text: "The preview is still building. Call mc preview_browser again in a minute; a build can take up to 5 minutes.",
+        isError: true,
+      };
     const origin = preview?.origin ?? null;
     if (browser === undefined || origin === null)
       return {

@@ -11,6 +11,8 @@ import { type HudProxy, startHudProxy } from "./flight/hud-proxy.ts";
 
 export const PREVIEW_DEADLINE_MS = 60_000;
 export const PREVIEW_CLOSE_MS = 1_000;
+/** How long a call waits for a building preview; Codex ends a tool call at 60 s, so it answers before that. */
+export const PREVIEW_READY_WAIT_MS = 40_000;
 export const PREVIEW_WIDTH_MIN = 320;
 export const PREVIEW_WIDTH_MAX = 3840;
 export const PREVIEW_HEIGHT = 900;
