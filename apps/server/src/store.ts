@@ -99,6 +99,7 @@ import {
   type PrFileInput,
   type ProfileOverride,
   type PrTestsView,
+  type PrTitle,
   type PullRequestView,
   prCarries,
   QA_RETENTION_DAYS,
@@ -3637,6 +3638,17 @@ export class Store {
       out.push(toFlightDecision(r));
     }
     return out.sort((a, b) => b.at - a.at || b.id - a.id).slice(0, limit);
+  }
+
+  /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
+  pullRequestTitles(repoId: RepoId, numbers: readonly number[]): PrTitle[] {
+    if (numbers.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT number, title FROM pull_requests WHERE repo_id = ? AND number IN (${numbers.map(() => "?").join(", ")}) ORDER BY number ASC`,
+      )
+      .all(repoId, ...numbers) as { number: number; title: string }[];
+    return rows.map((r) => ({ number: r.number, title: r.title }));
   }
 
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
