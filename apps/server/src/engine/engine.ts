@@ -124,6 +124,7 @@ import {
   reviewStatusOf,
   reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
+  STUCK_PARK,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
   seatDef,
@@ -3130,23 +3131,29 @@ export function createEngine(deps: EngineDeps): Engine {
         if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
           return refused("its repo is a draft workspace");
         }
-        const parkedOnConflict =
-          loop.phase === "parked" && loop.parked?.kind === "conflict" && !loop.parked.ended;
-        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict) {
-          return refused("the run is not in CI or review, or parked on a conflict");
+        const parkedOn = (kind: string) =>
+          loop.phase === "parked" && loop.parked?.kind === kind && !loop.parked.ended;
+        const parkedOnConflict = parkedOn("conflict");
+        // a push or PR GitHub does not show: the merge is the new push, so the old one need not match
+        const parkedStuck = parkedOn(STUCK_PARK);
+        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict && !parkedStuck) {
+          return refused("the run is not in CI or review, or parked on a conflict or a stuck push");
         }
         if (loop.mainMerge) return refused("a merge of main already waits on the seat");
+        const newest = store.newestRunCommit(run.id)?.sha;
         const pushed = store.runPush(run.id);
-        if (pushed === null || store.newestRunCommit(run.id)?.sha !== pushed.sha) {
+        if (!parkedStuck && (pushed === null || newest !== pushed.sha)) {
           return refused("the branch has unpushed commits");
         }
+        const tip = parkedStuck ? (newest ?? pushed?.sha) : pushed?.sha;
+        if (tip === undefined) return refused("the branch has no recorded commit");
         const worktree = worktreeOf(run, loop);
         if (worktree === null) return refused("the run has no worktree");
         const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
         if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
           return refused("its seat is in a turn");
         }
-        const g = await publisher.gateFacts(run, pushed.sha, null);
+        const g = await publisher.gateFacts(run, tip, null);
         if (!g.ok) return refused(g.text);
         const mainSha = g.facts.mainSha;
         if (g.facts.containsMain) return { kind: "current", mainSha };
@@ -3155,7 +3162,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
         if (!r.ok) return refused(r.text);
         if (r.kind === "wait") return refused("the worktree has uncommitted changes");
-        if (parkedOnConflict) {
+        if (parkedOnConflict || parkedStuck) {
           cur.epoch += 1;
           cur.parked = null;
           cur.unparkedAt = at;
