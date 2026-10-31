@@ -92,7 +92,14 @@ import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
 import { followPrs } from "./github-board.ts";
-import { attentionItems, crew, flightNotTriagingDueAt, forgetViews, NO_LOCK } from "./hud.ts";
+import {
+  attentionItems,
+  crew,
+  flightNotTriagingDueAt,
+  forgetViews,
+  NO_LOCK,
+  stateInputs,
+} from "./hud.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
@@ -583,13 +590,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
+  let lastInputs: string | null = null;
   const afterLoopTick = () => {
+    const inputs = noViewClients() ? stateInputs(config, store) : null;
     const quiet =
-      noViewClients() &&
+      inputs !== null &&
+      inputs === lastInputs &&
       !store.hasActiveRun() &&
       [...lastStates.values()].every((s) => s === "idle" || s === "stopped");
     // nothing can change state: no crew read
     if (quiet) return sweepAcks();
+    lastInputs = inputs;
     const at = now();
     // with no browser the rows are the summary: state changes need no event timelines
     const lock = deps.lockState?.() ?? NO_LOCK;

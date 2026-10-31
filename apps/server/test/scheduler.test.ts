@@ -18,7 +18,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { holdItem, holds } from "../src/attention-holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
-import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
+import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
 import {
@@ -845,6 +845,28 @@ describe("scheduler", () => {
           const calls = vi.mocked(hud.crew).mock.calls.slice(before);
           expect(calls.length).toBeGreaterThan(0);
           expect(calls.every((call) => call[5] === true)).toBe(true);
+        });
+
+        it("records a loop's error while no browser is connected and no run is open", async () => {
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          expect(store.agentEvents(0)).toEqual([]);
+          const quietCalls = vi.mocked(hud.crew).mock.calls.length;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(quietCalls);
+          store.setStatus(collectorName("ta-loop", "shop-app-ta"), false, "boom");
+          states["shop-app-ta"] = "error";
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(store.agentEvents(0).filter((e) => e.to === "error")).toHaveLength(1);
         });
 
         it("ignores topics other than agents", async () => {

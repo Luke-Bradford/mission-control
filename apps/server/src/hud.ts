@@ -176,6 +176,34 @@ function readStop(store: Store, loopId: string): DriverStop | null {
   }
 }
 
+/**
+ * What turns a row's state with no run behind it: each loop's collector status and note, pause
+ * flag and driver stop, the escalations, and each crew seat's session. Two equal signals mean no
+ * such input changed between them. Reads what `loopViews` reads.
+ */
+export function stateInputs(config: CcConfig, store: Store): string {
+  const status = new Map(store.status().map((s) => [s.collector, s]));
+  const agents = configuredAgents(config);
+  const seats = store.seatSessions(agents.filter((a) => a.kind === "crew").map((a) => a.id));
+  return JSON.stringify([
+    agents.map((agent) => {
+      if (agent.kind === "crew") {
+        const s = seats.get(agent.id);
+        return [s?.state, s?.reason, s?.runId, s?.updatedAt, s?.errorSince];
+      }
+      const loop = agent.loop;
+      return [
+        status.get(collectorName(loop.kind, loop.id))?.ok,
+        status.get(collectorName(loop.kind, loop.id))?.error,
+        status.get(noteCollectorName(loop.kind, loop.id))?.error,
+        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
+      ];
+    }),
+    store.escalations().map((e) => [e.repoId, e.source, e.id]),
+  ]);
+}
+
 function loopViews(
   config: CcConfig,
   store: Store,
