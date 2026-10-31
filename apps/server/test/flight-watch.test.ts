@@ -3802,6 +3802,36 @@ describe("ops review regressions", () => {
     },
   );
 
+  it.each([
+    ["superseded", false],
+    ["engine", true],
+    ["exit", true],
+  ] as const)(
+    "a running review's run ended by %s without a report: signal is %s",
+    (endedBy, raised) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      }) as number;
+      store.setReviewState(reviewId, ["queued"], "running", { at: T0, runId: "review-run" });
+      const r = run("review-run", "retro-1", { reviewId, endedAt: T0, status: "ok", endedBy });
+      store.upsertRun(r);
+      store.setRunEnded(r.id, T0, "ok", endedBy);
+      recordNoReport(store, r, "review", { code: 0, signal: null, lastStderr: "" }, null, T0);
+      const signals = signalState().signals;
+      if (raised)
+        expect(signals).toContainEqual(expect.objectContaining({ key: "report:review-run" }));
+      else expect(signals).toEqual([]);
+    },
+  );
+
   it("raises a hub_error for a blocking review that holds no finding text", () => {
     live("guido-1", "r-guido");
     const reviewId = store.requestReview({

@@ -1128,6 +1128,13 @@ describe("a run set aside in review", () => {
     expect(store.seatSession("guido-1")?.state).toBe("idle");
   });
 
+  it("endRunByEngine ends a set-aside run endedBy superseded when told to", async () => {
+    const { sup, runId } = await aside();
+    await sup.endRunByEngine(runId, "superseded");
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "superseded" });
+    expect(store.run(runId)?.noReport ?? null).toBeNull();
+  });
+
   it("setAside answers null mid-turn, for an ended run and for a run the seat does not hold", async () => {
     const { sup, runId } = await idleRun();
     await sup.message("guido-1", "SLOW", { interrupt: false });

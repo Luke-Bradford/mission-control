@@ -536,7 +536,7 @@ export function flightSignals(i: {
     }
   }
   for (const run of store.runsOverlapping(cutoff, now + 1)) {
-    if (run.repoId !== repo || run.endedBy === "operator") continue;
+    if (run.repoId !== repo || run.endedBy === "operator" || run.endedBy === "superseded") continue;
     const seat = session.seats.find((s) => s.id === run.agentId);
     if (!seat) continue;
     const loop = seatDef(seat).loop;

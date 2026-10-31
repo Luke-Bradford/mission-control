@@ -111,7 +111,7 @@ export interface Run {
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
-  endedBy?: "operator" | "engine" | "exit" | null;
+  endedBy?: "operator" | "engine" | "superseded" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
   noReport?: NoReport | null;
 }

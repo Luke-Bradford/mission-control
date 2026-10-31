@@ -538,13 +538,13 @@ export interface Supervisor {
    */
   sessionAlive?(seatId: string): boolean | null;
   /**
-   * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
+   * Ends the run `ok`, `endedBy: "engine"` (`"superseded"` when the hub drops a review, so the missing report is no error), only when it is its seat's current run, closes its
    * process (with none attached, ends any keeper it left and revokes its token), removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
    * seat idle. An ended or unknown run is left alone, with no event. A run Stop is already ending
    * stays Stop's (endedBy operator, seat stopped, worktree kept). Does nothing on a server that
    * does not run crew (disabled, or without the crew lock).
    */
-  endRunByEngine(runId: string): Promise<void>;
+  endRunByEngine(runId: string, reason?: "superseded"): Promise<void>;
   /**
    * Takes the run off its seat while it is in review: the process is closed, the worktree kept and
    * the seat left idle with no run; the run is not ended and no event is emitted. Null (nothing
@@ -3802,7 +3802,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     await dropScratch(info, run.id, run.seq, worktree);
   }
 
-  async function endRunByEngine(runId: string): Promise<void> {
+  async function endRunByEngine(runId: string, reason?: "superseded"): Promise<void> {
     if (!mayAct()) return;
     const moving = transfers.get(store.run(runId)?.agentId ?? "");
     if (moving) await moving;
@@ -3817,7 +3817,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // a run set aside in review: no process, no seat; its worktree is all it holds
       const aside = run.loop?.aside;
       if (aside && live.get(seatId)?.run.id !== runId) {
-        await endAside(run, info, aside.worktree, "engine");
+        await endAside(run, info, aside.worktree, reason ?? "engine");
       }
       return;
     }
@@ -3831,7 +3831,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // Recorded first, so nothing after it can end the run twice.
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
-    store.setRunEnded(runId, at, "ok", "engine");
+    store.setRunEnded(runId, at, "ok", reason ?? "engine");
     removeRunFiles(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
