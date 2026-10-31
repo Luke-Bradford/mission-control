@@ -6687,10 +6687,10 @@ describe("superuser housekeeping", () => {
   it("gives each Comms refusal its own text", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
-    const add = (ticket: string) => {
+    const add = (ticket: string | null, from = "guido-1") => {
       const m = store.addComms({
         at: nowMs - 50 * 60_000,
-        from: "guido-1",
+        from,
         to: "CAPCOM",
         ticket,
         text: "A question",
@@ -6713,15 +6713,41 @@ describe("superuser housekeeping", () => {
       text: "Decision",
       at: NOW,
     });
+    // a held sender's question
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    const held = add("mc#910");
+    // the operator's own always_ask rule
+    rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+    board(card(911, { labels: ["approval:operator"] }));
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    const asked = add("mc#911");
+    // someone who is no seat of this repo, and a seat of another repo
+    const operator = add(null, "CAPCOM");
+    const otherSeat = add(null, "fao-2");
     const texts = [
       await refusal("comms-open:999999"),
       await refusal(add("other#5")),
       await refusal("note:x"),
+      await refusal(asked),
+      await refusal(operator),
+      await refusal(otherSeat),
     ];
     expect(texts[0]).toMatch(/not found|No open/i);
     expect(texts[1]).toMatch(/another repo/i);
     expect(texts[2]).toMatch(/protected/i);
-    expect(new Set(texts).size).toBe(texts.length);
+    expect(texts[3]).toMatch(/protected/i);
+    expect(texts[4]).toMatch(/not from a seat in this repo/i);
+    expect(texts[5]).toMatch(/another repo/i);
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    rulesNow = DEFAULT_REPO_RULES;
+    expect(await refusal(held)).toMatch(/protected/i);
+    const settle = vi.spyOn(store, "settleCommsItem").mockReturnValue(false);
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "running" });
+    const failed = await refusal(add("mc#912"));
+    settle.mockRestore();
+    expect(failed).toMatch(/could not be settled/i);
+    expect(new Set([texts[0], texts[1], texts[2], texts[4], failed]).size).toBe(5);
     for (const text of texts) expect(text).not.toBe("This item is protected or unavailable.");
   });
   it("settles FLIGHT's own stale Comms item with its reason", async () => {

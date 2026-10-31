@@ -3539,6 +3539,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           );
           if (message === undefined) return fail(notFound);
           if (ticketRepoId !== undefined && ticketRepoId !== repo.id) return fail(otherRepo);
+          // only FLIGHT's own message or a seat's: the operator's own questions stay theirs
+          const senderRepoId = config.crew?.sessions.find((s) =>
+            s.seats.some((seat) => seat.id === message.from),
+          )?.repoId;
+          if (message.from !== ctx.seatId) {
+            if (senderRepoId === undefined)
+              return fail("This question is not from a seat in this repo.");
+            if (senderRepoId !== repo.id) return fail(otherRepo);
+          }
+          // a question on a ticket the repo's always_ask rules send to the operator stays theirs
+          const asked = /#(\d+)$/.exec(message.ticket ?? "")?.[1];
+          if (asked !== undefined && ticketRepoId === repo.id) {
+            const rules = await deps.rules(repo.id);
+            const card = store.board(repo.id).find((c) => c.issueNumber === Number(asked));
+            if (
+              card &&
+              rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true)))
+            )
+              return fail(protectedItem);
+          }
           // a question from any seat in this repo is FLIGHT's to settle once its subject is resolved,
           // even when briefed up; the protected kinds are still refused
           const problem = dismissProblem(item, true);
