@@ -8,10 +8,13 @@
 import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_HANDOVER_ASK,
+  FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
@@ -27,8 +30,11 @@ import {
   type FlightState,
   flightDownText,
   flightStartFailedText,
+  freshStartLine,
   HUD_STATE_LABEL,
   type HudState,
+  handoverKey,
+  memoryTopicKey,
   type SeatSessionRow,
   type TestLockState,
   wakeKey,
@@ -136,6 +142,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
 
+  /** The run that has been asked for its handover, and when. */
+  let handover: { runId: string; at: number } | null = null;
   let lastFacts = "";
   let lastWakeAt = 0;
   /**
@@ -437,6 +445,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
         const left = leftOf(state);
+        const note = store
+          .flightMemory(state.repo)
+          .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
         const { runId } = await supervisor.startWatch(id, {
           first: wakeLine(
             state,
@@ -446,6 +457,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
                 ? causes
                 : ["initial"]
               : [leftLine(left), ...causes],
+            freshStartLine(note ?? null),
           ),
         });
         audit = nextAudit(t, reasons, left);
@@ -505,6 +517,23 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = true;
       await supervisor.endRunByEngine(runId);
       rotationRequested = false;
+      return;
+    }
+    // past the context limit: one handover wake, then the fresh session once that turn has ended
+    const context = store.digest(runId)?.contextTokens ?? null;
+    if (context !== null && context > FLIGHT_CONTEXT_ROTATE_TOKENS) {
+      if (handover?.runId !== runId) {
+        const sent = await supervisor.send(runId, handoverKey(runId), FLIGHT_HANDOVER_ASK);
+        if (sent === "sent") handover = { runId, at: t };
+        // a handover already sent (before a hub restart) is taken as written
+        else if (sent === "dup") handover = { runId, at: 0 };
+        if (sent !== "dup") return;
+      }
+      if (lastTurnEndAt >= handover.at) {
+        rotating = true;
+        await supervisor.endRunByEngine(runId);
+        return;
+      }
       return;
     }
     prepareDaily(t);

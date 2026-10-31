@@ -103,6 +103,8 @@ export interface FlightView {
     live: boolean;
     /** The turn FLIGHT's session is on, and the last before a fresh one; null when it has no run. */
     turns?: { n: number; max: number } | null;
+    /** The context of its last turn and the size at which it hands over; null with no run. */
+    context?: { tokens: number | null; rotateAt: number; text: string | null } | null;
   } | null;
   decisions: FlightDecision[];
   /** Last day's decisions that ask the controller, from the metrics scan rather than the view cap. */
@@ -1090,6 +1092,27 @@ export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
+/** A run whose context passes this many tokens writes its handover and gets a fresh session. */
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/** The repo memory topic FLIGHT writes its handover to (with `remember`). */
+export const FLIGHT_HANDOVER_TOPIC = "handover";
+export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
+export const handoverKey = (runId: string): string => `flight:handover:${runId}`;
+/**
+ * The start brief's text for a fresh session: where to read what is going on, and the handover.
+ * One line, as the brief's digest stays on the lines after it.
+ */
+export const freshStartLine = (handover: { body: string; updatedAt: number } | null): string =>
+  `Fresh session: nobody will tell you what is going on. Read mc flight_state first, then your tracked items, plans, memory (recall) and the latest handover.${
+    handover === null
+      ? " No handover is on file."
+      : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
+  }`;
+/** "context 142K · fresh session at 150K"; null while the context is unknown. */
+export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
+  tokens === null
+    ? null
+    : `context ${Math.round(tokens / 1000)}K · fresh session at ${Math.round(rotateAt / 1000)}K`;
 /** Starts of FLIGHT itself per hour, rotations not counted. */
 export const FLIGHT_STARTS_MAX = 3;
 export const FLIGHT_WAKE_HEAD = "[Mission Control] Wake:";
@@ -1212,6 +1235,7 @@ export function wakeLine(
   s: FlightState,
   digest: FlightWake | FlightState = s,
   causes: string[] = ["initial"],
+  preface = "",
 ): string {
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
@@ -1220,7 +1244,7 @@ export function wakeLine(
     (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
       ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}\n${JSON.stringify(digest)}`;
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

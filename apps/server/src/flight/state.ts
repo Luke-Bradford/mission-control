@@ -12,6 +12,7 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
@@ -55,6 +56,7 @@ import {
   type FlightWake,
   type FlightWakeList,
   type FlightWakeStatus,
+  flightContextText,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -325,6 +327,7 @@ export function flightView(
   const live = found === null ? false : flightLive(config, store, alive);
   const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
   const controller = found === null ? [] : controllerDecisions(decisions);
+  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
   return {
     seat:
       found === null
@@ -339,6 +342,14 @@ export function flightView(
               runId === null
                 ? null
                 : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
+            context:
+              runId === null
+                ? null
+                : {
+                    tokens: contextTokens,
+                    rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+                    text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
+                  },
           },
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,

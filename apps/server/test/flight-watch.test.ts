@@ -7,10 +7,13 @@ import {
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
   carriedFrom,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_HANDOVER_ASK,
+  FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
@@ -39,6 +42,7 @@ import {
   flightDownText,
   flightStartFailedText,
   GITHUB_RATE_SETTING,
+  handoverKey,
   NEW_LOOP,
   type PullRequestView,
   type Run,
@@ -2185,6 +2189,118 @@ describe("the FLIGHT watcher", () => {
     expect(notesOpen()).toEqual([]);
     await watch.check();
     expect(notesOpen()).toHaveLength(1);
+  });
+
+  describe("a handover at FLIGHT_CONTEXT_ROTATE_TOKENS of context", () => {
+    /** A digest whose last assistant turn reports this much context. */
+    const context = (tokens: number, runId = "r-flight") => {
+      const line = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(nowMs).toISOString(),
+        message: {
+          id: "m1",
+          content: [{ type: "text", text: "working" }],
+          usage: {
+            input_tokens: 1000,
+            cache_read_input_tokens: tokens - 11_000,
+            cache_creation_input_tokens: 10_000,
+            output_tokens: 50,
+          },
+        },
+      });
+      store.setDigest(runId, foldTranscript(null, [line], nowMs).digest);
+    };
+    const idle = () =>
+      listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+
+    it("sends one handover wake at 151K, then rotates once that turn ends", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+      expect(endCalls).toEqual([]);
+
+      // its turn is running, then it ends
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      nowMs += MIN;
+      idle();
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+      expect(endCalls).toEqual(["r-flight"]);
+      await watch.check();
+      expect(startCalls).toHaveLength(1);
+    });
+
+    it("does nothing at the limit or under it", async () => {
+      liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS);
+      await watch.check();
+      await watch.check();
+      expect(sendCalls).toEqual([]);
+      expect(endCalls).toEqual([]);
+    });
+
+    it("rotates at once when the handover for this run was already sent", async () => {
+      liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      store.claimLine(handoverKey("r-flight"), {
+        runId: "r-flight",
+        seatId: "flight-1",
+        origin: "engine",
+        text: FLIGHT_HANDOVER_ASK,
+        at: T0,
+      });
+      await watch.check();
+      // the repeat is refused as a duplicate, and the run is rotated
+      expect(sendCalls).toHaveLength(1);
+      expect(endCalls).toEqual(["r-flight"]);
+    });
+
+    it("gives the next session's start brief the handover and where to read", async () => {
+      liveCrew();
+      store.putFlightMemory({
+        repoId: "mc",
+        topic: FLIGHT_HANDOVER_TOPIC,
+        kind: "crew",
+        body: "Mid-way through #77; promised the operator a PR by noon.",
+        source: "flight handover",
+        author: "flight",
+        updatedAt: T0,
+      });
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      store.claimLine(handoverKey("r-flight"), {
+        runId: "r-flight",
+        seatId: "flight-1",
+        origin: "engine",
+        text: FLIGHT_HANDOVER_ASK,
+        at: T0,
+      });
+      await watch.check();
+      await watch.check();
+      expect(startCalls).toHaveLength(1);
+      const first = startCalls[0]?.first ?? "";
+      expect(first).toContain("Mid-way through #77; promised the operator a PR by noon.");
+      expect(first).toContain("flight_state");
+      expect(first).toContain("tracked items, plans, memory");
+    });
+
+    it("tells the FLIGHT page the context and when the session is renewed", () => {
+      liveCrew();
+      expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
+        tokens: null,
+        rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+        text: null,
+      });
+      context(151_000);
+      expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
+        tokens: 151_000,
+        rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+        text: "context 151K · fresh session at 150K",
+      });
+    });
   });
 
   it("rotates after 40 wakes, and the next start is not counted", async () => {
