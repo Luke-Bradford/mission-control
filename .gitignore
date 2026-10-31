@@ -12,3 +12,5 @@ apps/web/.vite-guard-test-*/
 
 # Playwright MCP server output (snapshots, console logs) from the browser tools
 .playwright-mcp/
+# TypeScript incremental caches (packages write theirs under node_modules/.cache/tsc)
+*.tsbuildinfo
