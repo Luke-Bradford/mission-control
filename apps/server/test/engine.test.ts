@@ -5198,6 +5198,133 @@ describe("the engine runs reviews", () => {
       },
     );
 
+    describe("second_review settles a blocking floor review", () => {
+      const SECOND = "retro-2";
+      const FLOOR = "apps/server/src/guard/x.ts";
+      /** A reviewer on another account, so a second review has somewhere to go. */
+      const addSecondReviewer = (): void => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: SECOND, accountId: "claude-2" });
+      };
+      const parkOnBlocking = async (): Promise<void> => {
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = [FLOOR];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Critical")]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+      };
+      const second = () =>
+        operate(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "the floor review looks wrong",
+        });
+      const secondReview = () => need(reviewRows().find((r) => r.epoch === loopOf().epoch));
+
+      it("starts a fresh review on another account, and a pass lets the merge follow", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        expect(loopOf().flightSecondReview?.[SHA]).toMatchObject({
+          epoch: loopOf().epoch,
+          reason: "the floor review looks wrong",
+        });
+        await h.engine.tick();
+        reported(secondReview().id, []);
+        setPr({
+          ci: "passing",
+          checks: [
+            {
+              name: "mc/review",
+              kind: "status",
+              conclusion: "SUCCESS",
+              state: "passing",
+              attempt: null,
+              url: null,
+            },
+          ],
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked).toBeNull();
+        expect(h.sent.some((l) => l.key.includes("flight-rework"))).toBe(false);
+        expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toContain("merge");
+      });
+
+      it("a holding second review sends its findings to the seat", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        reported(secondReview().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).not.toContain("merge");
+        expect(h.sent.some((l) => l.text.includes("a Important thing"))).toBe(true);
+        expect(store.flightDecisions(0, 10)).toEqual([
+          expect.objectContaining({
+            kind: "settle",
+            targetRunId: RUN,
+            basis: "the floor review looks wrong",
+            decision: expect.stringMatching(/Second review holds .*the first held/),
+          }),
+        ]);
+      });
+
+      it("a holding second review still sends its findings after a granted rework", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        setLoop({ flightReworks: { [SHA]: 1 } });
+        expect(await second()).toBe(true);
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        reported(secondReview().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked).toBeNull();
+        expect(h.sent.some((l) => l.text.includes("a Important thing"))).toBe(true);
+      });
+
+      it("refuses a second one on the same head", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        expect(await second()).toBe(true);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        const again = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "again",
+        });
+        expect(again).toEqual({ lifted: false, reason: "second-review-done" });
+      });
+
+      it("refuses when no reviewer on another account is left", async () => {
+        await parkOnBlocking();
+        const r = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(r).toEqual({ lifted: false, reason: "no-second-reviewer" });
+        expect(loopOf().parked).not.toBeNull();
+      });
+
+      it("refuses off the floor paths, and when the review is not blocking", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        h.touches = ["apps/web/x.ts"];
+        const off = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "second_review",
+          note: "x",
+        });
+        expect(off).toEqual({ lifted: false, reason: "wrong-action" });
+      });
+    });
+
     it("sends FLIGHT's own reason when the review holds no blocking finding text", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       draftWorkspace();

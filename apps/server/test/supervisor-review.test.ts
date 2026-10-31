@@ -762,6 +762,66 @@ describe("startReview", () => {
     expect(brief).not.toContain("a minor one");
   });
 
+  it("FLIGHT's second review runs on the full model and reads the first review and FLIGHT's reason", async () => {
+    const base = DEFAULT_PROFILES[0] as Profile;
+    const r = reviewOfPush({
+      state: "queued",
+      profile: {
+        profile: { ...base, reviewer: { role: "RETRO", depth: "light" } },
+        route: { by: "size", size: "M" },
+        hash: "h",
+      },
+    });
+    store.setReviewState(r.reviewId, ["queued"], "running", { at: 2, runId: "retro:first" });
+    expect(
+      store.recordFindings(r.reviewId, "retro:first", {
+        verdict: { spec: "pass", quality: "fail" },
+        summary: "s",
+        findings: [
+          {
+            severity: "Critical",
+            file: "a.txt",
+            line: 1,
+            summary: "the guard leaks",
+            scenario: "w",
+            fix: "f",
+          },
+        ],
+        at: 3,
+      }),
+    ).toBe(true);
+    const secondId = store.requestReview({
+      authorRunId: r.author.id,
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 9,
+      sha: r.sha,
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: 4,
+    }) as number;
+    store.setReviewState(secondId, ["queued"], "starting", { at: 5 });
+    store.setRunLoop(r.author.id, {
+      ...NEW_LOOP,
+      epoch: 1,
+      flightSecondReview: {
+        [r.sha]: { epoch: 1, firstReviewId: r.reviewId, firstAccountId: "a", reason: "why" },
+      },
+    });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", secondId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(store.run(runId)?.model).toBe(REVIEW_FULL_MODEL);
+    const argv = recorded()[0].argv as string[];
+    expect(argv[argv.indexOf("--model") + 1]).toBe(REVIEW_FULL_MODEL);
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("## A second, independent review");
+    expect(brief).toContain("FLIGHT's reason: why");
+    expect(brief).toContain("[Critical] a.txt:1 — the guard leaks");
+  });
+
   it("startReview starts a review whose sha the pushed sha carries", async () => {
     const pushSha = "e".repeat(40);
     const r = reviewOfPush({ pushSha });
