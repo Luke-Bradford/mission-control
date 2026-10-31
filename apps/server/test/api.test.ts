@@ -2342,6 +2342,11 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
+      if (url.startsWith("/api/qa/uat/")) {
+        // the placeholder PR is not in this fixture
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
       if (url === "/api/repos/shop-app/map/diff") {
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map collector unavailable" });
