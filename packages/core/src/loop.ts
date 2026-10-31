@@ -934,6 +934,37 @@ function stateStep(s: LoopSnapshot): Step {
       actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
     };
   }
+  // a ruling on a red head is void once the seat's newer push shows green checks: back to review
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === RULING_PARK || loop.parked?.kind === "review-ruling") &&
+    !loop.parked.ended &&
+    loop.ciFailedSha !== null &&
+    pr?.state === "open" &&
+    pr.ci === "passing" &&
+    pr.headSha !== null &&
+    pr.headSha !== loop.ciFailedSha &&
+    pushed?.sha === pr.headSha &&
+    headCommit === pr.headSha
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "review",
+        parked: null,
+        ciFails: 0,
+        transient: 0,
+        lastRefusal: null,
+        unparkedAt: now,
+      },
+      actions: [
+        {
+          kind: "event",
+          text: `CI green on ${sha7(pr.headSha)}; ruling on ${sha7(loop.ciFailedSha)} void`,
+        },
+      ],
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);

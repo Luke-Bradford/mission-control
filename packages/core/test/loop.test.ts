@@ -343,6 +343,40 @@ describe("state step", () => {
     });
   });
 
+  it("5: a ruling park lifts to review once a newer head has green checks", () => {
+    for (const kind of ["ruling", "review-ruling"]) {
+      const parked = {
+        phase: "parked" as const,
+        parked: { kind, reason: "ruled", ended: false },
+        ciFailedSha: SHA,
+        reportedEvidenceId: 1,
+      };
+      const newer = {
+        headCommit: SHA2,
+        pushed: { sha: SHA2, at: NOW - 1000 },
+        evidence: { id: 1, at: 1, ruling: true },
+        evidenceCount: 1,
+      };
+      const r = reconcile(snap({ ...newer, pr: pr({ headSha: SHA2, ci: "passing" }) }, parked));
+      expect(r.loop).toMatchObject({ phase: "review", parked: null, ciFails: 0 });
+      expect(events(r.actions)).toEqual([`CI green on bbbbbbb; ruling on aaaaaaa void`]);
+      // red, pending or unchanged heads, and a closed PR, stay parked
+      for (const over of [
+        { pr: pr({ headSha: SHA2, ci: "failing" as const }) },
+        { pr: pr({ headSha: SHA2, ci: "pending" as const }) },
+        {
+          pr: pr({ headSha: SHA, ci: "passing" as const }),
+          headCommit: SHA,
+          pushed: { sha: SHA, at: 1 },
+        },
+        { pr: pr({ headSha: SHA2, ci: "passing" as const, state: "closed" as const }) },
+      ] as Partial<LoopSnapshot>[]) {
+        const stays = reconcile(snap({ ...newer, ...over }, parked));
+        expect(stays.loop.phase).toBe("parked");
+      }
+    }
+  });
+
   it("6: a new report starts the push, in working and in review", () => {
     for (const phase of ["working", "review"] as const) {
       const r = reconcile(
