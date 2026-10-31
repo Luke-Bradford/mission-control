@@ -1405,6 +1405,7 @@ async function syncReused(
         GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
       });
     } catch (e) {
+      console.error("SYNC-FAIL", String((e as { stderr?: unknown })?.stderr ?? (e as Error)?.message).slice(0, 400));
       if ((e as { code?: unknown } | null)?.code === 1) {
         const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
           .split("\0")
