@@ -941,6 +941,8 @@ export interface CrewSandboxInput {
   allowRead?: string[];
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
+  /** The hub's own checkout: FLIGHT's full profile may not write it (the hub runs that code). */
+  hubRoot?: string;
 }
 
 /** Credential files and folders (relative to home) no seat's Bash may read. */
@@ -1132,6 +1134,8 @@ export function crewSandboxSettings(
     // Everything else is open: home and temp are writable, and nothing else is denied by name.
     if (!i.dataDir.startsWith("/") || !i.home.startsWith("/"))
       throw new Error("crew sandbox: dataDir and home must be absolute");
+    if (i.hubRoot === undefined || !i.hubRoot.startsWith("/"))
+      throw new Error("crew sandbox: the full profile needs the hub's absolute checkout");
     return JSON.stringify({
       hooks: guardHooks(hook),
       sandbox: {
@@ -1149,7 +1153,9 @@ export function crewSandboxSettings(
           ],
           // its own temp folder sits inside the denied data folder, as a seat's does
           allowRead: i.tempRoot === undefined ? [] : [i.tempRoot],
-          denyWrite: [i.dataDir],
+          // the hub's data folder, its own checkout (with node_modules: the hub runs that code, holding
+          // the operator token, on its next start) and the launchd job that starts it
+          denyWrite: [i.dataDir, i.hubRoot, `${i.home}/Library/LaunchAgents`],
           denyRead: [...new Set([i.dataDir, `${i.home}/.config/mission-control`])],
         },
       },
@@ -1346,6 +1352,14 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
+    // `--restricted` (kept for every seat) removes Bash and WebFetch, and confines the file tools to the
+    // working directories, unless `--tools` names them and `--add-dir` adds the folder (claude --help).
+    // So FLIGHT names its whole set, and its file tools reach the crew clone; never home or the data folder.
+    const clone = i.sandbox.gitCommonDir.endsWith("/.git")
+      ? i.sandbox.gitCommonDir.slice(0, -"/.git".length)
+      : null;
+    args.splice(args.indexOf("--settings"), 0, "--tools", FLIGHT_FULL_BUILTINS.join(","));
+    if (clone !== null) args.splice(args.indexOf("--settings"), 0, "--add-dir", clone);
     // every built-in tool, unscoped, and FLIGHT's mc tools; nothing is denied by name
     args.splice(
       args.indexOf("--append-system-prompt-file"),

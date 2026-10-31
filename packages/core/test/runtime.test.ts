@@ -31,6 +31,7 @@ import {
   crewSandboxTmp,
   DEFAULT_SEAT_COMMANDS,
   DENIED_TOOLS,
+  FLIGHT_FULL_BUILTINS,
   FLIGHT_FULL_DOMAINS,
   FLIGHT_TOOLS,
   foldForMatch,
@@ -74,6 +75,7 @@ const base: CrewCliInput = {
     worktreeGitDir: "/mc/clone/.git/worktrees/guido-1",
     home: "/home/you",
     dataDir: "/home/you/.local/share/mission-control",
+    hubRoot: "/home/you/Dev/mission-control",
     denyRead: [],
     pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
   },
@@ -94,7 +96,14 @@ const asArgv = (tools: readonly string[]) =>
 describe("crewCliArgs", () => {
   it("gives FLIGHT's full profile an unrestricted shell while retaining guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    expect(args).not.toContain("--tools");
+    // --restricted removes Bash and WebFetch unless --tools names them (claude --help), so it names them
+    const tools = args[args.indexOf("--tools") + 1]?.split(",") ?? [];
+    expect(tools).toEqual([...FLIGHT_FULL_BUILTINS]);
+    expect(tools).toEqual(expect.arrayContaining(["Bash", "WebFetch"]));
+    expect(args).toContain("--restricted");
+    // and its file tools reach the crew clone, never home or the data folder
+    expect(args[args.indexOf("--add-dir") + 1]).toBe("/mc/clone");
+    expect(args.filter((a) => a === "--add-dir")).toHaveLength(1);
     expect(args).not.toContain("--disallowedTools");
     // the shell, the web and subagents are allowed whole; the mc tools it holds stay allowed
     const allowed = args.slice(
@@ -128,6 +137,13 @@ describe("crewCliArgs", () => {
           base.sandbox.tempRoot === undefined ? [] : [base.sandbox.tempRoot],
         );
         expect(fs.allowWrite).not.toContain(base.sandbox.dataDir);
+        // the hub runs its own checkout (and node_modules) holding the token, and launchd starts it
+        expect(fs.denyWrite).toEqual(
+          expect.arrayContaining([
+            base.sandbox.hubRoot,
+            `${base.sandbox.home}/Library/LaunchAgents`,
+          ]),
+        );
       }
     });
 
@@ -144,6 +160,11 @@ describe("crewCliArgs", () => {
       const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
       expect(seat.network).toEqual({ allowedDomains: [] });
       expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
+    });
+
+    it("refuses a full profile with no hub checkout to protect", () => {
+      const { hubRoot: _hubRoot, ...rest } = base.sandbox;
+      expect(() => crewSandboxSettings(rest, "read-only", base.hook, "flight-full")).toThrow();
     });
 
     it("refuses a relative data folder", () => {

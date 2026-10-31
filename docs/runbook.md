@@ -1207,11 +1207,12 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 ### FLIGHT's full access
 
 FLIGHT's watch run starts with the `flight-full` profile (`crewProfileOf` in `packages/core/src/runtime.ts`):
-every built-in tool allowed unscoped (shell, `git`, `gh` as the operator, `curl`, the web, subagents) and no
+every built-in tool allowed unscoped and named with `--tools` (the CLI's `--restricted` removes Bash and WebFetch otherwise), with `--add-dir` for the crew clone so its file tools reach it (shell, `git`, `gh` as the operator, `curl`, the web, subagents) and no
 denied-tool list. Every other seat keeps its sandbox and denies unchanged. Its shell is sandboxed around one
 thing only, and that is the barrier that keeps the operator token out of FLIGHT's hands: the hub's data folder
-(the token file, the DB, every transcript) and `~/.config/mission-control` are denied to read, the data folder is
-denied to write, home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
+(the token file, the DB, every transcript) and `~/.config/mission-control` are denied to read, the data folder, the hub's own
+checkout (with its `node_modules`: the hub runs that code, holding the token, on its next start) and
+`~/Library/LaunchAgents` are denied to write, the rest of home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
 loopback address, and with it the HUD's token route, is out of reach from its shell. `mc operator` is its way to the
 hub. The hub also refuses any request that carries a seat's run token on the token's bootstrap route, `flight/approvals`,
 `flight/runaway/lift` and the attention routes (the operator token is a second, separate key). The guard hook still
@@ -1220,7 +1221,7 @@ on the token, approvals and breaker names (below) are a backstop for the sandbox
 checks the sandbox live after an Update (`git push`, `gh` and the keychain must still work from inside it).
 
 - `git push` to `main`, with `--force`, `-f`, `--mirror`, `--all` or a `+refspec`, or without an explicit branch (`git push`, `git push origin` and `git push origin HEAD` are refused, since FLIGHT's checkout may be on `main`; `git push origin <branch>` is allowed; a branch built by `$(...)`, backticks or `@{...}` is refused too); `git commit` (FLIGHT's checkouts are not for commits);
-- `gh pr merge` and `PUT .../merge` (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
+- `gh pr merge` and `PUT .../merge`, and any other way to the same end: a `gh api` write that moves or deletes `main`, `merges`, commits `CLAUDE.md` or `.github/**` through `contents`, or renames `main`; a `gh api graphql` call that reads its query from a file or `--input`, or names `createCommitOnBranch`, `updateRef`, `deleteRef`, `mergeBranch`, `mergePullRequest` or `enablePullRequestAutoMerge`; a git alias, a `remote.*.push` or `.mirror` setting, or a git subcommand the guard does not know (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
 - writes to `.github/**` or `CLAUDE.md` by Edit, Write, a redirect, `tee`, `cp`, `mv`, `rm` or `sed -i` (best effort for a shell; the whole `CLAUDE.md` file is held, not only its Mission Control block);
 - `gh api` with a writing method on branch protection, rulesets, repo settings, collaborators, hooks, keys, environments, pages or Actions secrets and variables;
 - reading or writing the operator token file (or a glob of it), calling the HUD's `operator/bootstrap` route, sending the `x-mc-operator` header, or naming `flight/approvals` (each parsed word is read after the shell's quotes are removed, `%xx` escapes are decoded and `./`, `x/../` and `//` are folded, so `flight/%61pprovals`, `operator-to''ken` and `flight/x/../approvals` are read as what they are; a glob that could expand to the token file, or any glob in the hub's data folder, is refused), the `flight-runaway` note key, the `flight.approvals` setting or the `flight.runaway` setting: approvals and lifting the breaker are a controller's acts; `sqlite3` runs only with `-readonly` and no writing dot-command, since SQL text can always be reworded;

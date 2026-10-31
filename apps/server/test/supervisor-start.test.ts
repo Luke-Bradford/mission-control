@@ -2575,7 +2575,9 @@ describe("repo guidance at launch", () => {
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    expect(argv).not.toContain("--tools");
+    // --restricted removes Bash and WebFetch unless --tools names them
+    const tools = (argv[argv.indexOf("--tools") + 1] ?? "").split(",");
+    expect(tools).toEqual(expect.arrayContaining(["Bash", "WebFetch"]));
     expect(argv).not.toContain("--disallowedTools");
     expect(argv).toContain("--allowedTools");
     // sandboxed, with the hub's data folder (the operator token) denied to read and write

@@ -436,7 +436,7 @@ describe("startWatch", () => {
     const argv = start.argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
     // FLIGHT's watch run has the full profile (#1214): every built-in tool, nothing denied by name
-    expect(argv).not.toContain("--tools");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).not.toContain("--disallowedTools");
     expect(
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--append-system-prompt-file")),

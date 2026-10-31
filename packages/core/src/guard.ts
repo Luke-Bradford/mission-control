@@ -2273,11 +2273,38 @@ function ghApiCall(args: readonly string[]): {
   return { method: used, endpoint, writes: used !== "GET" };
 }
 
-/** Why `gh api ...` may not run (a writing call on protection, settings or access), or null. */
-function ghApiRefusal(args: readonly string[]): string | null {
+/** The REST routes that move main, merge without `merge_pr`, or commit a floor file to the repo. */
+const GH_FLOOR_ENDPOINT =
+  /^\/?repos\/[^/]+\/[^/]+\/(?:git\/refs\/heads\/main(?:$|[/?])|merges(?:$|\?)|contents\/(?:\.github\/|CLAUDE\.md)|branches\/main\/rename)/;
+/** The GraphQL mutations that do the same. */
+const GH_FLOOR_MUTATION =
+  /createCommitOnBranch|updateRefs?\b|deleteRef|mergeBranch|mergePullRequest|enablePullRequestAutoMerge/;
+
+/** Why `gh api ...` may not run (a writing call on protection, settings, access or main), or null. */
+function ghApiRefusal(args: readonly string[]): { rule: GuardRule; text: string } | null {
   const call = ghApiCall(args);
-  if (call.writes && call.endpoint !== null && GH_PROTECTED_ENDPOINT.test(call.endpoint))
-    return "gh api write to branch protection, rulesets, settings or collaborators";
+  if (call.endpoint === "graphql") {
+    // a query read from a file, or sent as the whole body, cannot be read here
+    if (args.some((a) => /^[^=\s]+=@/.test(a) || a === "--input" || a.startsWith("--input=")))
+      return {
+        rule: "repo-rules",
+        text: "a gh api graphql call whose query the guard cannot read",
+      };
+    if (args.some((a) => GH_FLOOR_MUTATION.test(a)))
+      return { rule: "merge-push", text: "a GraphQL mutation that commits, merges or moves a ref" };
+    return null;
+  }
+  if (!call.writes || call.endpoint === null) return null;
+  if (GH_FLOOR_ENDPOINT.test(call.endpoint))
+    return {
+      rule: "merge-push",
+      text: "a gh api write that moves main, merges or commits a floor file",
+    };
+  if (GH_PROTECTED_ENDPOINT.test(call.endpoint))
+    return {
+      rule: "repo-rules",
+      text: "gh api write to branch protection, rulesets, settings or collaborators",
+    };
   return null;
 }
 
@@ -2459,6 +2486,15 @@ export function guardDecision(
     if (program === "git") {
       const g = gitSubcommand(args);
       if (ctx.fullAccess && g?.sub === "commit") return deny("merge-push", "git commit on main");
+      // an alias or a push mapping can hide a force push or a push to main from the checks above
+      if (
+        ctx.fullAccess &&
+        (/(?:^|\s)(?:alias\.|remote\.[^.\s=]+\.(?:push|mirror)\b|push\.default)/.test(
+          args.join(" "),
+        ) ||
+          (g !== null && !GIT_KNOWN.has(g.sub)))
+      )
+        return deny("merge-push", "a git alias, push mapping or unknown git subcommand");
       if (ctx.fullAccess && g?.sub === "push") {
         const refused = pushRefusal(g.rest);
         if (refused !== null) return deny("merge-push", refused);
@@ -2550,7 +2586,7 @@ export function guardDecision(
         if (/^pr\s+merge(?:\s|$)/.test(gh) || /^api\s+.*\/merge(?:\s|\?|$)/.test(gh))
           return deny("merge-push", "gh PR merge");
         const api = ghArgs[0] === "api" ? ghApiRefusal(ghArgs) : null;
-        if (api !== null) return deny("repo-rules", api);
+        if (api !== null) return deny(api.rule, api.text);
       } else githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
       if (!ctx.fullAccess) return deny("network", program);

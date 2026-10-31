@@ -1666,6 +1666,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
+        hubRoot: existsSync(deps.hubRoot) ? realpathSync(deps.hubRoot) : deps.hubRoot,
         pnpmStoreDir: pnpmStore,
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
