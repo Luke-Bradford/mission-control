@@ -1262,7 +1262,7 @@ export async function editRunPrBody(
   deps: McToolsDeps,
   runId: string,
   prNumber: number,
-  body: string,
+  next: string | ((current: string) => string),
 ): Promise<Result> {
   const { store, bus } = deps;
   const now = deps.now ?? Date.now;
@@ -1274,8 +1274,10 @@ export async function editRunPrBody(
   const repo = repoOf(deps, run);
   const issue = issueOf(run);
   const known = await readKnown(deps, "pr_body");
-  const problem = prTextProblem(body, { repo, issue, known, label: "PR body", unclosed: true });
-  if (problem !== null) {
+  // refuses a body that fails the text checks, counting a secret as a guard hit
+  const refuse = (text: string): Result | null => {
+    const problem = prTextProblem(text, { repo, issue, known, label: "PR body", unclosed: true });
+    if (problem === null) return null;
     if (problem.problem === "secret") {
       store.addGuardHit({
         agentId: place.seat.id,
@@ -1287,6 +1289,11 @@ export async function editRunPrBody(
       bus.emit("guard");
     }
     return { text: MC_PR_BODY_REFUSED, isError: true };
+  };
+  // a body given whole is checked before gh is asked anything
+  if (typeof next === "string") {
+    const refused = refuse(next);
+    if (refused !== null) return refused;
   }
 
   const cwd = crewDir(deps.dbPath);
@@ -1295,11 +1302,11 @@ export async function editRunPrBody(
     return { text: MC_PR_EDIT_FAILED, isError: true };
   };
   const viewed = await deps.gh(
-    ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=headRefName,state"],
+    ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=headRefName,state,body"],
     { cwd },
   );
   if (viewed.code !== 0) return failed("pr view", viewed);
-  let info: { headRefName?: unknown; state?: unknown } | null;
+  let info: { headRefName?: unknown; state?: unknown; body?: unknown } | null;
   try {
     info = JSON.parse(viewed.stdout) as typeof info;
   } catch {
@@ -1307,6 +1314,14 @@ export async function editRunPrBody(
   }
   if (info?.state !== "OPEN" || info.headRefName !== run.branch) {
     return { text: prNotRunsText(prNumber), isError: true };
+  }
+  let body: string;
+  if (typeof next === "string") body = next;
+  else {
+    // composed from the PR as it stands, so it is checked once that is known
+    body = next(typeof info.body === "string" ? info.body : "");
+    const refused = refuse(body);
+    if (refused !== null) return refused;
   }
 
   const file = crewPrBodyPath(deps.dbPath);
@@ -1330,12 +1345,37 @@ export async function editRunPrBody(
  * The engine's minor-findings section of a PR body (heading to the next heading, the closing line
  * or the hub's line), or null when the body has none.
  */
-function minorSection(body: string): string | null {
+export function minorSection(body: string): string | null {
   const at = body.indexOf(MINOR_HEADING);
   if (at === -1) return null;
   const rest = body.slice(at + MINOR_HEADING.length);
   const end = rest.search(/^(?:#{1,2}\s|Closes #\d+\.|Opened by )/m);
   return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
+}
+
+/**
+ * A PR body a seat wrote with `pr_body`: it does not open with the hub's `#<issue>` heading.
+ * An empty body is the hub's, not a seat's.
+ */
+export function seatWroteBody(body: string, issue: number): boolean {
+  return body.trim() !== "" && !body.startsWith(`#${issue}`);
+}
+
+/**
+ * `body` without the parts the hub adds around a seat's text: its minor-findings section, the
+ * closing line and its own line. `section`, when given, goes at the end.
+ */
+export function withEngineSection(body: string, issue: number, section: string | null): string {
+  const own = minorSection(body);
+  const rest = (own === null ? body : body.replace(own, ""))
+    .split("\n")
+    .filter(
+      (l) => l.trim() !== prClosesLine(issue) && !/^Opened by .* \(Mission Control\)\.$/.test(l),
+    )
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return section === null ? rest : `${rest}\n\n${section}`;
 }
 
 /** Another open writer run whose changes share paths with a commit. */
@@ -1669,22 +1709,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const prNumber = run.loop?.prNumber ?? null;
     if (prNumber === null) return { text: MC_PR_BODY_NO_PR, isError: true };
     // the engine's own section outlives the seat's rewrite
-    let section: string | null = null;
-    const viewed = await deps.gh(
-      ["pr", "view", String(prNumber), `--repo=${repoOf(deps, run)}`, "--json=body"],
-      { cwd: crewDir(deps.dbPath) },
-    );
-    if (viewed.code === 0) {
-      try {
-        const current = (JSON.parse(viewed.stdout) as { body?: unknown }).body;
-        section = typeof current === "string" ? minorSection(current) : null;
-      } catch {
-        section = null;
-      }
-    }
-    const body =
-      section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
-    return editRunPrBody(deps, ctx.runId, prNumber, body);
+    return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
+      const section = minorSection(current);
+      return section === null ? parsed.data.body : `${parsed.data.body.trimEnd()}\n\n${section}`;
+    });
   }
 
   async function commit(ctx: McToolContext, args: unknown): Promise<Result> {
