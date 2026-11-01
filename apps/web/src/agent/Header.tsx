@@ -598,12 +598,45 @@ function TickingDoingLine({ row, tz, repoPrs }: Parameters<typeof CurrentDoingLi
 }
 
 /** Review ages tick independently, keeping the header's controls stable. */
-function HeaderReviewState({ check }: { check: ReviewCheckState }) {
+export function HeaderReviewState({ check }: { check: ReviewCheckState }) {
   const now = useNow();
   const pill = reviewCheckPill(check, now);
   return (
     <span className="header-review-state" title={pill.label}>
       <Pill tone={pill.tone}>{pill.label}</Pill>
+    </span>
+  );
+}
+
+/** Existing seat actions, grouped for the Agent v2 header. Opening More loads its settings. */
+export function AgentHeaderActions({ row }: { row: CrewRow }) {
+  const [open, setOpen] = useState(false);
+  const popout = useIsPopout();
+  return (
+    <span className="agent-v2-actions">
+      {row.kind === "crew" ? (
+        <SeatControls row={row} hold />
+      ) : row.loopKind === "ta-loop" ? (
+        <PauseButton row={row} />
+      ) : null}
+      <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <summary>More</summary>
+        {open && (
+          <div className="agent-v2-menu">
+            {!popout && (
+              <button type="button" onClick={() => popOut(row.id)}>
+                Pop out
+              </button>
+            )}
+            {row.kind === "crew" && (
+              <>
+                <SwitchAccount row={row} />
+                <SeatSettings row={row} />
+              </>
+            )}
+          </div>
+        )}
+      </details>
     </span>
   );
 }

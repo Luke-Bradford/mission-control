@@ -50,6 +50,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
+const AGENT_DETAIL_TOPICS: readonly Topic[] = ["agents", "attention", "boards"];
 const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
@@ -65,6 +66,10 @@ const pageDocument = (): PageDocument | undefined =>
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  agentDetail: (id: string): ResourceRef => ({
+    path: `/api/agents/${enc(id)}`,
+    topic: AGENT_DETAIL_TOPICS,
+  }),
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
@@ -641,7 +646,10 @@ class Hub {
   /** Refetch the crew list, and the seat's own full row when the Agent page shows one. */
   refetchCrew(id?: string): void {
     this.refetch(RESOURCES.crew.path);
-    if (id !== undefined) this.refetch(RESOURCES.crewDetail(id).path);
+    if (id !== undefined) {
+      this.refetch(RESOURCES.crewDetail(id).path);
+      this.refetch(RESOURCES.agentDetail(id).path);
+    }
   }
 
   refetch(path: string): void {

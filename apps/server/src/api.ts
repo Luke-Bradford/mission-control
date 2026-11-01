@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import type { Run } from "@mc/core";
 import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
@@ -149,6 +150,7 @@ import Fastify, {
 } from "fastify";
 import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
+import { agentDetail } from "./agent-detail.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -4571,11 +4573,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (run === null) return reply.code(404).send({ error: "unknown run" });
         return { runId: run.id, attempts: store.runAttempts(run.id) };
       });
-      // A looped run's state and its Activity rows, on demand.
-      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
-      api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
-        const run = store.run(req.params.id);
-        if (run === null) return reply.code(404).send({ error: "unknown run" });
+      const loopViewFor = (run: Run, history = true): RunLoopView => {
         const loop = run.loop ?? null;
         const events = store.loopEventsOfRun(run.id);
         const pushed = store.runPush(run.id);
@@ -4596,7 +4594,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             tries: run.profile?.profile.tries ?? CI_TRIES,
             rounds: run.profile?.profile.rounds ?? REVIEW_ROUNDS,
           },
-          usage: runUsage(store, run, now()),
+          ...(history ? { usage: runUsage(store, run, now()) } : {}),
           noReport: run.noReport ?? null,
           loop,
           events,
@@ -4622,9 +4620,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,
-          prompt: store.promptWakes(run.id),
+          ...(history ? { prompt: store.promptWakes(run.id) } : {}),
         };
         return view;
+      };
+      // A looped run's state and its Activity rows, on demand.
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
+      api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        return loopViewFor(run);
       });
 
       // Read-only: the top-level directories of each session's checkout, with the writer that owns
@@ -4667,6 +4672,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { id: string } }>("/crew/:id", async (req, reply) => {
         const row = sharedCrew().rows.find((r) => r.id === req.params.id);
         return row ?? reply.code(404).send({ error: "unknown agent" });
+      });
+
+      // Reader: apps/web/src/pages/Agent.tsx (Agent page v2, server-computed run facts)
+      api.get<{ Params: { id: string } }>("/agents/:id", async (req, reply) => {
+        const rows = sharedCrew().rows;
+        const row = rows.find((r) => r.id === req.params.id);
+        if (!row) return reply.code(404).send({ error: "unknown agent" });
+        const run = row.run ? store.run(row.run.id) : null;
+        return agentDetail({
+          row,
+          store,
+          loop: run ? loopViewFor(run, false) : null,
+          items: sharedAttention(),
+          github: (repoId) => config.repos.find((repo) => repo.id === repoId)?.github ?? null,
+          manifest: (pr) =>
+            pr.headSha
+              ? (deps.prEvidence?.manifest(pr.repoId, pr.number, pr.headSha) ?? null)
+              : null,
+        });
       });
 
       // The header's session filter: its repo, else every repo (the pipeline: the crew's repos).

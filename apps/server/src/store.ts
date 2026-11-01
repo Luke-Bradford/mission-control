@@ -1836,6 +1836,15 @@ export class Store {
     );
   }
 
+  /** Only the latest prompt for the Agent summary; history stays on demand. */
+  latestPromptWake(runId: string): PromptWakeCost | null {
+    const rows = this.db
+      .prepare(`SELECT * FROM prompt_sections WHERE run_id = ?
+      AND wake = (SELECT MAX(wake) FROM prompt_sections WHERE run_id = ?)`)
+      .all(runId, runId);
+    return this.wakesOf(rows as never)[0] ?? null;
+  }
+
   /** An agent's prompts since `since`, newest first, at most `limit` wakes. */
   agentPromptWakes(agentId: string, since: number, limit: number): PromptWakeCost[] {
     const rows = this.db
