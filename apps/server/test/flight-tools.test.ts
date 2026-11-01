@@ -2838,9 +2838,11 @@ describe("flight_state", () => {
         at: NOW,
       });
     const reviewer = async () =>
-      ((await state()) as {
-        reviewQueue: { seats: { seat: string; queued: number; idle: boolean }[] };
-      }).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
+      (
+        (await state()) as {
+          reviewQueue: { seats: { seat: string; queued: number; idle: boolean }[] };
+        }
+      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
 
     expect(queuedReview()).not.toBeNull();
     writeCrewPause(
