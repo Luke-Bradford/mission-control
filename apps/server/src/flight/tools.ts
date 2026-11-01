@@ -695,6 +695,11 @@ const PassArgs = z.looseObject({
 });
 const GRANT_PATH_MAX = 120;
 const GRANT_PATHS_MAX = 10;
+const ReassignTicketArgs = z.strictObject({
+  issue: issueNumber,
+  seat: z.string().regex(SEAT_ID),
+  reason: basisArg,
+});
 const StartSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
@@ -1207,7 +1212,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: answeredText(call) };
   }
 
-  async function startSeat(ctx: McToolContext, args: unknown): Promise<Result> {
+  async function startSeat(
+    ctx: McToolContext,
+    args: unknown,
+    handoffFrom?: string,
+  ): Promise<Result> {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
@@ -1406,7 +1415,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       ref,
       about: `${ref}: ${card.title}`,
-      decision: `${planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
+      decision: `${handoffFrom ? `Reassigned from ${seatCallSign(handoffFrom)} to ${call}` : planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
       basis,
     });
     store.recordFlightArrival({
@@ -1422,6 +1431,28 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     bus.emit("agents");
     bus.emit("flight");
     return { text: startedText(call, ref) };
+  }
+
+  async function reassignTicket(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, ReassignTicketArgs, args);
+    if (!c.ok) return c.result;
+    const repo = repoOf(),
+      target = seatCfg(c.args.seat);
+    if (!repo || !target || seatDef(target).loop !== "build")
+      return fail("ticket handoffs need a build seat in this session");
+    const ref = `${repo.id}#${c.args.issue}`;
+    const runs = store.runsOnTicket(repo.id, ref);
+    if (runs.some((r) => r.endedAt === null))
+      return fail(`${ref} still has a live run; it was not reassigned`);
+    const source = runs
+      .filter((r) => r.branch !== null)
+      .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
+    if (!source) return fail(`${ref} has no unfinished author to hand off`);
+    return startSeat(
+      ctx,
+      { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
+      source.agentId,
+    );
   }
 
   async function messageSeat(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3697,6 +3728,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: startSeat,
     },
     {
+      name: MC_TOOL_NAMES.reassignTicket,
+      description:
+        "Reassign an unfinished ticket after its author ended. Refuses a live run. The next build seat receives the handoff note and preserved branch; all start, quota, area and sandbox checks still apply. Give issue, seat and reason.",
+      inputSchema: z.toJSONSchema(ReassignTicketArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: reassignTicket,
+    },
+    {
       name: MC_TOOL_NAMES.messageSeat,
       description:
         "Read focus with read_focus: true, or replace persisted focus with focus (lane:name, label:name and/or repo#issue selectors; null clears). These operations are separate from messaging. Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park. Give runId (with unpark) for a run set aside in review; the seat is on another run then, so the text is not delivered.",
@@ -4044,6 +4084,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.readTicket,
     MC_TOOL_NAMES.answerQuestion,
     MC_TOOL_NAMES.startSeat,
+    MC_TOOL_NAMES.reassignTicket,
     MC_TOOL_NAMES.messageSeat,
     MC_TOOL_NAMES.flightState,
     MC_TOOL_NAMES.screenshotHud,

@@ -10,6 +10,7 @@ import type {
   PromptSection,
   PromptSectionCost,
   PromptWakeCost,
+  RunHandoff,
 } from "@mc/core";
 import {
   type AccountId,
@@ -322,6 +323,12 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
+CREATE TABLE IF NOT EXISTS run_handoffs (
+  run_id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, ticket TEXT NOT NULL, at INTEGER NOT NULL,
+  record TEXT NOT NULL, accepted_by TEXT, accepted_run_id TEXT, claim_token TEXT
+);
+CREATE INDEX IF NOT EXISTS run_handoffs_ticket ON run_handoffs(repo_id, ticket, at DESC);
+CREATE INDEX IF NOT EXISTS run_handoffs_received ON run_handoffs(accepted_run_id);
 -- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
 CREATE TABLE IF NOT EXISTS comms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
@@ -4262,6 +4269,91 @@ export class Store {
       .prepare("UPDATE runs SET loop = ? WHERE id = ?")
       .run(loop === null ? null : JSON.stringify(loop), runId);
     if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
+  }
+
+  /** An unfinished author gets one immutable context record; Git status can be filled afterward. */
+  recordHandoff(h: RunHandoff): void {
+    this.statement(
+      "INSERT OR IGNORE INTO run_handoffs (run_id, repo_id, ticket, at, record) VALUES (?, ?, ?, ?, ?)",
+    ).run(h.runId, h.repoId, h.ticket, h.at, JSON.stringify(h));
+  }
+
+  handoff(runId: string): RunHandoff | null {
+    const row = this.statement(
+      "SELECT record, accepted_by, accepted_run_id FROM run_handoffs WHERE run_id = ?",
+    ).get(runId) as Row | undefined;
+    return row
+      ? {
+          ...JSON.parse(row.record as string),
+          acceptedBy: row.accepted_by as string | null,
+          acceptedRunId: row.accepted_run_id as string | null,
+        }
+      : null;
+  }
+
+  openHandoff(repoId: string, ticket: string): RunHandoff | null {
+    const row = this.statement(
+      "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND ticket = ? ORDER BY at DESC, run_id DESC LIMIT 1",
+    ).get(repoId, ticket) as Row | undefined;
+    const h = row ? this.handoff(row.run_id as string) : null;
+    return h?.acceptedRunId == null ? h : null;
+  }
+
+  receivedHandoff(runId: string): RunHandoff | null {
+    const row = this.statement(
+      "SELECT run_id FROM run_handoffs WHERE accepted_run_id = ? ORDER BY at DESC LIMIT 1",
+    ).get(runId) as Row | undefined;
+    return row ? this.handoff(row.run_id as string) : null;
+  }
+
+  latestHandoffs(repoId: string): RunHandoff[] {
+    return (
+      this.statement(`SELECT h.run_id FROM run_handoffs h WHERE repo_id = ? AND h.run_id = (
+      SELECT fresh.run_id FROM run_handoffs fresh WHERE fresh.repo_id = h.repo_id AND fresh.ticket = h.ticket ORDER BY fresh.at DESC, fresh.run_id DESC LIMIT 1
+    )`).all(repoId) as Row[]
+    ).flatMap((r) => {
+      const h = this.handoff(r.run_id as string);
+      return h ? [h] : [];
+    });
+  }
+
+  /** Enrichment never changes the reservation or the seat that accepted the work. */
+  handoffGit(runId: string, gitStatus: string[], gitState: RunHandoff["gitState"]): void {
+    const h = this.handoff(runId);
+    if (h)
+      this.statement("UPDATE run_handoffs SET record = ? WHERE run_id = ?").run(
+        JSON.stringify({ ...h, gitStatus, gitState }),
+        runId,
+      );
+  }
+
+  claimHandoff(runId: string, token: string): boolean {
+    return (
+      this.statement(
+        "UPDATE run_handoffs SET claim_token = ? WHERE run_id = ? AND claim_token IS NULL AND accepted_run_id IS NULL",
+      ).run(token, runId).changes === 1
+    );
+  }
+
+  releaseHandoff(runId: string, token: string): void {
+    this.statement(
+      "UPDATE run_handoffs SET claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
+    ).run(runId, token);
+  }
+
+  acceptHandoff(runId: string, token: string, seatId: string, newRunId: string): boolean {
+    return (
+      this.statement(
+        "UPDATE run_handoffs SET accepted_by = ?, accepted_run_id = ?, claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
+      ).run(seatId, newRunId, runId, token).changes === 1
+    );
+  }
+
+  /** Called only by the supervisor after it acquires the single crew lock on startup. */
+  releaseHandoffClaims(): void {
+    this.statement(
+      "UPDATE run_handoffs SET claim_token = NULL WHERE accepted_run_id IS NULL",
+    ).run();
   }
 
   /** Ends the run: when, with what status, and who ended it. */
