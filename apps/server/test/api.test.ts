@@ -1410,6 +1410,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/drafts/guido-1/copied"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
+  ["GET", "/api/prs/flow"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
   ["GET", "/api/flight/schedule"],
@@ -5021,6 +5022,55 @@ describe("boards, escalations, health", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual([{ ...pr, check: null, preview: null, previewable: false }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
+  });
+
+  it("prs/flow returns every open PR with its ownership flow", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 4,
+          title: "Flow row",
+          url: "https://github.com/o/shop-app/pull/4",
+          branch: "feature/4-flow",
+          ticket: "shop-app#4",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "pending",
+          createdAt: NOW - HOUR,
+          updatedAt: NOW,
+          mergedAt: null,
+          mergeCommitSha: null,
+          headSha: null,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          checks: [],
+          closingIssues: [],
+        },
+      ],
+      NOW,
+    );
+
+    const response = await get("/api/prs/flow");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().repos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          repoId: "shop-app",
+          rows: expect.arrayContaining([
+            expect.objectContaining({
+              pr: 4,
+              ticket: "shop-app#4",
+              owner: "nobody",
+              stage: "building",
+            }),
+          ]),
+        }),
+      ]),
+    );
   });
 
   // #26 A1: the Board reads only the PRs it can put on a card.
@@ -8730,6 +8780,23 @@ describe("operator token", () => {
     );
     expect(crewPause.statusCode).toBe(401);
     expect(store.getSetting("crew.paused")).toBeNull();
+  });
+
+  it("requires the operator token for PR flow", async () => {
+    for (const headers of [{}, { [OPERATOR_HEADER]: "wrong" }]) {
+      const response = await guarded.inject({ method: "GET", url: "/api/prs/flow", headers });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    }
+    expect(
+      (
+        await guarded.inject({
+          method: "GET",
+          url: "/api/prs/flow",
+          headers: { [OPERATOR_HEADER]: "tok-1" },
+        })
+      ).statusCode,
+    ).toBe(200);
   });
 
   describe("controller check route", () => {
