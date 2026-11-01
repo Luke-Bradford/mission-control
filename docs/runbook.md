@@ -1605,7 +1605,7 @@ copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=
 
 ### Checking the write floors
 
-Every crew CLI receives `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Claude strips recognized credentials
+Every Claude crew CLI receives `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Claude strips recognized credentials
 from Bash, hooks and MCP subprocess environments. The parent CLI retains its authentication.
 The supervisor also starts every seat with a minimal inherited environment, excluding operator
 provider and GitHub tokens. The real-CLI floor suite checks fake provider credentials against a
