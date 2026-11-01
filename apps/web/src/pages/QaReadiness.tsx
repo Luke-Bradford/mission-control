@@ -9,11 +9,11 @@ import {
   type ReviewShotView,
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { apiPost, apiReviewImage } from "../api.ts";
+import { ApiError, apiPost, apiReviewImage } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, streamStatus, useResource } from "../data.ts";
-import { elapsed, plural, prLabel, shortSha } from "../fmt.ts";
+import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { mapPath, navigate, useSearch } from "../router.ts";
@@ -218,13 +218,14 @@ function Detail({
         }
       : null,
   );
-  const data = detail.data;
+  const detailMatches = detail.data?.sha === pr.headSha;
+  const fullMatches = full.data?.headSha === pr.headSha;
+  const data = detailMatches ? detail.data : undefined;
+  const fullPr = fullMatches ? full.data : undefined;
+  const moved =
+    (detail.data !== undefined && !detailMatches) || (full.data !== undefined && !fullMatches);
   const disabled =
-    !enabled ||
-    detail.error !== null ||
-    full.error !== null ||
-    data?.sha !== pr.headSha ||
-    full.data?.headSha !== pr.headSha;
+    !enabled || detail.error !== null || full.error !== null || !detailMatches || !fullMatches;
   const pairs = evidence.data?.sha === pr.headSha ? evidence.data : undefined;
   return (
     <div className="uat-detail">
@@ -233,7 +234,7 @@ function Detail({
           <Decide
             pr={pr}
             disabled={disabled}
-            waiting={Boolean(pr.uat && data?.uat.waiting)}
+            waiting={pr.uat ? (data ? data.uat.waiting : null) : false}
             summary={data?.qaSummary ?? "No review summary has been captured for this head."}
           >
             <div>
@@ -242,16 +243,25 @@ function Detail({
                 <span>{pr.branch}</span>
                 <span>head {shortSha(pr.headSha ?? "")}</span>
                 <span>CI: {pr.ci ?? "not captured"}</span>
-                {full.data?.changedFiles != null && (
+                {fullPr?.changedFiles != null && (
                   <span>
-                    {plural(full.data.changedFiles, "file")} · +{full.data.additions ?? "—"} −
-                    {full.data.deletions ?? "—"}
+                    {plural(fullPr.changedFiles, "file")} · +{fullPr.additions ?? "—"} −
+                    {fullPr.deletions ?? "—"}
                   </span>
                 )}
               </div>
             </div>
           </Decide>
           {detail.loading && !data && <p role="status">Loading this PR’s evidence…</p>}
+          {moved && (
+            <p className="uat-banner" role="alert">
+              The PR head changed while this view loaded. Reload its current evidence before
+              deciding.{" "}
+              <button type="button" onClick={refresh}>
+                Reload current evidence
+              </button>
+            </p>
+          )}
           {(detail.error || full.error) && (
             <p className="crit-t" role="alert">
               Could not load this head’s details. {detail.error?.message ?? full.error?.message}{" "}
@@ -270,15 +280,24 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <Pairs pr={pr} manifest={pairs} loading={evidence.loading} />
+      <Pairs
+        pr={pr}
+        manifest={pairs}
+        loading={evidence.loading}
+        error={
+          evidence.error instanceof ApiError && evidence.error.status === 404
+            ? null
+            : evidence.error
+        }
+      />
       <div className="uat-grid-two uat-tests-grid">
-        <Tests data={data} checks={full.data?.checks ?? []} />
+        <Tests data={data} checks={fullPr?.checks ?? []} />
         <Panel title="Rework timeline">
           <ol className="pb uat-rounds">
             {data?.rounds.map((r) => (
               <li key={r.reviewId}>
                 <header>
-                  <strong>Round {r.round}</strong>
+                  <strong>Round {r.sequence ?? r.round}</strong>
                   <span>{shortSha(r.sha)}</span>
                   <Pill tone={r.result === "open" ? "warn" : "ok"}>{r.result}</Pill>
                 </header>
@@ -334,7 +353,7 @@ function Detail({
                 Open preview
               </a>
             ) : (
-              <p>No preview is running for this PR.</p>
+              <p>No preview is available for this head.</p>
             )}
           </div>
         </Panel>
@@ -362,7 +381,7 @@ function Decide({
 }: {
   pr: PullRequestSummary;
   disabled: boolean;
-  waiting: boolean;
+  waiting: boolean | null;
   children: ReactNode;
   summary: string;
 }) {
@@ -432,7 +451,9 @@ function Decide({
               Send back…
             </button>
           </fieldset>
-          {!waiting && !done && <p className="uat-meta">This PR is still in review.</p>}
+          {waiting === false && !done && (
+            <p className="uat-meta">This PR is not waiting for acceptance.</p>
+          )}
         </div>
       </div>
       <p>
@@ -479,20 +500,32 @@ function Pairs({
   pr,
   manifest,
   loading,
+  error,
 }: {
   pr: PullRequestSummary;
   manifest: EvidenceManifest | undefined;
   loading: boolean;
+  error: Error | null;
 }) {
   return (
     <Panel title="Before and after" sub="per affected page · captured at PR head">
       <div className="pb uat-pairs">
-        {!manifest?.pairs.length ? (
-          <p className="uat-no-capture">
-            {loading
-              ? "Loading screenshot evidence…"
-              : "No before/after pairs have been captured for this head. Ask QA about missing evidence before deciding."}
+        {error && (
+          <p className="uat-banner crit-t" role="alert">
+            Screenshot evidence is unavailable: {error.message}{" "}
+            <button type="button" onClick={refresh}>
+              Retry screenshot evidence
+            </button>
           </p>
+        )}
+        {!manifest?.pairs.length ? (
+          error ? null : (
+            <p className="uat-no-capture">
+              {loading
+                ? "Loading screenshot evidence…"
+                : "No before/after pairs have been captured for this head. Ask QA about missing evidence before deciding."}
+            </p>
+          )
         ) : (
           manifest.pairs.map((pair) => {
             const base = `/api/prs/${pr.number}/evidence/${manifest.sha}/${pair.page}-${pair.scheme}`;
@@ -505,7 +538,7 @@ function Pairs({
                   </span>
                   <Pill tone={pair.changedPixels ? "warn" : "ok"}>
                     {pair.changedPixels
-                      ? `${pair.changedPercent.toFixed(2)}% changed`
+                      ? `${percent(pair.changedPercent, 2)} changed`
                       : "No visual change"}
                   </Pill>
                 </h3>

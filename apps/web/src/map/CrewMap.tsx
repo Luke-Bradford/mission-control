@@ -150,7 +150,7 @@ export function CrewMapView({
   const focusKey = focusedFiles.join("\n");
   useEffect(() => {
     const first = focusKey.split("\n")[0];
-    if (first) setSelection({ kind: "node", path: first });
+    setSelection(first ? { kind: "node", path: first } : null);
   }, [focusKey]);
   const now = useNow();
   const seatWork = useCallback(
@@ -203,7 +203,7 @@ export function CrewMapView({
     .join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual and the conflicts
   const extraFiles = useMemo(() => {
-    const visual = markConflicts(changesVisual, snapshot.conflicts);
+    const visual = { ...markConflicts(changesVisual, snapshot.conflicts) };
     for (const path of focusedFiles) visual[path] ??= { changes: [] };
     return branchOnlyFiles(snapshot.tree, visual);
   }, [snapshot.tree, pathKey, focusKey]);

@@ -1529,6 +1529,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/milestones"],
   ["GET", "/api/qa/review-shots/:id"],
   ["GET", "/api/qa/uat/:repoId/:number"],
+  ["GET", "/api/qa/queue"],
+  ["GET", "/api/repos/:repoId/prs/:number/files"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2269,6 +2271,11 @@ describe("local access", () => {
                 payload: body,
               })
             : await post(url, json, body);
+      if (url === "/api/repos/:repoId/prs/:number/files") {
+        // This DB-backed read has no placeholder PR; unlike worktree files it answers unknown.
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);

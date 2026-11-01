@@ -2339,12 +2339,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          const preview =
+            repo.id === deps.previewRepoId ? deps.previews?.get(pr.number) : undefined;
           return prUat({
             store,
             pr,
             runCommand: repo.runCommand,
-            previewUrl:
-              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number)?.url ?? null) : null,
+            previewUrl: preview && preview.sha === pr.headSha ? preview.url : null,
             singleRepo: config.repos.length === 1,
             repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
             flightId: flightSeat(config)?.seat.id ?? null,

@@ -102,7 +102,7 @@ export function prUat(input: PrUatInput): PrUatView {
   const reviews = store
     .reviewsOfPr(pr.repoId, pr.number)
     .filter((v) => v.state === "reported")
-    .sort((a, b) => a.round - b.round || a.id - b.id);
+    .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   const commits = store.commitsOnBranch(pr.repoId, pr.branch);
   const currentReview = reviews.filter((r) => r.sha === pr.headSha).at(-1);
   const author = currentReview ? store.run(currentReview.authorRunId) : null;
@@ -124,6 +124,7 @@ export function prUat(input: PrUatInput): PrUatView {
     const reply = all.find((m) => m.from === author && m.at > from && m.at < until);
     return {
       round: v.round,
+      sequence: i + 1,
       reviewId: v.id,
       at: from,
       sha: v.sha,
@@ -157,7 +158,9 @@ export function prUat(input: PrUatInput): PrUatView {
     tryIt: {
       branch: pr.branch,
       commands: [
-        `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
+        pr.headSha && /^[0-9a-f]{40}$/i.test(pr.headSha)
+          ? `git fetch origin ${pr.headSha} && git switch --detach ${pr.headSha}`
+          : `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
         ...(runCommand === undefined ? [] : [runCommand]),
       ],
       previewUrl,

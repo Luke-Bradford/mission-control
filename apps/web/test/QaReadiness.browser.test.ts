@@ -9,6 +9,29 @@ const SHOTS = join(process.env.TMPDIR ?? "/tmp", "qa-acceptance-shots");
 const { renderAt } = browserSession();
 const fixture = qaAcceptanceFixture;
 describeRendered("QA acceptance queue in a browser", () => {
+  it(
+    "keeps a long queue scrollable without clipping its titles",
+    async () => {
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1366,
+        height: 1000,
+        colorScheme: "dark",
+        api: fixture(50),
+      });
+      const rows = await page.boxes(".uat-queue-row");
+      expect(rows).toHaveLength(54);
+      expect(await page.unclipped(".uat-queue-row")).not.toContain(false);
+      expect(
+        await page.evaluate(() => {
+          const list = document.querySelector(".uat-queue-group ul");
+          return !!list && list.scrollHeight > list.clientHeight;
+        }, null),
+      ).toBe(true);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it.each(
     [1366, 1600, 1920].flatMap((width) =>
       ["light", "dark"].map((theme) => ({ width, theme: theme as "light" | "dark" })),

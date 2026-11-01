@@ -11,14 +11,14 @@
   flex-wrap: wrap;
 }
 .uat-title h1 {
-  font-size: 20px;
-  line-height: 28px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
   margin: 0;
 }
 .uat-title p {
   color: var(--fg-2);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
   margin: 0;
 }
 .uat-layout {
@@ -61,14 +61,14 @@
 }
 .uat-queue-group h3 {
   margin: 0;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--fs);
+  line-height: var(--lh);
 }
 .uat-queue-group header > span,
 .uat-queue-none {
   color: var(--muted);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 .uat-queue-group ul,
 .uat-rounds,
@@ -106,7 +106,7 @@
   font-weight: 600;
 }
 .uat-age {
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   white-space: nowrap;
   text-align: right;
   color: var(--warn);
@@ -114,7 +114,7 @@
 .uat-queue-meta {
   grid-column: 1 / -1;
   color: var(--muted);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   overflow-wrap: anywhere;
 }
 .uat-queue-none {
@@ -127,8 +127,8 @@
 .uat-empty h2,
 .uat-empty h3 {
   margin: 0 0 var(--sp-2);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--fs-panel);
+  line-height: var(--lh);
   color: var(--fg);
 }
 .uat-empty p {
@@ -153,8 +153,8 @@
 }
 .uat-detail-head h2 {
   margin: 0 0 var(--sp-2);
-  font-size: 20px;
-  line-height: 28px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
   overflow-wrap: anywhere;
 }
 .uat-meta {
@@ -162,7 +162,7 @@
   gap: var(--sp-2) var(--sp-3);
   flex-wrap: wrap;
   color: var(--muted);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   overflow-wrap: anywhere;
 }
 .uat-actions-area {
@@ -199,8 +199,8 @@
 .uat-page label {
   display: grid;
   gap: var(--sp-2);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 .uat-page textarea {
@@ -212,7 +212,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   color: var(--fg);
-  font: 13px / 20px var(--sans);
+  font: var(--fs) / var(--lh) var(--sans);
   resize: vertical;
 }
 .uat-page button:disabled {
@@ -225,12 +225,12 @@
   flex-wrap: wrap;
   gap: var(--sp-2);
   margin: 0 0 var(--sp-2);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--fs);
+  line-height: var(--lh);
   text-transform: capitalize;
 }
 .uat-pair h3 > span {
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--muted);
   text-transform: none;
   overflow-wrap: anywhere;
@@ -259,7 +259,7 @@
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
   color: var(--muted);
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
   flex-wrap: wrap;
 }
 .uat-shots img,
@@ -296,7 +296,7 @@
 .uat-table th {
   height: 32px;
   color: var(--muted);
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
   text-transform: uppercase;
 }
 .uat-table th:first-child,
@@ -304,7 +304,7 @@
   width: 55%;
   text-align: left;
   overflow-wrap: anywhere;
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 .uat-checks {
   display: flex;
@@ -330,7 +330,7 @@
   gap: var(--sp-2);
   align-items: center;
   color: var(--muted);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 .uat-rounds p,
 .uat-thread p {
@@ -340,7 +340,7 @@
 }
 .uat-files {
   color: var(--fg-2);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 .uat-files li {
   white-space: nowrap;
@@ -355,7 +355,7 @@
   margin: 0;
   background: var(--bg);
   border: 1px solid var(--line);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 .uat-review-shots {
   display: grid;
@@ -425,13 +425,13 @@ fieldset.uat-actions {
   padding: var(--sp-3) var(--sp-4);
 }
 .uat-page .ph h2 {
-  font: 600 14px / 20px var(--sans);
+  font: 600 var(--fs-panel) / var(--lh) var(--sans);
   text-transform: none;
   letter-spacing: 0;
 }
 .uat-page .ph .sub {
   margin-left: auto;
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }

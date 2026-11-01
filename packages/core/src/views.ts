@@ -731,6 +731,8 @@ export interface PrUatFinding {
  */
 export interface PrUatRound {
   round: number;
+  /** PR-wide chronological review number; unlike the engine round it survives Send back. */
+  sequence?: number;
   reviewId: number;
   at: number;
   sha: string;

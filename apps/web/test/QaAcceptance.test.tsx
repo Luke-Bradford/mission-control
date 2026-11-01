@@ -30,6 +30,7 @@ let rows: PullRequestView[];
 let details: PrUatView;
 let fullHead: string;
 let refuse = false;
+let evidenceFails = false;
 let fetcher: ReturnType<typeof stubFetch>;
 beforeEach(() => {
   hub.clear();
@@ -39,6 +40,7 @@ beforeEach(() => {
   rows = [pr(1, NOW - 3600000), pr(2, NOW - 7200000), pr(3, null)];
   fullHead = SHA;
   refuse = false;
+  evidenceFails = false;
   details = {
     repoId: "mc",
     number: 2,
@@ -54,7 +56,15 @@ beforeEach(() => {
     [`/api/qa/uat/mc/2?head=${SHA}`]: () => ({ status: 200, body: details }),
     [`/api/repos/mc/prs/2?head=${SHA}`]: () => ({
       status: 200,
-      body: { ...rows[1], headSha: fullHead },
+      body: {
+        ...rows[1],
+        headSha: fullHead,
+        checks: [{ name: "Head-specific CI", kind: "check", state: "passing" }],
+      },
+    }),
+    [`/api/prs/2/evidence?repo=mc&sha=${SHA}`]: () => ({
+      status: evidenceFails ? 500 : 404,
+      body: { error: evidenceFails ? "capture store is offline" : "not found" },
     }),
     "POST /api/prs/mc/2/uat": () =>
       refuse
@@ -164,14 +174,38 @@ describe("QA acceptance", () => {
       true,
     );
   });
-  it("does not decide when the detail response has moved to a different head", async () => {
-    fullHead = "b".repeat(40);
-    render(<QaReadiness />);
-    await screen.findByText("No messages for this PR yet.");
-    expect((screen.getByRole("button", { name: "Accept" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    expect(posts("/api/prs/mc/2/uat")).toHaveLength(0);
+  it.each(["full PR", "UAT"])(
+    "warns and hides %s evidence when that response has a different head",
+    async (source) => {
+      if (source === "full PR") fullHead = "b".repeat(40);
+      else
+        details = {
+          ...details,
+          sha: "b".repeat(40),
+          qaSummary: "Wrong head summary",
+          tests: [{ command: "wrong-head tests", passed: 9, failed: 0, skipped: 0, duration: 1 }],
+        };
+      render(<QaReadiness />);
+      await screen.findByText(/The PR head changed while this view loaded/);
+      expect(screen.getByRole("button", { name: "Reload current evidence" })).toBeTruthy();
+      expect(screen.queryByText("Wrong head summary")).toBeNull();
+      expect(screen.queryByText("wrong-head tests")).toBeNull();
+      if (source === "full PR") expect(screen.queryByText(/Head-specific CI/)).toBeNull();
+      expect((screen.getByRole("button", { name: "Accept" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+      expect(posts("/api/prs/mc/2/uat")).toHaveLength(0);
+    },
+  );
+  it("distinguishes a failed evidence read from a genuine missing capture and offers retry", async () => {
+    evidenceFails = true;
+    await ready();
+    expect(await screen.findByText(/Screenshot evidence is unavailable/)).toBeTruthy();
+    expect(screen.queryByText(/No before\/after pairs have been captured/)).toBeNull();
+    evidenceFails = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry screenshot evidence" }));
+    await screen.findByText(/No before\/after pairs have been captured/);
+    expect(screen.queryByText(/Screenshot evidence is unavailable/)).toBeNull();
   });
   it("shows the server's stale-head refusal", async () => {
     refuse = true;
