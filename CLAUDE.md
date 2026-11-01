@@ -73,7 +73,7 @@ mc:
   pick_from: [Ready]
   promote_backlog: true
   needs: [done_when, size]
-  checks: ["pnpm -s lint", "pnpm -s typecheck"]
+  checks: ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"]
   templates:
     "type:feature": feature
     "bug": bugfix
@@ -102,6 +102,13 @@ mc:
     - "packages/core/src/loop.ts"
     - "packages/core/src/review.ts"
     - "packages/core/src/repo-rules.ts"
+    - "packages/core/src/flight-model.ts"
+    - "packages/core/src/guard-model.ts"
+    - "packages/core/src/review-model.ts"
+    - "packages/core/src/runtime-model.ts"
+    - "packages/core/src/repo-rules-model.ts"
+    - "packages/core/src/rule-paths.ts"
+    - "packages/core/src/loop-shared.ts"
     - "loops/**"
     - "roles/**"
     - "CLAUDE.md"

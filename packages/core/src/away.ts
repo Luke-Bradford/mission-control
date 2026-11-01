@@ -1,6 +1,7 @@
 import type { FlightDecision, ReplyDraft } from "./flight.ts";
 import { DEFAULT_PROFILES, SMALL_SIZES } from "./profiles.ts";
-import { DEFAULT_HARD_RULES, type RepoRules } from "./repo-rules.ts";
+import type { RepoRules } from "./repo-rules-model.ts";
+import { DEFAULT_HARD_RULES } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
 import type { AttentionItem, AwaySettings, BoardItem, PullRequestView } from "./types.ts";
 

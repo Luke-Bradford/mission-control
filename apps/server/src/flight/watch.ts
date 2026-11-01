@@ -364,6 +364,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const id = found.seat.id;
     const t = now();
     await deps.refreshAuthors?.(found.session.repoId);
+    if (stopped) return;
 
     let added = false;
     let nextDue = Infinity;
@@ -389,6 +390,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       triageTimer = setTimeout(
         () => {
           triageTimer = null;
+          if (stopped) return;
           bus.emit("attention");
           void check();
         },

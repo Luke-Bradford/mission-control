@@ -77,7 +77,8 @@ const BEFORE_REVIEW: readonly HudColumn[] = [
 /**
  * Moves each ticket's card to follow its closing PRs, falling back to the PR's branch-first ticket.
  * All hubs follow PRs for every lane: there is one hub per repo today.
- * An open, ready PR puts an earlier card In review; a merged one puts it Done. PRs all closed
+ * An open, ready PR puts an earlier card In review; a merged closing PR puts it Done.
+ * A branch-only match needs the issue itself closed. PRs all closed
  * unmerged send an In review card back to Ready. Live runs belong to the engine; planner cards
  * stay put. A successful move to a column happens once per PR, leaving later hand moves alone.
  * Each attempt is a `board_moves` row under `pr:<repo>#<number>`; failures wait five minutes.
@@ -121,17 +122,26 @@ export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean
       store.runsOnTicket(repoId, ticket).some((r) => nonBuilders.has(r.agentId))
     )
       continue;
-    const column = hudColumnOf(item);
+    // Compare the project field itself; the HUD already presents a closed issue as Done.
+    const column = hudColumnOf({ ...item, closed: false });
     const open =
       prs.find((p) => p.state === "open" && !p.isDraft) ?? prs.find((p) => p.state === "open");
     const merged = prs.find((p) => p.state === "merged");
+    // A branch names the work it contributes to, not necessarily the whole outcome (research
+    // stages and performance slices share a parent). A closing relation or a closed issue is
+    // the evidence that a merged contribution completes its parent.
+    const completed = item.closed
+      ? (merged ?? prs[0])
+      : open
+        ? undefined
+        : prs.find((p) => p.state === "merged" && p.closingIssues?.includes(item.issueNumber));
     let target: MoveColumn | FlightMoveColumn | null = null;
-    const by = open ?? merged ?? prs[0];
-    if (open) {
-      if (!open.isDraft && BEFORE_REVIEW.includes(column)) target = "In review";
-    } else if (merged) {
+    const by = completed ?? open ?? merged ?? prs[0];
+    if (completed) {
       if (column !== "Done") target = "Done";
-    } else if (column === "In review") {
+    } else if (open) {
+      if (!open.isDraft && BEFORE_REVIEW.includes(column)) target = "In review";
+    } else if (!merged && column === "In review") {
       target = "Ready";
     }
     if (!target || !by) continue;

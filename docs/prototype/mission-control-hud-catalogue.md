@@ -283,33 +283,39 @@ HTML comment: "BOARD: the delivery board, filtered; Mission Control adds only th
 
 ### 2.4 Agent page (`#page-agent`)
 
-HTML comment: "AGENT: one agent in detail". Order: picker, need banner, header panel, then grid: Activity (left) | Loop + side tabs (right).
+The current Agent page follows `docs/mockups/agent/index.html` (Agent page v2, #1022).
+The first screen answers what this agent awaits, why, who moves next, and how the run is doing.
+Order: picker, identity and awaiting reason, owner-labelled next move, five run figures, complete build-loop strip,
+then original ask/result beside deliverables, related work and prompt context. Activity and side tabs follow.
+Previous runs and full attempt history load when their disclosure opens.
 
 #### 2.4.1 Picker `#picker` (aria "Pick an agent")
 
-One button per in-view agent: lamp (needs, non-pulsing) · tag · state pill; selected = `.on`.
+One button per in-view agent: needs lamp, tag and state pill; selected = `.on`.
 
-#### 2.4.2 Need banner `#needBanner`
+#### 2.4.2 Next move
 
-When the agent has needs: "**{CALL} needs you.**" + the same need line as Overview (Stop the run / Interrupt / Answer / Read buttons) + [Ack] (acks all of that agent's items; shown only if any unacknowledged).
+The server selects the current seat's attention, scoped to its current ticket or a repo escalation.
+The panel names the owner: you, FLIGHT, controller, loop or lane. A recommendation and conversation link
+appear when saved. Acknowledgement does not imply that an unresolved decision is complete.
 
-#### 2.4.3 Header `#ahead`
+#### 2.4.3 Header `#ahead` and run figures
 
-- ID row: big call sign with colour square · state pill · chips: role · "s/{session}" · "{account} · {model}" · area globs (mono) or "read-only" · controls:
-  - [Interrupt] (amber when stalled)
-  - [Switch account] → toast "{CALL}: pick another {provider} account. Mission Control moves the session there and resumes it, or starts fresh with a handoff brief if the resume fails."
-  - [Stop] → if it holds the test lock, stops the run first; state Stopped, doing "Stopped by you · area still reserved"; Activity "{State} → Stopped (by you)"; toast "{CALL}: stopped. Its area stays reserved until you remove it."
-  - [Remove] (only when stopped or idle) → removed; Activity "{CALL} removed; its area is free"; toast "{CALL} removed from s/{session}; its area is free."
-  - [Rename] (ghost) → toast "Rename {CALL}: call signs default to the role's console plus a number. Any name works."
-  - [Pop out] (ghost) → toast "In the real HUD this opens {CALL} in its own browser window, live and independent of this one."
-- Tiles:
-  - **Now**: ticket chip + title (or "No ticket") / "{tpl} › **{node}**{ · try n of max} · {m:ss} in this step" / step bar.
-  - **Context**: "{ctx}%" "of {ctxMax}k"; Claude: segmented bar system (s5) · tools (s4) · messages (s1) · compaction buffer (line-2) + "msgs {n}k · tools {n}k · system {n}k · {n} compaction(s)"; Codex: single bar + "Codex reports the total, not a breakdown · {n} compaction(s)".
-  - **Tokens this run**: in+out (live-updating) / "{in} in · {out} out · {cacheHit}% cache hit".
-  - **~Cost**: "~${cost}" / "API-equivalent, this run".
-  - **Speed**: "{tps} tokens/s" / "first token {ttft} · turn {avgTurn}".
-  - **Work**: "{tools} tool calls" / "{turns} turns · {commits} commit(s) · +{add} −{del} · ⊘{denials}".
-  - **Quota · {account}**: one meter per window.
+Identity includes role, session, account, model, area, branch and ticket. Awaiting text names the reason;
+long text folds open. Relative state age ticks in its own child. Crew pause, stop and error take precedence.
+The existing author review badge remains visible. Interrupt and Stop keep their existing permissions;
+Pop out, Switch account, Rename and Remove live behind More and load settings when opened.
+
+The five figures are run health, tool calls (top three tools and failures), reported tokens, API-equivalent
+cost (mean per reported turn), and latest recorded context. Unknown values use a dash; an older run's
+context window cannot produce a current percentage. Quota, Speed and the duplicate Now tile are absent.
+
+The full configured loop strip shows all steps, recorded durations, review rounds/cap, CI executions and
+failures/cap separately. A profile gate without a recorded verdict says Not recorded.
+Original acceptance lines and the agent's reported answers remain separate; a reported pass is not a verified verdict.
+Deliverables link saved PRs, exact-head screenshot evidence and changed files in their own repositories.
+The related tree identifies reviews, subagents and set-aside runs. Prompt context shows the latest recorded
+section costs and compaction count; compactions also have an explicit timeline mark.
 
 #### 2.4.4 Activity (stream) panel `#streamP`
 
@@ -331,7 +337,7 @@ When the agent has needs: "**{CALL} needs you.**" + the same need line as Overvi
 
 #### 2.4.6 Side panel `#sideP` (tabs)
 
-Tabs: "Plan {done}/{total}" (default) · "Queue" · "Subagents {n}" · "Files {n}".
+Tabs: "Plan {done}/{total}" (default), "Queue", "Subagents {n}" only when populated, "Files" (count after loading), and "Context". Each tab reads its data only while open.
 - **Plan**: items with "✓ done" / "◌ doing" / "· to do"; note "The agent's own task list: Claude's task tools or Codex plan updates, replayed from its stream." Empty "No task list yet."
 - **Queue**: "Focus {focus} [Change]" (toast "Focus is what FLIGHT assigns from: a lane, labels or a ticket list. Change it here, or tell FLIGHT, e.g. "GUIDO-2: catalog bugs only this week".") · "Now" (▸ ticket + current step, or "Nothing assigned.") · "Next · from Ready, by priority" (numbered; ↑ on items 2+ with title "Ask FLIGHT to move this up"; empty "Empty: FLIGHT fills this from the focus.") · note "Each ticket starts as a fresh run on its own branch, with the ticket, the repo's docs and this lane's notes. Earlier tickets' conversations aren't carried over." · "Done" (✓ list; empty "None yet.").
   - ↑ creates an approval ask: "Move {ref} above {ref} in {CALL}'s queue? That swaps their Priority on the delivery board ({P} ↔ {P})." with options Approve / Deny, and opens the Item panel. Approve → swaps queue order and the two cards' Priority; FLIGHT: "Changed Priority on the board. {CALL} takes {ref} first now." Deny → "Left the order as it is."

@@ -1,6 +1,7 @@
-import type { ProfileStep, ReviewDepth } from "./profiles.ts";
+import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
-import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
+import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
+import type { CrewMode, CrewRole, LoopKind } from "./runtime-model.ts";
 import type {
   AccountId,
   AgentId,

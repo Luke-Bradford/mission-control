@@ -1,0 +1,300 @@
+.agent-v2-identity {
+  padding: var(--sp-4);
+}
+.agent-v2-idrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.agent-v2-idrow h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: 700 var(--fs-title) / var(--lh-title) var(--display);
+}
+.agent-v2-idrow h2 i {
+  width: var(--sp-3);
+  height: var(--sp-3);
+  border-radius: var(--r-s);
+}
+.agent-v2-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: min(48%, 640px);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  font-size: var(--fs-s);
+}
+.agent-v2-state.parked,
+.agent-v2-state.blocked,
+.agent-v2-state.waiting {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.agent-v2-state.error,
+.agent-v2-state.stalled {
+  color: var(--crit);
+  border-color: var(--crit);
+}
+.agent-v2-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.agent-v2-actions details {
+  position: relative;
+}
+.agent-v2-actions summary {
+  min-height: 28px;
+  min-width: 48px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  cursor: pointer;
+  list-style: none;
+}
+.agent-v2-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--sp-1));
+  z-index: 5;
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 200px;
+  padding: var(--sp-2);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 4px 12px var(--bg);
+}
+.agent-v2-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-s);
+}
+.agent-v2-meta .mono {
+  overflow-wrap: anywhere;
+}
+.agent-v2-meta a,
+.agent-v2 a {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+.agent-v2-next {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 3px solid var(--warn);
+}
+.agent-v2-next > div {
+  flex: 1;
+  min-width: 0;
+}
+.agent-v2-next .btn {
+  white-space: nowrap;
+}
+.agent-v2-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.agent-v2-stat {
+  padding: var(--sp-3) var(--sp-4);
+  min-width: 0;
+}
+.agent-v2-stat h3 {
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.agent-v2-stat > p {
+  margin: var(--sp-1) 0;
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+  font-variant-numeric: tabular-nums;
+}
+.agent-v2-stat > div {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.agent-v2-stat > div span {
+  overflow-wrap: anywhere;
+}
+.agent-v2-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+}
+.agent-v2-steps > li {
+  padding: var(--sp-2) var(--sp-4);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.agent-v2-steps .done > b {
+  color: var(--ok);
+}
+.agent-v2-steps .held {
+  background: var(--warn-soft);
+  box-shadow: inset 0 2px var(--warn);
+}
+.agent-v2-steps .held > b {
+  color: var(--warn);
+}
+.agent-v2-steps .current > b {
+  color: var(--accent);
+}
+.agent-v2-steps > li > span {
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+.agent-v2-steps .agent-v2-step-time {
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.agent-v2-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.agent-v2-left,
+.agent-v2-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.agent-v2-story {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  font-size: var(--fs-s);
+}
+.agent-v2-story h3 {
+  font-size: var(--fs-s);
+  margin-bottom: var(--sp-2);
+}
+.agent-v2-story p {
+  overflow-wrap: anywhere;
+}
+.agent-v2-story details > ol,
+.agent-v2-story details > ul {
+  max-height: 200px;
+  overflow: auto;
+  padding-left: var(--sp-4);
+  margin: var(--sp-2) 0;
+}
+.agent-v2 summary {
+  min-height: 24px;
+  cursor: pointer;
+}
+.agent-v2-deliverables,
+.agent-v2-related {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.agent-v2-deliverables > li {
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.agent-v2-deliverables > li > span {
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  min-width: 48px;
+  text-transform: uppercase;
+}
+.agent-v2-deliverables a {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.agent-v2-related {
+  padding: var(--sp-2) var(--sp-4);
+}
+.agent-v2-related li {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  min-height: 28px;
+}
+.agent-v2-related li > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-v2-related li span {
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+.agent-v2 #streamP {
+  height: 440px;
+  min-height: 320px;
+}
+.agent-v2 #sideP {
+  max-height: 440px;
+  min-height: 160px;
+}
+.agent-v2-history {
+  padding: var(--sp-3) var(--sp-4);
+}
+.agent-v2-history #loopP {
+  max-height: 480px;
+}
+#page-agent.agent-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding-bottom: var(--sp-4);
+}
+@media (max-width: 1350px) {
+  .agent-v2-columns {
+    grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+  }
+  .agent-v2-stats {
+    gap: var(--sp-2);
+  }
+  .agent-v2-stat {
+    padding: var(--sp-3);
+  }
+}
+
+#page-agent.agent-v2 > * {
+  flex-shrink: 0;
+}
+
+.event-mark {
+  margin-right: var(--sp-1);
+}

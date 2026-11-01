@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CrewRow, MAP_RECENT_MS as KEEP_MS, type MapChange, type Run } from "@mc/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SeatDiff } from "../src/map/diff.ts";
 import type { CallRing } from "../src/map/ring.ts";
 import { mapSeats, runChanges, runWork } from "../src/map/seats.ts";
@@ -196,6 +196,22 @@ describe("mapSeats", () => {
   const lock = { holder: null, waiting: [] } as never;
   const seatsOf = (rows: CrewRow[], store: Store, ring: ReturnType<typeof ringOf>) =>
     mapSeats(rows, store, ring as unknown as CallRing, lock, 1000).seats;
+
+  it("decodes a repository's PR history once across seats and set-aside branches", () => {
+    const runs = [run({ id: "a", branch: "feature/a" }), run({ id: "b", branch: "feature/b" })];
+    const store = storeOf(runs, [run({ id: "aside", branch: "feature/aside" })]);
+    const reads = vi.spyOn(store, "pullRequests");
+    seatsOf(
+      [
+        row({ run: { id: "a" } as CrewRow["run"] }),
+        row({ id: "guido-2", run: { id: "b" } as CrewRow["run"] }),
+      ],
+      store,
+      ringOf({}),
+    );
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(reads).toHaveBeenCalledWith("mission-control");
+  });
 
   it("carries the seat's configured area globs, a copy and empty when it has none", () => {
     const area = ["apps/web/**", "docs/**"];

@@ -284,23 +284,17 @@ taking over one second produce a summary carrying the method and URL path (never
 string; the operator token travels as a header). Every 5xx includes its error message and stack
 through the existing redacting logger. Other hub warnings remain logged.
 
-For a launchd hub, add this entry to `/etc/newsyslog.d/mission-control.conf`, replacing
-`<home>` with the home directory and `<user>:<group>` with the hub's account and group.
-Use absolute paths (newsyslog does not expand `~`). If `MC_DB` is set, the pid file is
-`server.pid` beside that database instead.
+The hub writes these JSON lines to `<data dir>/logs/server.log`, with owner-only file permissions.
+Before the next record would exceed 20 MB, or on the first write of a new UTC day, it rotates the
+file and keeps seven numbered archives (`server.log.1` is newest). A single record larger than
+20 MB is kept whole in its own file. Rotation happens in the hub without a restart and works for
+both launchd and manually started hubs. Each preview uses its own database's data directory.
+If writing or rotation fails, records go to stderr, with one warning until writing recovers.
 
-```text
-# logfilename                                  owner:group     mode count size when flags pid_file                                                signal
-<home>/Library/Logs/mission-control/server.log  <user>:<group>  600  7     20480 @T00 B     <home>/.local/share/mission-control/server.pid           15
-```
-
-The system's newsyslog job rotates at 20 MB (the size column is in KB) or daily at midnight,
-whichever comes first, and keeps seven archives. The
-`B` flag avoids inserting plain text into the JSON log. Signal 15 requests the hub's existing
-graceful shutdown; launchd's `KeepAlive` starts it again and reopens the new log. Rotation
-therefore includes a hub restart and the crew's normal shutdown and resume. This entry requires
-the launchd job; do not install it for a manually started hub. Check the expanded entry with
-`sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
+The launchd `StandardOutPath` and `StandardErrorPath` remain bootstrap/fallback logs. Existing
+files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no longer grows
+`server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
+that entry: the built-in rotation replaces it and does not need a service restart.
 
 ### FLIGHT runaway breaker
 
@@ -2176,3 +2170,52 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).
+
+## Repeating a suspected flaky test
+
+Use **Actions → Repeat one test file → Run workflow** on the branch to check. Supply one exact
+`.test.ts` or `.test.tsx` path under `apps/` or `packages/`, a count from 1 to 100, and optionally
+a Vitest test-name pattern. The job runs that file repeatedly with one worker and keeps going
+after a failed repetition, up to its 60-minute job limit. This is a manual diagnostic; it does
+not replace the full CI checks required for merging.
+
+Download the `repeated-test-results-<run id>-<attempt>` artifact. Each repetition has a log and
+Vitest JSON report. `summary.json` records the checked-out SHA, tracked-file dirty status, input
+file and pattern, every outcome, and requested/completed counts. A finished summary has
+`finalized: true`; `success: true` requires every requested repetition to execute at least one
+test and pass. A missing or invalid report, an unsuccessful process, or a pattern that executes
+no tests fails the diagnostic. A cancelled or timed-out job can leave an unfinished summary;
+it is not passing evidence. Artifacts are retained for seven days.
+
+For the same diagnostic locally, from the repository root:
+
+```sh
+TEST_FILE=apps/server/test/supervisor-events.test.ts TEST_REPETITIONS=10 \
+  node --experimental-strip-types scripts/repeat-test.ts
+```
+
+Set `TEST_NAME_PATTERN` for a particular test. Local results are written to
+`.mc-tmp/repeat-tests/`; copy any evidence you want to retain before the next invocation.
+A dirty checkout's result is not proof of an unchanged commit.
+
+## Affected tests before a crew push
+
+This repo requires `pnpm -s lint`, `pnpm -s typecheck` and
+`pnpm -s test:related` before `mc push`. The existing hub check recorder counts
+a command only when it starts and finishes on the same clean commit in the session clone. A
+failed or missing command holds the push and names the check to run. Run checks after committing;
+a check on uncommitted edits is not evidence for that commit. Re-run after changing the head.
+
+The wrapper verifies `origin/HEAD`, its commit and the merge base, then passes the immutable
+base SHA to Vitest. This prevents a missing-ref comparison from becoming a no-tests success.
+Vitest's changed mode selects changed test files and tests importing changed source files against
+the merge base with the clone's `origin/HEAD`. Its configured force-rerun triggers still apply.
+A documentation-only diff can legitimately select no tests; that is different from a named flaky
+test diagnostic, which must execute tests. The full CI suite remains required before merge.
+This selection uses the import graph; it cannot discover arbitrary runtime file reads, so authors
+still run targeted fixture/role checks for those changes and reviewers verify the coverage.
+
+If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the clone's default
+branch ref rather than changing the required command. The hub never executes the seat's check
+code in the server process. Its existing exception for engine-only clean merges of main is
+unchanged; this check gates seat-authored pushes and does not certify that separate publish path.

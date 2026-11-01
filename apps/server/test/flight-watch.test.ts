@@ -81,7 +81,12 @@ import {
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
-import { createFlightWatch, type FlightWatch, flightToolsDigest } from "../src/flight/watch.ts";
+import {
+  createFlightWatch,
+  type FlightWatch,
+  type FlightWatchDeps,
+  flightToolsDigest,
+} from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -213,8 +218,9 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = () => {
+const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors"> = {}) => {
   watch = createFlightWatch({
+    ...over,
     config,
     store,
     bus,
@@ -5032,4 +5038,36 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
     flightState({ config, store, busy: [], now: T0 + MIN });
     expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
   });
+});
+
+it("does not rearm triage or wake a seat when stopped during author refresh", async () => {
+  let finishRefresh!: () => void;
+  let entered!: () => void;
+  const refreshing = new Promise<void>((resolve) => {
+    finishRefresh = resolve;
+  });
+  const startedRefresh = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  makeWatch({
+    refreshAuthors: () => {
+      entered();
+      return refreshing;
+    },
+  });
+  liveCrew();
+  ask();
+  const checking = watch.check();
+  await startedRefresh;
+  watch.stop();
+  finishRefresh();
+  await checking;
+  expect(vi.getTimerCount()).toBe(0);
+  expect(emitted).toEqual([]);
+  expect(sendCalls).toEqual([]);
+  expect(startCalls).toEqual([]);
+  nowMs += FLIGHT_IDLE_MS;
+  await vi.advanceTimersByTimeAsync(FLIGHT_IDLE_MS);
+  expect(emitted).toEqual([]);
+  expect(sendCalls).toEqual([]);
 });

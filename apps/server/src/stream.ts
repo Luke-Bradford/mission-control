@@ -60,6 +60,7 @@ function itemsOf(ev: Json): Item[] {
   const at = timeOf(ev.timestamp);
   const sys = (text: string): Item => ({ k: "ev", ev: { at, kind: "sys", text: cleanText(text) } });
   if (ev.type === "system") {
+    if (ev.subtype === "compact_boundary") return [sys("Context compacted")];
     if (ev.subtype === "task_started" && ev.task_type === "local_agent") {
       const type = str(ev.subagent_type) ?? "agent";
       const description = typeof ev.description === "string" ? ev.description : "";

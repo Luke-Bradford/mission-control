@@ -588,7 +588,15 @@ function buildCrew(
     [...seatRows.values()].flatMap((seat) => (seat.runId === null ? [] : [seat.runId])),
   );
   const allRuns = [...runsByAgent.values()].flat();
-  const digestByRun = store.digests(allRuns.map((run) => run.id));
+  const latestRunIds = [...runsByAgent.entries()].flatMap(([agentId, runs]) => {
+    const held = runs.find(
+      (run) => run.id === seatRows.get(agentId)?.runId && run.agentId === agentId,
+    );
+    const latest = held?.endedAt === null ? held : runs[0];
+    return latest ? [latest.id] : [];
+  });
+  const digestByRun = store.digests(latestRunIds);
+  const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
   const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
@@ -622,7 +630,7 @@ function buildCrew(
       const digest = latest ? (digests.get(latest.id) ?? null) : null;
       let contextWindow: number | null = null;
       for (const r of runs) {
-        const w = digests.get(r.id)?.contextWindow ?? null;
+        const w = contextWindows.get(r.id) ?? null;
         if (w !== null) {
           contextWindow = w;
           break;

@@ -3,6 +3,7 @@
 import { type LoopTry, pushChecksText, type RunLoopView } from "@mc/core";
 import { expect, it } from "vitest";
 import { RESOURCES } from "../src/data.ts";
+import { agentView } from "./agentV2Fixture.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { crewRow, MIN, NOW } from "./fixtures.ts";
 
@@ -57,11 +58,13 @@ const row = crewRow({
   hudState: "idle",
   loop: { phase: "parked", text: `Blocked: ${PARK}`, parked: PARK, prNumber: 77 },
 });
+const detail = agentView(row);
+detail.awaiting = { label: "Parked", reason: PARK, since: row.stateSince };
 const api = {
   [RESOURCES.runLoop(RUN).path]: view,
   [RESOURCES.runs(SEAT).path]: [],
   [RESOURCES.crew.path]: { rows: [row], firstRunToday: null },
-  [RESOURCES.crewDetail(SEAT).path]: row,
+  [RESOURCES.agentDetail(SEAT).path]: detail,
   [RESOURCES.attention.path]: [],
   [RESOURCES.limits.path]: [],
 };
@@ -82,6 +85,8 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
         colorScheme: scheme,
         api,
       });
+      await page.box(".agent-v2-history summary");
+      await page.click(".agent-v2-history summary");
       await page.box("#loopP .vstep");
       const tall = await page.evaluate(() => {
         const lines = (el: Element) => {
@@ -89,7 +94,11 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
           const lh = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.3;
           return el.getBoundingClientRect().height / lh;
         };
-        return [...document.querySelectorAll("#loopP *, #ahead .doing, #ahead .doing *")]
+        return [
+          ...document.querySelectorAll(
+            "#loopP *, #ahead .agent-v2-state, #ahead .agent-v2-state *",
+          ),
+        ]
           .filter((el) => el.children.length === 0 && (el.textContent ?? "").trim() !== "")
           .filter((el) => lines(el) > 3.2)
           .map((el) => `${el.className}: ${(el.textContent ?? "").slice(0, 40)}`);
@@ -99,7 +108,8 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
       expect(text).toContain("waiting: 1 finding held on c74cdfc");
       expect(text).not.toContain("the grid clips");
       const header = await page.evaluate(() => document.querySelector("#ahead")?.textContent, null);
-      expect(header).toContain("Parked · review findings on c74cdfc · 1 held");
+      expect(header).toContain("Parked");
+      expect(header).toContain("RETRO-CX reviewed c74cdfc");
       expect(header).not.toContain("the grid clips");
       expect(await page.reachable("#loopP .vstep")).not.toContain(false);
       if (process.env.MC_SHOT_DIR) {

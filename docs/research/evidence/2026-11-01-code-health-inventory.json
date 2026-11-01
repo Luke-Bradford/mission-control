@@ -1,0 +1,220 @@
+{
+  "findingCategories": [
+    {
+      "category": "uncategorised",
+      "n": 915
+    },
+    {
+      "category": "correctness",
+      "n": 523
+    },
+    {
+      "category": "spec",
+      "n": 384
+    },
+    {
+      "category": "test-missing",
+      "n": 195
+    },
+    {
+      "category": "style",
+      "n": 81
+    },
+    {
+      "category": "docs",
+      "n": 69
+    },
+    {
+      "category": "test-wrong",
+      "n": 60
+    },
+    {
+      "category": "security",
+      "n": 41
+    },
+    {
+      "category": "scope",
+      "n": 7
+    },
+    {
+      "category": "test-stale",
+      "n": 2
+    }
+  ],
+  "reviewRanges": [
+    {
+      "repo_id": "mission-control",
+      "rows": 1049,
+      "prs": 322,
+      "firstAt": 1792626761545,
+      "lastAt": 1793536048052,
+      "firstUtc": "2026-10-21T23:52:41.545000+00:00",
+      "lastUtc": "2026-11-01T12:27:28.052000+00:00"
+    }
+  ],
+  "reworkRounds": [
+    {
+      "rounds": 1,
+      "prs": 103
+    },
+    {
+      "rounds": 2,
+      "prs": 128
+    },
+    {
+      "rounds": 3,
+      "prs": 87
+    },
+    {
+      "rounds": 4,
+      "prs": 2
+    }
+  ],
+  "findingResolutions": [
+    {
+      "state": "logged",
+      "n": 974,
+      "withResolution": 0
+    },
+    {
+      "state": "open",
+      "n": 1303,
+      "withResolution": 582
+    }
+  ],
+  "sameShaMixedCI": [
+    {
+      "candidates": 69
+    }
+  ],
+  "ciRange": [
+    {
+      "rows": 10652,
+      "firstAt": 1793240678145,
+      "lastAt": 1793564119024,
+      "firstUtc": "2026-10-29T02:24:38.145000+00:00",
+      "lastUtc": "2026-11-01T20:15:19.024000+00:00"
+    }
+  ],
+  "reviewTestRange": [
+    {
+      "rows": 1289,
+      "minDuration": 0,
+      "maxDuration": 600000,
+      "passed": 269929,
+      "failed": 5728
+    }
+  ],
+  "fileCoverage": [
+    {
+      "rows": 13273,
+      "files": 3447,
+      "prs": 1276
+    }
+  ],
+  "prSizeCoverage": [
+    {
+      "rows": 1198,
+      "withAdditions": 1198,
+      "withDeletions": 1198
+    }
+  ],
+  "findingsFileCoverage": [
+    {
+      "findings": 2277,
+      "categorised": 1362,
+      "files": 333
+    }
+  ],
+  "tables": [
+    {
+      "name": "test_lock_holds"
+    },
+    {
+      "name": "test_lock_runs"
+    },
+    {
+      "name": "review_tests"
+    },
+    {
+      "name": "map_cache"
+    }
+  ],
+  "ciConclusions": [
+    {
+      "conclusion": "SUCCESS",
+      "n": 9605
+    },
+    {
+      "conclusion": "FAILURE",
+      "n": 641
+    },
+    {
+      "conclusion": "IN_PROGRESS",
+      "n": 333
+    },
+    {
+      "conclusion": "CANCELLED",
+      "n": 31
+    },
+    {
+      "conclusion": "PENDING",
+      "n": 23
+    },
+    {
+      "conclusion": "QUEUED",
+      "n": 17
+    },
+    {
+      "conclusion": "SKIPPED",
+      "n": 2
+    }
+  ],
+  "escapedDefects": [
+    {
+      "rows": 53,
+      "prs": 48
+    }
+  ],
+  "cachedFileSizes": [
+    {
+      "files": 1152,
+      "key": "5f1b0fcb2ee8b492b56f167dcf5b822b81cc706d",
+      "largestFiles": [
+        {
+          "path": "apps/server/test/api.test.ts",
+          "lines": 9937
+        },
+        {
+          "path": "apps/server/test/flight-tools.test.ts",
+          "lines": 9642
+        },
+        {
+          "path": "apps/server/src/store.ts",
+          "lines": 7555
+        },
+        {
+          "path": "apps/server/test/engine.test.ts",
+          "lines": 7238
+        },
+        {
+          "path": "apps/server/test/mcp-tools.test.ts",
+          "lines": 6069
+        },
+        {
+          "path": "apps/server/src/api.ts",
+          "lines": 5192
+        },
+        {
+          "path": "apps/server/test/flight-watch.test.ts",
+          "lines": 5035
+        },
+        {
+          "path": "apps/server/src/runtime/supervisor.ts",
+          "lines": 4740
+        }
+      ]
+    }
+  ],
+  "snapshot": "Private read-only copy captured on 2026-11-01, with newest CI observation at 20:15:19 UTC. No live database writes."
+}

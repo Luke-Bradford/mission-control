@@ -1,0 +1,105 @@
+{
+  "scope": "First measured read-cost slice of issue933; does not complete its idle CPU, memory or rotation outcomes.",
+  "method": "Owned copied-database API preview, crew disabled, loop writes disabled. Node inspector profiler on the preview only. Each run copied the then-current DB; snapshots are not identical. Timings are diagnostic, not controlled CI thresholds. The final run waited30seconds after the cold request before idle phases. Private CPU profiles are not committed.",
+  "runs": [
+    {
+      "candidate": "baseline main4e75",
+      "phases": [
+        {
+          "name": "cold-map",
+          "ms": 3209.8038750000005,
+          "result": {
+            "ms": 3204.1967090000003,
+            "bytes": 55850
+          }
+        },
+        {
+          "name": "idle-no-browser",
+          "ms": 20017.37375,
+          "result": null
+        },
+        {
+          "name": "idle-with-sse",
+          "ms": 20005.930333000004,
+          "result": null
+        }
+      ]
+    },
+    {
+      "candidate": "scoped PR lookups",
+      "phases": [
+        {
+          "name": "cold-map",
+          "ms": 743.5064580000001,
+          "result": {
+            "ms": 738.4242499999998,
+            "bytes": 55682
+          }
+        },
+        {
+          "name": "idle-no-browser",
+          "ms": 20017.232458,
+          "result": null
+        },
+        {
+          "name": "idle-with-sse",
+          "ms": 20010.968041000004,
+          "result": null
+        }
+      ]
+    },
+    {
+      "candidate": "latest digest and exact board lookups",
+      "phases": [
+        {
+          "name": "cold-map",
+          "ms": 655.5241670000003,
+          "result": {
+            "ms": 650.8237080000001,
+            "bytes": 55850
+          }
+        },
+        {
+          "name": "idle-no-browser",
+          "ms": 20019.790083,
+          "result": null
+        },
+        {
+          "name": "idle-with-sse",
+          "ms": 20016.650374999997,
+          "result": null
+        }
+      ]
+    },
+    {
+      "candidate": "same changes with 30-second collector settling",
+      "phases": [
+        {
+          "name": "cold-map",
+          "ms": 586.4682500000001,
+          "result": {
+            "ms": 586.1041249999998,
+            "bytes": 55686
+          },
+          "cpuMs": 569.659,
+          "cpuPercent": 97.13381755960359
+        },
+        {
+          "name": "idle-no-browser",
+          "ms": 20003.256791000003,
+          "result": null,
+          "cpuMs": 1834.779,
+          "cpuPercent": 9.17240137028844
+        },
+        {
+          "name": "idle-with-sse",
+          "ms": 20004.095707999993,
+          "result": null,
+          "cpuMs": 2162.899,
+          "cpuPercent": 10.8122808027509
+        }
+      ]
+    }
+  ],
+  "remaining": "Background CPU is still material and deployment log rotation is not configured. Further profiling and verification required before closing933."
+}

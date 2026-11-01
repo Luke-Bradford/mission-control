@@ -438,9 +438,15 @@ describe("followPrs", () => {
     ...over,
   });
   /** A board with one card in `status` and the fake GitHub to match, then one follow. */
-  async function follow(status: string, optionId: string, prs: PullRequestView[], cfg = config) {
+  async function follow(
+    status: string,
+    optionId: string,
+    prs: PullRequestView[],
+    cfg = config,
+    closed = false,
+  ) {
     const b = fakeBoard({ itemStatus: optionId });
-    store.replaceBoard("mc", [card(status)]);
+    store.replaceBoard("mc", [{ ...card(status), closed }]);
     store.upsertPullRequests("mc", prs, NOW);
     await followPrs({ gql: b.gql, store, config: cfg, now: () => now }, "mc");
     return b;
@@ -465,6 +471,69 @@ describe("followPrs", () => {
     const b = await follow("In Review", "O_review", [pr({ state: "merged", mergedAt: 5 })]);
     expect(b.state.card).toBe("O_done");
   });
+
+  it("leaves an open parent unfinished when a branch-only contribution merges", async () => {
+    const b = await follow("In Review", "O_review", [
+      pr({ state: "merged", closingIssues: [], mergedAt: 5 }),
+    ]);
+    expect(b.mutations()).toHaveLength(0);
+    expect(b.state.card).toBe("O_review");
+    expect(store.boardMoves(0)).toEqual([]);
+  });
+
+  it("finishes a closed parent even when old PRs have no closing-issue metadata", async () => {
+    const b = await follow(
+      "In Review",
+      "O_review",
+      [pr({ state: "merged", closingIssues: [], mergedAt: 5 })],
+      config,
+      true,
+    );
+    expect(b.state.card).toBe("O_done");
+  });
+
+  it("keeps a closed issue Done when a follow-up PR is open", async () => {
+    const b = await follow("Todo", "O_todo", [pr()], config, true);
+    expect(b.state.card).toBe("O_done");
+  });
+
+  it("records completion against the closing PR rather than an earlier partial contribution", async () => {
+    const b = await follow("In Review", "O_review", [
+      pr({ number: 90, state: "merged", closingIssues: [] }),
+      pr({ number: 91, state: "merged" }),
+    ]);
+    expect(b.state.card).toBe("O_done");
+    expect(store.boardMoves(0)[0]?.runId).toBe("pr:mc#91");
+  });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "keeps a reopened issue's current open PR ahead of an old merged closing PR (draft %s, previous Done move %s)",
+    async (isDraft, previousDone) => {
+      if (previousDone)
+        store.addBoardMove({
+          runId: "pr:mc#90",
+          repoId: "mc",
+          issue: 7,
+          column: "Done",
+          state: "done",
+          detail: null,
+          at: NOW - 1000,
+        });
+      const b = await follow("Todo", "O_todo", [
+        pr({ number: 90, state: "merged" }),
+        pr({ number: 92, isDraft }),
+      ]);
+      expect(b.state.card).toBe(isDraft ? "O_todo" : "O_review");
+      expect(store.boardMoves(0).filter((move) => move.column === "Done")).toHaveLength(
+        previousDone ? 1 : 0,
+      );
+    },
+  );
 
   it("moves a card to a column once per PR; a later move by hand is left alone", async () => {
     await follow("In Review", "O_review", [pr({ state: "merged", mergedAt: 5 })]);
@@ -513,6 +582,8 @@ describe("followPrs", () => {
         state === "open" ? "" : "In Review",
         state === "open" ? "O_todo" : "O_review",
         [pr({ state, closingIssues: [] })],
+        config,
+        state === "merged",
       );
       expect(b.state.card).toBe(
         state === "open" ? "O_review" : state === "merged" ? "O_done" : "O_todo",
@@ -537,7 +608,7 @@ describe("followPrs", () => {
     store = new Store(old);
     expect(store.pullRequests("mc")[0]).toMatchObject({ closingIssues: [], ticket: "mc#7" });
     const b = fakeBoard({ itemStatus: "O_review" });
-    store.replaceBoard("mc", [card("In Review")]);
+    store.replaceBoard("mc", [{ ...card("In Review"), closed: true }]);
     expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
     expect(b.state.card).toBe("O_done");
   });

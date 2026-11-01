@@ -18,6 +18,7 @@ import { dur, kTokens, shortSha } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { useSearch } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 
 import { openItem } from "../shell/overlays.ts";
@@ -413,7 +414,11 @@ function Diff({ agentId, path, onClose }: { agentId: string; path: string; onClo
 }
 
 function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFiles> }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const linked = new URLSearchParams(useSearch()).get("path");
+  const [open, setOpen] = useState<string | null>(linked);
+  useEffect(() => {
+    if (linked) setOpen(linked);
+  }, [linked]);
   if (files.error && !files.data) {
     const failNote = errorNote(files.error);
     return (
@@ -465,10 +470,24 @@ function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFil
 
 /** The side panel's tabs (catalogue 2.4.6); a file opens its diff below the Files list. */
 export function SideTabs({ row }: { row: CrewRow }) {
-  const [tab, setTab] = useState<Tab>("plan");
-  const files = useResource<ChangedFiles>(RESOURCES.files(row.id));
+  const side = new URLSearchParams(useSearch()).get("side");
+  const requested =
+    side && ["plan", "queue", "subs", "files", "prompt"].includes(side) ? (side as Tab) : null;
+  const hasSubagents = (row.digest?.subagents.length ?? 0) > 0;
+  const [tab, setTab] = useState<Tab>(
+    requested === "subs" && !hasSubagents ? "plan" : (requested ?? "plan"),
+  );
+  useEffect(() => {
+    if (requested) setTab(requested === "subs" && !hasSubagents ? "plan" : requested);
+  }, [requested, hasSubagents]);
+  useEffect(() => {
+    if (tab === "subs" && !hasSubagents) setTab("plan");
+  }, [tab, hasSubagents]);
+  const files = useResource<ChangedFiles>(tab === "files" ? RESOURCES.files(row.id) : null);
   const nFiles = files.data?.note === READONLY_FILES_NOTE ? undefined : files.data?.files.length;
-  const stream = useResource<AgentStream>(row.run ? RESOURCES.stream(row.id) : null);
+  const stream = useResource<AgentStream>(
+    row.run && tab === "plan" ? RESOURCES.stream(row.id) : null,
+  );
   const tasks = row.run && stream.data?.runId === row.run.id ? (stream.data.tasks ?? []) : [];
   const tasksKnown =
     row.run !== null && stream.data?.runId === row.run.id && !stream.loading && !stream.error;
@@ -476,7 +495,9 @@ export function SideTabs({ row }: { row: CrewRow }) {
   const options = [
     { value: "plan", label: tasksKnown ? `Plan ${done}/${tasks.length}` : "Plan" },
     { value: "queue", label: "Queue" },
-    { value: "subs", label: `Subagents ${row.digest?.subagents.length ?? 0}` },
+    ...((row.digest?.subagents.length ?? 0) > 0
+      ? [{ value: "subs" as const, label: `Subagents ${row.digest?.subagents.length}` }]
+      : []),
     { value: "files", label: nFiles === undefined ? "Files" : `Files ${nFiles}` },
     { value: "prompt", label: "Context" },
   ] as const;

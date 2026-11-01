@@ -1,14 +1,14 @@
-import type { Owner, Stage } from "./board.ts";
+import type { Owner, Stage } from "./board-model.ts";
 import type { CrewPause } from "./crew-pause.ts";
-import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
-import type { FlightPowers } from "./guard.ts";
+import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
+import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
-import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
-import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
+import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud-model.ts";
+import type { ProfileStepPhase, RunProfile } from "./profiles-model.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
-import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
-import type { ReviewCheckState, ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
+import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow-model.ts";
+import type { ReviewCheckState, ReviewStatus } from "./review-model.ts";
+import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime-model.ts";
 
 export type RepoId = string;
 export type AgentId = string;

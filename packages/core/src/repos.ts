@@ -1,5 +1,6 @@
 import { FLOW_BATCH, FLOW_LONG_TIMELINES, FLOW_TIMELINE_MAX_PAGES, PR_MAX_PAGES } from "./board.ts";
-import { HUD_COLUMNS, type HudColumn, hudColumnOf } from "./hud.ts";
+import { hudColumnOf } from "./hud.ts";
+import { HUD_COLUMNS, type HudColumn } from "./hud-model.ts";
 import type { GithubBudget, TicketState } from "./types.ts";
 
 /** The state a ticket in each HUD column has. */

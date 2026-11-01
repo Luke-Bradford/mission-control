@@ -1,5 +1,4 @@
 import {
-  ACK_BATCH_MAX,
   type AgentStream,
   type AttentionItem,
   type ChangedFiles,
@@ -11,8 +10,6 @@ import {
   type FileDiff,
   type LimitRow,
   type LoopTry,
-  METER_FULL_PCT,
-  METER_WARN_PCT,
   READONLY_FILES_NOTE,
   type ReviewStatus,
   type RunDigest,
@@ -31,6 +28,7 @@ import { installKeys } from "../src/shell/keys.ts";
 import { setSelectedAgent } from "../src/shell/selection.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast, toast } from "../src/shell/Toast.tsx";
+import { agentView } from "./agentV2Fixture.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
   boardItem,
@@ -46,7 +44,6 @@ import {
   run,
   SESSION_CONFIG,
   seatRow,
-  stoppedSeat,
 } from "./fixtures.ts";
 
 export function digest(over: Partial<RunDigest> = {}): RunDigest {
@@ -163,9 +160,9 @@ function stub(d: Data = {}) {
     const enc = encodeURIComponent(r.id);
     const streamNow = d.streamNow;
     // The page's own row follows `rows`, which a test swaps as the seat changes.
-    routes[`/api/crew/${enc}`] = () => ({
+    routes[`/api/agents/${enc}`] = () => ({
       status: 200,
-      body: rows.find((x) => x.id === r.id) ?? r,
+      body: agentView(rows.find((x) => x.id === r.id) ?? r),
     });
     routes[`/api/agents/${enc}/stream?limit=20`] = streamNow
       ? () => ({ status: 200, body: streamNow() })
@@ -194,7 +191,32 @@ afterEach(() => {
 });
 
 const $ = (c: HTMLElement, sel: string) => c.querySelector<HTMLElement>(sel);
-const loaded = () => screen.findByText("Work on shop-app#3349");
+const loaded = async () => {
+  const message = await screen.findByText("Work on shop-app#3349");
+  await openHistory();
+  return message;
+};
+async function openHistory() {
+  await screen.findByText("More");
+  const summary = screen.queryByText("Attempts and previous runs");
+  if (summary) {
+    const details = summary.closest("details");
+    if (details && !details.open) {
+      details.open = true;
+      fireEvent(details, new Event("toggle", { bubbles: true }));
+    }
+  }
+  await act(async () => {});
+}
+async function moreButton(name: string) {
+  const summary = await screen.findByText("More");
+  const details = summary.closest("details");
+  if (details && !details.open) {
+    details.open = true;
+    fireEvent(details, new Event("toggle", { bubbles: true }));
+  }
+  return screen.findByRole("button", { name });
+}
 
 const traceView = (): RunLoopView => ({
   runId: "r-12",
@@ -224,13 +246,13 @@ describe("Agent run trace", () => {
     });
     stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
     const view = render(<Agent id={row.id} />);
-    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
-    const trace = screen.getByRole("link", { name: "Trace" });
+    await waitFor(() => expect(view.container.querySelector("#ahead")).not.toBeNull());
+    const trace = screen.getByRole("link", { name: "Open run trace" });
     expect(trace.getAttribute("href")).toBe(`/agent/${row.id}?trace=r-12`);
     fireEvent.click(trace);
     expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: "Back to agent" }));
-    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
+    await waitFor(() => expect(view.container.querySelector("#ahead")).not.toBeNull());
     view.unmount();
   });
 
@@ -250,15 +272,6 @@ describe("Agent run trace", () => {
   });
 });
 
-describe("Agent page: header before the timezone loads", () => {
-  it("shows the doing line without waiting for the config", async () => {
-    stub({ extra: { "/api/config": () => ({ status: 503, body: { error: "loading" } }) } });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(container, "#ahead .doing")?.textContent).toContain("run #12");
-  });
-});
-
 describe("Agent page: first load", () => {
   it("lists the crew by summary and reads the shown seat's row and stream in the budgeted forms", async () => {
     const f = stub();
@@ -266,11 +279,11 @@ describe("Agent page: first load", () => {
     await loaded();
     const asked = f.mock.calls.map(([p]) => String(p));
     expect(asked).toContain("/api/crew?shape=summary");
-    expect(asked).toContain("/api/crew/shop-app-ta");
+    expect(asked).toContain("/api/agents/shop-app-ta");
     expect(asked).toContain("/api/agents/shop-app-ta/stream?limit=20");
     expect(asked).not.toContain("/api/crew");
     // The page asks for no seat's full row but the one it shows.
-    expect(asked).not.toContain("/api/crew/studio");
+    expect(asked).not.toContain("/api/agents/studio");
   });
 });
 
@@ -297,79 +310,6 @@ describe("Agent page: static run rows", () => {
 
     expect(renders).toHaveBeenCalledTimes(initial);
     vi.useRealTimers();
-  });
-});
-
-describe("Agent page: what the seat is doing", () => {
-  const tile = (container: HTMLElement, label: string) =>
-    [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith(label),
-    ) as HTMLElement;
-
-  it("the header and the Now tile say the tool in hand and what it touches", async () => {
-    const live = { name: "Edit", since: NOW - 12_000, detail: "apps/server/src/backfill.ts" };
-    stub({ rows: [crewRow({ digest: digest({ liveTool: live }) })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(container, "#ahead .doing")?.textContent).toBe(
-      "Edit 0:12 · apps/server/src/backfill.ts",
-    );
-    expect($(tile(container, "Now"), ".nowdoing")?.textContent).toBe(
-      "Edit 0:12 · apps/server/src/backfill.ts",
-    );
-  });
-
-  it("between tools they say the last text; with no text the Now tile adds nothing", async () => {
-    stub({ rows: [crewRow({ digest: digest({ lastText: "I'm editing supervisor.ts now…" }) })] });
-    const first = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(first.container, "#ahead .doing")?.textContent).toBe("I'm editing supervisor.ts now…");
-    expect($(tile(first.container, "Now"), ".nowdoing")?.textContent).toBe(
-      "I'm editing supervisor.ts now…",
-    );
-    first.unmount();
-    stub({ rows: [crewRow({ digest: digest() })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(container, "#ahead .doing")?.textContent).toBe("run #12");
-    expect($(tile(container, "Now"), ".nowdoing")).toBeNull();
-  });
-
-  it("a running seat's background task comes ahead of its last text in the tile as in the header", async () => {
-    const task = { taskId: "t1", description: "Run the full suite", type: "shell" };
-    stub({
-      rows: [crewRow({ digest: digest({ background: [task], lastText: "Starting the suite." }) })],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(container, "#ahead .doing")?.textContent).toBe(
-      "run #12 · background: Run the full suite",
-    );
-    expect($(tile(container, "Now"), ".nowdoing")?.textContent).toBe(
-      "background: Run the full suite",
-    );
-  });
-
-  it("the header's PR chip is followed by the PR's title, from the repo's PRs", async () => {
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000 }),
-        // as live data is: the run records no PRs
-        seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] }),
-      ],
-      extra: {
-        "/api/repos/shop-app/prs?linked=1&shape=summary": [
-          prView({ number: 166, title: "Backfill the quote cache" }),
-        ],
-      },
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    await vi.waitFor(() =>
-      expect($(container, "#ahead .doing")?.textContent).toBe(
-        "Draft PR #166 · Backfill the quote cache",
-      ),
-    );
   });
 });
 
@@ -499,6 +439,7 @@ describe("Agent page: what past runs were", () => {
       },
     });
     const { container } = render(<Agent id="guido-1" />);
+    await openHistory();
     const chip = await within(container).findByRole("link", { name: "shop-app PR #77" });
     expect(chip.closest(".rref")?.getAttribute("title")).toBe("Cache quotes");
     expect(within(container).queryByRole("link", { name: "shop-app PR #9" })).toBeNull();
@@ -585,12 +526,12 @@ describe("Agent page: picker and selection", () => {
     act(() => setSelectedAgent("studio-builder"));
     const { container, unmount } = render(<Agent id={null} />);
     await loaded();
-    expect($(container, "#ahead .big")?.textContent).toBe("studio-builder");
+    expect($(container, "#ahead h2")?.textContent).toBe("studio-builder");
     unmount();
     act(() => setSelectedAgent(null));
     const again = render(<Agent id={null} />);
     await loaded();
-    expect($(again.container, "#ahead .big")?.textContent).toBe("shop-app-ta");
+    expect($(again.container, "#ahead h2")?.textContent).toBe("shop-app-ta");
   });
 
   it("/agent with nothing selected opens on the first running crew seat, else the first crew seat", async () => {
@@ -603,7 +544,7 @@ describe("Agent page: picker and selection", () => {
     act(() => setSelectedAgent(null));
     const running = render(<Agent id={null} />);
     await vi.waitFor(() =>
-      expect($(running.container, "#ahead .big")?.textContent).toContain("GUIDO-2"),
+      expect($(running.container, "#ahead h2")?.textContent).toContain("GUIDO-2"),
     );
     running.unmount();
     hub.clear();
@@ -611,7 +552,7 @@ describe("Agent page: picker and selection", () => {
     act(() => setSelectedAgent(null));
     const idle = render(<Agent id={null} />);
     await vi.waitFor(() =>
-      expect($(idle.container, "#ahead .big")?.textContent).toContain("GUIDO-1"),
+      expect($(idle.container, "#ahead h2")?.textContent).toContain("GUIDO-1"),
     );
   });
 
@@ -619,7 +560,7 @@ describe("Agent page: picker and selection", () => {
     stub({ rows: [studio({ index: 0 }), seatRow({ index: 1, hudState: "running" })] });
     act(() => setSelectedAgent(null));
     const { container } = render(<Agent id="studio-builder" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")?.textContent).toBe("studio-builder"));
+    await vi.waitFor(() => expect($(container, "#ahead h2")?.textContent).toBe("studio-builder"));
   });
 
   it.each([
@@ -634,8 +575,8 @@ describe("Agent page: picker and selection", () => {
     }));
     stub({ rows: [seatRow({ hudState: "idle" })] });
     const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .idrow .big")?.textContent).toBe(text));
-    expect($(container, "#ahead .idrow .big")?.getAttribute("title")).toBe(title);
+    await vi.waitFor(() => expect($(container, "#ahead h2")?.textContent).toBe(text));
+    expect($(container, "#ahead h2")?.getAttribute("title")).toBe(title);
   });
 
   it("picking an agent navigates to its page", async () => {
@@ -648,669 +589,13 @@ describe("Agent page: picker and selection", () => {
   });
 });
 
-describe("Agent page: need banner", () => {
-  it("says the agent needs you, with the need line and Ack, which acks its unacked keys", async () => {
-    const fetch = stub({
-      items: [
-        item(),
-        item({ key: "stall:shop-app-ta:r-12", kind: "stalled", at: NOW - 12 * MIN, tool: "Bash" }),
-        item({ key: "esc:shop-app#1", kind: "question", acked: true }),
-        item({ key: "esc:other", agentId: "studio-builder" }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const banner = $(container, "#needBanner .banner") as HTMLElement;
-    expect(banner.textContent).toContain("shop-app-ta needs you.");
-    expect(banner.textContent).toContain("Stalled 12:00 in Bash");
-    expect(banner.textContent).toContain("Decision and question for you");
-    fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
-    await vi.waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/attention/ack",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const body = JSON.parse(
-      (fetch.mock.calls.find(([u]) => u === "/api/attention/ack")?.[1]?.body as string) ?? "{}",
-    );
-    expect(body.keys.sort()).toEqual(["esc:shop-app#4001", "stall:shop-app-ta:r-12"]);
-  });
-
-  describe("a stalled crew seat", () => {
-    const stall = item({
-      key: "stall:guido-1:r-12",
-      agentId: "guido-1",
-      kind: "stalled",
-      at: NOW - 11 * MIN,
-      tool: "Bash",
-      ticket: null,
-      escalationId: null,
-    });
-    const rows = () => [seat({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN }), studio()];
-    const banner = (container: HTMLElement) => $(container, "#needBanner .banner") as HTMLElement;
-
-    it("holding the test lock shows the Overview's line with Stop the run", async () => {
-      const fn = stub({
-        rows: rows(),
-        items: [stall],
-        extra: SEAT_ROUTES({
-          "/api/test-lock": {
-            holder: { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - MIN },
-            waiting: [
-              { runId: "r-2", seatId: "retro-1", command: "pnpm -s test", since: NOW - MIN },
-              { runId: "r-3", seatId: "inco-1", command: "pnpm -s test", since: NOW - MIN },
-            ],
-          },
-        }),
-      });
-      const { container } = render(<Agent id="guido-1" />);
-      await waitFor(() =>
-        expect(banner(container).textContent).toContain(
-          "Stalled 11:00 and holding the test lock; 2 waiting",
-        ),
-      );
-      fireEvent.click(within(banner(container)).getByRole("button", { name: "Stop the run" }));
-      await waitFor(() => expect(bodyOf(fn, "/api/seats/guido-1/interrupt")).toBe("{}"));
-    });
-
-    it("holding nothing shows Interrupt", async () => {
-      const fn = stub({
-        rows: rows(),
-        items: [stall],
-        extra: SEAT_ROUTES({ "/api/test-lock": { holder: null, waiting: [] } }),
-      });
-      const { container } = render(<Agent id="guido-1" />);
-      await waitFor(() => expect(banner(container).textContent).toContain("Stalled 11:00 in Bash"));
-      expect(within(banner(container)).queryByRole("button", { name: "Stop the run" })).toBeNull();
-      fireEvent.click(within(banner(container)).getByRole("button", { name: "Interrupt" }));
-      await waitFor(() => expect(bodyOf(fn, "/api/seats/guido-1/interrupt")).toBe("{}"));
-    });
-  });
-
-  it(`Ack sends more than ${ACK_BATCH_MAX} keys in batches the server accepts`, async () => {
-    const many = Array.from({ length: 51 }, (_, i) => item({ key: `esc:shop-app#${i + 1}` }));
-    const fetch = stub({ items: many });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const banner = $(container, "#needBanner .banner") as HTMLElement;
-    fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
-    const posts = () => fetch.mock.calls.filter(([u]) => u === "/api/attention/ack");
-    await vi.waitFor(() => expect(posts()).toHaveLength(2));
-    const sent = posts().map(([, init]) => JSON.parse(init?.body as string).keys as string[]);
-    expect(ACK_BATCH_MAX).toBe(50);
-    expect(sent.map((k) => k.length)).toEqual([50, 1]);
-    expect(new Set(sent.flat()).size).toBe(51);
-  });
-
-  it("Ack leaves a set-aside run's unacked note alone: the banner does not show it", async () => {
-    const ready = {
-      ...item({ key: "note:ready:old", ticket: "shop-app#3000", escalationId: null }),
-      kind: "ready",
-    } as unknown as AttentionItem;
-    const fetch = stub({
-      items: [
-        item({
-          key: "stall:shop-app-ta:r-12",
-          kind: "stalled",
-          at: NOW - 12 * MIN,
-          tool: "Bash",
-          ticket: null,
-          escalationId: null,
-        }),
-        ready,
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const banner = $(container, "#needBanner .banner") as HTMLElement;
-    expect(banner.textContent).toContain("Stalled 12:00 in Bash");
-    expect(banner.textContent).not.toContain("Ready to merge");
-    fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
-    await vi.waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/attention/ack",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const body = JSON.parse(
-      (fetch.mock.calls.find(([u]) => u === "/api/attention/ack")?.[1]?.body as string) ?? "{}",
-    );
-    expect(body.keys).toEqual(["stall:shop-app-ta:r-12"]);
-  });
-
-  it("has no banner without needs, and no Ack when everything is acknowledged", async () => {
-    stub({ items: [item({ acked: true })] });
-    const { container, unmount } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const banner = $(container, "#needBanner .banner") as HTMLElement;
-    expect(within(banner).queryByRole("button", { name: "Ack" })).toBeNull();
-    unmount(); // one page at a time: ids are unique on a page
-    const none = render(<Agent id="studio-builder" />);
-    await vi.waitFor(() => expect($(none.container, "#ahead .big")).toBeTruthy());
-    expect($(none.container, "#needBanner .banner")).toBeNull();
-  });
-});
-
-describe("Agent page: header and tiles", () => {
-  it("shows id, state, chips, Pause for a ta-loop and the observed-loop line", async () => {
-    stub();
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const head = $(container, "#ahead") as HTMLElement;
-    expect($(head, ".big")?.textContent).toBe("shop-app-ta");
-    expect(within(head).getByText("Running")).toBeTruthy();
-    const chips = [...head.querySelectorAll(".chips span")].map((s) => s.textContent);
-    expect(chips).toEqual([
-      "observed loop · ta-loop",
-      "s/shop-app",
-      "claude-main · claude-opus-4-1",
-      "feature/3349-quote-cache",
-    ]);
-    expect(within(head).getByRole("button", { name: "pause" })).toBeTruthy();
-    expect(
-      within(head)
-        .getAllByRole("button")
-        .map((b) => b.textContent),
-    ).toEqual(["pause", "Pop out"]);
-    expect(head.textContent).toContain(
-      "Observed loop: Mission Control reads it and never drives it.",
-    );
-  });
-
-  it("a stopped studio loop's header shows the stop line under the call sign", async () => {
-    const stop = {
-      reason: "7-day quota utilization 88% >= QUOTA_STOP_PCT=80% -- refusing to fire",
-      at: NOW - HOUR,
-      quota: { usedPct: 88, stopPct: 80 },
-      resumesAt: NOW + 2 * 24 * HOUR,
-    };
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000 }),
-        studio({ hudState: "stopped", stop }),
-      ],
-    });
-    const { container } = render(<Agent id="studio-builder" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, "#ahead .doing")?.textContent).toBe(
-      "Stopped at the 7-day quota (88% of 80%) · resumes after Mon 13:00",
-    );
-  });
-
-  it.each([
-    ["whose run merged", stoppedSeat({ merged: true }), "Run ended · PR #75 merged"],
-    ["stopped by you", stoppedSeat(), "Run ended by you"],
-  ])("a stopped seat %s says why in its header", async (_name, seat, line) => {
-    stub({ rows: [crewRow({ digest: digest(), contextWindow: 200_000 }), seat] });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, "#ahead .doing")?.textContent).toBe(line);
-  });
-
-  it.each([
-    ["open", "In review · PR #77"],
-    ["approved", "In review · PR #77"],
-    ["draft", "Draft PR #77"],
-    ["changes", "Changes requested · PR #77"],
-  ] as const)("an idle seat's header says %s PR, linked", async (state, line) => {
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000 }),
-        seatRow({ hudState: "idle", review: { prNumber: 77, state } }),
-      ],
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    const doing = $(container, "#ahead .doing") as HTMLElement;
-    expect(doing.textContent).toBe(line);
-    await vi.waitFor(() =>
-      expect(
-        within(doing).getByRole("link", { name: "shop-app PR #77" }).getAttribute("href"),
-      ).toBe("https://github.com/octo-org/shop-app/pull/77"),
-    );
-  });
-
-  it("an idle seat with no PR stays Idle in its header", async () => {
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000 }),
-        seatRow({ hudState: "idle", review: null }),
-      ],
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, "#ahead .doing")?.textContent).toMatch(/^Idle/);
-  });
-
-  it("a stopped seat's Now tile shows its ticket muted as last, without the title as current work", async () => {
-    stub({
-      rows: [crewRow({ digest: digest(), contextWindow: 200_000 }), stoppedSeat({ merged: true })],
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    const now = $(container, ".tile2.now .nowt") as HTMLElement;
-    // one seat is one repo: the page leaves the repo chip out
-    expect(now.textContent).toBe("Last #74");
-    expect(now.querySelector(".muted .rref")?.textContent).toBe("#74");
-    expect(now.textContent).not.toContain("Dead collector fallback");
-    expect(now.querySelector(".muted")?.getAttribute("title")).toBe("Dead collector fallback");
-  });
-
-  it("a stopped seat with a ticket but no title has no hover text on its Now line", async () => {
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000 }),
-        stoppedSeat({ merged: true, ticketTitle: null, summary: "Some summary" }),
-      ],
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, ".tile2.now .nowt")?.getAttribute("title")).toBeNull();
-  });
-
-  it("a seat in error says its run failed and shows its ticket muted as last", async () => {
-    const failed = stoppedSeat({ hudState: "error", sourceError: "CLI never started" });
-    stub({ rows: [crewRow({ digest: digest(), contextWindow: 200_000 }), failed] });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, "#ahead .doing")?.textContent).toBe("Run failed: CLI never started");
-    const now = $(container, ".tile2.now .nowt") as HTMLElement;
-    expect(now.textContent).toBe("Last #74");
-    expect(now.textContent).not.toContain("Dead collector fallback");
-  });
-
-  it("a loop in error still reads Error: … with its current ticket", async () => {
-    stub({
-      rows: [
-        crewRow({
-          hudState: "error",
-          sourceError: "state dir gone",
-          digest: digest(),
-          contextWindow: 200_000,
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    expect($(container, "#ahead .doing")?.textContent).toBe("Error: state dir gone");
-    const now = $(container, ".tile2.now .nowt") as HTMLElement;
-    expect(now.textContent).toContain("Quote cache");
-    expect(now.textContent).not.toContain("Last");
-  });
-
-  it("a parked loop's header status is one line, with the whole park text behind details", async () => {
-    const park = `RETRO-CX reviewed c74cdfc and found 1 issue to resolve. ${"Fix it, then explain. ".repeat(40)}`;
-    stub({
-      rows: [
-        crewRow({
-          hudState: "idle",
-          loop: { phase: "parked", text: `Blocked: ${park}`, prNumber: 77, parked: park },
-          digest: digest(),
-          contextWindow: 200_000,
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    const line = $(container, "#ahead .doing") as HTMLElement;
-    expect(line.textContent).toContain("Parked · review findings on c74cdfc · 1 held");
-    expect(line.textContent).not.toContain("Fix it, then explain");
-    fireEvent.click(within(line).getByRole("button", { name: "details" }));
-    expect($(container, "#ahead .vdetail")?.textContent).toContain("Fix it, then explain");
-  });
-
-  it("has no Pause (or any loop control) for a studio loop, only Pop out", async () => {
-    stub();
-    const { container } = render(<Agent id="studio-builder" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    const buttons = within($(container, "#ahead") as HTMLElement).queryAllByRole("button");
-    expect(buttons.map((b) => b.textContent)).toEqual(["Pop out"]);
-  });
-
-  it("Pop out opens the agent in its own window", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-    stub();
-    const { container } = render(<Agent id="studio-builder" />);
-    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
-    const btn = within($(container, "#ahead") as HTMLElement).getByRole("button", {
-      name: "Pop out",
-    });
-    expect(btn.classList.contains("ghost")).toBe(true);
-    fireEvent.click(btn);
-    expect(open).toHaveBeenCalledWith(
-      "/agent/studio-builder?popout=1",
-      "mc-agent-studio-builder",
-      "popup,width=1200,height=820",
-    );
-  });
-
-  it("tiles: now, context, tokens with cache hit, cost, speed, work, quota", async () => {
-    stub({
-      rows: [
-        crewRow({
-          digest: digest({
-            subagents: [
-              {
-                taskId: "t1",
-                type: "Explore",
-                description: "find callers",
-                status: "running",
-                tokens: 12_300,
-                toolUses: 5,
-                durationMs: 42_000,
-              },
-            ],
-          }),
-          contextWindow: 200_000,
-          work: { commits: 1, denials: 0 },
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const tile = (label: string) =>
-      [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-        t.querySelector(".lbl")?.textContent?.startsWith(label),
-      ) as HTMLElement;
-    // one seat is one repo: the ticket is the number alone, with no repo chip
-    expect($(tile("Now"), ".nowt")?.textContent).toBe("#3349 Quote cache");
-    expect(tile("Now").querySelector(".rchip")).toBeNull();
-    expect(tile("Now").textContent).toContain("run #12 · 25:00 in this run");
-    // 150k of a 200k window
-    const ctx = $(tile("Context"), ".v") as HTMLElement;
-    expect(ctx.firstChild?.textContent).toBe("75%");
-    expect(ctx.querySelector("small")?.textContent?.trim()).toBe("of 200k");
-    expect(tile("Context").textContent).toContain(
-      "Breakdown arrives with the agent runtime (phase 2) · 0 compactions",
-    );
-    // 1.2M ÷ (12k + 1.2M + 40k) = 95.8%
-    expect($(tile("Tokens this run"), ".v")?.textContent).toBe("15.4k");
-    expect($(tile("Tokens this run"), ".d")?.textContent).toBe(
-      "12.0k in · 3.4k out · 96% cache hit",
-    );
-    expect($(tile("~Cost"), ".v")?.textContent).toBe("~$2.47");
-    expect($(tile("~Cost"), ".d")?.textContent).toBe("API-equivalent, this run");
-    expect($(tile("Speed"), ".v")?.textContent).toBe("—tokens/s");
-    expect($(tile("Work"), ".v")?.textContent).toBe("37tool calls");
-    await waitFor(() =>
-      expect($(tile("Work"), ".d")?.textContent).toBe("21 turns · 1 commit · +0 −0 · ⊘0"),
-    );
-    expect(tile("Quota · claude-main").textContent).toContain("5h 41%");
-  });
-
-  const tileOf = (container: HTMLElement, label: string) =>
-    [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith(label),
-    ) as HTMLElement;
-
-  it("~Cost shows the live estimate while running and costUsd once the run has ended", async () => {
-    const base = crewRow().run as NonNullable<CrewRow["run"]>;
-    const cases = [
-      [{ ...base, costEstimateUsd: 3.1 }, "running", "~$3.10"],
-      [
-        { ...base, status: "ok", endedAt: NOW - MIN, costEstimateUsd: 3.1, costUsd: 2.4712 },
-        "idle",
-        "~$2.47",
-      ],
-      [{ ...base, costEstimateUsd: null }, "running", "~$2.47"],
-    ] as const;
-    for (const [r, hudState, want] of cases) {
-      hub.clear();
-      stub({
-        rows: [crewRow({ digest: digest(), contextWindow: 200_000, run: r, hudState })],
-      });
-      const { container, unmount } = render(<Agent id="shop-app-ta" />);
-      await screen.findByText(/Quote cache/);
-      expect($(tileOf(container, "~Cost"), ".v")?.textContent).toBe(want);
-      unmount();
-    }
-  });
-
-  it("Speed shows tokens/s and the mean turn from digest.speed, — without it", async () => {
-    stub({
-      rows: [
-        crewRow({
-          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000, firstTokenMs: 1200 } }),
-          contextWindow: 200_000,
-        }),
-      ],
-    });
-    const first = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const speed = tileOf(first.container, "Speed");
-    expect($(speed, ".v")?.textContent).toBe("64tokens/s");
-    expect($(speed, ".d")?.textContent).toBe("first token 1.2s · turn 2m 40s");
-    expect(speed.textContent).not.toContain("phase 2");
-    first.unmount();
-    hub.clear();
-    cleanup();
-    stub({ rows: [crewRow({ digest: digest(), contextWindow: 200_000 })] });
-    const second = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(tileOf(second.container, "Speed"), ".v")?.textContent).toBe("—tokens/s");
-    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("first token — · turn —");
-  });
-
-  it("Work sums +add −del from the Files list and shows commits and ⊘denials from row.work", async () => {
-    stub({
-      rows: [
-        crewRow({ digest: digest(), contextWindow: 200_000, work: { commits: 2, denials: 3 } }),
-      ],
-      files: {
-        files: [
-          { path: "a.ts", add: 10, del: 2, state: "uncommitted" },
-          { path: "b.ts", add: 5, del: null, state: "committed" },
-          { path: "logo.png", add: null, del: null, state: "committed" },
-        ],
-        note: null,
-        sha: null,
-      },
-    });
-    const first = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const work = () => tileOf(first.container, "Work");
-    await waitFor(() =>
-      expect($(work(), ".d")?.textContent).toBe("21 turns · 2 commits · +15 −2 · ⊘3"),
-    );
-    expect($(work(), ".add")?.textContent).toBe("+15");
-    expect($(work(), ".del")?.textContent).toBe("−2");
-    first.unmount();
-    hub.clear();
-    cleanup();
-    stub({ rows: [crewRow({ digest: null, contextWindow: 200_000 })] });
-    const second = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    expect($(tileOf(second.container, "Work"), ".d")?.textContent).toBe("—");
-  });
-
-  it("context tile counts compactions, singular for one", async () => {
-    stub({ rows: [crewRow({ digest: digest({ compactions: 1 }), contextWindow: 200_000 })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const ctx = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Context"),
-    );
-    expect(ctx?.textContent).toContain("(phase 2) · 1 compaction");
-    expect(ctx?.textContent).not.toContain("1 compactions");
-  });
-
-  it.each([
-    ["missing", undefined, null],
-    ["zero", { count: 0, tokensSaved: 0 }, null],
-    [
-      "few, under 1k tokens",
-      { count: 3, tokensSaved: 950 },
-      "Re-reads avoided: 3, about 1k tokens saved",
-    ],
-    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4k tokens saved"],
-    [
-      "many",
-      { count: 128, tokensSaved: 1_234_000 },
-      "Re-reads avoided: 128, about 1234k tokens saved",
-    ],
-  ])("context tile re-reads line: %s", async (_name, rereads, line) => {
-    stub({
-      rows: [crewRow({ digest: digest({ rereads }), contextWindow: 200_000 })],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const ctx = tileOf(container, "Context");
-    if (line === null) expect(ctx?.textContent).not.toContain("Re-reads");
-    else expect(ctx?.textContent).toContain(line);
-  });
-
-  it("context tile shows — for compactions when there is no digest, not 0", async () => {
-    stub({ rows: [crewRow({ digest: null, contextWindow: 200_000 })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const ctx = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Context"),
-    );
-    expect(ctx?.textContent).toContain("(phase 2) · —");
-    expect(ctx?.textContent).not.toContain("0 compactions");
-  });
-
-  it("context is — when the window is unknown; tokens — without counts", async () => {
-    stub({
-      rows: [
-        crewRow({
-          digest: digest({ contextWindow: null }),
-          contextWindow: null,
-          run: { ...(crewRow().run as NonNullable<CrewRow["run"]>), tokens: null, costUsd: null },
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const tile = (label: string) =>
-      [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-        t.querySelector(".lbl")?.textContent?.startsWith(label),
-      ) as HTMLElement;
-    expect($(tile("Context"), ".v")?.textContent).toBe("—");
-    expect($(tile("Tokens this run"), ".v")?.textContent).toBe("—");
-    expect($(tile("~Cost"), ".v")?.textContent).toBe("—");
-  });
-
-  it("the context bar takes the meter tones: amber from METER_WARN_PCT, red from METER_FULL_PCT", async () => {
-    const at = (tokens: number) => [
-      crewRow({ digest: digest({ contextTokens: tokens }), contextWindow: 200_000 }),
-    ];
-    for (const [tokens, cls] of [
-      [150_000, "ctxbar"],
-      [(METER_WARN_PCT / 100) * 200_000, "ctxbar hi"],
-      [(METER_FULL_PCT / 100) * 200_000, "ctxbar full"],
-    ] as const) {
-      hub.clear();
-      stub({ rows: at(tokens) });
-      const { container, unmount } = render(<Agent id="shop-app-ta" />);
-      await loaded();
-      expect($(container, ".ctxbar")?.className, String(tokens)).toBe(cls);
-      unmount();
-    }
-  });
-
-  it("a run past an hour reads in hours and minutes, not 160:48", async () => {
-    const long = {
-      ...(crewRow().run as NonNullable<CrewRow["run"]>),
-      startedAt: NOW - 2 * HOUR - 41 * MIN,
-    };
-    stub({ rows: [crewRow({ run: long, digest: digest() })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const now = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Now"),
-    ) as HTMLElement;
-    expect(now.textContent).toContain("run #12 · 2h 41m in this run");
-  });
-
-  it("the Now tile of a finished run reads last run, how long it took and when it ended", async () => {
-    const finished = {
-      ...(crewRow().run as NonNullable<CrewRow["run"]>),
-      seq: 60,
-      status: "ok" as const,
-      startedAt: NOW - HOUR - 3 * HOUR - 7 * MIN,
-      endedAt: NOW - HOUR,
-    };
-    stub({
-      rows: [
-        crewRow({
-          hudState: "idle",
-          run: finished,
-          ticket: null,
-          ticketTitle: null,
-          summary: "Cached quotes",
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const now = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Now"),
-    ) as HTMLElement;
-    expect(now.textContent).toContain("last run #60 · took 3h 07m · ended 60 min ago");
-    expect(now.textContent).not.toContain("in this run");
-    expect($(now, ".nowt")?.textContent).toBe("Cached quotes");
-  });
-
-  it.each([
-    ["ended just now", NOW - 30_000],
-    ["ended 12 min ago", NOW - 12 * MIN],
-    ["ended 3 h ago", NOW - 3 * HOUR],
-    ["ended 2d ago", NOW - 50 * HOUR],
-  ])("the Now tile says how long ago the last run ended: %s", async (expected, endedAt) => {
-    const run = {
-      ...(crewRow().run as NonNullable<CrewRow["run"]>),
-      seq: 60,
-      status: "ok" as const,
-      startedAt: endedAt - HOUR,
-      endedAt,
-    };
-    stub({
-      rows: [
-        crewRow({
-          hudState: "idle",
-          run,
-          ticket: null,
-          ticketTitle: null,
-          summary: "Cached quotes",
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const now = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Now"),
-    ) as HTMLElement;
-    expect(now.textContent).toContain(expected);
-  });
-
-  it("a run that is not running and has no end shows — for its time, not a growing count", async () => {
-    const ended = { ...(crewRow().run as NonNullable<CrewRow["run"]>), status: "unknown" as const };
-    stub({
-      rows: [crewRow({ hudState: "idle", run: ended })],
-      runs: [rv({ status: "unknown", endedAt: null })],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const now = [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
-      t.querySelector(".lbl")?.textContent?.startsWith("Now"),
-    ) as HTMLElement;
-    expect(now.textContent).toContain("last run #12 · took — · ended —");
-    const first = $(container, "#loopP .runrow:not(.head)") as HTMLElement;
-    expect(first.textContent).not.toContain("25m");
-    expect(first.querySelector(".num.right")?.textContent).toBe("—");
-  });
-});
-
 describe("Agent page: activity stream", () => {
   it("shows each event with its time and who; tools expand to input, result and duration", async () => {
     stub();
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const rows = [...container.querySelectorAll<HTMLElement>("#stream .ev")];
-    expect(rows.map((r) => $(r, ".who")?.textContent)).toEqual([
+    expect(rows.map((r) => $(r, ".event-kind")?.textContent)).toEqual([
       "prompt",
       "thinking",
       "tool",
@@ -1479,7 +764,7 @@ describe("Agent page: activity stream", () => {
     const { container } = render(<Agent id="guido-1" />);
     await loaded();
     const rows = () => [...container.querySelectorAll<HTMLElement>("#stream .ev")];
-    const who = () => rows().map((r) => r.querySelector(".who")?.textContent);
+    const who = () => rows().map((r) => r.querySelector(".event-kind")?.textContent);
     await waitFor(() => expect(who()).toContain("agents"));
     expect(who()).toEqual(["agents", "prompt", "thinking", "tool", "to you", "system", "agents"]);
     expect(rows()[0]?.querySelector(".txt")?.textContent).toBe(
@@ -1508,7 +793,8 @@ describe("Agent page: activity stream", () => {
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
-    const who = () => [...container.querySelectorAll("#stream .ev .who")].map((w) => w.textContent);
+    const who = () =>
+      [...container.querySelectorAll("#stream .ev .event-kind")].map((w) => w.textContent);
     await waitFor(() => expect(who()).toContain("agents"));
     const seg = screen.getByRole("group", { name: "Activity filter" });
     fireEvent.click(within(seg).getByRole("button", { name: "Messages" }));
@@ -1549,7 +835,8 @@ describe("Agent page: activity stream", () => {
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
-    const who = () => [...container.querySelectorAll("#stream .ev .who")].map((w) => w.textContent);
+    const who = () =>
+      [...container.querySelectorAll("#stream .ev .event-kind")].map((w) => w.textContent);
     const seg = screen.getByRole("group", { name: "Activity filter" });
     fireEvent.click(within(seg).getByRole("button", { name: "Guard" }));
     await waitFor(() => expect(who()).toEqual(["guard"]));
@@ -2715,7 +2002,7 @@ describe("Agent page: loop steps", () => {
     });
     const f = stub({ rows: [next], runs: [] });
     act(() => hub.refetchCrew(next.id));
-    await settled(f, `/api/crew/${next.id}`);
+    await settled(f, `/api/agents/${next.id}`);
   };
   const title = (panel: HTMLElement) => within(panel).getByRole("heading").textContent;
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
@@ -2945,13 +2232,12 @@ describe("Agent page: side tabs", () => {
     );
   });
 
-  it("Subagents 0 says none were spawned", async () => {
+  it("omits the empty Subagents option", async () => {
     stub();
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(within(side).getByRole("button", { name: "Subagents 0" }));
-    expect($(side, "#sideBody")?.textContent).toBe("No subagents spawned this run.");
+    expect(within(side).queryByRole("button", { name: "Subagents 0" })).toBeNull();
   });
 
   it("Files {n}: path, +add −del and state, with the note when present", async () => {
@@ -2968,7 +2254,8 @@ describe("Agent page: side tabs", () => {
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: "Files 2" }));
+    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
+    await waitFor(() => expect(side.querySelectorAll(".f")).toHaveLength(2));
     const rows = [...side.querySelectorAll<HTMLElement>(".f")];
     expect(rows.map((r) => r.textContent)).toEqual(["src/a.ts+10 −2uncommitted", "img/logo.png——"]);
     expect(side.textContent).toContain("no origin/HEAD: showing uncommitted changes only");
@@ -2979,8 +2266,8 @@ describe("Agent page: side tabs", () => {
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: "Files 0" }));
-    expect($(side, "#sideBody")?.textContent).toBe("No file changes yet.");
+    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
+    await waitFor(() => expect($(side, "#sideBody")?.textContent).toBe("No file changes yet."));
   });
 
   it("clicking a file shows its diff below the list, lines coloured by class; Close hides it", async () => {
@@ -3013,7 +2300,7 @@ describe("Agent page: side tabs", () => {
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: "Files 2" }));
+    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
     fireEvent.click(await within(side).findByRole("button", { name: /^src\/a\.ts/ }));
     const pre = await vi.waitFor(() => {
       const p = $(side, "pre.diff");
@@ -3090,7 +2377,11 @@ const bodyOf = (fn: ReturnType<typeof stub>, path: string) => {
   const call = fn.mock.calls.find((c) => c[0] === path);
   return call?.[1]?.body;
 };
-const seatLoaded = () => screen.findByText("GUIDO-1");
+const seatLoaded = async () => {
+  const heading = await screen.findByRole("heading", { name: /^GUIDO-1/ });
+  await openHistory();
+  return heading;
+};
 const idleSeat = () => seat({ hudState: "idle" });
 
 describe("Agent page: header and tile mockup", () => {
@@ -3135,7 +2426,8 @@ describe("Agent page: header and tile mockup", () => {
       const f = stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
       const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
       render(<Agent id="guido-1" />);
-      const remove = await screen.findByRole("button", { name: "Remove" });
+      const remove = await moreButton("Remove");
+      await moreButton("Remove");
       await settled(f, "/api/crew/changes");
       expect(screen.queryByText("Not in config.yaml")).toBeNull();
       fireEvent.click(remove);
@@ -3167,6 +2459,11 @@ describe("Agent page: header and tile mockup", () => {
     stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
     render(<Agent id="guido-1" />);
     await seatLoaded();
+    const more = await screen.findByText("More");
+    const menu = more.closest("details") as HTMLDetailsElement;
+    menu.open = true;
+    fireEvent(menu, new Event("toggle", { bubbles: true }));
+    await act(async () => {});
     expect(screen.queryByRole("button", { name: "Remove" }) !== null).toBe(visible);
   });
 
@@ -3182,6 +2479,7 @@ describe("Agent page: header and tile mockup", () => {
       }),
     });
     render(<Agent id="guido-1" />);
+    await moreButton("Remove");
     await settled(f, "/api/crew/changes");
     const remove = screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement;
     expect(remove.disabled).toBe(true);
@@ -3206,7 +2504,7 @@ describe("Agent page: header and tile mockup", () => {
         <Toast />
       </>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     expect(
       await screen.findByText(
         "Rename GUIDO-1: call signs default to the role's console plus a number. Any name works.",
@@ -3235,14 +2533,14 @@ describe("Agent page: header and tile mockup", () => {
       }),
     });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     const input = await screen.findByRole("textbox", { name: "Call sign" });
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: "ORBIT" } });
     fireEvent.submit(input.closest("form") as HTMLFormElement);
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Call sign" })).toBeNull());
     await waitFor(() =>
-      expect(document.querySelector("#ahead .big")?.textContent).toContain("ORBIT"),
+      expect(document.querySelector("#ahead h2")?.textContent).toContain("ORBIT"),
     );
     const picker = within(screen.getByRole("group", { name: "Pick an agent" })).getByRole(
       "button",
@@ -3262,7 +2560,7 @@ describe("Agent page: header and tile mockup", () => {
   it("cancels with Escape and rejects blank and overlong names in place", async () => {
     const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     let input = await screen.findByRole("textbox", { name: "Call sign" });
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: "Call sign" })).toBeNull();
@@ -3282,7 +2580,7 @@ describe("Agent page: header and tile mockup", () => {
     async (body) => {
       stub({ rows: [seat()], extra: SEAT_ROUTES({ ...removalRoutes, "/api/crew/changes": body }) });
       render(<Agent id="guido-1" />);
-      fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+      fireEvent.click(await moreButton("Rename"));
       await screen.findByText("Not in config.yaml");
       expect(
         (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
@@ -3302,7 +2600,7 @@ describe("Agent page: header and tile mockup", () => {
       return (original as NonNullable<typeof original>)(path, init);
     });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     await screen.findByText("Loading call sign…");
     expect(
       (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
@@ -3322,7 +2620,7 @@ describe("Agent page: header and tile mockup", () => {
       }),
     });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     expect((await screen.findByRole("alert")).textContent).toBe("Config unavailable");
     expect(
       (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
@@ -3341,7 +2639,7 @@ describe("Agent page: header and tile mockup", () => {
       return (original as NonNullable<typeof original>)(path, init);
     });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     const input = await screen.findByRole("textbox", { name: "Call sign" });
     await waitFor(() =>
       expect(
@@ -3370,7 +2668,7 @@ describe("Agent page: header and tile mockup", () => {
       }),
     });
     render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await moreButton("Rename"));
     const input = await screen.findByRole("textbox", { name: "Call sign" });
     await waitFor(() =>
       expect(
@@ -3381,116 +2679,6 @@ describe("Agent page: header and tile mockup", () => {
     fireEvent.submit(input.closest("form") as HTMLFormElement);
     expect((await screen.findByRole("alert")).textContent).toContain("call signs must be unique");
     expect((input as HTMLInputElement).value).toBe("ORBIT");
-  });
-
-  it("Now shows the template, step, attempt and elapsed time of the latest matching try", async () => {
-    const loop: CrewLoop = {
-      phase: "ci",
-      text: "CI is running",
-      prNumber: 77,
-      parked: null,
-      profile: "bugfix",
-      step: "verify",
-      tries: { n: 2, max: 3 },
-      steps: DEFAULT_PROFILES.find((p) => p.name === "bugfix")?.steps,
-    };
-    const attempt: LoopTry = {
-      step: "ci",
-      fix: false,
-      n: 1,
-      startedAt: NOW - 10 * MIN,
-      endedAt: NOW - 5 * MIN,
-      outcome: "fail",
-      reason: "Check failed",
-    };
-    const view: RunLoopView = {
-      runId: "r-12",
-      loop: null,
-      events: [],
-      round: 1,
-      budget: null,
-      review: null,
-      tries: [
-        attempt,
-        { ...attempt, n: 2, startedAt: NOW - 92_000, endedAt: null, outcome: "running" },
-      ],
-    };
-    const f = stub({ rows: [seat({ loop })], extra: SEAT_ROUTES({ "/api/runs/r-12/loop": view }) });
-    const { container } = render(<Agent id="guido-1" />);
-    await settled(f, "/api/runs/r-12/loop");
-    const tile = $(container, ".tile2.now") as HTMLElement;
-    expect(tile.textContent).toContain("bugfix › verify · try 2 of 3 · 1:32 in this step");
-    expect(tile.textContent).not.toContain("in this run");
-    expect(tile.querySelector(".stepbar")?.getAttribute("title")).toBe(
-      "reproduce → fix → draft PR → verify → review → merge",
-    );
-    expect([...tile.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
-      "",
-      "d",
-      "d",
-      "c",
-      "",
-      "",
-    ]);
-  });
-
-  it("Now shows a dash for parked step time even with an earlier CI try", async () => {
-    const view: RunLoopView = {
-      runId: "r-12",
-      loop: null,
-      events: [],
-      round: 1,
-      budget: null,
-      review: null,
-      tries: [
-        {
-          step: "ci",
-          fix: false,
-          n: 1,
-          startedAt: NOW - 10 * MIN,
-          endedAt: NOW - MIN,
-          outcome: "parked",
-          reason: "Check failed",
-        },
-      ],
-    };
-    const f = stub({
-      rows: [
-        seat({
-          hudState: "parked",
-          loop: {
-            phase: "parked",
-            text: "Held: Check failed",
-            parked: "Check failed",
-            prNumber: 77,
-          },
-        }),
-      ],
-      extra: SEAT_ROUTES({ "/api/runs/r-12/loop": view }),
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await settled(f, "/api/runs/r-12/loop");
-    const tile = $(container, ".tile2.now") as HTMLElement;
-    expect(tile.textContent).toContain("— in this step");
-    expect(tile.textContent).not.toContain("in this run");
-  });
-
-  it.each([
-    null,
-    { categories: [{ name: "Messages", tokens: 100_000 }], total: 100_000, window: 200_000 },
-  ])("Codex context uses a single bar and explains total-only reporting (%j)", async (usage) => {
-    stub({
-      rows: [seat({ accountId: "provider-account", contextWindow: 200_000, digest: digest() })],
-      extra: SEAT_ROUTES({
-        "/api/config": { ...CONFIG, accounts: [{ ...CONFIG.accounts[1], id: "provider-account" }] },
-        "/api/seats/guido-1/context": usage,
-      }),
-    });
-    render(<Agent id="guido-1" />);
-    const note = await screen.findByText(/Codex reports the total, not a breakdown/);
-    expect(note.textContent).toContain("0 compactions");
-    expect(note.closest(".tile2")?.querySelectorAll(".ctxbar i")).toHaveLength(1);
-    expect(note.closest(".tile2")?.textContent).not.toContain("msgs");
   });
 
   it("Queue Done lists successful completed tickets once, as inert text", async () => {
@@ -3567,7 +2755,7 @@ describe("Agent page: driving a crew seat", () => {
     expect(within(activity).getByText("The cache is in")).toBeTruthy();
     expect(activity.textContent).not.toContain("Could not load the activity");
     const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: "Files 1" }));
+    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
     await waitFor(() =>
       expect([...side.querySelectorAll(".f")].map((e) => e.textContent)).toEqual([
         "src/a.ts+3 −1uncommitted",
@@ -3814,31 +3002,6 @@ describe("Agent page: driving a crew seat", () => {
     await vi.waitFor(() => expect(bodyOf(f, "/api/seats/guido-1/interrupt")).toBe("{}"));
   });
 
-  it("the Context tile renders the categories from the seat's usage", async () => {
-    stub({
-      rows: [seat({ contextWindow: 200_000 })],
-      extra: SEAT_ROUTES({
-        "/api/seats/guido-1/context": {
-          categories: [
-            { name: "System prompt", tokens: 3000 },
-            { name: "System tools", tokens: 12_000 },
-            { name: "Messages", tokens: 40_000 },
-            { name: "Free space", tokens: 145_000 },
-          ],
-          total: 55_000,
-          window: 200_000,
-        },
-      }),
-    });
-    const a = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    const tile = (await screen.findByText(/msgs 40k/)).closest(".tile2") as HTMLElement;
-    expect(tile.textContent).toContain("28% of 200k");
-    expect(tile.textContent).toContain("msgs 40k · tools 12k · system 3k · —");
-    expect(tile.querySelectorAll(".ctxbar i").length).toBeGreaterThanOrEqual(3);
-    a.unmount();
-  });
-
   it("`i` interrupts a crew seat", async () => {
     const f = stub({ rows: [seat()], extra: SEAT_ROUTES() });
     const off = installKeys({
@@ -3856,90 +3019,6 @@ describe("Agent page: driving a crew seat", () => {
     });
     await vi.waitFor(() => expect(bodyOf(f, "/api/seats/guido-1/interrupt")).toBe("{}"));
     off();
-  });
-});
-
-describe("Agent page: agent text is formatted", () => {
-  const nowTile = (c: HTMLElement) => $(c, ".tile2.now .nowt") as HTMLElement;
-  const idle = (summary: string) =>
-    crewRow({ hudState: "blocked", run: null, ticket: null, ticketTitle: null, summary });
-
-  it("the Now tile's summary is its hover text, as written", async () => {
-    stub({ rows: [idle("Cached **quotes** via `refresh()`")] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await waitFor(() => expect(nowTile(container).querySelector("strong")).not.toBeNull());
-    expect(nowTile(container).getAttribute("title")).toBe("Cached **quotes** via `refresh()`");
-  });
-
-  it("a running row with no ticket has no hover text on its Now line", async () => {
-    stub({ rows: [crewRow({ ticket: null, ticketTitle: null, summary: "Cached quotes" })] });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await screen.findByText("No ticket");
-    expect(nowTile(container).getAttribute("title")).toBeNull();
-  });
-
-  it("the Now tile's summary and the banner's Parked reason render Markdown on one line", async () => {
-    stub({
-      rows: [idle("Cached **quotes** via `refresh()`")],
-      items: [
-        item({ key: "p:1", kind: "parked", text: "wait for **the operator**", ticket: null }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await screen.findByText("the operator");
-    expect(nowTile(container).querySelector("strong")?.textContent).toBe("quotes");
-    expect(nowTile(container).querySelector("code")?.textContent).toBe("refresh()");
-    expect(nowTile(container).querySelector("p, div")).toBeNull();
-    const banner = $(container, "#needBanner .banner") as HTMLElement;
-    expect(banner.querySelector("strong")?.textContent).toBe("the operator");
-    expect(banner.textContent).toContain("Parked: wait for the operator");
-    expect(banner.textContent).not.toContain("**");
-  });
-
-  it("keeps the Now tile and the banner to one line: a list marker is not a list", async () => {
-    stub({
-      rows: [idle("1. retry")],
-      items: [item({ key: "p:1", kind: "parked", text: "1. retry", ticket: null })],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await screen.findByText("Parked: 1. retry");
-    expect(nowTile(container).textContent).toBe("1. retry");
-    expect(nowTile(container).querySelector("p, ul, ol, pre, .md")).toBeNull();
-    for (const part of container.querySelectorAll("#needBanner .needpart")) {
-      expect(part.querySelector("p, ul, ol, pre, .md")).toBeNull();
-    }
-  });
-
-  it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
-    stub({
-      rows: [idle(text)],
-      items: [item({ key: "p:1", kind: "parked", text, ticket: null })],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await screen.findByText(`Parked: ${text}`);
-    expect(nowTile(container).textContent).toBe(text);
-    expect(nowTile(container).children).toHaveLength(0);
-  });
-});
-
-describe("Agent page: the header pill", () => {
-  it("says what a seat is doing, by seatStatus", async () => {
-    const loop = { phase: "ci" as const, text: "CI on 08a7cfc", prNumber: 9, parked: null };
-    stub({ rows: [seat({ hudState: "idle", loop }), studio()], extra: SEAT_ROUTES() });
-    const { container } = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    expect($(container, "#ahead .pill")?.textContent).toBe("Watching");
-  });
-
-  it("keeps the pause reason in the tooltip and detail line", async () => {
-    const crewPause = { seats: ["guido-1"], reason: "Save tokens", at: NOW, by: "operator" };
-    stub({ rows: [seat({ crewPause }), studio()], extra: SEAT_ROUTES() });
-    const { container } = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    const pill = $(container, "#ahead .pill") as HTMLElement;
-    expect(pill.textContent).toBe("Paused");
-    expect(pill.parentElement?.getAttribute("title")).toBe("Save tokens");
-    expect($(container, "#ahead .doing")?.textContent).toBe("Paused: Save tokens");
   });
 });
 

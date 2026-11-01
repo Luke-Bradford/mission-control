@@ -1,3 +1,5 @@
+export { OWNERS, type Owner, STAGES, type Stage } from "./board-model.ts";
+
 import type { BoardItem } from "./types.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,8 +35,6 @@ export const FLOW_LONG_TIMELINES = 5;
 
 /** Additive single-select fields on the GitHub Project; the existing Status field is never touched. */
 export const STAGE_FIELD = "Stage";
-export const STAGES = ["Needs detail", "Ready"] as const;
-export type Stage = (typeof STAGES)[number];
 
 export const SIZE_FIELD = "Size";
 
@@ -72,8 +72,6 @@ export function labelPriority(labels: string[]): string | null {
 }
 
 export const OWNER_FIELD = "Owner";
-export const OWNERS = ["PM", "CTO", "Agent", "Operator"] as const;
-export type Owner = (typeof OWNERS)[number];
 
 export const BOARD_COLUMNS = ["needs detail", "ready", "in flight", "blocked", "done"] as const;
 export type BoardColumnKey = (typeof BOARD_COLUMNS)[number];

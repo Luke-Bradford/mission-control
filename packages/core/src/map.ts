@@ -1,5 +1,5 @@
 import type { ReviewFinding } from "./review.ts";
-import type { SeatState } from "./runtime.ts";
+import type { SeatState } from "./runtime-model.ts";
 import type { ContextUsage, PrCheck } from "./types.ts";
 
 /** Map paths are repo-relative; all times are Unix milliseconds. */

@@ -2627,6 +2627,26 @@ describe("push and draft_pr", () => {
         expect(remoteTip()).toBe(sha);
       });
 
+      it("holds the repo's affected-tests check until it passes on the pushed head", async () => {
+        const related = "pnpm -s test:related";
+        const checks = gated({ checks: async () => [LINT, TYPES, related] });
+        const old = await commitOk("apps/a.ts", "a2\n");
+        ran(related, old, true);
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        ran(LINT, sha, true);
+        ran(TYPES, sha, true);
+        const missing = await push(checks);
+        expect(missing.isError).toBe(true);
+        expect(missing.text).toContain(`not run: ${related}`);
+        expect(remoteTip()).toBeNull();
+        ran(related, sha, false, NOW + 1);
+        expect((await push(checks)).isError).toBe(true);
+        expect(remoteTip()).toBeNull();
+        ran(related, sha, true, NOW + 2);
+        expect(await push(checks)).toEqual({ text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.` });
+        expect(remoteTip()).toBe(sha);
+      });
+
       it("refuses a check that was never run, naming it and its command", async () => {
         const sha = await commitOk("apps/a.ts", "a2\n");
         ran(LINT, sha, true);

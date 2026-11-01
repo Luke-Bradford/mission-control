@@ -1,10 +1,28 @@
+import { DEFAULT_HARD_RULES, FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
+
+export {
+  DEFAULT_HARD_RULES,
+  FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_FLOOR_PATHS,
+} from "./rule-paths.ts";
+
+import { REPO_NEEDS, type RepoRules } from "./repo-rules-model.ts";
+
+export {
+  HARD_RULES_BY,
+  type HardRulesBy,
+  REPO_NEEDS,
+  type RepoNeed,
+  type RepoRules,
+} from "./repo-rules-model.ts";
+
 /**
  * A repo's board rules, from user config with an optional `## Mission Control` override: which
  * statuses a seat may pick from, which area labels match a seat, and which paths are hard-rule
  * files. The parser is the server's; this is the shape, the defaults and the label match.
  */
 import { AWAY_START_REFUSED, awayTicketType } from "./away.ts";
-import type { DependencyWait } from "./dependencies.ts";
+import type { DependencyWait } from "./dependencies-model.ts";
 import {
   claimedText,
   hasDoneWhenSection,
@@ -18,50 +36,11 @@ import {
   waitsOnText,
   wrongAreaText,
 } from "./flight.ts";
-import type { FlightPowers } from "./guard.ts";
+import type { FlightPowers } from "./guard-model.ts";
 import { hudColumnOf } from "./hud.ts";
-import { type LoopKind, pathInArea } from "./runtime.ts";
+import { pathInArea } from "./runtime.ts";
+import type { LoopKind } from "./runtime-model.ts";
 import type { BoardItem } from "./types.ts";
-
-export const REPO_NEEDS = ["done_when", "size"] as const;
-export type RepoNeed = (typeof REPO_NEEDS)[number];
-
-export const HARD_RULES_BY = ["operator", "controller"] as const;
-export type HardRulesBy = (typeof HARD_RULES_BY)[number];
-
-export interface RepoRules {
-  /** Explicit user-config keys, preserved across copies of these rules. */
-  userSet?: readonly string[];
-  /** Label to template mapping from the resolved repo rules. */
-  templates?: Record<string, string>;
-  /** Board statuses a seat may pick a ticket from. */
-  pickFrom: string[];
-  /** Whether the hub may promote Backlog tickets to a pickable status. */
-  promoteBacklog: boolean;
-  /** What makes a Backlog ticket complete enough to promote to Ready. */
-  needs: RepoNeed[];
-  /** Area label → the globs it covers. */
-  areas: Record<string, string[]>;
-  /** Globs of files that need the operator's sign-off. */
-  hardRules: string[];
-  /** Whether user config or the repo block set a `hard_rules` list (`[]` counts). */
-  hardRulesSet: boolean;
-  /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
-  hardRulesBy: HardRulesBy | "flight";
-  /** The open issue that collects minor findings from merged PRs, when this repo names one. */
-  techDebtIssue?: number;
-  alwaysAsk: string[];
-  /**
-   * The operator's acceptance (UAT) before merge: a passing PR whose ticket has one of `labels`, or
-   * whose diff touches one of `paths`, waits for Accept or Send back. Both empty: no UAT.
-   */
-  uat: { labels: string[]; paths: string[] };
-  /**
-   * Exact shell commands a seat must have run, passing, on the head it pushes (`mc push` refuses
-   * otherwise). Empty: the push is not gated.
-   */
-  checks: string[];
-}
 
 /**
  * Freezes `rules` and everything inside it, so a caller cannot corrupt the shared defaults or a
@@ -91,42 +70,6 @@ export const hardRulesBySettingKey = (repoId: string): string => `hard_rules_by:
 
 export const hardRulesUnsetText = (repo: string): string =>
   `${repo}: set \`repos[].rules.hard_rules\` for this repo in \`~/.config/mission-control/config.yaml\` (or \`MC_CONFIG\`) before the hub merges there: a list of paths that never auto-merge, or \`[]\`.`;
-
-/** Code that enforces FLIGHT's floors requires independent RETRO review. */
-export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
-  "apps/server/src/away.ts",
-  "apps/server/src/guard/**",
-  "apps/server/src/mcp/**",
-  "apps/server/src/runtime/**",
-  "apps/server/src/engine/**",
-  "apps/server/src/flight/**",
-  "packages/core/src/away.ts",
-  "packages/core/src/guard.ts",
-  "packages/core/src/flight.ts",
-  "packages/core/src/loop.ts",
-  "packages/core/src/repo-rules.ts",
-  "packages/core/src/runtime.ts",
-  "apps/server/src/update.ts",
-  "apps/server/src/config.ts",
-  "apps/server/src/crew-apply.ts",
-]);
-
-export const DEFAULT_HARD_RULES: string[] = Object.freeze([
-  ...FLIGHT_FLOOR_ENFORCING_PATHS,
-  "packages/core/src/review.ts",
-  "loops/**",
-  "roles/**",
-  "CLAUDE.md",
-  ".github/**",
-  "config.example.yaml",
-]) as string[];
-
-/**
- * Paths whose change FLIGHT never clears on a `superuser` repo, whatever its `hard_rules_by`: the
- * operator or the delegate does (floor 7). CLAUDE.md is held unless the engine verifies
- * that its `## Mission Control` block is unchanged.
- */
-export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze(["CLAUDE.md", ".github/**"]);
 
 /**
  * The hard-rule globs the engine flags PRs by. On a `superuser` repo a repo's own list can only add
