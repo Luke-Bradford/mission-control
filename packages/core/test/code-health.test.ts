@@ -33,6 +33,9 @@ const finding = (id: number, pr: number, category: string | null = null): CodeHe
   file: "src/example.ts",
   category,
   state: "open",
+  resolution: null,
+  resolvedReviewId: null,
+  carry: { kind: "new" },
 });
 const attempt = (id: number, state: CodeHealthTestAttempt["state"]): CodeHealthTestAttempt => ({
   attemptId: `attempt-${id}`,
@@ -121,6 +124,24 @@ describe("code-health definitions", () => {
     ).toBe(1);
   });
 
+  it("preserves logged disposition, resolution and carry provenance independently", () => {
+    const rows: CodeHealthFinding[] = [
+      { ...finding(1, 1), state: "logged", resolution: "fixed", resolvedReviewId: 12 },
+      { ...finding(2, 1), resolution: "held", resolvedReviewId: 13, carry: { kind: "unknown" } },
+      { ...finding(3, 1), state: "logged", resolution: "waived", resolvedReviewId: 14 },
+      { ...finding(4, 1), resolution: "reply-accepted", resolvedReviewId: 15 },
+      { ...finding(5, 1), carry: { kind: "carried", priorFindings: [{ reviewId: 13, pos: 0 }] } },
+    ];
+    expect(codeHealthFindingCategories(rows, "sample").uncategorised.denominator).toBe(5);
+    for (const changed of [
+      { ...rows[0], state: "open" as const },
+      { ...rows[0], resolution: "held" as const },
+      { ...rows[0], resolvedReviewId: 99 },
+      { ...rows[0], carry: { kind: "unknown" as const } },
+    ])
+      expect(() => codeHealthFindingCategories([rows[0], changed], "sample")).toThrow(/identity/);
+  });
+
   it("intersects eligible changed PRs, with multiple findings and outside-diff counts separate", () => {
     const input = {
       repoId: "sample",
@@ -163,6 +184,11 @@ describe("code-health definitions", () => {
       percent: 50,
     });
     expect(codeHealthTestRate(rows, "sample", false).percent).toBeNull();
+    for (const missing of [
+      { ...rows[0], attemptId: " " },
+      { ...rows[0], testId: "" },
+    ])
+      expect(() => codeHealthTestRate([missing], "sample", true)).toThrow(/identity/);
     expect(codeHealthTestRate([attempt(1, "cancelled")], "sample", true).percent).toBeNull();
     expect(() =>
       codeHealthTestRate([rows[0], { ...rows[0], state: "failed" }], "sample", true),

@@ -1,4 +1,5 @@
 /** Shared code-health definitions. Collection and mutations belong to the server. */
+import type { FindingResolutionOutcome, StoredFinding } from "./review.ts";
 export const CODE_HEALTH_WINDOWS = ["7d", "30d", "90d"] as const;
 export type CodeHealthWindow = (typeof CODE_HEALTH_WINDOWS)[number];
 export const CODE_HEALTH_TABS = ["overview", "review", "risk", "test"] as const;
@@ -63,7 +64,14 @@ export interface CodeHealthFinding {
   headSha: string;
   file: string | null;
   category: string | null;
-  state: "open" | "resolved" | "carried";
+  /** Disposition and later resolution are independent in the source. */
+  state: StoredFinding["state"];
+  resolution: FindingResolutionOutcome | null;
+  resolvedReviewId: number | null;
+  carry:
+    | { kind: "unknown" }
+    | { kind: "new" }
+    | { kind: "carried"; priorFindings: { reviewId: number; pos: number }[] };
 }
 
 export interface CodeHealthPrRef {
@@ -310,7 +318,18 @@ function distinctFindings(rows: readonly CodeHealthFinding[], repoId: string) {
   return unique(
     rows.filter((row) => row.repoId === repoId),
     (row) => row.findingId,
-    (row) => JSON.stringify([row.pr, row.reviewId, row.headSha, row.file, row.category, row.state]),
+    (row) =>
+      JSON.stringify([
+        row.pr,
+        row.reviewId,
+        row.headSha,
+        row.file,
+        row.category,
+        row.state,
+        row.resolution,
+        row.resolvedReviewId,
+        row.carry,
+      ]),
   );
 }
 
@@ -366,7 +385,11 @@ export function codeHealthTestRate(
 ) {
   const attempts = unique(
     rows.filter((row) => row.repoId === repoId),
-    (row) => JSON.stringify([row.attemptId, row.testId]),
+    (row) => {
+      if (!row.attemptId.trim() || !row.testId.trim())
+        throw new Error("Missing code-health test identity");
+      return JSON.stringify([row.attemptId, row.testId]);
+    },
     (row) => JSON.stringify([row.headSha, row.workflow, row.job, row.state, row.completedAt]),
   );
   const executed = attempts.filter((row) => row.state === "passed" || row.state === "failed");
