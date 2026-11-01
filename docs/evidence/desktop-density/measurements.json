@@ -421,16 +421,16 @@
           "height": 1080
         },
         "typeScale": {
-          "20px/20px": 1,
-          "12px/20px": 48,
+          "20px/20px": 8,
+          "12px/20px": 90,
           "11px/16px": 5,
-          "13px/20px": 8,
-          "12px/16px": 15,
+          "13px/20px": 31,
+          "12px/16px": 16,
           "26px/20px": 1,
           "13px/16px": 3,
-          "11px/20px": 29
+          "11px/20px": 33
         },
-        "tinyText": 34,
+        "tinyText": 38,
         "panels": [
           {
             "id": "askP",
@@ -535,6 +535,13 @@
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
             "count": 7
+          },
+          {
+            "tag": "SPAN",
+            "class": "rchip",
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 4
           },
           {
             "tag": "KBD",
@@ -678,7 +685,7 @@
             "height": 30,
             "font": "12px",
             "inViewport": true,
-            "count": 1
+            "count": 2
           },
           {
             "tag": "BUTTON",
@@ -9249,28 +9256,70 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 25,
-          "11px/16px": 6,
-          "13px/20px": 10,
-          "12px/16px": 6,
-          "20px/28px": 1,
-          "14px/20px": 3,
+          "12px/20px": 30,
+          "11px/16px": 12,
+          "13px/20px": 26,
+          "12px/16px": 28,
+          "20px/28px": 2,
+          "14px/20px": 10,
           "11px/20px": 15
         },
-        "tinyText": 21,
+        "tinyText": 27,
         "panels": [
           {
             "id": "",
             "width": 420,
-            "height": 220,
+            "height": 556,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "",
             "width": 1028,
-            "height": 98,
-            "padding": "24px",
+            "height": 215,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1028,
+            "height": 133,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 607,
+            "height": 180,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 405,
+            "height": 180,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 506,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 506,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1028,
+            "height": 203,
+            "padding": "0px",
             "overflow": "visible"
           },
           {
@@ -9281,7 +9330,13 @@
             "overflow": "visible"
           }
         ],
-        "forms": [],
+        "forms": [
+          {
+            "kind": "FORM",
+            "name": "",
+            "fields": 1
+          }
+        ],
         "tokens": {
           "--fs-s": "12px",
           "--fs-m": "",
@@ -9326,7 +9381,14 @@
             "class": "sub",
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
-            "count": 1
+            "count": 4
+          },
+          {
+            "tag": "TH",
+            "class": null,
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 3
           },
           {
             "tag": "KBD",
@@ -9403,6 +9465,42 @@
           {
             "tag": "BUTTON",
             "type": "button",
+            "width": 68,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 97,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "TEXTAREA",
+            "type": null,
+            "width": 934,
+            "height": 64,
+            "font": "13px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "submit",
+            "width": 60,
+            "height": 32,
+            "font": "13px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
             "width": 90,
             "height": 30,
             "font": "12px",
@@ -9466,7 +9564,7 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 26,
+          "12px/20px": 230,
           "11px/16px": 5,
           "13px/20px": 6,
           "12px/16px": 1,
@@ -9593,6 +9691,258 @@
             "height": 28,
             "font": "12px",
             "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "SELECT",
+            "type": null,
+            "width": 201,
+            "height": 27,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 122,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 108,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 216,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 223,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 173,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 7
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 230,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 202,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 274,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 108,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
             "count": 1
           },
           {
@@ -24256,16 +24606,16 @@
           "height": 1080
         },
         "typeScale": {
-          "20px/20px": 1,
-          "12px/20px": 48,
+          "20px/20px": 8,
+          "12px/20px": 90,
           "11px/16px": 5,
-          "13px/20px": 8,
-          "12px/16px": 15,
+          "13px/20px": 31,
+          "12px/16px": 16,
           "26px/20px": 1,
           "13px/16px": 3,
-          "11px/20px": 29
+          "11px/20px": 33
         },
-        "tinyText": 34,
+        "tinyText": 38,
         "panels": [
           {
             "id": "askP",
@@ -24370,6 +24720,13 @@
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
             "count": 7
+          },
+          {
+            "tag": "SPAN",
+            "class": "rchip",
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 4
           },
           {
             "tag": "KBD",
@@ -24513,7 +24870,7 @@
             "height": 30,
             "font": "12px",
             "inViewport": true,
-            "count": 1
+            "count": 2
           },
           {
             "tag": "BUTTON",
@@ -30138,8 +30495,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 25,
-          "12px/16px": 28,
+          "13px/20px": 24,
+          "12px/16px": 26,
           "20px/28px": 2,
           "14px/20px": 9,
           "11px/20px": 15
@@ -30149,7 +30506,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 556,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -32910,28 +33267,70 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 24,
-          "11px/16px": 6,
-          "13px/20px": 10,
-          "12px/16px": 6,
-          "20px/28px": 1,
-          "14px/20px": 3,
+          "12px/20px": 30,
+          "11px/16px": 12,
+          "13px/20px": 25,
+          "12px/16px": 26,
+          "20px/28px": 2,
+          "14px/20px": 10,
           "11px/20px": 15
         },
-        "tinyText": 21,
+        "tinyText": 27,
         "panels": [
           {
             "id": "",
             "width": 420,
-            "height": 220,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "",
             "width": 1028,
-            "height": 98,
-            "padding": "24px",
+            "height": 215,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1028,
+            "height": 133,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 607,
+            "height": 180,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 405,
+            "height": 180,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 506,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 506,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1028,
+            "height": 203,
+            "padding": "0px",
             "overflow": "visible"
           },
           {
@@ -32942,7 +33341,13 @@
             "overflow": "visible"
           }
         ],
-        "forms": [],
+        "forms": [
+          {
+            "kind": "FORM",
+            "name": "",
+            "fields": 1
+          }
+        ],
         "tokens": {
           "--fs-s": "12px",
           "--fs-m": "",
@@ -32987,7 +33392,14 @@
             "class": "sub",
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
-            "count": 1
+            "count": 4
+          },
+          {
+            "tag": "TH",
+            "class": null,
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 3
           },
           {
             "tag": "KBD",
@@ -33010,7 +33422,7 @@
           {
             "tag": "SELECT",
             "type": null,
-            "width": 102,
+            "width": 132,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -33057,6 +33469,51 @@
             "type": "button",
             "width": 77,
             "height": 28,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 68,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 97,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "TEXTAREA",
+            "type": null,
+            "width": 934,
+            "height": 64,
+            "font": "13px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "submit",
+            "width": 60,
+            "height": 32,
+            "font": "13px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 90,
+            "height": 30,
             "font": "12px",
             "inViewport": true,
             "count": 1
@@ -47633,56 +48090,56 @@
           "height": 1440
         },
         "typeScale": {
-          "20px/20px": 1,
-          "12px/20px": 48,
+          "20px/20px": 8,
+          "12px/20px": 90,
           "11px/16px": 5,
-          "13px/20px": 8,
-          "12px/16px": 15,
+          "13px/20px": 31,
+          "12px/16px": 16,
           "26px/20px": 1,
           "13px/16px": 3,
-          "11px/20px": 29
+          "11px/20px": 33
         },
-        "tinyText": 34,
+        "tinyText": 38,
         "panels": [
           {
             "id": "askP",
             "width": 2536,
-            "height": 419,
+            "height": 356,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "prFlowP",
             "width": 2536,
-            "height": 440,
+            "height": 535,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "defaultsP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "handlingP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "heldP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "waitingP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -47747,6 +48204,13 @@
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
             "count": 7
+          },
+          {
+            "tag": "SPAN",
+            "class": "rchip",
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 4
           },
           {
             "tag": "KBD",
@@ -47890,7 +48354,7 @@
             "height": 30,
             "font": "12px",
             "inViewport": true,
-            "count": 1
+            "count": 2
           },
           {
             "tag": "BUTTON",
@@ -55369,8 +55833,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 25,
-          "12px/16px": 28,
+          "13px/20px": 24,
+          "12px/16px": 26,
           "20px/28px": 2,
           "14px/20px": 9,
           "11px/20px": 15
@@ -55380,7 +55844,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 556,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -58157,28 +58621,70 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 25,
-          "11px/16px": 6,
-          "13px/20px": 10,
-          "12px/16px": 6,
-          "20px/28px": 1,
-          "14px/20px": 3,
+          "12px/20px": 30,
+          "11px/16px": 12,
+          "13px/20px": 25,
+          "12px/16px": 26,
+          "20px/28px": 2,
+          "14px/20px": 10,
           "11px/20px": 15
         },
-        "tinyText": 21,
+        "tinyText": 27,
         "panels": [
           {
             "id": "",
             "width": 420,
-            "height": 220,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "",
             "width": 1668,
-            "height": 98,
-            "padding": "24px",
+            "height": 191,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1668,
+            "height": 133,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 991,
+            "height": 152,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 661,
+            "height": 152,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 826,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 826,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1668,
+            "height": 203,
+            "padding": "0px",
             "overflow": "visible"
           },
           {
@@ -58189,7 +58695,13 @@
             "overflow": "visible"
           }
         ],
-        "forms": [],
+        "forms": [
+          {
+            "kind": "FORM",
+            "name": "",
+            "fields": 1
+          }
+        ],
         "tokens": {
           "--fs-s": "12px",
           "--fs-m": "",
@@ -58234,7 +58746,14 @@
             "class": "sub",
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
-            "count": 1
+            "count": 4
+          },
+          {
+            "tag": "TH",
+            "class": null,
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 3
           },
           {
             "tag": "KBD",
@@ -58257,7 +58776,7 @@
           {
             "tag": "SELECT",
             "type": null,
-            "width": 102,
+            "width": 132,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -58311,7 +58830,43 @@
           {
             "tag": "BUTTON",
             "type": "button",
-            "width": 93,
+            "width": 68,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 97,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "TEXTAREA",
+            "type": null,
+            "width": 1574,
+            "height": 64,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "submit",
+            "width": 60,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 90,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -58374,7 +58929,7 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 25,
+          "12px/20px": 282,
           "11px/16px": 5,
           "13px/20px": 6,
           "12px/16px": 1,
@@ -58452,7 +59007,7 @@
           {
             "tag": "SELECT",
             "type": null,
-            "width": 102,
+            "width": 132,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -58499,6 +59054,249 @@
             "type": "button",
             "width": 77,
             "height": 28,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "SELECT",
+            "type": null,
+            "width": 201,
+            "height": 27,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 8
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 108,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 122,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 216,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 6
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 223,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 173,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 7
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 230,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 274,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 90,
+            "height": 30,
             "font": "12px",
             "inViewport": true,
             "count": 1
@@ -73040,56 +73838,56 @@
           "height": 1440
         },
         "typeScale": {
-          "20px/20px": 1,
-          "12px/20px": 48,
+          "20px/20px": 8,
+          "12px/20px": 90,
           "11px/16px": 5,
-          "13px/20px": 8,
-          "12px/16px": 15,
+          "13px/20px": 31,
+          "12px/16px": 16,
           "26px/20px": 1,
           "13px/16px": 3,
-          "11px/20px": 29
+          "11px/20px": 33
         },
-        "tinyText": 34,
+        "tinyText": 38,
         "panels": [
           {
             "id": "askP",
             "width": 2536,
-            "height": 419,
+            "height": 356,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "prFlowP",
             "width": 2536,
-            "height": 440,
+            "height": 535,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "defaultsP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "handlingP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "heldP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "waitingP",
             "width": 625,
-            "height": 210,
+            "height": 178,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -73154,6 +73952,13 @@
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
             "count": 7
+          },
+          {
+            "tag": "SPAN",
+            "class": "rchip",
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 4
           },
           {
             "tag": "KBD",
@@ -73297,7 +74102,7 @@
             "height": 30,
             "font": "12px",
             "inViewport": true,
-            "count": 1
+            "count": 2
           },
           {
             "tag": "BUTTON",
@@ -80776,8 +81581,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 25,
-          "12px/16px": 28,
+          "13px/20px": 24,
+          "12px/16px": 26,
           "20px/28px": 2,
           "14px/20px": 9,
           "11px/20px": 15
@@ -80787,7 +81592,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 556,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -83564,28 +84369,70 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 25,
-          "11px/16px": 6,
-          "13px/20px": 10,
-          "12px/16px": 6,
-          "20px/28px": 1,
-          "14px/20px": 3,
+          "12px/20px": 30,
+          "11px/16px": 12,
+          "13px/20px": 25,
+          "12px/16px": 26,
+          "20px/28px": 2,
+          "14px/20px": 10,
           "11px/20px": 15
         },
-        "tinyText": 21,
+        "tinyText": 27,
         "panels": [
           {
             "id": "",
             "width": 420,
-            "height": 220,
+            "height": 499,
             "padding": "0px",
             "overflow": "visible"
           },
           {
             "id": "",
             "width": 1668,
-            "height": 98,
-            "padding": "24px",
+            "height": 191,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1668,
+            "height": 133,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 991,
+            "height": 152,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 661,
+            "height": 152,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 826,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 826,
+            "height": 285,
+            "padding": "0px",
+            "overflow": "visible"
+          },
+          {
+            "id": "",
+            "width": 1668,
+            "height": 203,
+            "padding": "0px",
             "overflow": "visible"
           },
           {
@@ -83596,7 +84443,13 @@
             "overflow": "visible"
           }
         ],
-        "forms": [],
+        "forms": [
+          {
+            "kind": "FORM",
+            "name": "",
+            "fields": 1
+          }
+        ],
         "tokens": {
           "--fs-s": "12px",
           "--fs-m": "",
@@ -83641,7 +84494,14 @@
             "class": "sub",
             "size": "11px",
             "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
-            "count": 1
+            "count": 4
+          },
+          {
+            "tag": "TH",
+            "class": null,
+            "size": "11px",
+            "family": "\"IBM Plex Mono\", \"Cascadia Mono\", Consolas, ui-monospace, monospace",
+            "count": 3
           },
           {
             "tag": "KBD",
@@ -83664,7 +84524,7 @@
           {
             "tag": "SELECT",
             "type": null,
-            "width": 102,
+            "width": 132,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -83718,7 +84578,43 @@
           {
             "tag": "BUTTON",
             "type": "button",
-            "width": 93,
+            "width": 68,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 97,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "TEXTAREA",
+            "type": null,
+            "width": 1574,
+            "height": 64,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "submit",
+            "width": 60,
+            "height": 32,
+            "font": "13px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 90,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -83781,7 +84677,7 @@
         },
         "typeScale": {
           "20px/20px": 1,
-          "12px/20px": 26,
+          "12px/20px": 282,
           "11px/16px": 5,
           "13px/20px": 6,
           "12px/16px": 1,
@@ -83859,7 +84755,7 @@
           {
             "tag": "SELECT",
             "type": null,
-            "width": 102,
+            "width": 132,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -83911,9 +84807,243 @@
             "count": 1
           },
           {
+            "tag": "SELECT",
+            "type": null,
+            "width": 201,
+            "height": 27,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
             "tag": "BUTTON",
             "type": "button",
-            "width": 93,
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 8
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 108,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 122,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 216,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 144,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 166,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 6
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 130,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 137,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 187,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 194,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 223,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 2
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 151,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 5
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 173,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 4
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 158,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 7
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 230,
+            "height": 24,
+            "font": "12px",
+            "inViewport": false,
+            "count": 3
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 180,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 274,
+            "height": 24,
+            "font": "12px",
+            "inViewport": true,
+            "count": 1
+          },
+          {
+            "tag": "BUTTON",
+            "type": "button",
+            "width": 90,
             "height": 30,
             "font": "12px",
             "inViewport": true,
@@ -110300,8 +111430,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 26,
-          "12px/16px": 27,
+          "13px/20px": 25,
+          "12px/16px": 25,
           "20px/28px": 2,
           "14px/20px": 8,
           "11px/20px": 15
@@ -110311,7 +111441,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 428,
+            "height": 351,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -110579,8 +111709,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 26,
-          "12px/16px": 27,
+          "13px/20px": 25,
+          "12px/16px": 25,
           "20px/28px": 2,
           "14px/20px": 8,
           "11px/20px": 15
@@ -110590,7 +111720,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 428,
+            "height": 351,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -110858,8 +111988,8 @@
           "20px/20px": 1,
           "12px/20px": 22,
           "11px/16px": 12,
-          "13px/20px": 26,
-          "12px/16px": 27,
+          "13px/20px": 25,
+          "12px/16px": 25,
           "20px/28px": 2,
           "14px/20px": 8,
           "11px/20px": 15
@@ -110869,7 +111999,7 @@
           {
             "id": "",
             "width": 420,
-            "height": 428,
+            "height": 351,
             "padding": "0px",
             "overflow": "visible"
           },
@@ -112879,5 +114009,7 @@
       "fictionalIdentities": true
     }
   ],
-  "measurementNote": "Identical measured controls are grouped by shape/style/viewport status, retaining their counts. Published screenshots replace repo/loop/account identities, dynamic object keys, paths, branches and other-project references. Original-content sample measurements are separately identified in the report."
+  "measurementNote": "Identical measured controls are grouped by shape/style/viewport status, retaining their counts. Published screenshots replace repo/loop/account identities, dynamic object keys, paths, branches and other-project references. Original-content sample measurements are separately identified in the report.",
+  "protectedReadsUsePreviewToken": true,
+  "settling": "Audit alternatives wait for populated queue/detail or .qa-hotspots-panels; FLIGHT waits for the rendered PR-flow summary. Outstanding API reads settle before capture."
 }

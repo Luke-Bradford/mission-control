@@ -66,3 +66,5 @@ All browser writes and external requests were blocked. QA send-back uses an acce
 | form hold date | [View](form-hold-date-1920-light.png) | [View](form-hold-date-1920-dark.png) | [View](form-hold-date-2560-light.png) | [View](form-hold-date-2560-dark.png) |
 | form hold ticket | [View](form-hold-ticket-1920-light.png) | [View](form-hold-ticket-1920-dark.png) | [View](form-hold-ticket-2560-light.png) | [View](form-hold-ticket-2560-dark.png) |
 | form pause selected | [View](form-pause-selected-1920-light.png) | [View](form-pause-selected-1920-dark.png) | [View](form-pause-selected-2560-light.png) | [View](form-pause-selected-2560-dark.png) |
+
+Capture verification: protected read endpoints use only the isolated preview token. All browser writes remain blocked. Audit alternatives wait for loaded queue/detail or hotspot panels; FLIGHT waits for the rendered PR-flow summary. Foreign commit hashes are fictional fixtures.

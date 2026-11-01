@@ -51,3 +51,5 @@ The gallery covers the main routes, ticket/trace views, all Setup sections, all 
 This is layout research. Save/submit actions were not performed, so it does not certify permissions, persistence or a successful operational transaction. Conditional states that use fixtures are named in the manifest.
 
 The operator sees this report before Stage 2. That plan must choose either a compact token/layout set below 2200 px or a Comfortable/Compact preference with Compact as the 1080p default; define the default FLIGHT dock content; and specify labels, widths, grouping, buttons and validation for every inventoried form. After plan approval, mock up Overview, Agent and one form at both sizes/themes. The operator approves that mockup before any build tickets.
+
+Capture verification: protected read endpoints use only the isolated preview token. All browser writes remain blocked. Audit alternatives wait for loaded queue/detail or hotspot panels; FLIGHT waits for the rendered PR-flow summary. Foreign commit hashes are fictional fixtures.
