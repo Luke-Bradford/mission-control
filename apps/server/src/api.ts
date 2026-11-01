@@ -242,7 +242,13 @@ import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { liftRunaway } from "./flight/runaway.ts";
-import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
+import {
+  flightBriefView,
+  flightScheduleView,
+  flightSeat,
+  flightView,
+  prFlow,
+} from "./flight/state.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
@@ -3943,6 +3949,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight", async () =>
         flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
       );
+      // Reader: docs/runbook.md#pr-flow-api (FLIGHT's PR-flow panel)
+      api.get("/prs/flow", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return {
+          repos: config.repos.map((repo) => ({
+            repoId: repo.id,
+            ...prFlow(store, repo.id, now()),
+          })),
+          generatedAt: now(),
+        };
+      });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),

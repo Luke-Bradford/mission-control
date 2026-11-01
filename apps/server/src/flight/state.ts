@@ -103,6 +103,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "../machine-capacity.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -125,6 +126,8 @@ interface TeamsDigestState {
     }[];
   };
 }
+
+export { prFlow } from "../pr-flow.ts";
 
 /**
  * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
@@ -350,7 +353,7 @@ export function nextWakeAt(
   lastWakeAt: number,
   now: number,
 ): number | null {
-  const times: number[] = [];
+  const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
@@ -714,6 +717,7 @@ export function flightState(i: {
       questions: [],
       tickets: [],
       prs: [],
+      prFlow: { generatedAt: now, rows: [], unowned: 0, metrics: [] },
       items: [],
       holds: [],
       reviewQueue: { queued: 0, running: 0, seats: [] },
@@ -914,6 +918,7 @@ export function flightState(i: {
       .pullRequests(session.repoId)
       .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
   );
+  const flow = prFlow(store, session.repoId, now);
   const mergeQueue = prs
     .filter((p) => p.state === "open")
     .map((p) => {
@@ -1144,6 +1149,7 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   return {
+    prFlow: flow,
     ...flightSignals({
       config,
       store,
@@ -1417,6 +1423,7 @@ export function wakeFacts(
     ].sort(),
     stopped: stoppedSeats(s),
     reviews: reviewFault ? ["idle-reviewers"] : [],
+    prFlow: prFlowFacts(s.prFlow),
     holdsInForce:
       s.flowHolds
         ?.filter((hold) => hold.blocking)
@@ -1536,6 +1543,10 @@ const factTargets = (category: string, item: unknown): string[] => {
   // a question's decision may name it as its item key, ask:<id>
   if (typeof first !== "string")
     return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  if (category === "prFlow") {
+    const pr = first.split(":")[0];
+    return pr && /^\d+$/.test(pr) ? [pr, `#${pr}`] : [];
+  }
   let parts = first.split(":");
   if (category === "signals") parts = parts.slice(1);
   if (category === "parked") parts = parts.slice(0, -1);

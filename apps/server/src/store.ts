@@ -1920,6 +1920,28 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Complete author bindings for flow reads, plus active runs needed for seat queue order. */
+  prFlowRuns(
+    repoId: RepoId,
+    prs: readonly Pick<PullRequestView, "number" | "branch" | "ticket">[],
+  ): Run[] {
+    const numbers = JSON.stringify(prs.map((p) => p.number));
+    return (
+      this.statement(`SELECT * FROM runs WHERE repo_id = ? AND review_id IS NULL AND (
+      ended_at IS NULL OR branch IN (SELECT json_extract(value, '$.branch') FROM json_each(?))
+      OR ticket IN (SELECT json_extract(value, '$.ticket') FROM json_each(?))
+      OR json_extract(loop, '$.prNumber') IN (SELECT value FROM json_each(?))
+      OR EXISTS (SELECT 1 FROM json_each(prs) p WHERE json_extract(p.value, '$.number') IN (SELECT value FROM json_each(?)))
+    ) ORDER BY started_at, seq`).all(
+        repoId,
+        JSON.stringify(prs),
+        JSON.stringify(prs),
+        numbers,
+        numbers,
+      ) as Row[]
+    ).map(toRun);
+  }
+
   /** Every recorded run on a branch; review ordering needs merged predecessors too. */
   runsOnBranch(repoId: RepoId, branch: string): Run[] {
     return (

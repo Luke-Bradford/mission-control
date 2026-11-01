@@ -3384,7 +3384,7 @@ describe("flight_state", () => {
     store.upsertRun(run("r-old", "guido-1", { endedAt: NOW - 1000, status: "ok" }));
     store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
-    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 }, NOW);
     store.upsertPullRequests(
       "mc",
       [
@@ -3569,6 +3569,18 @@ describe("flight_state", () => {
           failingChecks: [],
         },
       ],
+      prFlow: expect.objectContaining({
+        unowned: 0,
+        rows: [
+          expect.objectContaining({
+            pr: 9,
+            owner: "review seat",
+            stage: "review",
+            lastAction: "review started",
+          }),
+        ],
+        metrics: expect.any(Array),
+      }),
       items: [
         {
           key: "ask:1",

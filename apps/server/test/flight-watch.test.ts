@@ -582,6 +582,92 @@ describe("FLIGHT's evidence", () => {
 });
 
 describe("FLIGHT's flow queues", () => {
+  it("names an open PR whose run ended as unowned and waiting for a run", () => {
+    store.upsertRun(run("r-ended", "guido-1", { ticket: "mc#7", endedAt: T0, status: "failed" }));
+    store.upsertPullRequests("mc", [stored(7)], T0);
+
+    const state = flightState({ config, store, busy: [], now: T0 + MIN });
+    expect(state.prFlow?.rows).toMatchObject([
+      {
+        pr: 7,
+        owner: "nobody",
+        stage: "building",
+        waitsOn: [`no run since 12:00`],
+        lastAction: "run ended",
+        lastActor: "guido-1",
+      },
+    ]);
+    expect(wakeFacts(state)).toContain('"prFlow":[]');
+    const overdue = flightState({ config, store, busy: [], now: T0 + 5 * MIN });
+    expect(wakeFacts(overdue)).toContain(`"prFlow":["7:unowned:${T0}"]`);
+  });
+
+  it("wakes on a never-run PR at five minutes and keeps its unchanged fault quiet afterward", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    await watch.check();
+    sendCalls.length = 0;
+    nowMs = T0 + 5 * MIN - 1;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs++;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain(`7:unowned:${T0}`);
+    sendCalls.length = 0;
+    nowMs += MIN;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+  });
+
+  it("names a set-aside PR behind the seat's current PR", () => {
+    store.upsertRun(run("r-held", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-held", {
+      ...NEW_LOOP,
+      phase: "review",
+      prNumber: 7,
+      aside: { worktree: "/w", wake: false },
+    });
+    store.upsertRun(run("r-current", "guido-1", { ticket: "mc#8", startedAt: T0 + 1 }));
+    store.setRunLoop("r-current", { ...NEW_LOOP, phase: "ci", prNumber: 8 });
+    store.upsertPullRequests("mc", [stored(7), stored(8)], T0);
+
+    expect(flightState({ config, store, busy: [], now: T0 + MIN }).prFlow?.rows).toContainEqual(
+      expect.objectContaining({ pr: 7, owner: "guido-1 is on PR 8 (2nd in its queue)" }),
+    );
+  });
+
+  it("calculates merged throughput and open-to-merge percentiles for both windows", () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        stored(7, { state: "merged", createdAt: T0 - 4 * MIN, mergedAt: T0 - MIN }),
+        stored(8, { state: "merged", createdAt: T0 - 10 * MIN, mergedAt: T0 - 5 * MIN }),
+      ],
+      T0,
+    );
+
+    expect(flightState({ config, store, busy: [], now: T0 }).prFlow?.metrics).toMatchObject([
+      { windowMs: 24 * 60 * MIN, merged: 2, openToMerge: { p50Ms: 3 * MIN, p90Ms: 5 * MIN } },
+      { windowMs: 7 * 24 * 60 * MIN, merged: 2, openToMerge: { p50Ms: 3 * MIN, p90Ms: 5 * MIN } },
+    ]);
+  });
+
+  it("shows a held dependent PR in both the wait and block sides", () => {
+    store.upsertPullRequests("mc", [stored(7), stored(9)], T0);
+    store.addHold({ ref: "mc#9", waitsOn: 7, basis: "Depends on PR 7", at: T0 });
+
+    expect(flightState({ config, store, busy: [], now: T0 }).prFlow?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ pr: 7, blocks: ["mc#9", "PR 9"] }),
+        expect.objectContaining({
+          pr: 9,
+          waitsOn: expect.arrayContaining(["PR 7 to merge (mc#9)"]),
+        }),
+      ]),
+    );
+  });
+
   it("keeps a review carried across a main merge current", () => {
     live("guido-1", "r-guido");
     store.setRunLoop("r-guido", {

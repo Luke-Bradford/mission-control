@@ -241,6 +241,20 @@ the live hub's data.
 The API is under `/api/*`. A POST must be `application/json` (415 otherwise) and, if it carries an
 `Origin`, one on `localhost` or `127.0.0.1` (403 otherwise).
 
+## PR flow API
+
+`GET /api/prs/flow` requires the operator token. It returns every open PR grouped by repository,
+with its next owner, current stage, age, waits, dependents and latest actor. FLIGHT reads the same
+record at the start of every wake; the HUD panel uses it to explain delays.
+
+The 24-hour and 7-day metrics use immutable merged-PR history. Stage timings total each PR's
+recorded intervals in that stage, within the merged cohort; missing stage history stays unknown.
+Rework counts blocking review reports, including earlier rounds, rather than CI retries.
+Historical timings can lag late backfills by at most 30 seconds; new merges and window boundaries
+invalidate them immediately. Live ownership and waits are read fresh on every request.
+FLIGHT wakes after five unowned minutes, a stage's seven-day p90, or fifteen minutes waiting for
+the controller or operator. Repeated polls do not reset stage clocks or repeat the same wake fact.
+
 ### As a launchd job (optional; nothing loads it for you)
 
 `ops/com.missioncontrol.server.plist.tmpl` runs

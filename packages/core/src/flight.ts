@@ -823,6 +823,58 @@ export interface FlightPrReview {
   sha: string;
 }
 
+/** A live open pull request, shaped for FLIGHT and the PR-flow panel. */
+export interface FlightPrFlowRow {
+  pr: number;
+  ticket: string | null;
+  title: string;
+  owner: string;
+  stage:
+    | "building"
+    | "CI"
+    | "review"
+    | "rework"
+    | "sync"
+    | "clearance"
+    | "controller check"
+    | "merge";
+  stageSince: number;
+  /** When the current owner took the next step (or the PR became unowned). */
+  ownerSince: number | null;
+  ownerKind?: "nobody" | "seat" | "review" | "CI" | "operator" | "controller" | "FLIGHT" | "hub";
+  seatId?: string | null;
+  lastActionAt?: number;
+  openSince: number;
+  waitsOn: string[];
+  blocks: string[];
+  lastAction: string;
+  lastActor: string | null;
+}
+
+export interface FlightPrFlow {
+  /** Time at which this flow was calculated, in milliseconds since the epoch. */
+  generatedAt: number;
+  rows: FlightPrFlowRow[];
+  unowned: number;
+  metrics: {
+    windowMs: number;
+    merged: number;
+    openToMerge: { p50Ms: number | null; p90Ms: number | null };
+    stageTimes: {
+      stage: FlightPrFlowRow["stage"];
+      p50Ms: number | null;
+      p90Ms: number | null;
+    }[];
+    reworkRounds: { p50: number | null; p90: number | null };
+  }[];
+}
+
+/** Operator-authenticated PR-flow API, grouped by repository. */
+export interface FlightPrFlowView {
+  generatedAt: number;
+  repos: (FlightPrFlow & { repoId: string })[];
+}
+
 /** The park kinds whose digest entry carries the seat's last report, and the most of it carried. */
 export const FLIGHT_REPORT_PARKS: readonly string[] = [RULING_PARK, "review-ruling"];
 export const FLIGHT_REPORT_MAX = 1500;
@@ -910,6 +962,8 @@ export interface FlightTriage {
 
 /** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
+  /** Every open PR, unowned first. FLIGHT starts each wake by reading this flow. */
+  prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];
   retrospective?: FlightRetrospective;
   signals: FlightSignal[];
