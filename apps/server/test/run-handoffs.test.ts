@@ -50,6 +50,15 @@ describe("unfinished run handoffs", () => {
       text: "Other repo secret",
       at: 7,
     });
+    for (let at = 10; at < 40; at++)
+      store.addComms({
+        from: "other-seat",
+        to: "flight",
+        ticket: "other#7",
+        ref: "#7",
+        text: `Other repo traffic ${at}`,
+        at,
+      });
     const review = store.requestReview({
       authorRunId: r.id,
       repoId: "mc",

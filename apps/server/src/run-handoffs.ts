@@ -56,14 +56,7 @@ export function recordRunHandoff(
       .map((s) => safe(`Verify: ${s}`)),
   ];
   const messages = store
-    .commsOnTicket(
-      run.ticket,
-      `#${issue}`,
-      run.loop?.prNumber ? [`PR ${run.loop.prNumber}`] : [],
-      20,
-    )
-    .filter((m) => m.ticket === run.ticket || m.ref === run.ticket)
-    .slice(0, 6)
+    .commsOnTicket(run.ticket, run.ticket, [], 6)
     .reverse()
     .map((m) => ({ from: safe(m.from), at: m.at, text: safe(m.text) }));
   const digest = store.digest(run.id);
