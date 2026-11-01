@@ -196,6 +196,7 @@ export function doingLine(
   repoPrs?: readonly PullRequestView[],
 ): string {
   if (row.crewPause) return `Paused: ${row.crewPause.reason}`;
+  if (row.reviewing && row.hudState === "idle") return reviewingLine(row, row.reviewing, now);
   if (isSeatFree(row) && row.hudState === "idle") return SEAT_FREE_LINE;
   // In `review` the PR line (idle case below) wins: it carries the title.
   if (row.loop?.phase !== "review") {
@@ -671,8 +672,8 @@ export const isLoopInFlight = (row: Pick<CrewRow, "loop" | "run">): boolean =>
   row.loop !== null && row.loop.phase !== "done" && row.run !== null && row.run.endedAt === null;
 
 /** A crew seat with no open run: free for work, whatever its last run's ticket was. */
-export const isSeatFree = (row: Pick<CrewRow, "kind" | "run">): boolean =>
-  row.kind === "crew" && (row.run === null || row.run.endedAt !== null);
+export const isSeatFree = (row: Pick<CrewRow, "kind" | "run" | "reviewing">): boolean =>
+  row.kind === "crew" && !row.reviewing && (row.run === null || row.run.endedAt !== null);
 
 /** What a crew row's state pill says, beyond the engine's own states. */
 export const MAX_STATE_PILL_LENGTH = 10;
@@ -705,6 +706,8 @@ export type SeatStatus = { label: string; tone: HudTone; reason?: string };
 
 export function seatStatus(row: CrewRow): SeatStatus {
   if (row.crewPause) return { label: "Paused", tone: "warn", reason: row.crewPause.reason };
+  if (row.reviewing && (row.hudState === "idle" || row.hudState === "running"))
+    return { label: "Checking", tone: "neutral" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   const reason = row.loop?.parked ?? row.note ?? undefined;
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
@@ -783,6 +786,7 @@ export function useSeatName(): (id: string) => string {
 /** Whether Work should show current references rather than the last assignment. */
 export function isCurrentWork(row: CrewRow): boolean {
   if (row.paused || row.hudState === "stopped" || row.hudState === "error") return false;
+  if (row.reviewing && (row.hudState === "idle" || row.hudState === "running")) return true;
   if (["running", "stalled", "parked"].includes(row.hudState)) return true;
   if (isSeatFree(row)) return false;
   return (
