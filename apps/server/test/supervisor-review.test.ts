@@ -447,6 +447,7 @@ describe("startWatch", () => {
       "mcp__mc__read_ticket",
       "mcp__mc__answer_question",
       "mcp__mc__start_seat",
+      "mcp__mc__reassign_ticket",
       "mcp__mc__message_seat",
       "mcp__mc__comms_pin",
       "mcp__mc__flight_state",
