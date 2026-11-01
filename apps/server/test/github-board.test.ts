@@ -506,15 +506,32 @@ describe("followPrs", () => {
     expect(store.boardMoves(0)[0]?.runId).toBe("pr:mc#91");
   });
 
-  it.each([false, true])(
-    "keeps a reopened issue's current open PR ahead of an old merged closing PR (draft %s)",
-    async (isDraft) => {
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "keeps a reopened issue's current open PR ahead of an old merged closing PR (draft %s, previous Done move %s)",
+    async (isDraft, previousDone) => {
+      if (previousDone)
+        store.addBoardMove({
+          runId: "pr:mc#90",
+          repoId: "mc",
+          issue: 7,
+          column: "Done",
+          state: "done",
+          detail: null,
+          at: NOW - 1000,
+        });
       const b = await follow("Todo", "O_todo", [
         pr({ number: 90, state: "merged" }),
         pr({ number: 92, isDraft }),
       ]);
       expect(b.state.card).toBe(isDraft ? "O_todo" : "O_review");
-      expect(store.boardMoves(0).some((move) => move.column === "Done")).toBe(false);
+      expect(store.boardMoves(0).filter((move) => move.column === "Done")).toHaveLength(
+        previousDone ? 1 : 0,
+      );
     },
   );
 
