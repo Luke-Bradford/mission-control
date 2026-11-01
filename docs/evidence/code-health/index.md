@@ -8,7 +8,7 @@ Values come from the committed [research inventory](../../research/evidence/2026
 
 ## Browser checks
 
-Chrome at 1×, both themes. All four tabs fit at 1600×1000; narrower or shorter windows scroll without clipping. Forty captures passed: no browser errors, horizontal document overflow, non-mono text below 12 px or controls below 24×24 px. The browser also exercised keyboard tabs, dialog Escape, Accept/Dismiss/Snooze, the test-file toggle, unsupported window selection and all six edge-case states. Numeric results are in [verification.json](verification.json).
+Chrome at 1×, both themes. All four tabs fit at 1600×1000; narrower or shorter windows scroll without clipping. Forty captures passed: no browser errors, horizontal document overflow, non-mono text below 12 px or controls (including links) below 24×24 px. The browser also exercised keyboard tabs, dialog Escape, Accept/Dismiss/Snooze, the test-file toggle, unsupported window selection and all six edge-case states. It also checked empty collection across range changes, disconnected actions after reset, and switching dialogs after whitespace validation errors. Numeric results are in [verification.json](verification.json).
 
 | Tab | 1440×900 first render | 1280×900 | 1600×1000 | 1920×1080 | 1600×700 |
 | --- | --- | --- | --- | --- | --- |
