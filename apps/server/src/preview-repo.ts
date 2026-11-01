@@ -9,7 +9,7 @@ async function originRepo(checkout: string): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       "git",
-      ["-C", checkout, "config", "--get", "remote.origin.url"],
+      ["-C", checkout, "remote", "get-url", "origin"],
       { encoding: "utf8", timeout: READ_ORIGIN_MS, maxBuffer: 4096 },
       (error, stdout) => {
         if (error) return resolve(null);

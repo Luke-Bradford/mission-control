@@ -39,6 +39,21 @@ describe("the repository allowed to run branch previews", () => {
     await expect(resolvePreviewRepo(hub, repos, sessions())).resolves.toBe("hub");
   });
 
+  it.each(["file:///foreign/repo/", "https://example.com/"])(
+    "refuses an effective origin rewritten to %s",
+    async (replacement) => {
+      origin(crew, "https://github.com/example/hub.git");
+      git(crew, "config", `url.${replacement}.insteadOf`, "https://github.com/");
+      await expect(resolvePreviewRepo(hub, repos, sessions())).resolves.toBeUndefined();
+    },
+  );
+
+  it("accepts a rewrite that still targets the same GitHub repository", async () => {
+    origin(crew, "https://github.com/example/hub.git");
+    git(crew, "config", "url.git@github.com:.insteadOf", "https://github.com/");
+    await expect(resolvePreviewRepo(hub, repos, sessions())).resolves.toBe("hub");
+  });
+
   it("does not select a configured foreign repository", async () => {
     origin(crew, "https://github.com/example/other.git");
     await expect(
