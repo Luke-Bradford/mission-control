@@ -442,6 +442,7 @@ describe("startWatch", () => {
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
     ).toEqual([
       ...READONLY_TOOLS,
+      "mcp__mc__code_health",
       "mcp__mc__log_decision",
       "mcp__mc__wait_on",
       "mcp__mc__read_ticket",
