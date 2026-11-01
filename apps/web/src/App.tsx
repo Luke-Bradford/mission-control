@@ -65,6 +65,9 @@ const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
 const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
+const QaReadiness = lazy(() =>
+  import("./pages/QaReadiness.tsx").then((m) => ({ default: m.QaReadiness })),
+);
 
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
@@ -258,6 +261,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "audit":
       page = <Audit />;
+      break;
+    case "qa":
+      page = <QaReadiness />;
       break;
     case "setup":
       page = <Setup tab={r.tab} />;

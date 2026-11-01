@@ -1977,6 +1977,14 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Live acceptance metadata never needs to decode ended loop history. */
+  activeLoopRuns(repoId: RepoId): Run[] {
+    const rows = this.statement(
+      "SELECT * FROM runs WHERE repo_id = ? AND ended_at IS NULL AND loop IS NOT NULL ORDER BY started_at, seq",
+    ).all(repoId) as Row[];
+    return rows.map(toRun);
+  }
+
   /** The runs that have not ended and are off their seat in review, oldest first. */
   asideRuns(): Run[] {
     const rows = this.db
@@ -3578,6 +3586,14 @@ export class Store {
   pullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.statement(
       "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
+    ).all(repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  /** The queue needs only open PRs, without decoding historical checks and bodies. */
+  openPullRequests(repoId: RepoId): PullRequestView[] {
+    const rows = this.statement(
+      "SELECT * FROM pull_requests WHERE repo_id = ? AND state = 'open' ORDER BY created_at, number",
     ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
   }

@@ -7,6 +7,32 @@ import {
 } from "@mc/core";
 import type { Store } from "./store.ts";
 
+/** One bounded overlay per repo, shared by the queue and Board PR list. */
+export function prAcceptanceFor(store: Store, repoId: string) {
+  const waiting = new Map<number, NonNullable<PullRequestView["uat"]>>();
+  for (const run of store.activeLoopRuns(repoId)) {
+    const loop = run.loop;
+    if (
+      run.repoId !== repoId ||
+      run.endedAt !== null ||
+      loop?.prNumber == null ||
+      loop.parked?.kind !== UAT_PARK ||
+      !loop.uat ||
+      loop.uat.accepted
+    )
+      continue;
+    const since =
+      store
+        .loopEventsOfRun(run.id)
+        .find((e) => e.key === `${run.id}:${loop.epoch}:parked:uat:${loop.uat?.sha}`)?.at ?? null;
+    waiting.set(loop.prNumber, { sha: loop.uat.sha, since });
+  }
+  return (pr: PullRequestView) => {
+    const uat = waiting.get(pr.number);
+    return pr.state === "open" && uat?.sha === pr.headSha ? { uat } : {};
+  };
+}
+
 /** Comms shown on a PR's readiness card. */
 export const PR_UAT_COMMS = 20;
 /** Comms read per PR, so a rework round's reply is found even past the newest few. */
@@ -23,6 +49,7 @@ export interface PrUatInput {
   singleRepo: boolean;
   /** The repo of the seat that sent a message, else null. */
   repoOfSender: (from: string) => string | null;
+  flightId?: string | null;
 }
 
 /** The branch as one shell word: bare when it is only safe characters, else single-quoted. */
@@ -35,7 +62,7 @@ const SEND_BACK =
 /** Whether the PR waits for acceptance, since when, and the operator's newest send-back note. */
 function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
   const run = store
-    .loopRuns(0)
+    .activeLoopRuns(pr.repoId)
     .find((r) => r.repoId === pr.repoId && r.endedAt === null && r.loop?.prNumber === pr.number);
   const loop = run?.loop;
   if (run === undefined || !loop) return { waiting: false, since: null, note: null };
@@ -61,16 +88,25 @@ export function prUat(input: PrUatInput): PrUatView {
     .commsOnTicket(
       pr.ticket ?? "",
       ticketNumber === null || ticketNumber === undefined ? "" : `#${ticketNumber}`,
-      [`PR ${pr.number}`],
+      [`PR ${pr.number}`, `${pr.repoId}#${pr.number}`],
       COMMS_READ,
     )
-    .filter((m) => m.ticket === pr.ticket || singleRepo || repoOfSender(m.from) === pr.repoId);
+    .filter(
+      (m) =>
+        (pr.ticket !== null && m.ticket === pr.ticket) ||
+        m.ticket === `${pr.repoId}#${pr.number}` ||
+        singleRepo ||
+        repoOfSender(m.from) === pr.repoId,
+    );
 
   const reviews = store
     .reviewsOfPr(pr.repoId, pr.number)
     .filter((v) => v.state === "reported")
-    .sort((a, b) => a.round - b.round || a.id - b.id);
+    .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   const commits = store.commitsOnBranch(pr.repoId, pr.branch);
+  const currentReview = reviews.filter((r) => r.sha === pr.headSha).at(-1);
+  const author = currentReview ? store.run(currentReview.authorRunId) : null;
+  const report = author?.loop?.gate?.sha === pr.headSha ? store.latestEvidence(author.id) : null;
   const rounds: PrUatRound[] = reviews.map((v, i) => {
     const from = v.endedAt ?? v.createdAt;
     const until = reviews[i + 1]?.createdAt ?? Number.POSITIVE_INFINITY;
@@ -88,6 +124,7 @@ export function prUat(input: PrUatInput): PrUatView {
     const reply = all.find((m) => m.from === author && m.at > from && m.at < until);
     return {
       round: v.round,
+      sequence: i + 1,
       reviewId: v.id,
       at: from,
       sha: v.sha,
@@ -100,6 +137,13 @@ export function prUat(input: PrUatInput): PrUatView {
   });
 
   return {
+    sha: pr.headSha,
+    qaSummary: currentReview?.summary ?? null,
+    files: store.prFilePaths(pr.repoId, pr.number),
+    tests: report?.tests ?? [],
+    testsAdded: report?.testsAdded ?? [],
+    screenshots: currentReview ? store.reviewShots(currentReview.id) : [],
+    flightId: input.flightId ?? null,
     repoId: pr.repoId,
     number: pr.number,
     comms: all.slice(0, PR_UAT_COMMS).map((m) => ({
@@ -114,7 +158,9 @@ export function prUat(input: PrUatInput): PrUatView {
     tryIt: {
       branch: pr.branch,
       commands: [
-        `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
+        pr.headSha && /^[0-9a-f]{40}$/i.test(pr.headSha)
+          ? `git fetch origin ${pr.headSha} && git switch --detach ${pr.headSha}`
+          : `git fetch origin ${shellWord(pr.branch)} && git switch ${shellWord(pr.branch)}`,
         ...(runCommand === undefined ? [] : [runCommand]),
       ],
       previewUrl,

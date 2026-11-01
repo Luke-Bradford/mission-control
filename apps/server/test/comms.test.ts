@@ -22,6 +22,25 @@ const frame = (text: string) =>
   `${JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] } })}\n`;
 const messages = () => threadMessages(store, "seat", true);
 
+it("keeps a qualified PR question and its reply in the same repository thread", async () => {
+  const deps = { store, crew: () => ["seat", "other"], knownSecrets: async () => [] };
+  const question = await sendComms({ ...deps, ticket: "repo#42" }, "CAPCOM", {
+    to: "seat",
+    ref: "PR 7",
+    label: "question",
+    text: "What did QA test?",
+  });
+  const reply = await sendComms(deps, "seat", {
+    to: "CAPCOM",
+    ref: "PR 7",
+    replyTo: question.id,
+    text: "Both themes.",
+  });
+  expect(question.ticket).toBe("repo#42");
+  expect(reply.ticket).toBe("repo#42");
+  expect(reply.ref).toBe("PR 7");
+});
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-comms-"));
   path = join(dir, "transcript.jsonl");

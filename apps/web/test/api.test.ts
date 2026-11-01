@@ -6,6 +6,7 @@ import {
   apiGet,
   apiPost,
   apiPut,
+  apiReviewImage,
   errorNote,
   forgetOperatorToken,
   loadOperatorToken,
@@ -40,6 +41,27 @@ describe("errorNote", () => {
 });
 
 describe("api", () => {
+  it("retrieves a private PNG with the operator token and rejects other image targets", async () => {
+    const id = "a".repeat(32);
+    const mock = vi.fn(async (path: string) =>
+      path === OPERATOR_BOOTSTRAP_PATH
+        ? json(200, { token: "image-token" })
+        : new Response(new Uint8Array([137, 80, 78, 71]), {
+            headers: { "content-type": "image/png" },
+          }),
+    );
+    vi.stubGlobal("fetch", mock);
+    expect((await apiReviewImage(id)).type).toBe("image/png");
+    expect(mock).toHaveBeenLastCalledWith(
+      `/api/qa/review-shots/${id}`,
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: { [OPERATOR_HEADER]: "image-token" },
+      }),
+    );
+    await expect(apiReviewImage("../../secret")).rejects.toThrow("Invalid review image");
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
   it("bootstraps once with same-origin credentials, authenticates POSTs, and leaves GETs bare", async () => {
     const fetchMock = vi.fn(async () => json(200, { token: "boot-token" }));
     vi.stubGlobal("fetch", fetchMock);

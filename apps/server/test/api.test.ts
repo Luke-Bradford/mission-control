@@ -1470,7 +1470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
-  ["POST", "/api/prs/shop-app/12/uat", { action: "accept" }],
+  ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
@@ -1529,6 +1529,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/milestones"],
   ["GET", "/api/qa/review-shots/:id"],
   ["GET", "/api/qa/uat/:repoId/:number"],
+  ["GET", "/api/qa/queue"],
+  ["GET", "/api/repos/:repoId/prs/:number/files"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2269,6 +2271,11 @@ describe("local access", () => {
                 payload: body,
               })
             : await post(url, json, body);
+      if (url === "/api/repos/:repoId/prs/:number/files") {
+        // This DB-backed read has no placeholder PR; unlike worktree files it answers unknown.
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);
@@ -8938,10 +8945,10 @@ describe("operator token", () => {
     });
 
     it("needs the operator token", async () => {
-      expect((await post({}, { action: "accept" })).statusCode).toBe(401);
-      expect((await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept" })).statusCode).toBe(
-        401,
-      );
+      expect((await post({}, { action: "accept", sha: SHA })).statusCode).toBe(401);
+      expect(
+        (await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept", sha: SHA })).statusCode,
+      ).toBe(401);
       expect(calls).toEqual([]);
     });
 
@@ -8960,8 +8967,8 @@ describe("operator token", () => {
     });
 
     it("records a verdict for the waiting head and names a refusal", async () => {
-      expect((await post(key, { action: "accept" })).statusCode).toBe(200);
-      const refused = await post(key, { action: "send_back", note: "unreadable" });
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(200);
+      const refused = await post(key, { action: "send_back", sha: SHA, note: "unreadable" });
       expect(refused.statusCode).toBe(409);
       expect(refused.json().error).toContain("head moved");
       expect(calls).toEqual([
@@ -8970,10 +8977,18 @@ describe("operator token", () => {
       ]);
     });
 
+    it("refuses a stale displayed head before calling the engine", async () => {
+      const result = await post(key, { action: "accept", sha: "b".repeat(40) });
+      expect(result.statusCode).toBe(409);
+      expect(result.json().error).toContain("head changed");
+      expect(calls).toEqual([]);
+      expect((await post(key, { action: "accept" })).statusCode).toBe(400);
+    });
+
     it("answers 404 for a PR that is not waiting and 409 when loop writes are off", async () => {
-      expect((await post(key, { action: "accept" }, "13")).statusCode).toBe(404);
+      expect((await post(key, { action: "accept", sha: SHA }, "13")).statusCode).toBe(404);
       noWrites = true;
-      expect((await post(key, { action: "accept" })).statusCode).toBe(409);
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(409);
       expect(calls).toEqual([]);
     });
 

@@ -101,6 +101,7 @@ function review(
   prNumber = 30,
   outcome: "fixed" | "held" = "fixed",
   authorRunId = "dev-2",
+  epoch = 0,
 ) {
   const id = store.requestReview({
     authorRunId,
@@ -108,14 +109,14 @@ function review(
     seatId: "retro-1",
     prNumber,
     sha,
-    epoch: 0,
+    epoch,
     attempt: 1,
     round,
     at,
   });
   if (id === null) throw new Error("review not queued");
-  store.setReviewState(id, ["queued"], "running", { runId: `rev-${round}`, at });
-  store.recordFindings(id, `rev-${round}`, {
+  store.setReviewState(id, ["queued"], "running", { runId: `rev-${id}`, at });
+  store.recordFindings(id, `rev-${id}`, {
     verdict: { spec: findings === 0 ? "pass" : "fail", quality: "pass" },
     summary: `round ${round}`,
     findings: Array.from({ length: findings }, (_, k) => ({
@@ -135,6 +136,63 @@ function review(
 const get = async (path: string) => app.inject({ method: "GET", url: path });
 
 describe("GET /api/qa/uat/:repoId/:number", () => {
+  it("serves only open PRs in the queue with UAT entry time bound to the current head", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [pr("shop-app", 70), { ...pr("shop-app", 71), state: "closed" }],
+      NOW,
+    );
+    store.upsertRun(
+      run("waiting", {
+        endedAt: null,
+        loop: {
+          ...NEW_LOOP,
+          epoch: 1,
+          phase: "parked",
+          prNumber: 70,
+          parked: { kind: UAT_PARK, reason: "accept", ended: false },
+          uat: { sha: "sha3", from: "review", accepted: false },
+        },
+      }),
+    );
+    store.addLoopEvent("waiting:1:parked:uat:sha3", "waiting", "waiting", NOW - 60000);
+    const body = (await get("/api/qa/queue")).json();
+    expect(body.prs.find((p: PullRequestView) => p.number === 70)?.uat).toEqual({
+      sha: "sha3",
+      since: NOW - 60000,
+    });
+    expect(body.prs.some((p: PullRequestView) => p.number === 71)).toBe(false);
+    store.upsertPullRequests("shop-app", [{ ...pr("shop-app", 70), headSha: "new-head" }], NOW + 1);
+    expect(
+      (await get("/api/qa/queue")).json().prs.find((p: PullRequestView) => p.number === 70)?.uat,
+    ).toBeUndefined();
+  });
+
+  it("serves the selected PR's exact changed files without requiring a cookie", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          ...pr("shop-app", 30),
+          files: [
+            { path: "src/a.ts", changeType: "MODIFIED" },
+            { path: "new/b.ts", changeType: "ADDED" },
+          ],
+        },
+      ],
+      NOW + 1,
+    );
+    const response = await get("/api/repos/shop-app/prs/30/files");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      repoId: "shop-app",
+      number: 30,
+      sha: "sha3",
+      files: ["new/b.ts", "src/a.ts"],
+    });
+    expect((await get("/api/repos/unconfigured/prs/30/files")).statusCode).toBe(404);
+    expect((await get(`/api/repos/shop-app/prs/${"9".repeat(100)}/files`)).statusCode).toBe(404);
+  });
   beforeEach(() => {
     store.upsertRun(run("dev-2"));
     store.upsertPullRequests("shop-app", [pr("shop-app", 30)], NOW);
@@ -187,6 +245,36 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     expect(body.rounds[0]?.blocking).toEqual([]);
     expect(body.rounds[0]?.result).toBe("clean");
     expect(first?.result).toBe("resolved");
+  });
+
+  it("keeps review chronology and reply/fix windows across a Send back epoch", async () => {
+    review(1, "sha3", NOW - 10 * MIN, 0, 30, "fixed", "dev-2", 1);
+    store.addComms({
+      at: NOW - 8 * MIN,
+      from: "dev-2",
+      to: "retro-1",
+      ticket: "shop-app#7",
+      ref: "PR 30",
+      text: "new cycle reply",
+    });
+    store.addRunCommit({
+      runId: "dev-2",
+      repoId: "shop-app",
+      branch: BRANCH,
+      sha: "newfix",
+      at: NOW - 7 * MIN,
+    });
+    const body = (await get("/api/qa/uat/shop-app/30")).json() as PrUatView;
+    expect(body.rounds.map((r) => [r.sequence, r.round, r.sha])).toEqual([
+      [3, 1, "sha3"],
+      [2, 2, "sha2"],
+      [1, 1, "sha1"],
+    ]);
+    expect(body.rounds[0]?.reply?.text).toBe("new cycle reply");
+    expect(body.rounds[0]?.fixSha).toBe("newfix");
+    expect(body.rounds[1]?.reply).toBeNull();
+    expect(body.rounds[1]?.fixSha).toBeNull();
+    expect(body.rounds[2]?.reply?.text).toBe("fixed it");
   });
 
   it("builds the try-it commands from the run's branch name exactly", async () => {
@@ -302,7 +390,14 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
       previews: {
         get: (n: number) =>
           n === 30
-            ? { pr: 30, branch: BRANCH, port: 7431, url: "http://127.0.0.1:7431", startedAt: NOW }
+            ? {
+                pr: 30,
+                sha: "sha3",
+                branch: BRANCH,
+                port: 7431,
+                url: "http://127.0.0.1:7431",
+                startedAt: NOW,
+              }
             : null,
       } as never,
     });
@@ -314,9 +409,20 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
         ).json() as PrUatView
       ).tryIt.previewUrl;
     const [started, other] = [await read(30), await read(41)];
+    store.upsertPullRequests("shop-app", [{ ...pr("shop-app", 30), headSha: "new-head" }], NOW + 1);
+    const stale = await read(30);
     await withPreview.close();
     expect(started).toBe("http://127.0.0.1:7431");
     expect(other).toBeNull();
+    expect(stale).toBeNull();
+  });
+
+  it("checks out the exact displayed commit when the PR has an immutable head", async () => {
+    const sha = "a".repeat(40);
+    store.upsertPullRequests("shop-app", [{ ...pr("shop-app", 30), headSha: sha }], NOW + 1);
+    const body = (await get("/api/qa/uat/shop-app/30")).json() as PrUatView;
+    expect(body.tryIt.branch).toBe(BRANCH);
+    expect(body.tryIt.commands[0]).toBe(`git fetch origin ${sha} && git switch --detach ${sha}`);
   });
 
   it("omits the run command when the repo has none", async () => {

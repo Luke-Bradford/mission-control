@@ -64,6 +64,7 @@ export type Page =
   | "agent"
   | "map"
   | "comms"
+  | "qa"
   | "telemetry"
   | "audit"
   | "setup";
@@ -87,6 +88,7 @@ export type Route =
   | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
+  | { page: "qa" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
@@ -97,7 +99,7 @@ export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
  * page is one: it says what the dock would, so the dock stays out of its way.
  */
-export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map", "flight"]);
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map", "flight", "qa"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
 export const PAGE_PATHS: Record<Page, string> = HUD_PAGE_PATHS;
@@ -215,6 +217,7 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
+  if (p === "/qa") return { page: "qa" };
   const board = withId(path, "board");
   if (board) return { page: "board", repoId: board.id, ticket: null };
   const ticket = boardTicket(path);

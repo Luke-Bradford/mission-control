@@ -173,6 +173,16 @@ describe("hudRenderRequest", () => {
 });
 
 describe("renderHudWithPlaywright", () => {
+  it("captures the old Audit readiness view when main predates the QA route", async () => {
+    const url = "http://127.0.0.1:7420/qa";
+    const fake = fakePlaywright({ pageUrl: "http://127.0.0.1:7420/audit" });
+    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+    expect(fake.page.goto).toHaveBeenCalledTimes(2);
+    expect(fake.page.click).toHaveBeenCalledWith(
+      '[aria-label="QA view"] button:text-is("PR readiness")',
+      expect.anything(),
+    );
+  });
   it("selects non-default Audit views before capturing them", async () => {
     for (const [tab, label] of [
       ["readiness", "PR readiness"],

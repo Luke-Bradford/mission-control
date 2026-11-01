@@ -68,6 +68,27 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 export const apiGet = <T>(path: string): Promise<T> =>
   request<T>(path, { headers: { accept: "application/json" } });
 
+/** Review images require the same operator token as their metadata's private retrieval route. */
+export async function apiReviewImage(id: string): Promise<Blob> {
+  if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid review image.");
+  await loadOperatorToken();
+  const read = () =>
+    fetch(`/api/qa/review-shots/${encodeURIComponent(id)}`, {
+      credentials: "same-origin",
+      headers: operatorToken ? { [OPERATOR_HEADER]: operatorToken } : {},
+    });
+  let response = await read();
+  if (response.status === 401) {
+    forgetOperatorToken();
+    await loadOperatorToken();
+    response = await read();
+  }
+  if (!response.ok) throw await errorOf(response);
+  if (!response.headers.get("content-type")?.startsWith("image/png"))
+    throw new Error("The review image is not a PNG.");
+  return response.blob();
+}
+
 /** POSTs always send a JSON body (`{}` when there is nothing to say): the server requires both. */
 export async function apiPost<T>(path: string, body: unknown = {}): Promise<T> {
   return apiWrite<T>("POST", path, body);

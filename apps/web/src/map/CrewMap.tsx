@@ -13,6 +13,9 @@ import { SessionTimeline } from "./SessionTimeline.tsx";
 import { useSessionTimeline } from "./timeline.ts";
 import "./map.css";
 import { plural } from "../fmt.ts";
+import { useSearch } from "../router.ts";
+
+const NO_FOCUSED_FILES: string[] = [];
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -22,6 +25,13 @@ export interface MapStatus {
 
 /** One repo's live map: the snapshot, then its deltas, until the page leaves the repo. */
 export function LiveCrewMap({ repo }: { repo: string }) {
+  const search = useSearch();
+  const pr = new URLSearchParams(search).get("pr");
+  const focused = useResource<{ files: string[] }>(
+    pr && /^[1-9]\d*$/.test(pr)
+      ? { path: `/api/repos/${encodeURIComponent(repo)}/prs/${pr}/files`, topic: "boards" }
+      : null,
+  );
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -81,6 +91,9 @@ export function LiveCrewMap({ repo }: { repo: string }) {
       names={names}
       work={work}
       status={status}
+      focusedFiles={focused.data?.files ?? NO_FOCUSED_FILES}
+      focusedPr={pr && /^[1-9]\d*$/.test(pr) ? pr : null}
+      focusError={focused.error?.message}
     />
   );
 }
@@ -117,6 +130,9 @@ export function CrewMapView({
   names = noNames,
   work = noWork,
   status,
+  focusedFiles = NO_FOCUSED_FILES,
+  focusedPr = null,
+  focusError,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
@@ -125,9 +141,17 @@ export function CrewMapView({
   /** What each crew seat is on (its crew row's ticket, title and PR); the map's own otherwise. */
   work?: Record<string, SeatWork>;
   status?: MapStatus;
+  focusedFiles?: string[];
+  focusedPr?: string | null;
+  focusError?: string;
 }) {
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
+  const focusKey = focusedFiles.join("\n");
+  useEffect(() => {
+    const first = focusKey.split("\n")[0];
+    setSelection(first ? { kind: "node", path: first } : null);
+  }, [focusKey]);
   const now = useNow();
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
@@ -178,10 +202,11 @@ export function CrewMapView({
     .sort()
     .join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual and the conflicts
-  const extraFiles = useMemo(
-    () => branchOnlyFiles(snapshot.tree, markConflicts(changesVisual, snapshot.conflicts)),
-    [snapshot.tree, pathKey],
-  );
+  const extraFiles = useMemo(() => {
+    const visual = { ...markConflicts(changesVisual, snapshot.conflicts) };
+    for (const path of focusedFiles) visual[path] ??= { changes: [] };
+    return branchOnlyFiles(snapshot.tree, visual);
+  }, [snapshot.tree, pathKey, focusKey]);
   const searchable = useMemo(
     () => [...snapshot.tree.map((file) => file.path), ...extraFiles.map((file) => file.path)],
     [snapshot.tree, extraFiles],
@@ -222,6 +247,13 @@ export function CrewMapView({
     <div className="map-body">
       <div className="map-key-bar">
         <ChangesKey snapshot={snapshot} />
+        {focusedPr && (
+          <span role="status">
+            {focusError
+              ? `Could not select PR files: ${focusError}`
+              : `PR #${focusedPr} · ${plural(focusedFiles.length, "selected file")}`}
+          </span>
+        )}
       </div>
       <div className="map-main">
         <div className="map-stage-wrap">
@@ -234,6 +266,7 @@ export function CrewMapView({
             currentMark={replaying ? (current?.file ?? null) : null}
             markSeat={replaying ? playback.seat : null}
             onSelect={selectNode}
+            focusedFiles={focusedFiles}
           />
         </div>
         <div className="map-rail">
