@@ -1912,10 +1912,12 @@ export class Store {
     for (const agentId of agentIds) out.set(agentId, []);
     const held = [...new Set(heldRunIds)];
     const rows = this.statement(
-      `SELECT * FROM (
-         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
+      `SELECT runs.* FROM runs JOIN (
+         SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
          FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
-       ) WHERE row_number <= ?${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}`,
+       ) recent ON recent.id = runs.id
+       WHERE recent.row_number <= ?${held.length > 0 ? ` OR runs.id IN (${held.map(() => "?").join(", ")})` : ""}
+       ORDER BY runs.agent_id, runs.started_at DESC, runs.seq DESC`,
     ).all(...agentIds, ...held, limit, ...held) as Row[];
     for (const run of rows.map(toRun)) {
       const runs = out.get(run.agentId) ?? [];
@@ -2383,6 +2385,23 @@ export class Store {
     for (const [id, r] of this.rereads(runIds)) {
       const d = out.get(id);
       if (d) out.set(id, this.withRereads(d, r));
+    }
+    return out;
+  }
+
+  /** Historical window provenance for crew rows, without decoding old event and token arrays. */
+  digestContextWindows(runIds: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
+      const ids = runIds.slice(i, i + DIGEST_BATCH);
+      const rows =
+        this.statement(`SELECT run_id, json_extract(digest, '$.contextWindow') AS context_window
+        FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
+          run_id: string;
+          context_window: number | null;
+        }[];
+      for (const row of rows)
+        if (row.context_window !== null) out.set(row.run_id, row.context_window);
     }
     return out;
   }
@@ -3666,6 +3685,14 @@ export class Store {
     const rows = this.statement(
       "SELECT * FROM pull_requests WHERE ticket = ? AND repo_id = ? ORDER BY number DESC",
     ).all(ticket, repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  /** PRs that name this ticket directly or in closingIssues, without decoding unrelated histories. */
+  pullRequestsClosingTicket(repoId: RepoId, issue: number): PullRequestView[] {
+    const rows = this.statement(`SELECT * FROM pull_requests WHERE repo_id = ?
+      AND (ticket = ? OR EXISTS (SELECT 1 FROM json_each(closing_issues) WHERE value = ?))
+      ORDER BY number DESC`).all(repoId, `${repoId}#${issue}`, issue) as Row[];
     return this.pullRequestRows(rows);
   }
 
