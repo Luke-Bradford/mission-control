@@ -2902,6 +2902,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
+      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/graph",
         mapRoute(async (repo, checkout, req, reply) => {
