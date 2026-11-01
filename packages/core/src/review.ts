@@ -1,7 +1,11 @@
-import type { PillSpec } from "./hud.ts";
-import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop.ts";
-import type { ReviewDepth } from "./profiles.ts";
-import type { SeatState } from "./runtime.ts";
+import type { ReviewCheckState, ReviewStatus, ReviewStatusState } from "./review-model.ts";
+
+export type { ReviewCheckState, ReviewStatus, ReviewStatusState } from "./review-model.ts";
+
+import type { PillSpec } from "./hud-model.ts";
+import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop-shared.ts";
+import type { ReviewDepth } from "./profiles-model.ts";
+import type { SeatState } from "./runtime-model.ts";
 import type { RunLoop } from "./types.ts";
 
 export const REVIEW_STATES = [
@@ -369,13 +373,6 @@ export const REVIEW_STATUS_WAIVED = "QA review waived by the operator";
 export const carriedStatusText = (description: string, from: string): string =>
   `${description} (carried from ${from.slice(0, 7)}, main merged)`;
 
-export type ReviewStatusState = "pending" | "success" | "failure";
-
-export interface ReviewStatus {
-  state: ReviewStatusState;
-  description: string;
-}
-
 /** The mc/review status `sha` should carry, or null when there is none to set. */
 export function reviewStatusOf(
   rows: readonly ReviewFact[],
@@ -592,17 +589,6 @@ export const minorIssueBody = (pr: number, findings: readonly string[]): string 
   `Minor findings from #${pr}.\n\n${findings.join("\n")}\n`;
 export const minorIssueFailedText = (pr: number, why: string): string =>
   `PR #${pr}: minor findings could not be filed in Backlog (${why}); collect them from the PR body.`;
-
-/**
- * One open PR's review state, the same on the Board card, the PR chip, the Overview crew row and
- * the Agent page. (`ReviewCheck` is a checklist item; this is the PR's state.)
- */
-export type ReviewCheckState =
-  | { kind: "queued"; position: number }
-  | { kind: "checking"; seat: string; since: number }
-  | { kind: "sent" }
-  | { kind: "ready" }
-  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" | "hub" };
 
 /** What of the author run's loop decides whether a reviewed PR can merge. */
 export type ReviewCheckLoop = Pick<

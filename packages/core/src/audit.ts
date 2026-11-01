@@ -1,5 +1,5 @@
 import type { FindingCategory } from "./review.ts";
-import type { LoopKind } from "./runtime.ts";
+import type { LoopKind } from "./runtime-model.ts";
 
 /** A merged PR at or above this many changed lines (additions plus deletions) is a size outlier. */
 export const AUDIT_PR_OUTLIER_LINES = 800;
