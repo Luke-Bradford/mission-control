@@ -422,13 +422,24 @@ export function needLine(
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
   const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
   if (asks.length > 0) {
-    const oldest = asks.reduce((a, b) => (b.at < a.at ? b : a));
-    const labels = ASKS.filter((kind) => asks.some((i) => i.kind === kind)).map((kind, index) =>
-      index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
-    );
-    const kinds =
-      labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
-    parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
+    const others = asks.filter((i) => i.owner !== "operator");
+    for (const ask of others)
+      parts.push({
+        text: `${ATTENTION_LABEL[ask.kind]} for ${ask.owner === "loop" ? callSign(row) : ask.owner === "controller" ? "the controller" : "FLIGHT"}`,
+        action: "open",
+        key: ask.key,
+      });
+    const operatorAsks = asks.filter((i) => i.owner === "operator");
+    if (operatorAsks.length > 0) {
+      const oldest = operatorAsks.reduce((a, b) => (b.at < a.at ? b : a));
+      const labels = ASKS.filter((kind) => operatorAsks.some((i) => i.kind === kind)).map(
+        (kind, index) =>
+          index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
+      );
+      const kinds =
+        labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+      parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
+    }
   }
   const tag = mine.find((i) => i.kind === "tag");
   if (tag && !parts.some((p) => p.action === "answer")) {

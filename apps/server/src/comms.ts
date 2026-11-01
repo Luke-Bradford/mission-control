@@ -217,6 +217,10 @@ export function reactComms(
     throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
+  if (actor === COMMS_CAPCOM && reaction === "done") {
+    store.settleCommsItem(id, COMMS_CAPCOM, "Marked done by the operator", at);
+    store.addHubEvent(`Comms ${id} marked done by the operator.`, at);
+  }
   return added;
 }
 
@@ -369,12 +373,97 @@ export function attentionChatter(
     return asked.has(m.at);
   };
   const lines = threadMessages(store, agentId, crew, "attention").filter(
-    (m) => !m.seen && m.from === agentId && !mirrored(m),
+    (m) =>
+      !m.seen &&
+      m.from === agentId &&
+      !mirrored(m) &&
+      ((m.tagged && (!own || flightQuestion(m.text))) ||
+        (!own && m.direct && flightQuestion(m.text))) &&
+      resolvedCommsReason(store, m, crew && !own) === null,
   );
   return {
     tag: lines.filter((m) => m.tagged && (!own || flightQuestion(m.text))),
     message: own ? [] : lines.filter((m) => m.direct && flightQuestion(m.text)),
   };
+}
+
+/** Only saved subject facts retire a question; message prose never supplies a resolution. */
+export function resolvedCommsReason(
+  store: Store,
+  message: Pick<CommsThreadMessage, "id" | "ticket" | "at"> & {
+    ref?: string | null;
+    label?: string | null;
+  },
+  includeRun = true,
+  subjectRepoId?: string,
+): string | null {
+  if (store.commsSettlement(message.id)) return "The conversation was settled.";
+  if (
+    store.commsReactions(message.id).some((r) => r.actor === COMMS_CAPCOM && r.reaction === "done")
+  )
+    return "The operator marked it done.";
+  const position = commsPosition(message.id);
+  const run = !includeRun
+    ? null
+    : position?.source.startsWith("stream:")
+      ? store.run(position.source.slice("stream:".length))
+      : store.commsRun(message.id);
+  const controls = run?.loop;
+  if (
+    run &&
+    (controls?.parked?.kind === "budget" ||
+      controls?.parked?.kind === "account" ||
+      controls?.mergeHold ||
+      controls?.controllerCheckRequired ||
+      (controls?.controllerCheck && !controls.controllerCheck.pass) ||
+      (controls?.uat && !controls.uat.accepted) ||
+      store.seatSession(run.agentId)?.state === "stopped")
+  )
+    return null;
+  const at = message.at;
+  if (at === null) return null;
+  if (run?.endedAt != null && run.endedAt >= at) return "The related run ended.";
+  if (
+    run &&
+    message.label === "blocker" &&
+    store
+      .loopEventsOfRun(run.id)
+      .some((e) => e.key.startsWith(`${run.id}:resume-confirmed:`) && e.at > at)
+  )
+    return "The related run resumed.";
+  const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+  if (
+    ticket &&
+    store
+      .board(ticket[1] ?? "")
+      .some(
+        (c) =>
+          c.issueNumber === Number(ticket[2]) &&
+          c.updatedAt >= at &&
+          (c.closed || c.state === "done"),
+      )
+  )
+    return "The related ticket resolved.";
+  const repoId = ticket?.[1] ?? run?.repoId ?? subjectRepoId;
+  if (repoId) {
+    const prs = store.pullRequests(repoId);
+    const pr = /^PR (\d+)$/.exec(message.ref ?? "");
+    if (
+      pr &&
+      prs.some(
+        (p) =>
+          p.number === Number(pr[1]) && p.state !== "open" && (p.mergedAt ?? p.updatedAt) >= at,
+      )
+    )
+      return "The related PR resolved.";
+    const linked = prs.filter((p) => p.ticket === message.ticket);
+    if (
+      linked.some((p) => p.state === "merged" && (p.mergedAt ?? p.updatedAt) >= at) &&
+      !linked.some((p) => p.state === "open")
+    )
+      return "The related PR merged.";
+  }
+  return null;
 }
 
 /** Direct messages that need a decision, excluding punctuation in links and code. */

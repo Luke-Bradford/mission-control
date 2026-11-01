@@ -72,6 +72,8 @@ import {
   hardRulesUnsetText,
   hudColumnOf,
   isDollarCapReason,
+  isFlakeNoteKey,
+  isHardRulesFlagKey,
   isReviewBudgetFailure,
   type LoopAction,
   type LoopReviewFacts,
@@ -1445,6 +1447,8 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "note":
+        if (isHardRulesFlagKey(a.key) || isFlakeNoteKey(a.key))
+          store.addLoopEvent(`${a.key}:information`, run.id, a.text, at);
         store.raiseNote({
           key: a.key,
           kind: a.noteKind,

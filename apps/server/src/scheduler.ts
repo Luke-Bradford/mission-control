@@ -12,6 +12,8 @@ import {
   githubCollector,
   type HudState,
   hudColumnOf,
+  isFlakeNoteKey,
+  isHardRulesFlagKey,
   MACHINE_COLLECTOR,
   type MachineSample,
   NOTABLE_STATES,
@@ -508,6 +510,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const applyDefaults = async () => {
     try {
+      for (const note of store.notes())
+        if (note.runId !== null && (isHardRulesFlagKey(note.key) || isFlakeNoteKey(note.key)))
+          store.addLoopEvent(`${note.key}:information`, note.runId, note.text, note.at);
       const raised = raiseStalledCommsDecisions({ config, store, now: now() });
       if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({

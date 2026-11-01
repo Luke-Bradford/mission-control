@@ -4,11 +4,13 @@ import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  attentionChatter,
   COMMS_INBOX_PROMPT_MAX,
   COMMS_INBOX_PROMPT_ROWS,
   commsInboxContext,
   commsInboxPrompt,
   reactComms,
+  resolvedCommsReason,
   sendComms,
   threadMessages,
 } from "../src/comms.ts";
@@ -21,6 +23,42 @@ let store: Store;
 const frame = (text: string) =>
   `${JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] } })}\n`;
 const messages = () => threadMessages(store, "seat", true);
+
+it("retires a question when CAPCOM marks it done and records the resolution", () => {
+  const m = store.addComms({
+    at: 4,
+    from: "seat",
+    to: "CAPCOM",
+    ticket: null,
+    text: "@CAPCOM Which option?",
+    label: "question",
+    mentions: ["CAPCOM"],
+  });
+  if (!m) throw new Error("missing message");
+  expect(attentionChatter(store, "seat", true, false).tag).toHaveLength(1);
+  reactComms(store, "CAPCOM", m.id, "done", undefined, 5);
+  expect(attentionChatter(store, "seat", true, false).tag).toEqual([]);
+  expect(store.openCommsItems()).toEqual([]);
+  expect(store.hubEvents(0)[0]?.text).toContain("marked done");
+});
+
+it("keeps an ended run's old question resolved after its sender starts another run", () => {
+  const m = store.addComms({
+    at: 4,
+    from: "seat",
+    to: "CAPCOM",
+    ticket: null,
+    text: "Which option?",
+  });
+  if (!m) throw new Error("missing message");
+  expect(resolvedCommsReason(store, m)).toBeNull();
+  const old = store.run("r");
+  if (!old) throw new Error("missing run");
+  store.upsertRun({ ...old, endedAt: 5 });
+  store.upsertRun({ ...old, id: "next", seq: 2, startedAt: 6 });
+  expect(store.commsRun(m.id)?.id).toBe("r");
+  expect(resolvedCommsReason(store, m)).toBe("The related run ended.");
+});
 
 it("keeps a qualified PR question and its reply in the same repository thread", async () => {
   const deps = { store, crew: () => ["seat", "other"], knownSecrets: async () => [] };

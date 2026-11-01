@@ -588,9 +588,14 @@ function ModernConversation({
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
-  const crew = useResource<CommsMessagesResponse>(
-    view.kind === "crew" ? RESOURCES.commsCrew : null,
-  );
+  const [crewEarlier, setCrewEarlier] = useState(false);
+  useEffect(() => {
+    if (view.kind !== "crew") setCrewEarlier(false);
+  }, [view.kind]);
+  const crewRef = crewEarlier
+    ? { ...RESOURCES.commsCrew, path: `${RESOURCES.commsCrew.path}?history=1` }
+    : RESOURCES.commsCrew;
+  const crew = useResource<CommsMessagesResponse>(view.kind === "crew" ? crewRef : null);
   const flight = useResource<CommsMessagesResponse>(
     view.kind === "flight" ? RESOURCES.commsFlight : null,
   );
@@ -620,7 +625,7 @@ function ModernConversation({
   // The route this view pages, and the newest page it sent.
   const pageRef =
     view.kind === "crew"
-      ? RESOURCES.commsCrew
+      ? crewRef
       : view.kind === "flight"
         ? RESOURCES.commsFlight
         : view.kind === "contact"
@@ -736,6 +741,16 @@ function ModernConversation({
           {pins.map((pin) => (
             <PinnedMessage key={pin.id} message={pin} />
           ))}
+        </div>
+      )}
+      {view.kind === "crew" && (crewEarlier || crew.data?.hasEarlier) && (
+        <div className="comms-older">
+          <button type="button" onClick={() => setCrewEarlier((shown) => !shown)}>
+            {crewEarlier ? "Current crew" : "Earlier"}
+          </button>
+          <span className="s muted">
+            {crewEarlier ? "All crew history" : "Live runs · last 24h"}
+          </span>
         </div>
       )}
       <MessagePane

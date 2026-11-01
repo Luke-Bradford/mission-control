@@ -1712,16 +1712,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         cursorKey: string,
         paging: { limit: number; before: string | undefined },
         countsOnly = false,
+        recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor).unread,
+          unread: store.commsCounts(scope, cursor, recentSince).unread,
         };
       };
       const commsScope = (
@@ -1747,12 +1748,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
         "/comms/crew",
         (req, reply) => {
           const paging = commsPaging(req.query);
           if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          return commsScopePage({ crew: true }, "crew", paging);
+          if (req.query.history !== undefined && req.query.history !== "1")
+            return reply.code(400).send({ error: "history must be 1 when supplied" });
+          const history = req.query.history === "1";
+          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+          const hidden =
+            !history &&
+            store.commsCounts({ crew: true }, null).count >
+              store.commsCounts({ crew: true }, null, since).count;
+          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
         },
       );
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
