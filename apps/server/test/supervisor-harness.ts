@@ -82,11 +82,18 @@ const prep = vi.hoisted(() => ({
   closing: 0,
   /** The `peers` each prepare call was given, in order. */
   peers: [] as unknown[],
+  handoffGate: null as Promise<void> | null,
+  handoffChecks: 0,
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
   return {
     ...real,
+    handoffCheckoutStatus: async (...a: Parameters<typeof real.handoffCheckoutStatus>) => {
+      prep.handoffChecks++;
+      if (prep.handoffGate) await prep.handoffGate;
+      return real.handoffCheckoutStatus(...a);
+    },
     existingCheckout: async (...a: Parameters<typeof real.existingCheckout>) => {
       prep.resumeChecks++;
       if (prep.resumeGate) await prep.resumeGate;
@@ -167,6 +174,14 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
       prep.sessions.push(session);
       return new Proxy(session, {
         get(target, key) {
+          if (key === "close")
+            return async () => {
+              if (prep.closeGate) {
+                prep.closing++;
+                await prep.closeGate;
+              }
+              return target.close();
+            };
           if (key === "send" && prep.failWrite) {
             return () => {
               throw new Error("session ended");
@@ -457,6 +472,8 @@ beforeEach(() => {
   prep.failWrite = false;
   prep.sessions = [];
   prep.peers = [];
+  prep.handoffGate = null;
+  prep.handoffChecks = 0;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");

@@ -10,6 +10,7 @@ export * from "./external-text.ts";
 export * from "./flight.ts";
 export * from "./flight-memory.ts";
 export * from "./guard.ts";
+export * from "./handoff.ts";
 export * from "./hud.ts";
 export * from "./hud-paths.ts";
 export * from "./loop.ts";

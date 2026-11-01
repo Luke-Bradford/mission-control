@@ -300,6 +300,7 @@ import {
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review-check.ts";
+import { publicHandoff } from "./run-handoffs.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -1399,6 +1400,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .map((r): RunView => runView(config, store, r, cache, boards));
         },
       );
+
+      // Reader: apps/web/src/agent/HandoffPanel.tsx
+      api.get<{ Params: { id: string } }>("/runs/:id/handoff", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (!run || !config.repos.some((r) => r.id === run.repoId))
+          return reply.code(404).send({ error: "unknown run" });
+        const h = store.handoff(run.id) ?? store.receivedHandoff(run.id);
+        return h ? publicHandoff(h) : null;
+      });
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
       // text, never the path.
@@ -3082,7 +3092,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
-        return store.board(repo.id);
+        const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
+        return store.board(repo.id).map((card) => {
+          const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
+          return h
+            ? {
+                ...card,
+                handoff: {
+                  runId: h.runId,
+                  fromSeat: h.fromSeat,
+                  at: h.at,
+                  acceptedBy: h.acceptedBy,
+                },
+              }
+            : card;
+        });
       });
 
       // Read live from GitHub (the board's rows carry no body); the number is validated here.

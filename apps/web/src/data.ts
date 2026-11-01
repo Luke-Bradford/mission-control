@@ -239,6 +239,10 @@ export const RESOURCES = {
     topic: "agents",
   }),
   /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.aside` is set while it is off its seat. */
+  runHandoff: (runId: string): ResourceRef => ({
+    path: `/api/runs/${enc(runId)}/handoff`,
+    topic: "agents",
+  }),
   runLoop: (runId: string): ResourceRef => ({
     path: `/api/runs/${enc(runId)}/loop`,
     topic: "agents",

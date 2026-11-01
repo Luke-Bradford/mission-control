@@ -29,7 +29,13 @@ import {
   scratchName,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
-import { type CrewSessionConfig, managedSessionPath, realish, SEAT_ID } from "../config.ts";
+import {
+  type CrewSessionConfig,
+  isInside,
+  managedSessionPath,
+  realish,
+  SEAT_ID,
+} from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import {
   assertSeatGitConfig,
@@ -306,6 +312,8 @@ export interface PendingCheckouts {
 }
 
 export interface CheckoutInput {
+  /** An ended author's branch; an existing managed worktree can be adopted in place. */
+  handoff?: { branch: string; worktree: string | null };
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
   /** `crew.worktrees`. */
@@ -1502,10 +1510,15 @@ export async function prepareCheckout(
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
-  const branch = (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
+  const branch =
+    i.handoff?.branch ?? (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
   // a worktree made before sessions had folders is reused where it is
-  const path =
+  let path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
+  if (i.handoff?.worktree && (await succeeds(lstat(i.handoff.worktree)))) {
+    path = (await checkedHandoffCheckout(i.checkout, i.handoff.worktree, branch, i.worktreesRoot))
+      .path;
+  }
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 
@@ -1515,6 +1528,11 @@ export async function prepareCheckout(
       detail: gitReason(e),
     });
   if (i.pending?.isPending(path)) {
+    if (i.handoff)
+      throw new CheckoutError(
+        "path",
+        "handoff worktree has pending cleanup; its files were preserved",
+      );
     await removePending(common, path, i.worktreesRoot, inClone).catch((e) => {
       if (e instanceof CheckoutError) throw e;
       throw cannotAdd(e);
@@ -1576,6 +1594,8 @@ export async function prepareCheckout(
     );
   const local = await refSha(`refs/heads/${branch}`);
   const remote = local === null ? await refSha(`refs/remotes/origin/${branch}`) : null;
+  if (i.handoff && local === null && remote === null)
+    throw new CheckoutError("path", "the handoff branch is missing; it was not recreated");
   const add =
     local !== null
       ? ["worktree", "add", "--quiet", "--", path, branch]
@@ -1659,6 +1679,82 @@ export async function existingCheckout(
   }
   if (head.trim() !== `refs/heads/${branch}`) throw notIt();
   return { branch, path, gitDir };
+}
+
+/** Handoffs cannot grant a seat an operator checkout, sibling repo, symlink escape or another clone. */
+export async function checkedHandoffCheckout(
+  checkout: string,
+  path: string,
+  branch: string,
+  worktreesRoot: string,
+) {
+  const root = await realpath(worktreesRoot);
+  const actual = await realpath(path);
+  if (actual === root || !isInside(actual, root))
+    throw new CheckoutError("path", "handoff worktree is outside the managed crew root");
+  const c = await existingCheckout(checkout, actual, branch);
+  await checkSeatGitConfig(actual);
+  return c;
+}
+
+/** A bounded status read after validating the original clone, branch and managed path. */
+export async function handoffCheckoutStatus(
+  checkout: string,
+  path: string,
+  branch: string,
+  worktreesRoot: string,
+): Promise<string[]> {
+  const c = await checkedHandoffCheckout(checkout, path, branch, worktreesRoot);
+  const common = await realpath(join(checkout, ".git"));
+  return (
+    await crewGit(
+      c.path,
+      ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"],
+      common,
+      { gitDir: c.gitDir, maxBuffer: 256 * 1024 },
+    )
+  )
+    .split("\n")
+    .filter(Boolean);
+}
+
+/** Reconstruct the location of an older ended run without moving or deleting any worktree. */
+export async function findHandoffCheckout(
+  checkout: string,
+  branch: string,
+  worktreesRoot: string,
+): Promise<string | null> {
+  const common = await realpath(join(checkout, ".git"));
+  const text = await crewGit(checkout, ["worktree", "list", "--porcelain"], common, {
+    gitDir: common,
+  });
+  for (const block of text.split("\n\n")) {
+    const lines = block.split("\n");
+    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
+    const path = lines.find((s) => s.startsWith("worktree "))?.slice(9);
+    if (path) return (await checkedHandoffCheckout(checkout, path, branch, worktreesRoot)).path;
+  }
+  return null;
+}
+
+/** Only the source run's registered commits that are actually on the adopted branch transfer. */
+export async function inheritedHandoffCommits(
+  checkout: string,
+  c: Checkout,
+  shas: readonly string[],
+): Promise<string[]> {
+  const common = await realpath(join(checkout, ".git"));
+  const inherited: string[] = [];
+  for (const sha of shas) {
+    if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) continue;
+    if (
+      await succeeds(
+        crewGit(c.path, ["merge-base", "--is-ancestor", sha, "HEAD"], common, { gitDir: c.gitDir }),
+      )
+    )
+      inherited.push(sha);
+  }
+  return inherited;
 }
 
 /**
