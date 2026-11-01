@@ -839,8 +839,11 @@ export interface FlightPrFlowRow {
     | "controller check"
     | "merge";
   stageSince: number;
-  /** When this PR became unowned; null while someone owns the next step. */
+  /** When the current owner took the next step (or the PR became unowned). */
   ownerSince: number | null;
+  ownerKind?: "nobody" | "seat" | "review" | "CI" | "operator" | "controller" | "FLIGHT" | "hub";
+  seatId?: string | null;
+  lastActionAt?: number;
   openSince: number;
   waitsOn: string[];
   blocks: string[];
@@ -864,6 +867,12 @@ export interface FlightPrFlow {
     }[];
     reworkRounds: { p50: number | null; p90: number | null };
   }[];
+}
+
+/** Operator-authenticated PR-flow API, grouped by repository. */
+export interface FlightPrFlowView {
+  generatedAt: number;
+  repos: (FlightPrFlow & { repoId: string })[];
 }
 
 /** The park kinds whose digest entry carries the seat's last report, and the most of it carried. */

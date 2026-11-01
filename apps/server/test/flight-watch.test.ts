@@ -599,7 +599,25 @@ describe("FLIGHT's flow queues", () => {
     ]);
     expect(wakeFacts(state)).toContain('"prFlow":[]');
     const overdue = flightState({ config, store, busy: [], now: T0 + 5 * MIN });
-    expect(wakeFacts(overdue)).toContain('"prFlow":["7:no run since 12:00"]');
+    expect(wakeFacts(overdue)).toContain(`"prFlow":["7:unowned:${T0}"]`);
+  });
+
+  it("wakes on a never-run PR at five minutes and keeps its unchanged fault quiet afterward", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    await watch.check();
+    sendCalls.length = 0;
+    nowMs = T0 + 5 * MIN - 1;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs++;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain(`7:unowned:${T0}`);
+    sendCalls.length = 0;
+    nowMs += MIN;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
   });
 
   it("names a set-aside PR behind the seat's current PR", () => {
