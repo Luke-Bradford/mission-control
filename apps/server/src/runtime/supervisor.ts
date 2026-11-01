@@ -2158,6 +2158,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     worktree: string | null,
   ): Promise<void> {
     if (worktree === null) return;
+    await handoffJobs.get(runId);
+    if (store.handoff(runId) !== null) return;
     const seatId = info.seat.id;
     try {
       await inClone(info.session.checkout, () =>
@@ -3040,7 +3042,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     const waiting = store.asideRuns();
     const ref = `${info.repo.id}#${issue}`;
-    for (const [source, job] of handoffJobs) if (store.run(source)?.ticket === ref) await job;
     const inReview = !readOnly
       ? waiting.find(
           (r) =>
@@ -3070,6 +3071,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     let handoff: RunHandoff | null = null;
     const handoffClaim = randomUUID();
     try {
+      for (const [source, job] of handoffJobs) if (store.run(source)?.ticket === ref) await job;
       handoff = store.openHandoff(info.repo.id, ref);
       if (!handoff && !readOnly && !planner) {
         const source = store
@@ -3292,16 +3294,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(plan === undefined ? {} : { plan }),
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
-      store.upsertRun(run);
-      handoffWorktrees.set(runId, checkout.path);
+      const handoffCommits =
+        handoff && !readOnly && !planner
+          ? await inheritedHandoffCommits(
+              info.session.checkout,
+              checkout,
+              store.runCommits(handoff.runId),
+            )
+          : [];
       if (handoff && !readOnly && !planner) {
         if (!store.acceptHandoff(handoff.runId, handoffClaim, seatId, runId))
           throw new SupervisorError(409, "the ticket handoff changed before launch");
-        for (const sha of await inheritedHandoffCommits(
-          info.session.checkout,
-          checkout,
-          store.runCommits(handoff.runId),
-        ))
+      }
+      store.upsertRun(run);
+      handoffWorktrees.set(runId, checkout.path);
+      if (handoff && !readOnly && !planner) {
+        for (const sha of handoffCommits)
           store.addRunCommit({
             runId,
             repoId: info.repo.id,
@@ -4087,7 +4095,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     await handoffJobs.get(runId);
-    if (store.handoff(runId) !== null || worktree === null) return;
+    const handoff = store.handoff(runId);
+    if (handoff !== null) {
+      await enrichHandoff(store, handoff, info.session.checkout, crew?.worktrees ?? "");
+      return;
+    }
+    if (worktree === null) return;
     try {
       await inClone(info.session.checkout, () =>
         removeCheckout(info.session.checkout, worktree, { force: true }),

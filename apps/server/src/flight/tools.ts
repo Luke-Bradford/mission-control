@@ -1215,7 +1215,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function startSeat(
     ctx: McToolContext,
     args: unknown,
-    handoffFrom?: string,
+    handoff?: { fromSeat: string; branch: string },
   ): Promise<Result> {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
@@ -1271,11 +1271,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
-    if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
+    if (
+      !FLIGHT_STARTABLE.includes(column) &&
+      !(handoff && (column === "In review" || column === "In progress"))
+    )
+      return fail(wrongColumnText(ref, column));
     // the previous run's PR: a ticket is not started again while one is open on it
     const openPr = store
       .pullRequests(repo.id)
-      .find((p) => p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(issue)));
+      .find(
+        (p) =>
+          p.state === "open" &&
+          (p.ticket === ref || p.closingIssues?.includes(issue)) &&
+          (!handoff || p.branch !== handoff.branch),
+      );
     if (openPr !== undefined) return fail(openPrText(ref, openPr.number));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
@@ -1324,7 +1333,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
-    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
+    } else if (
+      !handoff &&
+      column !== "Ready" &&
+      !card.labels.includes(READY_LABEL) &&
+      !hasPlanSection(body)
+    ) {
       return fail(notReadyText(ref));
     }
     // Files outside the area: the approval is a logged decision, made before the start. The run
@@ -1415,7 +1429,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       ref,
       about: `${ref}: ${card.title}`,
-      decision: `${handoffFrom ? `Reassigned from ${seatCallSign(handoffFrom)} to ${call}` : planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
+      decision: `${handoff ? `Reassigned from ${seatCallSign(handoff.fromSeat)} to ${call}` : planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
       basis,
     });
     store.recordFlightArrival({
@@ -1445,13 +1459,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (runs.some((r) => r.endedAt === null))
       return fail(`${ref} still has a live run; it was not reassigned`);
     const source = runs
-      .filter((r) => r.branch !== null)
+      .filter(
+        (r) =>
+          r.branch !== null &&
+          r.reviewId == null &&
+          r.loop?.phase !== "done" &&
+          seatCfg(r.agentId) !== undefined,
+      )
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
-    if (!source) return fail(`${ref} has no unfinished author to hand off`);
+    if (!source?.branch) return fail(`${ref} has no unfinished author to hand off`);
     return startSeat(
       ctx,
       { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
-      source.agentId,
+      { fromSeat: source.agentId, branch: source.branch },
     );
   }
 

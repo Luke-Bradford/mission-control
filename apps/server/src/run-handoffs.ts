@@ -37,7 +37,7 @@ export function recordRunHandoff(
         .filter((f) => f.state === "open" && f.resolution == null)
         .slice(0, 50)
         .map((f) => safe(`${f.severity}: ${f.file}:${f.line} — ${f.summary}; ${f.fix}`))
-    : [];
+    : (inherited?.findings ?? []);
   const evidence = store
     .evidenceNotes(run.id)
     .slice(-4)
