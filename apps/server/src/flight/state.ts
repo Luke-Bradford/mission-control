@@ -129,6 +129,7 @@ interface TeamsDigestState {
 }
 
 const PR_FLOW_HISTORY_MS = 30 * 24 * 60 * 60_000;
+const PR_FLOW_UNOWNED_WAKE_MS = 5 * 60_000;
 
 const percentile = (values: number[], p: number): number | null => {
   if (values.length === 0) return null;
@@ -243,6 +244,7 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
         owner,
         stage,
         stageSince: stageSince(store, run, stage, run?.startedAt ?? pr.updatedAt),
+        ownerSince: active === null ? (run?.endedAt ?? pr.createdAt) : null,
         openSince: pr.createdAt,
         waitsOn,
         blocks: holds
@@ -305,7 +307,7 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       reworkRounds: { p50: percentile(rounds, 50), p90: percentile(rounds, 90) },
     };
   });
-  return { rows, unowned: rows.filter((row) => row.owner === "nobody").length, metrics };
+  return { generatedAt: now, rows, unowned: rows.filter((row) => row.owner === "nobody").length, metrics };
 }
 
 /**
@@ -896,7 +898,7 @@ export function flightState(i: {
       questions: [],
       tickets: [],
       prs: [],
-      prFlow: { rows: [], unowned: 0, metrics: [] },
+      prFlow: { generatedAt: now, rows: [], unowned: 0, metrics: [] },
       items: [],
       holds: [],
       reviewQueue: { queued: 0, running: 0, seats: [] },
@@ -1571,6 +1573,7 @@ export function wakeFacts(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): string {
   const { free, startable } = startableFor(s);
+  const flow = s.prFlow;
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
   const reviewFault =
     (s.reviewQueue?.queued ?? 0) > 0 &&
@@ -1602,10 +1605,14 @@ export function wakeFacts(
     ].sort(),
     stopped: stoppedSeats(s),
     reviews: reviewFault ? ["idle-reviewers"] : [],
-    merge: s.mergeQueue?.map((pr) => `${pr.pr}:${pr.waitsOn.join(",")}`).sort() ?? [],
     prFlow:
-      s.prFlow?.rows
-        .filter((row) => row.owner === "nobody")
+      flow?.rows
+        .filter(
+          (row) =>
+            row.owner === "nobody" &&
+            row.ownerSince !== null &&
+            flow.generatedAt - row.ownerSince >= PR_FLOW_UNOWNED_WAKE_MS,
+        )
         .map((row) => `${row.pr}:${row.waitsOn.join(",")}`)
         .sort() ?? [],
     holdsInForce:

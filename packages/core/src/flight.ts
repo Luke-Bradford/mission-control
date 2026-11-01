@@ -838,6 +838,8 @@ export interface FlightPrFlowRow {
     | "controller check"
     | "merge";
   stageSince: number;
+  /** When this PR became unowned; null while someone owns the next step. */
+  ownerSince: number | null;
   openSince: number;
   waitsOn: string[];
   blocks: string[];
@@ -846,6 +848,8 @@ export interface FlightPrFlowRow {
 }
 
 export interface FlightPrFlow {
+  /** Time at which this flow was calculated, in milliseconds since the epoch. */
+  generatedAt: number;
   rows: FlightPrFlowRow[];
   unowned: number;
   metrics: {

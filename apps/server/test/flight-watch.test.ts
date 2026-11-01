@@ -597,7 +597,9 @@ describe("FLIGHT's flow queues", () => {
         lastActor: "guido-1",
       },
     ]);
-    expect(wakeFacts(state)).toContain('"prFlow":["7:no run since 12:00"]');
+    expect(wakeFacts(state)).toContain('"prFlow":[]');
+    const overdue = flightState({ config, store, busy: [], now: T0 + 5 * MIN });
+    expect(wakeFacts(overdue)).toContain('"prFlow":["7:no run since 12:00"]');
   });
 
   it("names a set-aside PR behind the seat's current PR", () => {
