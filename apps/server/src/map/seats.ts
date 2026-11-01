@@ -125,6 +125,7 @@ export function mapSeats(
     }
     return {
       seat: flight ? "FLIGHT" : row.id,
+      sourceId: live ? scopeId : null,
       state: row.hudState === "stalled" ? "stalled" : (session?.state ?? "idle"),
       since: row.stateSince,
       ticket,
@@ -142,7 +143,14 @@ export function mapSeats(
       calls: live
         ? calls
             .filter((c) => c.end === null)
-            .map(({ tool, detail, files, since }) => ({ tool, detail, files, since }))
+            .map(({ id, runId, tool, detail, files, since, writeTok }) => ({
+              id: JSON.stringify([runId, id]),
+              tool,
+              detail,
+              files,
+              since,
+              ...(writeTok === undefined ? {} : { writeTok }),
+            }))
         : [],
       scope: {
         read: live ? scope.read : [],

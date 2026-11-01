@@ -64,6 +64,7 @@ export type Page =
   | "agent"
   | "map"
   | "comms"
+  | "qa"
   | "telemetry"
   | "audit"
   | "setup";
@@ -80,19 +81,25 @@ export type Route =
   | { page: "overview" }
   | { page: "flight" }
   | { page: "board"; repoId: string | null; ticket: number | null }
+  /** One ticket as Mission Control knows it (`/tickets/:repo/:number`); the Board tab stays lit. */
+  | { page: "ticket"; repoId: string; number: number }
   | { page: "agent"; id: string | null }
   /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
   | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
+  | { page: "qa" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
+
+/** The header tab a route belongs under: a ticket is the Board's. */
+export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page);
 
 /**
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
  * page is one: it says what the dock would, so the dock stays out of its way.
  */
-export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map", "flight"]);
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map", "flight", "qa"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
 export const PAGE_PATHS: Record<Page, string> = HUD_PAGE_PATHS;
@@ -110,8 +117,9 @@ export const tracePath = (agentId: string, runId: string): string =>
   `${agentPath(agentId)}?trace=${enc(runId)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
 export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
+/** The ticket page: the form, and what the crew did on it. GitHub is one link on it. */
 export const ticketPath = (repoId: string, issueNumber: number): string =>
-  `${boardPath(repoId)}/${issueNumber}`;
+  `/tickets/${enc(repoId)}/${issueNumber}`;
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
@@ -188,6 +196,14 @@ function boardTicket(path: string): { repoId: string; ticket: number } | null {
   return repoId === null || !Number.isSafeInteger(ticket) ? null : { repoId, ticket };
 }
 
+/** `/tickets/<repoId>/<issue number>`; null unless the number is a positive integer. */
+function ticketPage(path: string): { repoId: string; number: number } | null {
+  const m = /^\/tickets\/([^/]+)\/([1-9]\d*)\/?$/.exec(path);
+  const repoId = m?.[1] ? decode(m[1]) : null;
+  const number = Number(m?.[2]);
+  return repoId === null || !Number.isSafeInteger(number) ? null : { repoId, number };
+}
+
 const isSetupTab = (s: string): s is SetupTab => (SETUP_TABS as readonly string[]).includes(s);
 
 const bare = (path: string): string =>
@@ -201,10 +217,13 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
+  if (p === "/qa") return { page: "qa" };
   const board = withId(path, "board");
   if (board) return { page: "board", repoId: board.id, ticket: null };
   const ticket = boardTicket(path);
   if (ticket) return { page: "board", ...ticket };
+  const page = ticketPage(path);
+  if (page) return { page: "ticket", ...page };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
   const map = withId(path, "map");

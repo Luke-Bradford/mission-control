@@ -23,10 +23,11 @@ export interface Ownership {
   areaOf: (path: string) => string | null;
   isHardRule: (path: string) => boolean;
 }
-const ownershipCache = new WeakMap<object, Ownership>();
+const ownershipCache = new Map<string, Ownership>();
 export function ownershipOf(rules: MapSnapshot["rules"] | undefined): Ownership | null {
   if (!rules) return null;
-  const cached = ownershipCache.get(rules);
+  const key = JSON.stringify([Object.entries(rules.areas), rules.hardRules]);
+  const cached = ownershipCache.get(key);
   if (cached) return cached;
   const areas = Object.entries(rules.areas);
   // a path's answer is kept: the map asks for every tile and folder on each draw
@@ -56,7 +57,9 @@ export function ownershipOf(rules: MapSnapshot["rules"] | undefined): Ownership 
       return hit;
     },
   };
-  ownershipCache.set(rules, out);
+  if (ownershipCache.size >= 64)
+    ownershipCache.delete(ownershipCache.keys().next().value as string);
+  ownershipCache.set(key, out);
   return out;
 }
 
@@ -71,7 +74,15 @@ interface Graph {
   cycles: string[][];
 }
 
+const graphCache = new WeakMap<MapSnapshot["tree"], WeakMap<MapSnapshot["imports"], Graph>>();
 export function graph(snapshot: MapSnapshot): Graph {
+  let byImports = graphCache.get(snapshot.tree);
+  const found = byImports?.get(snapshot.imports);
+  if (found) return found;
+  if (!byImports) {
+    byImports = new WeakMap();
+    graphCache.set(snapshot.tree, byImports);
+  }
   const paths = new Set(snapshot.tree.map((file) => file.path));
   const forward = new Map<string, Set<string>>();
   const reverse = new Map<string, Set<string>>();
@@ -114,7 +125,9 @@ export function graph(snapshot: MapSnapshot): Graph {
     if (component.length > 1 || forward.get(path)?.has(path)) cycles.push(component.sort());
   };
   for (const path of paths) if (!indices.has(path)) visit(path);
-  return { forward, reverse, cycles };
+  const out = { forward, reverse, cycles };
+  byImports.set(snapshot.imports, out);
+  return out;
 }
 
 export function downstream(path: string, reverse: Map<string, Set<string>>) {

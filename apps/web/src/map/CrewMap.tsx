@@ -1,11 +1,11 @@
 import type { Crew, MapSeat, MapSnapshot } from "@mc/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { conflictSummary } from "../lenses/lenses.tsx";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
 import { type ChangeVisual, changesVisuals, windowVisuals } from "./changes.ts";
+import { useMapTime } from "./clock.ts";
 import { LiveMap } from "./live.ts";
 import { branchOnlyFiles, MapTreemap } from "./MapTreemap.tsx";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
@@ -13,6 +13,9 @@ import { SessionTimeline } from "./SessionTimeline.tsx";
 import { useSessionTimeline } from "./timeline.ts";
 import "./map.css";
 import { plural } from "../fmt.ts";
+import { useSearch } from "../router.ts";
+
+const NO_FOCUSED_FILES: string[] = [];
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -22,6 +25,13 @@ export interface MapStatus {
 
 /** One repo's live map: the snapshot, then its deltas, until the page leaves the repo. */
 export function LiveCrewMap({ repo }: { repo: string }) {
+  const search = useSearch();
+  const pr = new URLSearchParams(search).get("pr");
+  const focused = useResource<{ files: string[] }>(
+    pr && /^[1-9]\d*$/.test(pr)
+      ? { path: `/api/repos/${encodeURIComponent(repo)}/prs/${pr}/files`, topic: "boards" }
+      : null,
+  );
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -81,6 +91,9 @@ export function LiveCrewMap({ repo }: { repo: string }) {
       names={names}
       work={work}
       status={status}
+      focusedFiles={focused.data?.files ?? NO_FOCUSED_FILES}
+      focusedPr={pr && /^[1-9]\d*$/.test(pr) ? pr : null}
+      focusError={focused.error?.message}
     />
   );
 }
@@ -108,6 +121,7 @@ function errorText(error: Error): string {
   return /reconnect|retry/i.test(sentence) ? `${sentence}…` : `${sentence}. Retrying every 5 s.`;
 }
 
+const NO_SEATS: MapSeat[] = [];
 const noNames: Record<string, string> = {};
 const noWork: Record<string, SeatWork> = {};
 const noIndices: Record<string, number> = {};
@@ -117,6 +131,9 @@ export function CrewMapView({
   names = noNames,
   work = noWork,
   status,
+  focusedFiles = NO_FOCUSED_FILES,
+  focusedPr = null,
+  focusError,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
@@ -125,10 +142,18 @@ export function CrewMapView({
   /** What each crew seat is on (its crew row's ticket, title and PR); the map's own otherwise. */
   work?: Record<string, SeatWork>;
   status?: MapStatus;
+  focusedFiles?: string[];
+  focusedPr?: string | null;
+  focusError?: string;
 }) {
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
-  const now = useNow();
+  const focusKey = focusedFiles.join("\n");
+  useEffect(() => {
+    const first = focusKey.split("\n")[0];
+    setSelection(first ? { kind: "node", path: first } : null);
+  }, [focusKey]);
+  const now = useMapTime(snapshot.seats);
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
       work[seat.seat] ?? { ticket: seat.ticket, title: seat.title, pr: null },
@@ -148,9 +173,15 @@ export function CrewMapView({
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
+  const workingKey = snapshot.seats
+    .filter((seat) => isWorking(seat, now))
+    .map((seat) => seat.seat)
+    .join("\n");
+  // Time changes membership only at a dock/expiry boundary; keep timeline inputs stable between them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workingKey captures time-dependent membership
   const workingSeats = useMemo(
     () => snapshot.seats.filter((seat) => isWorking(seat, now)),
-    [snapshot.seats, now],
+    [snapshot.seats, workingKey],
   );
   const timeline = useSessionTimeline(workingSeats, now);
   // What Changes draws: the working seats and their fresh paths only. The clock ticks every few
@@ -178,10 +209,11 @@ export function CrewMapView({
     .sort()
     .join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual and the conflicts
-  const extraFiles = useMemo(
-    () => branchOnlyFiles(snapshot.tree, markConflicts(changesVisual, snapshot.conflicts)),
-    [snapshot.tree, pathKey],
-  );
+  const extraFiles = useMemo(() => {
+    const visual = { ...markConflicts(changesVisual, snapshot.conflicts) };
+    for (const path of focusedFiles) visual[path] ??= { changes: [] };
+    return branchOnlyFiles(snapshot.tree, visual);
+  }, [snapshot.tree, pathKey, focusKey]);
   const searchable = useMemo(
     () => [...snapshot.tree.map((file) => file.path), ...extraFiles.map((file) => file.path)],
     [snapshot.tree, extraFiles],
@@ -222,6 +254,13 @@ export function CrewMapView({
     <div className="map-body">
       <div className="map-key-bar">
         <ChangesKey snapshot={snapshot} />
+        {focusedPr && (
+          <span role="status">
+            {focusError
+              ? `Could not select PR files: ${focusError}`
+              : `PR #${focusedPr} · ${plural(focusedFiles.length, "selected file")}`}
+          </span>
+        )}
       </div>
       <div className="map-main">
         <div className="map-stage-wrap">
@@ -234,6 +273,7 @@ export function CrewMapView({
             currentMark={replaying ? (current?.file ?? null) : null}
             markSeat={replaying ? playback.seat : null}
             onSelect={selectNode}
+            focusedFiles={focusedFiles}
           />
         </div>
         <div className="map-rail">
@@ -282,12 +322,7 @@ export function CrewMapView({
             </p>
             <aside className="map-detail" aria-label="Selection detail">
               {selectedSeat ? (
-                <SeatDetail
-                  {...named}
-                  seat={selectedSeat}
-                  now={now}
-                  work={seatWork(selectedSeat)}
-                />
+                <TickingSeatDetail {...named} seat={selectedSeat} work={seatWork(selectedSeat)} />
               ) : selectedPath !== null ? (
                 <>
                   <NodeDetail {...named} path={selectedPath} files={[selectedPath]} />
@@ -347,4 +382,9 @@ function KeySteps() {
       ))}
     </span>
   );
+}
+
+function TickingSeatDetail(props: Omit<Parameters<typeof SeatDetail>[0], "now">) {
+  const now = useMapTime(NO_SEATS, 5000);
+  return <SeatDetail {...props} now={now} />;
 }

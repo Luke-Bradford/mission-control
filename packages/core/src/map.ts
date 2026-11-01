@@ -25,6 +25,8 @@ export interface MapReviewCounts {
 }
 
 export interface MapCall {
+  id?: string;
+  writeTok?: number;
   tool: string;
   detail: string;
   files: string[];
@@ -44,6 +46,8 @@ export interface MapBadges {
 }
 
 export interface MapSeat {
+  /** The current live ring source; an aside run never supplies live calls. */
+  sourceId?: string | null;
   /** A crew seat id, or FLIGHT for its current turn on this repo. */
   seat: string;
   state: MapState;
@@ -98,8 +102,8 @@ export interface MapUnchecked {
 }
 
 /**
- * GET /api/repos/:repoId/map/tree: what only a new default-branch commit, merged PR or rules edit
- * changes. The server builds it once per such change and answers a repeat with 304 (ETag).
+ * In-memory tree and graph used by analysis. Wire /map/tree omits imports and hist;
+ * those arrive from /map/graph as MapGraph, indexed against the same tree order.
  */
 export interface MapTree {
   repoId: string;
@@ -140,13 +144,16 @@ export interface MapLive {
   seq: number;
 }
 
-/** GET /api/repos/:repoId/map, including every delta up to seq: the tree and the live part together. */
-export type MapSnapshot = MapTree & MapLive;
+/** Decoded in-memory snapshot through seq. GET /map serves compact MapPayload; analysis joins MapGraph. */
+export type MapSnapshot = MapTree & MapLive & { graphKey?: string };
 
 /** Repo-scoped event: map frames. Refetch the snapshot on reconnect or a gap in seq. */
 export type MapDelta = { seq: number } & (
   | {
       type: "call.start";
+      sourceId?: string;
+      id?: string;
+      since?: number;
       seat: string;
       tool: string;
       detail: string;
@@ -156,6 +163,9 @@ export type MapDelta = { seq: number } & (
     }
   | {
       type: "call.end";
+      sourceId?: string;
+      id?: string;
+      at?: number;
       seat: string;
       files: string[];
       /** This call's own result payload, approximately four characters per token. */
@@ -165,9 +175,10 @@ export type MapDelta = { seq: number } & (
       why: string | null;
       tests: MapTests | null;
     }
-  | { type: "edit"; seat: string; file: string; add: number; rem: number }
+  | { type: "edit"; seat: string; sourceId?: string; file: string; add: number; rem: number }
   | { type: "state"; seat: string; state: MapState; since: number }
   | { type: "message"; from: string; to: string; kind: string; ticket: number | null }
   | { type: "review"; seat: string; ticket: number; round: number; counts: MapReviewCounts }
+  | { type: "invalidate" }
   | { type: "diff"; seat: string; file: string; add: number; rem: number }
 );

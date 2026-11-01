@@ -34,7 +34,12 @@ function load(routes: Record<string, unknown>) {
   return fn;
 }
 
-const card = () => screen.findByRole("region", { name: "Board setup for shop-app" });
+// the repo card starts as one row; open it to reach the board section
+const card = async () => {
+  const title = (await screen.findByLabelText("shop-app")).querySelector("button[aria-expanded]");
+  if (title?.getAttribute("aria-expanded") === "false") fireEvent.click(title);
+  return screen.findByRole("region", { name: "Board setup for shop-app" });
+};
 const setupCalls = (fn: ReturnType<typeof stubFetch>, method: string) =>
   fn.mock.calls.filter(([p, i]) => p === SETUP && (i?.method ?? "GET") === method);
 
@@ -212,6 +217,8 @@ describe("Setup › Repos › board setup", () => {
     });
     window.history.replaceState(null, "", "/setup/repos");
     render(<Setup tab="repos" />);
+    const title = (await screen.findByLabelText("a/b c")).querySelector("button[aria-expanded]");
+    fireEvent.click(title as Element);
     const g = await screen.findByRole("region", { name: "Board setup for a/b c" });
     fireEvent.click(within(g).getByRole("button", { name: "Check board" }));
     await within(g).findByText("Board ready");

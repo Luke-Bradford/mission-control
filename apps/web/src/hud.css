@@ -679,7 +679,7 @@ select {
     gap: var(--sp-2);
     padding-inline: var(--sp-3);
   }
-  /* 1280 is in scope: the brand's tracking and the tabs' padding give the eight tabs and the
+  /* 1280 is in scope: the brand's tracking and the tabs' padding give the nine tabs and the
      status meters room side by side, so no tab sits behind a sideways scroll */
   .brand {
     letter-spacing: 0.1em;
@@ -690,7 +690,7 @@ select {
   .tabs a {
     gap: var(--sp-1);
     padding-inline: var(--sp-1);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
   }
   .top-status {
     flex: 0 0 auto;

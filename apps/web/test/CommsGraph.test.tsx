@@ -44,8 +44,12 @@ it.each([3, 6, 10])(
       `translate(${f.cx.toFixed(2)} ${f.cy.toFixed(2)})`,
     );
     expect(screen.getByRole("button", { name: /ebull-ta.*open ebull-ta/i })).toBeTruthy();
-    const spokes = [...document.querySelectorAll(".comms-spoke-name")].map((t) => t.textContent);
+    const spokes = [...document.querySelectorAll("[data-spoke]")].map((g) =>
+      g.getAttribute("data-spoke"),
+    );
     expect(spokes).toEqual(["GUIDO", "RETRO", "LOOPS"]);
+    // at the default (rail) width the rim names are left out: the seat names carry the role
+    expect(document.querySelectorAll(".comms-spoke-name")).toHaveLength(0);
     // Names are full call signs, never a role-stripped suffix.
     expect([...document.querySelectorAll(".comms-node-name")].map((t) => t.textContent)).toContain(
       "SEAT-1",

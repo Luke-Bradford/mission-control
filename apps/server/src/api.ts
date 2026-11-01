@@ -85,8 +85,9 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapGraph,
   type MapLive,
-  type MapSnapshot,
+  type MapPayload,
   type MapTree,
   MC_TEXT_MAX,
   type McToolName,
@@ -98,10 +99,13 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
+  type PrUatView,
   type PullRequestListRow,
+  type PullRequestPreviewFacts,
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
+  packMapTree,
   percentile,
   projectAtReset,
   QA_FLOW_METRICS,
@@ -114,6 +118,7 @@ import {
   type RepoProfile,
   type RepoRules,
   type RepoView,
+  type ReviewCheckState,
   RUNAWAY_NOT_TRIPPED,
   type RunLoopView,
   type RunView,
@@ -248,13 +253,8 @@ import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
-import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
-import {
-  FLIGHT_APPROVAL_MAX_MS,
-  findApproval,
-  grantApproval,
-  useApproval,
-} from "./flight-approvals.ts";
+import { flightBriefView, flightScheduleView, flightSeat, flightView, prFlow } from "./flight/state.ts";
+import { FLIGHT_APPROVAL_MAX_MS, findApproval, grantApproval, useApproval } from "./flight-approvals.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
@@ -294,6 +294,8 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import type { PrEvidenceStore } from "./pr-evidence/store.ts";
+import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -303,6 +305,8 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
+import { reviewCheckFor } from "./review-check.ts";
+import { publicHandoff } from "./run-handoffs.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -352,6 +356,8 @@ const TELEMETRY_COMMIT_CONCURRENCY = 4;
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
 const MAX_ISSUE_NUMBER = 2 ** 31 - 1;
+const EVIDENCE_REPO = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const FULL_SHA = /^[0-9a-f]{40}$/;
 /** The most PR titles one lookup reads. */
 const PR_TITLES_MAX = 50;
 
@@ -419,6 +425,10 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
+  prEvidence?: PrEvidenceStore;
+  /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
+  reviewShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
@@ -567,6 +577,7 @@ const MergeHoldBody = z.discriminatedUnion("action", [
 const UatBody = z
   .strictObject({
     action: z.enum(["accept", "send_back"]),
+    sha: z.string().regex(/^[0-9a-f]{40}$/i),
     note: z.string().max(COMMS_MESSAGE_MAX).optional(),
   })
   .superRefine((b, ctx) => {
@@ -588,6 +599,7 @@ const ControllerCheckBody = z
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
 const EndBody = z.strictObject({
   hold: z.boolean().optional(),
+  reason: z.string().trim().min(1).max(500).optional(),
   watch: z
     .strictObject({
       id: z.string().min(1).max(100),
@@ -698,7 +710,7 @@ const isLocalOrigin = (origin: string): boolean => {
 const errCode = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code;
 
 /** A PR as `?shape=summary` sends it: the fields a list shows, the checks as the `ci` rollup. */
-function prSummaryRow(pr: PullRequestView): PullRequestSummary {
+function prSummaryRow(pr: PullRequestView, check: ReviewCheckState | null): PullRequestSummary {
   return {
     repoId: pr.repoId,
     number: pr.number,
@@ -714,16 +726,18 @@ function prSummaryRow(pr: PullRequestView): PullRequestSummary {
     createdAt: pr.createdAt,
     updatedAt: pr.updatedAt,
     mergedAt: pr.mergedAt,
+    check,
   };
 }
 
 /** A PR as a list sends it by default: its checks by name and state only. */
-function prSummary(pr: PullRequestView): PullRequestListRow {
+function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullRequestListRow {
   const { checks, ...rest } = pr;
   return checks === undefined
-    ? rest
+    ? { ...rest, check }
     : {
         ...rest,
+        check,
         checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
       };
 }
@@ -743,7 +757,7 @@ const HUD_MEMO_MS = 2_000;
 const MAP_CACHE_MS = 15_000;
 /** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
 const MAP_TREE_MS = 60 * 60_000;
-type MapTreeBuilt = { etag: string; tree: MapTree };
+type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -752,7 +766,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts();
+  const mapConflicts = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const sources: RingSource[] = [];
@@ -810,7 +828,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     put: (kind, scope, key, value, exclusive) =>
       store.mapCachePut(kind, scope, key, value, exclusive),
   };
-  const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapSnapshot> }>();
+  const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapPayload> }>();
   const mapTrees = new Map<string, { key: string; at: number; built: Promise<MapTreeBuilt> }>();
   const buildTree = deps.mapTree ?? mapTree;
   /** The tree part for the default-branch `head`: built once, kept until an input of it moves. */
@@ -840,8 +858,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const read = await readRepoRules(repo.github, checkout, repo.rules);
       // Unreadable repo rules leave the configured ones: the map still draws.
       const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
+      const graphKey = createHash("sha256")
+        .update(JSON.stringify([tree.tree, tree.imports, tree.hist]))
+        .digest("hex");
+      const indexes = new Map(tree.tree.map((file, index) => [file.path, index]));
+      const graph: MapGraph = {
+        key: graphKey,
+        imports: tree.imports.flatMap(({ from, to }) => {
+          const a = indexes.get(from),
+            b = indexes.get(to);
+          return a === undefined || b === undefined ? [] : [[a, b] as [number, number]];
+        }),
+        hist: tree.hist,
+      };
       return {
-        etag: `"${createHash("sha256").update(`${key}@${at}`).digest("hex").slice(0, 32)}"`,
+        etag: `"${createHash("sha256").update(key).digest("hex").slice(0, 32)}"`,
+        graph,
         tree: {
           repoId: repo.id,
           ...tree,
@@ -871,6 +903,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   };
   const buildMapLive = async (
     checkout: string,
+    repoId: string,
     crewRows: CrewRow[],
     lock: typeof NO_LOCK,
     prs: PullRequestView[],
@@ -884,6 +917,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       now(),
       flightSeat(config)?.seat.id ?? null,
     );
+    const seq = mapRing.sequence(repoId);
     for (const seat of data.seats) {
       const context = store.seatSession(
         seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
@@ -903,8 +937,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ...data,
       conflicts: conflicts.conflicts,
       conflictsUnchecked: conflicts.unchecked,
-      // Slice 1b will publish sequenced deltas; none have been emitted yet.
-      seq: 0,
+      seq,
     };
   };
   /** Starts the ring on first use and brings it up to date: the live part reads from it. */
@@ -932,14 +965,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   ): Promise<MapLive> => {
     mapRingReady();
     const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(checkout, rows, lock, store.pullRequests(repo.id), log);
+    return await buildMapLive(checkout, repo.id, rows, lock, store.pullRequests(repo.id), log);
   };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
     repo: (typeof config.repos)[number],
     checkout: string,
     log: FastifyBaseLogger,
-  ): Promise<MapSnapshot> => {
+  ): Promise<MapPayload> => {
     const head = await mapHead(checkout);
     mapRingReady();
     const { rows: crewRows, lock } = mapCrewRows(repo);
@@ -961,12 +994,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const cached = mapPayloads.get(repo.id);
     if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
     // the tree part is its own cache: a changed seat or ring rebuilds only the live part
-    const payload = (async (): Promise<MapSnapshot> => {
-      const [{ tree }, live] = await Promise.all([
+    const payload = (async (): Promise<MapPayload> => {
+      const [{ tree, graph }, live] = await Promise.all([
         mapTreeFor(repo, checkout, head, prs, board),
-        buildMapLive(checkout, crewRows, lock, prs, log),
+        buildMapLive(checkout, repo.id, crewRows, lock, prs, log),
       ]);
-      return { ...tree, ...live };
+      return {
+        repoId: tree.repoId,
+        rules: tree.rules,
+        tree: packMapTree(tree.tree),
+        graphKey: graph.key,
+        ...live,
+      };
     })();
     const entry = { key, at, payload };
     mapPayloads.set(repo.id, entry);
@@ -1366,6 +1405,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
+  /** The checkout a preview of this repo would run from; the start route and the PR rows both ask. */
+  const previewCheckout = (repo: (typeof config.repos)[number]) =>
+    config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+  /**
+   * What a repo's PR rows say about previews: `previewable` is whether `POST /api/previews` could
+   * start one now (a preview hub, this repo, a checkout, an open PR); `preview` is the running one.
+   */
+  const prPreviewFor = (repo: (typeof config.repos)[number]) => {
+    const supported =
+      deps.previews !== undefined &&
+      repo.id === deps.previewRepoId &&
+      previewCheckout(repo) !== undefined;
+    return (pr: { number: number; state: string }): PullRequestPreviewFacts => ({
+      previewable: supported && pr.state === "open",
+      preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+    });
+  };
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
@@ -1398,6 +1454,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .map((r): RunView => runView(config, store, r, cache, boards));
         },
       );
+
+      // Reader: apps/web/src/agent/HandoffPanel.tsx
+      api.get<{ Params: { id: string } }>("/runs/:id/handoff", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (!run || !config.repos.some((r) => r.id === run.repoId))
+          return reply.code(404).send({ error: "unknown run" });
+        const h = store.handoff(run.id) ?? store.receivedHandoff(run.id);
+        return h ? publicHandoff(h) : null;
+      });
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
       // text, never the path.
@@ -1554,6 +1619,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .filter((agent) => agent.kind === "crew")
           .map((agent) => agent.id);
       const commsSendBody = z.strictObject({
+        repoId: z.string().optional(),
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
         label: z.enum(COMMS_LABELS).optional(),
@@ -1567,6 +1633,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.post("/comms", async (req, reply) => {
         const body = commsSendBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        let prThread: string | undefined;
+        if (body.data.repoId !== undefined) {
+          const number = /^PR ([1-9]\d*)$/.exec(body.data.ref ?? "")?.[1];
+          const repo = config.repos.find((r) => r.id === body.data.repoId);
+          if (!repo || !number || !store.pullRequest(repo.id, Number(number)))
+            return reply.code(400).send({ error: "unknown PR thread" });
+          prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
+        }
         try {
           const message = await sendComms(
             {
@@ -1575,6 +1649,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              ...(prThread === undefined ? {} : { ticket: prThread }),
               notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
             COMMS_CAPCOM,
@@ -1701,16 +1776,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         cursorKey: string,
         paging: { limit: number; before: string | undefined },
         countsOnly = false,
+        recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor).unread,
+          unread: store.commsCounts(scope, cursor, recentSince).unread,
         };
       };
       const commsScope = (
@@ -1736,12 +1812,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
         "/comms/crew",
         (req, reply) => {
           const paging = commsPaging(req.query);
           if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          return commsScopePage({ crew: true }, "crew", paging);
+          if (req.query.history !== undefined && req.query.history !== "1")
+            return reply.code(400).send({ error: "history must be 1 when supplied" });
+          const history = req.query.history === "1";
+          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+          const hidden =
+            !history &&
+            store.commsCounts({ crew: true }, null).count >
+              store.commsCounts({ crew: true }, null, since).count;
+          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
         },
       );
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
@@ -2415,6 +2500,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: docs/runbook.md#qa-board-data (the PR readiness page shows a review's preview screenshots)
+      api.get<{ Params: { id: string } }>("/qa/review-shots/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const png = deps.reviewShots?.read(req.params.id) ?? null;
+        if (!png) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, no-store")
+          .header("x-content-type-options", "nosniff")
+          .type("image/png")
+          .send(png);
+      });
+
       // Reader: docs/runbook.md#qa-board-data (escaped defects, review queue age, rework ratio and tests per PR, each with its definition)
       api.get<{ Querystring: { days?: unknown } }>(
         "/qa/flow",
@@ -2423,6 +2525,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
           const since = now() - days * DAY_MS;
           return { days, since, metrics: QA_FLOW_METRICS, ...store.qaFlow(since) };
+        },
+      );
+
+      // Reader: apps/web/src/pages/QaReadiness.tsx (the acceptance queue, with no per-PR detail reads)
+      api.get("/qa/queue", () => ({
+        prs: config.repos.flatMap((repo) => {
+          const acceptance = prAcceptanceFor(store, repo.id);
+          const check = reviewCheckFor(store, repo.id, now());
+          return store
+            .openPullRequests(repo.id)
+            .map((pr) => ({ ...prSummaryRow(pr, check(pr)), ...acceptance(pr) }));
+        }),
+        flightId: flightSeat(config)?.seat.id ?? null,
+      }));
+
+      // Reader: docs/runbook.md#qa-board-data (a PR's Comms, rework rounds and try-it commands, for the QA readiness card)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/qa/uat/:repoId/:number",
+        async (req, reply): Promise<PrUatView | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          const preview =
+            repo.id === deps.previewRepoId ? deps.previews?.get(pr.number) : undefined;
+          return prUat({
+            store,
+            pr,
+            runCommand: repo.runCommand,
+            previewUrl: preview && preview.sha === pr.headSha ? preview.url : null,
+            singleRepo: config.repos.length === 1,
+            repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+            flightId: flightSeat(config)?.seat.id ?? null,
+          });
         },
       );
 
@@ -2925,14 +3063,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
+      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/graph",
+        mapRoute(async (repo, checkout, req, reply) => {
+          const { graph } = await mapTreePayload(repo, checkout);
+          const expected = (req.query as { key?: string }).key;
+          if (expected !== undefined && expected !== graph.key)
+            return reply.code(409).send({ error: "Map graph changed; reload the map" });
+          const etag = `"${graph.key}"`;
+          reply.header("etag", etag).header("cache-control", "private, no-cache");
+          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+          return graph;
+        }),
+      );
+
       // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/tree",
-        mapRoute(async (repo, checkout, req, reply): Promise<MapTree | FastifyReply> => {
+        mapRoute(async (repo, checkout, req, reply) => {
           const { etag, tree } = await mapTreePayload(repo, checkout);
           reply.header("etag", etag).header("cache-control", "no-cache");
           if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          return tree;
+          const { imports: _imports, hist: _hist, ...light } = tree;
+          return light;
         }),
       );
 
@@ -3012,18 +3166,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const prPreview = prPreviewFor(repo);
         const listed = store.pullRequestsSince(
           repo.id,
           all === "1" ? null : now() - window * 86_400_000,
         );
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
-        const previewFor = (number: number) =>
-          repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
+        const checkOf = reviewCheckFor(store, repo.id, now());
+        const acceptance = prAcceptanceFor(store, repo.id);
         if (shape === "summary")
-          return prs.map((pr) => ({ ...prSummaryRow(pr), preview: previewFor(pr.number) }));
+          return prs.map((pr) => ({
+            ...prSummaryRow(pr, checkOf(pr)),
+            ...prPreview(pr),
+            ...acceptance(pr),
+          }));
         return detail === "1"
-          ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
-          : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
+          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), ...prPreview(pr), ...acceptance(pr) }))
+          : prs.map((pr) => ({
+              ...prSummary(pr, checkOf(pr)),
+              ...prPreview(pr),
+              ...acceptance(pr),
+            }));
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
       api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
@@ -3054,10 +3217,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
+        },
+      );
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/repos/:repoId/prs/:number/files",
+        (req, reply) => {
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(req.params.repoId, Number(req.params.number))
+            : null;
+          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
+            return reply.code(404).send({ error: "unknown pull request" });
           return {
-            ...pr,
-            preview:
-              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+            repoId: pr.repoId,
+            number: pr.number,
+            sha: pr.headSha,
+            files: store.prFilePaths(pr.repoId, pr.number),
           };
         },
       );
@@ -3094,17 +3272,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .pullRequests(repo.id)
           .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
         if (!pr) return reply.code(404).send({ error: "open PR not found" });
-        const match = {
-          repo,
-          pr,
-          checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
-        };
+        const match = { repo, pr, checkout: previewCheckout(repo) };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
         try {
           return await deps.previews.start({
             pr: match.pr.number,
             branch: match.pr.branch,
             checkout: match.checkout,
+            ...(match.pr.headSha === null ? {} : { sha: match.pr.headSha }),
           });
         } catch (e) {
           if (e instanceof PreviewHubError)
@@ -3127,7 +3302,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
-        return store.board(repo.id);
+        const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
+        return store.board(repo.id).map((card) => {
+          const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
+          return h
+            ? {
+                ...card,
+                handoff: {
+                  runId: h.runId,
+                  fromSeat: h.fromSeat,
+                  at: h.at,
+                  acceptedBy: h.acceptedBy,
+                },
+              }
+            : card;
+        });
       });
 
       // Read live from GitHub (the board's rows carry no body); the number is validated here.
@@ -3267,6 +3456,53 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("x-content-type-options", "nosniff")
           .type("image/png")
           .send(png);
+      });
+
+      // Reader: docs/runbook.md#pr-screenshot-evidence (the operator opens the links in a web PR's body)
+      api.get<{ Params: { n: string }; Querystring: { repo?: unknown; sha?: unknown } }>(
+        "/prs/:n/evidence",
+        async (req, reply) => {
+          const evidence = deps.prEvidence;
+          const n = /^[1-9]\d{0,9}$/.test(req.params.n) ? Number(req.params.n) : 0;
+          const { repo, sha } = req.query;
+          if (n === 0 || n > MAX_ISSUE_NUMBER)
+            return reply.code(400).send({ error: "pull request number required" });
+          if (repo !== undefined && !(typeof repo === "string" && EVIDENCE_REPO.test(repo)))
+            return reply.code(400).send({ error: "repo must be a repo id" });
+          if (sha !== undefined && !(typeof sha === "string" && FULL_SHA.test(sha)))
+            return reply.code(400).send({ error: "sha must be a full commit sha" });
+          if (!evidence) return reply.code(404).send({ error: "no screenshot evidence" });
+          const repos = repo === undefined ? evidence.reposWith(n) : [repo];
+          if (repos.length > 1)
+            return reply.code(409).send({ error: "several repos have this PR: pass repo" });
+          const manifest = repos[0] === undefined ? null : evidence.manifest(repos[0], n, sha);
+          if (!manifest) return reply.code(404).send({ error: "no screenshot evidence" });
+          return manifest;
+        },
+      );
+
+      // Reader: docs/runbook.md#pr-screenshot-evidence (the image links in a web PR's body)
+      api.get<{
+        Params: { n: string; sha: string; name: string };
+        Querystring: { repo?: unknown };
+      }>("/prs/:n/evidence/:sha/:name", async (req, reply) => {
+        const n = /^[1-9]\d{0,9}$/.test(req.params.n) ? Number(req.params.n) : 0;
+        const evidence = deps.prEvidence;
+        const { repo } = req.query;
+        if (repo !== undefined && !(typeof repo === "string" && EVIDENCE_REPO.test(repo)))
+          return reply.code(400).send({ error: "repo must be a repo id" });
+        const repos = repo === undefined ? (evidence?.reposWith(n) ?? []) : [repo];
+        // the image is looked up in each repo that has the PR; a sha names one commit
+        for (const id of repos) {
+          const png = evidence?.image(id, n, req.params.sha, req.params.name);
+          if (png)
+            return reply
+              .header("cache-control", "private, max-age=3600, immutable")
+              .header("x-content-type-options", "nosniff")
+              .type("image/png")
+              .send(png);
+        }
+        return reply.code(404).send({ error: "not found" });
       });
 
       if (operatorToken !== undefined) {
@@ -3930,6 +4166,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
         }
         await sup.endRun(id, { hold: b.hold });
+        const stopped = store.seatSession(id);
+        if (stopped?.state === "stopped")
+          store.setSeatSession({
+            ...stopped,
+            stop: { by: config.operator.id, reason: b.reason ?? null, at: now() },
+          });
         return { ok: true };
       });
       api.get<{ Params: { id: string } }>(
@@ -3948,6 +4190,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight", async () =>
         flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
       );
+      // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
+      api.get("/prs/flow", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return {
+          repos: config.repos.map((repo) => ({
+            repoId: repo.id,
+            ...prFlow(store, repo.id, now()),
+          })),
+          generatedAt: now(),
+        };
+      });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
@@ -4381,6 +4638,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           if (run === undefined || !run.loop?.uat)
             return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (body.data.sha !== run.loop.uat.sha)
+            return reply
+              .code(409)
+              .send({ error: "the PR head changed; reload its evidence before deciding" });
           if (!crewGate(run.agentId, reply)) return reply;
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.uat === undefined || deps.engine.status().on !== true) {
@@ -4399,7 +4660,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const result = await deps.engine.uat(
             run.id,
             body.data.action,
-            run.loop.uat.sha,
+            body.data.sha,
             body.data.note,
           );
           if (!result.lifted) {

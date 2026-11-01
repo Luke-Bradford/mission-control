@@ -265,3 +265,38 @@ it("names each branch's PR number in the order of the pair, null when the row ha
     { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [12, null] },
   ]);
 });
+
+it("the checked pairs are kept as one row per checkout, and a fresh instance merges nothing anew", async () => {
+  // a persist that behaves as the store's map cache does: exclusive keeps one row per kind+scope
+  const rows = new Map<string, string>();
+  let puts = 0;
+  const rowKey = (kind: string, scope: string, key: string) => `${kind}\0${scope}\0${key}`;
+  const persist = {
+    get: (kind: string, scope: string, key: string) => rows.get(rowKey(kind, scope, key)) ?? null,
+    put: (kind: string, scope: string, key: string, value: string, exclusive: boolean) => {
+      puts += 1;
+      if (exclusive)
+        for (const k of [...rows.keys()])
+          if (k.startsWith(`${kind}\0${scope}\0`) && k !== rowKey(kind, scope, key)) rows.delete(k);
+      rows.set(rowKey(kind, scope, key), value);
+    },
+  };
+  git("checkout", "-qb", "third", base);
+  writeFileSync(join(dir, "third.txt"), "third\n");
+  git("add", ".");
+  git("commit", "-qm", "third");
+  const third = git("rev-parse", "HEAD");
+  const prs = [pr("left", left), pr("right", right), pr("third", third)];
+  const first = await new MapConflicts(undefined, persist).check(dir, prs);
+  expect(rows.size).toBe(1);
+  expect(Object.keys(JSON.parse([...rows.values()][0] as string))).toHaveLength(3);
+  expect(puts).toBe(1);
+  // the same pairs from a fresh instance with an empty memory cache: the row answers, nothing is rewritten
+  const again = await new MapConflicts(undefined, persist).check(dir, prs);
+  expect(again.conflicts).toEqual(first.conflicts);
+  expect(puts).toBe(1);
+  // a pair that closed is dropped from the row on the next check
+  await new MapConflicts(undefined, persist).check(dir, [pr("left", left), pr("right", right)]);
+  expect(Object.keys(JSON.parse([...rows.values()][0] as string))).toHaveLength(1);
+  expect(puts).toBe(2);
+});

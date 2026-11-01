@@ -12,6 +12,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { OwnershipLens } from "../lenses/lenses.tsx";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
@@ -104,7 +105,7 @@ function RepoCard({
   onConvert: () => void;
 }) {
   const session = config.crew?.sessions.find((item) => item.repoId === repo.id);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
@@ -135,11 +136,21 @@ function RepoCard({
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <b>{repo.id}</b> · {session ? "Crew" : "Observed"} · default {account || "—"}
-        <span>{open ? "−" : "+"}</span>
+        <b>{repo.id}</b>
+        <span>{session ? "Crew" : "Observed"}</span>
+        <span>account {account || "—"}</span>
+        <span>{session ? plural(session.seats.length, "seat") : "no seats"}</span>
+        <span className="repo-card-toggle" aria-hidden="true">
+          {open ? "−" : "+"}
+        </span>
       </button>
       {open && (
         <>
+          {session ? (
+            <Seats session={session} config={config} defaultAccount={account} />
+          ) : (
+            <Observed repo={repo} config={config} onConvert={onConvert} />
+          )}
           <div className="repo-fields">
             <label>
               Default account
@@ -225,11 +236,6 @@ function RepoCard({
             <BoardSetup repoId={repo.id} github={repo.github} />
           </details>
           {session && <RepoOwnership repoId={repo.id} />}
-          {session ? (
-            <Seats session={session} config={config} defaultAccount={account} />
-          ) : (
-            <Observed repo={repo} config={config} onConvert={onConvert} />
-          )}
         </>
       )}
     </article>

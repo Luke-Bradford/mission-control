@@ -1,153 +1,94 @@
 // @vitest-environment node
-
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 
-const SHOTS = join(process.env.TMPDIR ?? "/tmp", "qa-readiness-shots");
+const SHOTS = join(process.env.TMPDIR ?? "/tmp", "qa-acceptance-shots");
 const { renderAt } = browserSession();
-const LONG =
-  "A long pull request title that makes sure the readiness card retains every piece of evidence without clipping the operator's view. ".repeat(
-    3,
-  );
-
-function apiFor(count: number, failed = false) {
-  return {
-    "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
-    "/api/repos/mission-control/prs": Array.from({ length: count }, (_, index) => ({
-      repoId: "mission-control",
-      number: index + 1,
-      title: `${LONG}${index}`,
-      url: `https://github.com/Luke-Bradford/mission-control/pull/${index + 1}`,
-      branch: `feature/${index + 1}`,
-      ticket: `mission-control#${index + 1}`,
-      state: "open",
-      isDraft: false,
-      review: "approved",
-      ci: failed ? "failing" : "passing",
-      createdAt: 0,
-      updatedAt: 0,
-      mergedAt: null,
-      headSha: `head-${index}`,
-      mergeable: "MERGEABLE",
-      additions: 100,
-      deletions: 20,
-      changedFiles: 4,
-    })),
-    "/api/qa/ci-runs?days=90": { runs: [] },
-    "/api/qa/findings?days=90": { findings: [] },
-    "/api/crew?shape=summary": { rows: [] },
-    "/api/repos/mission-control/map": impactMap(),
-  };
-}
-
-/** One seat holds feature/1 and changed util.ts, which main.ts imports. */
-function impactMap() {
-  const seat = {
-    seat: "GUIDO-1",
-    state: "running",
-    since: 0,
-    ticket: 1,
-    title: "A change",
-    branches: ["feature/1"],
-    area: [],
-    changedOn: ["feature/1"],
-    nowTicket: null,
-    tickets: { "feature/1": 1 },
-    calls: [],
-    scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
-    recent: [],
-    context: { total: 0, window: 64000 },
-    badges: { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null },
-  };
-  return {
-    repoId: "mission-control",
-    tree: [
-      { path: "src/main.ts", lines: 60 },
-      { path: "src/util.ts", lines: 20 },
-      { path: "test/main.test.ts", lines: 20 },
-    ],
-    imports: [
-      { from: "src/main.ts", to: "src/util.ts" },
-      { from: "test/main.test.ts", to: "src/main.ts" },
-    ],
-    hist: { since: 0, prCount: 0, fixCount: 0, files: {}, coupling: [] },
-    seats: [seat],
-    findings: [],
-    conflicts: [],
-    conflictsUnchecked: [],
-    rules: { areas: {}, hardRules: [] },
-    seq: 0,
-  };
-}
-
-describeRendered("QA PR readiness in a browser", () => {
-  it.each([
-    ["empty light", 0, 1366, 1000, "light", false],
-    ["long dark", 1, 1366, 1000, "dark", false],
-    ["many dark", 50, 1600, 700, "dark", false],
-    ["failed light", 1, 1600, 1000, "light", true],
-    ["wide dark", 1, 1920, 1000, "dark", false],
-  ] as const)(
-    "%s fits without horizontal clipping",
-    async (name, count, width, height, colorScheme, failed) => {
-      mkdirSync(SHOTS, { recursive: true });
+const fixture = qaAcceptanceFixture;
+describeRendered("QA acceptance queue in a browser", () => {
+  it(
+    "keeps a long queue scrollable without clipping its titles",
+    async () => {
       const page = await renderAt({
         page: "test/qaReadinessBrowser.html",
-        width,
-        height,
-        colorScheme,
-        api: apiFor(count, failed),
+        width: 1366,
+        height: 1000,
+        colorScheme: "dark",
+        api: fixture(50),
       });
-      expect(await page.unclipped("#page-qa-readiness"), name).toEqual([true]);
-      if (count === 0) {
-        expect(
-          await page.evaluate(
-            () => document.body.textContent?.includes("No open pull requests to check.") ?? false,
-            null,
-          ),
-          name,
-        ).toBe(true);
-      } else {
-        expect(await page.unclipped(".qa-readiness-card"), name).not.toContain(false);
-      }
-      await page.screenshot(
-        join(SHOTS, `qa-readiness-${name.replace(" ", "-")}-${width}x${height}.png`),
-      );
+      const rows = await page.boxes(".uat-queue-row");
+      expect(rows).toHaveLength(54);
+      expect(await page.unclipped(".uat-queue-row")).not.toContain(false);
+      expect(
+        await page.evaluate(() => {
+          const list = document.querySelector(".uat-queue-group ul");
+          return !!list && list.scrollHeight > list.clientHeight;
+        }, null),
+      ).toBe(true);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
-
-  it.each([1366, 1600, 1920] as const)(
-    "keeps the card unclipped with Impact open at %i",
-    async (width) => {
+  it.each(
+    [1366, 1600, 1920].flatMap((width) =>
+      ["light", "dark"].map((theme) => ({ width, theme: theme as "light" | "dark" })),
+    ),
+  )(
+    "fits the approved layout at $width in $theme",
+    async ({ width, theme }) => {
       mkdirSync(SHOTS, { recursive: true });
       const page = await renderAt({
         page: "test/qaReadinessBrowser.html",
         width,
         height: 1000,
-        colorScheme: "dark",
-        api: apiFor(1),
+        colorScheme: theme,
+        api: fixture(),
       });
-      await page.boxes(".qa-readiness-card");
+      await page.boxes(".uat-pair");
+      // Fixture artwork stands in for the captured page. Production images come from the PNG route.
       await page.evaluate(() => {
-        [...document.querySelectorAll("button")]
-          .find((b) => b.textContent?.trim() === "Show impact")
-          ?.click();
+        for (const image of document.querySelectorAll<HTMLImageElement>(".uat-shots img")) {
+          const svg =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000"><rect width="1600" height="1000" fill="#131a23"/><rect x="40" y="40" width="900" height="40" fill="#2a3646"/><rect x="40" y="130" width="460" height="800" fill="#0c1117"/><rect x="540" y="130" width="460" height="800" fill="#0c1117"/><rect x="1040" y="130" width="460" height="800" fill="#174f48"/></svg>';
+          image.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+        }
       }, null);
-      await page.boxes(".qa-impact .map-lens");
-      expect(await page.unclipped("#page-qa-readiness"), String(width)).toEqual([true]);
-      expect(await page.unclipped(".qa-readiness-card"), String(width)).not.toContain(false);
-      expect(await page.unclipped(".qa-impact .map-lens"), String(width)).not.toContain(false);
-      // the Impact section takes the card's full width
-      const [card, impact] = await Promise.all([
-        page.box(".qa-evidence"),
-        page.box(".qa-evidence-impact"),
-      ]);
-      expect(Math.abs(impact.width - card.width)).toBeLessThan(2);
-      await page.screenshot(join(SHOTS, `qa-readiness-impact-${width}.png`));
+      expect(await page.unclipped("#page-qa-readiness")).toEqual([true]);
+      expect(await page.unclipped(".uat-detail .panel")).not.toContain(false);
+      expect(await page.reachable(".uat-ask")).toEqual([true]);
+      const columns = await page.evaluate(() => {
+        const queue = document.querySelector(".uat-queue")?.getBoundingClientRect();
+        const detail = document.querySelector(".uat-detail")?.getBoundingClientRect();
+        return queue && detail ? queue.right < detail.left : false;
+      }, null);
+      expect(columns).toBe(true);
+      await page.screenshot(join(SHOTS, `qa-uat-${width}-${theme}.png`));
+      await page.click(".uat-actions .uat-send");
+      expect(await page.unclipped(".uat-send-form")).toEqual([true]);
+      await page.screenshot(join(SHOTS, `qa-uat-send-back-${width}-${theme}.png`));
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+  it(
+    "shows an honest empty queue",
+    async () => {
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1366,
+        colorScheme: "light",
+        api: fixture(0),
+      });
+      await page.boxes(".uat-empty");
+      expect(
+        await page.evaluate(
+          () => document.body.textContent?.includes("Nothing is waiting for you"),
+          null,
+        ),
+      ).toBe(true);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

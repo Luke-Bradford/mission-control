@@ -1,9 +1,10 @@
-import type { ConfigView, Crew, MapSnapshot, RepoView } from "@mc/core";
+import type { ConfigView, Crew, RepoView } from "@mc/core";
 import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { HistoryLens, ReviewLens } from "../lenses/lenses.tsx";
 import { mapRepoOptions } from "../map/repos.ts";
+import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
 import { MAP_REPO_KEY, readKey } from "../storage.ts";
 import "./qa-hotspots.css";
 
@@ -70,12 +71,15 @@ function RepoHotspots({
   github: string | undefined;
   names: Record<string, string>;
 }) {
-  const map = useResource<MapSnapshot>(RESOURCES.repoMap(repo));
+  const map = useGraphSnapshot(repo);
   const [focus, setFocus] = useState<string | null>(null);
   if (!map.data)
     return map.error ? (
       <p className="s crit-t">
         Could not read the map for {repo}: {map.error.message}
+        <button type="button" onClick={map.retry}>
+          Retry hotspots
+        </button>
       </p>
     ) : (
       <p className="s">Loading the repo map…</p>

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import type { MapPersist } from "./snapshot.ts";
 
 const execFileP = promisify(execFile);
 type Tip = Pick<PullRequestView, "branch" | "headSha" | "state"> & { number?: number };
@@ -30,6 +31,10 @@ export interface PairFailure {
  * unrelated histories) is held until either head changes, which changes the pair's key.
  */
 export const RETRY_HOLD_MS = 10_000;
+/** The map cache kind for a checked pair: sha pair → conflicting files. */
+const CONFLICT_KIND = "conflict";
+/** The one row per checkout under that kind. */
+const PAIRS_KEY = "pairs";
 
 type Held = { reason: string; until: number };
 
@@ -43,9 +48,29 @@ export class MapConflicts {
   private readonly missing = new Map<string, number>();
 
   private readonly now: () => number;
+  /** Pair results outlive the hub: a restart must not re-run every merge check on the first snapshot. */
+  private readonly persist: MapPersist | null;
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = Date.now, persist: MapPersist | null = null) {
     this.now = now;
+    this.persist = persist;
+  }
+
+  /** The checkout's stored pairs (sha pair → files): one row per checkout, so closed pairs fall away. */
+  private persistedPairs(worktree: string): Map<string, string[]> {
+    const raw = this.persist?.get(CONFLICT_KIND, worktree, PAIRS_KEY);
+    const pairs = new Map<string, string[]>();
+    if (raw == null) return pairs;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return pairs;
+      for (const [key, files] of Object.entries(parsed as Record<string, unknown>))
+        if (Array.isArray(files) && files.every((f) => typeof f === "string"))
+          pairs.set(key, files as string[]);
+    } catch {
+      // a row the hub cannot read is the same as none
+    }
+    return pairs;
   }
 
   /**
@@ -70,6 +95,9 @@ export class MapConflicts {
       const failures: PairFailure[] = [];
       const failedPairs: [string, string][] = [];
       const checkedTips = new Set<string>();
+      const stored = this.persistedPairs(worktree);
+      /** Every pair this check resolved, from memory, the store or a merge: the row to keep. */
+      const seen = new Map<string, string[]>();
       // Checked only on a cache miss: a cached pair needs no object reads.
       const present = new Map<string, Promise<boolean>>();
       const holds = (sha: string) => {
@@ -89,6 +117,13 @@ export class MapConflicts {
           const key = shas.join(":");
           const failedKey = `${worktree}\0${key}`;
           let files = this.cache.get(key);
+          if (files === undefined) {
+            const kept = stored.get(key);
+            if (kept !== undefined) {
+              files = kept;
+              this.cache.set(key, files);
+            }
+          }
           if (files === undefined) {
             const held = this.failed.get(failedKey);
             if (held && held.until > now) {
@@ -124,6 +159,7 @@ export class MapConflicts {
             this.cache.set(key, files);
             if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value as string);
           }
+          seen.set(key, files);
           checkedTips.add(a.branch);
           checkedTips.add(b.branch);
           for (const file of files) {
@@ -136,6 +172,16 @@ export class MapConflicts {
           }
         }
       }
+      // the row holds the open pairs as they stand now; an unchanged set is not rewritten
+      const same = seen.size === stored.size && [...seen.keys()].every((k) => stored.has(k));
+      if (!same)
+        this.persist?.put(
+          CONFLICT_KIND,
+          worktree,
+          PAIRS_KEY,
+          JSON.stringify(Object.fromEntries(seen)),
+          true,
+        );
       // blame the tip common to the failing pairs: a branch that checked against some other tip is
       // sound; when neither side of a failed pair checked anywhere, or both did, both are unknown
       for (const [a, b] of failedPairs) {

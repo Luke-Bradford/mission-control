@@ -15,6 +15,7 @@ const boot = vi.hoisted(() => ({
   onStreamCount: null as ((count: number) => void) | null,
   hasViewClients: null as (() => boolean) | null,
   serving: false,
+  evidenceLive: false,
   discoveryStarted: false,
   expectSupervisorEnabled: true,
   models: {} as ModelDeps,
@@ -94,6 +95,23 @@ vi.mock("../src/runtime/codex-discovery.ts", async (original) => {
     },
   };
 });
+vi.mock("../src/config.ts", async (original) => {
+  const real = await original<typeof import("../src/config.ts")>();
+  return {
+    ...real,
+    isPreview: (...args: Parameters<typeof real.isPreview>) =>
+      boot.evidenceLive ? false : real.isPreview(...args),
+  };
+});
+vi.mock("../src/preview-repo.ts", async (original) => {
+  const real = await original<typeof import("../src/preview-repo.ts")>();
+  return {
+    ...real,
+    resolvePreviewRepo: (...args: Parameters<typeof real.resolvePreviewRepo>) =>
+      boot.evidenceLive ? Promise.resolve("mission-control") : real.resolvePreviewRepo(...args),
+  };
+});
+
 vi.mock("../src/claim.ts", async (original) => ({
   ...(await original<typeof import("../src/claim.ts")>()),
   readLogin: async () => "operator",
@@ -151,6 +169,7 @@ beforeEach(async () => {
   boot.onStreamCount = null;
   boot.hasViewClients = null;
   boot.serving = false;
+  boot.evidenceLive = false;
   boot.discoveryStarted = false;
   boot.expectSupervisorEnabled = true;
   boot.retryMs = 60_000;
@@ -233,6 +252,16 @@ async function claudeCanStart() {
 
 describe("mixed hub startup", () => {
   const preparing = fakeModels();
+  it("starts the live evidence sweep after serving with shutdown hooks registered beforehand", async () => {
+    boot.evidenceLive = true;
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await expect((await import("../src/main.ts")).main()).resolves.toBeUndefined();
+    expect(boot.serving).toBe(true);
+    expect(boot.discoveryStarted).toBe(true);
+    await expect(boot.app?.close()).resolves.toBeUndefined();
+  });
+
   it("connects stream counts to scheduler client presence", async () => {
     boot.models = preparing.deps;
     boot.expectSupervisorEnabled = false;

@@ -35,6 +35,7 @@ import { flightSummary, ledgerEntry } from "./flightSummaryFixture.ts";
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
   fetchStub({
     "/api/repos": [],
+    "/api/prs/flow": { generatedAt: 0, repos: [] },
     "/api/flight/memory?repo=shop-app": { notes: [] },
     "/api/flight/memory?repo=site-builder": { notes: [] },
     "/api/drafts": [],

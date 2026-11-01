@@ -24,6 +24,7 @@ export function Roles() {
       <Panel
         title="Roles"
         sub="roles/*.md · call signs from the Apollo control room; rename any agent"
+        className="wide"
       >
         <div className="tw">
           <table>
@@ -40,7 +41,9 @@ export function Roles() {
                 <tr key={r.callSign}>
                   <td>{r.callSign}</td>
                   <td>{r.position}</td>
-                  <td>{r.here}</td>
+                  <td className="wrap" title={r.here}>
+                    {r.here}
+                  </td>
                   <td>{r.mode ?? "—"}</td>
                 </tr>
               ))}
@@ -48,7 +51,7 @@ export function Roles() {
           </table>
         </div>
       </Panel>
-      <Panel title="Guard" sub="hard stops enforced in code · hits this week">
+      <Panel title="Guard" sub="hard stops enforced in code · hits this week" className="wide">
         <div className="tw">
           <table>
             <thead>
@@ -60,7 +63,9 @@ export function Roles() {
             <tbody>
               {RULES.map((r) => (
                 <tr key={r}>
-                  <td>{GUARD_RULES[r]}</td>
+                  <td className="wrap" title={GUARD_RULES[r]}>
+                    {GUARD_RULES[r]}
+                  </td>
                   <td className="num">{hits ? hits.counts[r] : "—"}</td>
                 </tr>
               ))}
@@ -71,7 +76,11 @@ export function Roles() {
           <p className="s muted">{GUARD_NOTE}</p>
         </div>
       </Panel>
-      <Panel title="Test lock" sub="which commands count as a full suite, per repo profile">
+      <Panel
+        title="Test lock"
+        sub="which commands count as a full suite, per repo profile"
+        className="wide"
+      >
         <div className="tw">
           <table>
             <thead>
@@ -85,8 +94,12 @@ export function Roles() {
               {(config?.repos ?? []).map((r) => (
                 <tr key={r.id}>
                   <td>{r.id}</td>
-                  <td>{r.fullSuite.length > 0 ? r.fullSuite.join(", ") : "—"}</td>
-                  <td>{FREE_SUITE_HINT}</td>
+                  <td className="wrap" title={r.fullSuite.join(", ")}>
+                    {r.fullSuite.length > 0 ? r.fullSuite.join(", ") : "—"}
+                  </td>
+                  <td className="wrap" title={FREE_SUITE_HINT}>
+                    {FREE_SUITE_HINT}
+                  </td>
                 </tr>
               ))}
             </tbody>

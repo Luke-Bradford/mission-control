@@ -2,11 +2,12 @@ import type { Owner, Stage } from "./board.ts";
 import type { CrewPause } from "./crew-pause.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
+import type { RunHandoff } from "./handoff.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
-import type { ReviewStatus } from "./review.ts";
+import type { ReviewCheckState, ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
@@ -329,6 +330,7 @@ export type RunSummary = Omit<Run, "noReport"> & {
 
 /** `GET /api/agents/:id/runs` row: the run with its PRs joined and its ticket resolved. */
 export type RunView = Omit<RunSummary, "prs" | "ticket"> & {
+  handoff?: RunHandoff;
   prs: RunPr[];
   usage?: RunUsage;
   /** The run's own ticket, else the first of its PRs' tickets (see runTicket). */
@@ -373,6 +375,7 @@ export interface Escalation {
 }
 
 export interface BoardItem {
+  handoff?: Pick<RunHandoff, "runId" | "fromSeat" | "at" | "acceptedBy">;
   author?: string | null;
   repoId: RepoId;
   issueNumber: number;
@@ -433,6 +436,17 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
 
+/**
+ * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
+ * `previewable` is true only where `POST /api/previews` could start one now: the hub supports
+ * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
+ * null; the web offers "Start preview" when `previewable && preview === null`.
+ */
+export interface PullRequestPreviewFacts {
+  previewable: boolean;
+  preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
+}
+
 /** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
 export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
 
@@ -456,6 +470,8 @@ export type PullRequestSummary = Pick<
   | "createdAt"
   | "updatedAt"
   | "mergedAt"
+  | "check"
+  | "uat"
 >;
 
 /** A stored pull request's number and title: what a PR link shows. */
@@ -465,6 +481,8 @@ export interface PrTitle {
 }
 
 export interface PullRequestView {
+  /** The live acceptance gate for this head; supplied by the API, never trusted from GitHub. */
+  uat?: { sha: string; since: number | null };
   repoId: RepoId;
   number: number;
   title: string;
@@ -503,6 +521,8 @@ export interface PullRequestView {
   files?: PrFileInput[];
   /** Bugs recorded against this PR as escaped defects; absent when none. */
   escapedDefects?: { issueNumber: number; via: DefectVia; filedAt: number }[];
+  /** The open PR's review state, set by the API; absent or null without a live review. */
+  check?: ReviewCheckState | null;
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -980,14 +1000,16 @@ export interface CrewRow {
   model: string | null;
   /** Crew: the config session id; null for a loop. */
   sessionId: string | null;
-  /** Crew: the `claude --version` read at the server and the seat's configured effort; null for a loop. */
-  cli: { version: string | null; effort: string | null };
+  /** Crew: the `claude --version` read at the server, configured effort, and current run's dollar cap; null for a loop. */
+  cli: { version: string | null; effort: string | null; budgetUsd?: number | null };
   /** The open PR on the latest run's branch (in the seat's repo), else null. */
   review: {
     prNumber: number;
     state: "draft" | "open" | "changes" | "approved";
     /** The review seat reviewing this PR now (queued, starting or running), else null. */
     reviewing?: AgentId | null;
+    /** The PR's review state; absent on older servers. */
+    check?: ReviewCheckState | null;
   } | null;
   /** A scratch seat's live review, else null. */
   reviewing?: { prNumber: number; sha: string; ref: string | null } | null;
@@ -1275,6 +1297,13 @@ export interface RepoPreview {
   loops: AgentId[];
 }
 
+/** An operator's deliberate stop, kept apart from a crash or ordinary run end. */
+export interface SeatStop {
+  by: string;
+  reason: string | null;
+  at: number;
+}
+
 /** One seat's live session; `runId` is null when no run is active. `reason` shows in the doing line. */
 export interface SeatSessionRow {
   /** Absent on legacy callers; stored as Claude by default. */
@@ -1284,6 +1313,8 @@ export interface SeatSessionRow {
   cliSessionId: string | null;
   state: SeatState;
   reason: string | null;
+  /** Present only while an operator's Stop leaves this seat stopped. */
+  stop?: SeatStop | null;
   worktree: string | null;
   updatedAt: number;
   /** Start of the current error, preserved across seat updates until recovery. */

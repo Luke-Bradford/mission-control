@@ -87,7 +87,7 @@ import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
-import { readCrewPause } from "../crew-pause.ts";
+import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import {
@@ -103,6 +103,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "../machine-capacity.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -125,6 +126,8 @@ interface TeamsDigestState {
     }[];
   };
 }
+
+export { prFlow } from "../pr-flow.ts";
 
 /**
  * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
@@ -350,7 +353,7 @@ export function nextWakeAt(
   lastWakeAt: number,
   now: number,
 ): number | null {
-  const times: number[] = [];
+  const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
@@ -714,6 +717,7 @@ export function flightState(i: {
       questions: [],
       tickets: [],
       prs: [],
+      prFlow: { generatedAt: now, rows: [], unowned: 0, metrics: [] },
       items: [],
       holds: [],
       reviewQueue: { queued: 0, running: 0, seats: [] },
@@ -743,6 +747,7 @@ export function flightState(i: {
 
   const seats = mine.map((s): FlightSeatState => {
     const row = store.seatSession(s.id);
+    const pause = pausedSeat(store, s.id);
     const run = unended(s.id);
     const loop = run?.loop ?? null;
     const t = run?.ticket == null ? null : parseTicket(run.ticket);
@@ -755,7 +760,16 @@ export function flightState(i: {
       loop: seatDef(s).loop,
       area: s.area,
       state: row?.state ?? null,
-      free: !seatUnavailable(s) && seatFree(store, busy, s.id),
+      free:
+        !seatUnavailable(s) &&
+        pause === null &&
+        row?.state !== "stopped" &&
+        seatFree(store, busy, s.id),
+      pause: pause === null ? null : { by: pause.by, reason: pause.reason, at: pause.at },
+      stop:
+        row?.state === "stopped" && row.stop != null
+          ? { by: row.stop.by, reason: row.stop.reason, at: row.stop.at }
+          : null,
       ticket: run?.ticket ?? null,
       title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
       phase: loop?.phase ?? null,
@@ -809,7 +823,12 @@ export function flightState(i: {
         queued: reviews.filter((row) => row.state === "queued").length,
         running: reviews.filter((row) => row.state === "starting" || row.state === "running")
           .length,
-        idle: !seatUnavailable(seat) && held === null && !busy.some((b) => b.seatId === seat.id),
+        idle:
+          !seatUnavailable(seat) &&
+          pausedSeat(store, seat.id) === null &&
+          store.seatSession(seat.id)?.state !== "stopped" &&
+          held === null &&
+          !busy.some((b) => b.seatId === seat.id),
       };
     }),
   };
@@ -914,6 +933,7 @@ export function flightState(i: {
       .pullRequests(session.repoId)
       .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
   );
+  const flow = prFlow(store, session.repoId, now);
   const mergeQueue = prs
     .filter((p) => p.state === "open")
     .map((p) => {
@@ -1144,6 +1164,7 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   return {
+    prFlow: flow,
     ...flightSignals({
       config,
       store,
@@ -1417,6 +1438,7 @@ export function wakeFacts(
     ].sort(),
     stopped: stoppedSeats(s),
     reviews: reviewFault ? ["idle-reviewers"] : [],
+    prFlow: prFlowFacts(s.prFlow),
     holdsInForce:
       s.flowHolds
         ?.filter((hold) => hold.blocking)
@@ -1536,6 +1558,10 @@ const factTargets = (category: string, item: unknown): string[] => {
   // a question's decision may name it as its item key, ask:<id>
   if (typeof first !== "string")
     return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  if (category === "prFlow") {
+    const pr = first.split(":")[0];
+    return pr && /^\d+$/.test(pr) ? [pr, `#${pr}`] : [];
+  }
   let parts = first.split(":");
   if (category === "signals") parts = parts.slice(1);
   if (category === "parked") parts = parts.slice(0, -1);

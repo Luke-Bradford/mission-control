@@ -22,6 +22,7 @@ import {
   PAGE_PATHS,
   type Route,
   route,
+  tabOf,
   usePath,
   useSearch,
 } from "./router.ts";
@@ -56,11 +57,17 @@ const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.C
 const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
+const TicketPage = lazy(() =>
+  import("./pages/TicketPage.tsx").then((m) => ({ default: m.TicketPage })),
+);
 const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.Setup })));
 const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
 const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
+const QaReadiness = lazy(() =>
+  import("./pages/QaReadiness.tsx").then((m) => ({ default: m.QaReadiness })),
+);
 
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
@@ -103,7 +110,7 @@ export function App({
   // Comms has its own FLIGHT conversation, and Setup and the Map need the full width (Setup's
   // approved configuration frame; the Map's stage beside its agent rail). The dock remains
   // available on the other operational pages.
-  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(shown.page);
+  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -148,7 +155,7 @@ export function App({
           Skip to board
         </a>
       )}
-      <Header page={shown.page} />
+      <Header page={tabOf(shown)} />
       <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
@@ -237,6 +244,9 @@ function PageView({ route: r }: { route: Route }) {
     case "board":
       page = <BoardPage repoId={r.repoId} ticket={r.ticket} />;
       break;
+    case "ticket":
+      page = <TicketPage repoId={r.repoId} number={r.number} />;
+      break;
     case "agent":
       page = <Agent id={r.id} />;
       break;
@@ -251,6 +261,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "audit":
       page = <Audit />;
+      break;
+    case "qa":
+      page = <QaReadiness />;
       break;
     case "setup":
       page = <Setup tab={r.tab} />;
@@ -302,7 +315,7 @@ function useShellKeys(current: Route, popout: boolean) {
         // neither Comms, Setup, the Map nor a pop-out mounts the dock, so never change its
         // stored state there.
         if (isPopout || on.page === "comms") return;
-        if (FULL_WIDTH_PAGES.has(on.page)) navigate(PAGE_PATHS.comms);
+        if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
         else toggleDock();
       },
       help: openHelp,

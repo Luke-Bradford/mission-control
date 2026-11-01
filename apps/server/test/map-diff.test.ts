@@ -182,3 +182,43 @@ it("keeps reading a run's diff after it stops being current within the debounce"
     clearInterval(stop);
   }
 }, 12000);
+
+it("publishes an invalidation after an asynchronous authoritative diff lands without a board ping", async () => {
+  const { cwd } = fixture(),
+    transcriptPath = join(cwd, "notify.jsonl");
+  writeFileSync(transcriptPath, "");
+  const ring = new CallRing(() => [
+    { id: "run", seat: "seat", repoId: "repo", cwd, transcriptPath, vendor: "claude" },
+  ]);
+  const landed: { seq: number; diff: ReturnType<typeof ring.diff> }[] = [];
+  const unsubscribe = ring.subscribe("repo", (delta) => {
+    if (delta.type === "invalidate") landed.push({ seq: delta.seq, diff: ring.diff("run") });
+  });
+  const stop = ring.start();
+  try {
+    await expect.poll(() => ring.diff("run"), { timeout: 4500 }).toEqual([]);
+    const before = ring.sequence("repo");
+    writeFileSync(join(cwd, "file.ts"), "after\nextra\n");
+    const frames = readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url), "utf8")
+      .trim()
+      .split("\n");
+    appendFileSync(transcriptPath, `${frames.slice(0, 2).join("\n")}\n`);
+    ring.poll();
+    await expect
+      .poll(
+        () =>
+          landed.some(
+            (item) =>
+              item.seq > before &&
+              item.diff?.some(
+                (change) => change.file === "file.ts" && change.add === 2 && change.rem === 3,
+              ),
+          ),
+        { timeout: 4500 },
+      )
+      .toBe(true);
+  } finally {
+    stop();
+    unsubscribe();
+  }
+});

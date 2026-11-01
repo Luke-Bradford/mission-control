@@ -1007,6 +1007,20 @@ ${modelless("flight-2", "FLIGHT")}
       expect(e.message).toContain("shares its git repository with the hub's checkout");
     });
 
+    it("loads a preview from the hub repository while still refusing a preview from the crew clone", () => {
+      const { root, repo, linked: hubPreview } = repoWithWorktree();
+      const crewClone = join(root, "crew-clone");
+      git(root, "clone", "-q", repo, crewClone);
+      const crewPreview = join(root, "crew-preview");
+      git(crewClone, "worktree", "add", "-q", "-b", "preview", crewPreview);
+      const text = crewText({ checkout: crewClone });
+      expect(parseConfig(text, "t", { hubRoot: hubPreview }).crew?.sessions[0]?.checkout).toBe(
+        crewClone,
+      );
+      const error = errorOf(() => parseConfig(text, "t", { hubRoot: crewPreview }));
+      expect(error.message).toContain("shares its git repository with the hub's checkout");
+    });
+
     it("accepts a separate clone, and skips a loop worktree or hub that is not a git repo", () => {
       const { root, repo } = repoWithWorktree();
       const clone = join(root, "clone");
@@ -1450,6 +1464,17 @@ describe("guard config", () => {
       "pnpm -s vitest",
       "pnpm -s vitest run --coverage",
     ]);
+  });
+
+  it("loads run_command into runCommand, leaves it unset without the key and refuses an empty one", () => {
+    const withRun = text.replace(
+      FULL_SUITE_BLOCK,
+      `${FULL_SUITE_BLOCK}\n    run_command: pnpm dev`,
+    );
+    expect(parse(withRun).repos[2]?.runCommand).toBe("pnpm dev");
+    expect(parse(text).repos[2]?.runCommand).toBeUndefined();
+    const empty = text.replace(FULL_SUITE_BLOCK, `${FULL_SUITE_BLOCK}\n    run_command: ""`);
+    expect(() => parse(empty)).toThrow();
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(

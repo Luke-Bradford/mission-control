@@ -15,13 +15,17 @@ import {
   dockStreamPath,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
+  type MapPayload,
+  type MapSnapshot,
   type PullRequestView,
   prListPath,
   TOPICS,
   type Topic,
+  unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { apiGet } from "./api.ts";
+import { apiGet, apiOperatorGet } from "./api.ts";
+import { shareMap } from "./map/structural.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
@@ -46,6 +50,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
+const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
@@ -60,6 +65,7 @@ const pageDocument = (): PageDocument | undefined =>
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -221,6 +227,11 @@ export const RESOURCES = {
     path: `/api/boards/${enc(repoId)}/items/${issueNumber}`,
     topic: null,
   }),
+  // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
+  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
+    topic: before ? null : TICKET_TOPICS,
+  }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.
   seatContext: (seatId: string): ResourceRef => ({
@@ -232,6 +243,10 @@ export const RESOURCES = {
     topic: "agents",
   }),
   /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.aside` is set while it is off its seat. */
+  runHandoff: (runId: string): ResourceRef => ({
+    path: `/api/runs/${enc(runId)}/handoff`,
+    topic: "agents",
+  }),
   runLoop: (runId: string): ResourceRef => ({
     path: `/api/runs/${enc(runId)}/loop`,
     topic: "agents",
@@ -246,6 +261,8 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{ pr }`; starts a branch preview and returns its URL. */
+  startPreview: "/api/previews",
   /** Body `{ base, profile }`; returns the refreshed template profiles. */
   createProfile: "/api/profiles",
   flightMemory: (repoId: string, topic: string) =>
@@ -376,12 +393,44 @@ interface Entry {
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
+/** Only PR flow needs a protected JSON read. */
+const mapSnapshots = new Map<string, MapSnapshot>();
+const readResource = async <T>(path: string): Promise<T> => {
+  if (/^\/api\/repos\/[^/]+\/map$/.test(path)) {
+    const next = shareMap(
+      mapSnapshots.get(path),
+      unpackMap(await apiGet<MapPayload | MapSnapshot>(path)),
+    );
+    if (mapSnapshots.size >= 16 && !mapSnapshots.has(path))
+      mapSnapshots.delete(mapSnapshots.keys().next().value as string);
+    mapSnapshots.set(path, next);
+    return next as T;
+  }
+  return path === RESOURCES.prFlow.path ? apiOperatorGet<T>(path) : apiGet<T>(path);
+};
+
 class Hub {
   private readonly entries = new Map<string, Entry>();
   /** Bumped by clear(): a response to a request from an older generation is dropped. */
   private generation = 0;
   /** Stamps each request as it starts, so answers can be told apart by age. */
   private seq = 0;
+
+  /** A new tree must not retain every older analysis graph for the lifetime of the HUD. */
+  private pruneGraphs(): void {
+    const unused = [...this.entries.values()].filter(
+      (e) =>
+        /^\/api\/repos\/[^/]+\/map\/graph\?key=/.test(e.path) &&
+        e.listeners.size === 0 &&
+        e.settledListeners.size === 0 &&
+        !e.inflight &&
+        !e.queued &&
+        !e.again &&
+        !e.fullAgain,
+    );
+    for (const entry of unused.slice(0, Math.max(0, unused.length - 16)))
+      this.entries.delete(entry.path);
+  }
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -398,6 +447,7 @@ class Hub {
         settledListeners: new Set(),
       };
       this.entries.set(path, e);
+      if (path.includes("/map/graph?key=")) this.pruneGraphs();
     }
     return e;
   }
@@ -428,12 +478,16 @@ class Hub {
   ): () => void {
     const e = this.entry(path, topic);
     e.settledListeners.add(fn);
-    return () => e.settledListeners.delete(fn);
+    return () => {
+      e.settledListeners.delete(fn);
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
+    };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
+    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -445,6 +499,7 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
@@ -486,7 +541,7 @@ class Hub {
       // Re-read the newest millisecond as well: several rows can share a timestamp.
       const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
       const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
-      let data = await apiGet<unknown>(path);
+      let data = await readResource<unknown>(path);
       if (e.path === RESOURCES.flightLedger.path || e.path === RESOURCES.flightLedgerOpen.path) {
         const ledger = data as FlightLedgerView;
         let page = ledger;
@@ -572,7 +627,7 @@ class Hub {
   async read<T>(ref: ResourceRef): Promise<T> {
     const gen = this.generation;
     const seq = ++this.seq;
-    const data = await apiGet<T>(ref.path);
+    const data = await readResource<T>(ref.path);
     const e = this.entry(ref.path, ref.topic);
     if (gen === this.generation && seq > e.appliedSeq) {
       e.appliedSeq = seq;
@@ -649,6 +704,7 @@ class Hub {
    * What is still on screen is fetched again at once, rather than left idle until the next event.
    */
   clear(): void {
+    mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
       e.inflight = false;

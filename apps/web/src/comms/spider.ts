@@ -89,6 +89,22 @@ export function spokesFor(rows: readonly CrewRow[], flight: string, stretch = 1)
   }));
 }
 
+/**
+ * The role name drawn at a spoke's rim, or null when it would only repeat the one seat on it
+ * (GUIDO-1 under "GUIDO"): the seat's own name says the role, and the rail has no room for both.
+ */
+export function spokeName(
+  spoke: Pick<Spoke, "key" | "ids">,
+  present: (id: string) => boolean,
+  nameOf: (id: string) => string,
+): string | null {
+  const ids = spoke.ids.filter(present);
+  const name = ids.length === 1 ? nameOf(ids[0] as string).toUpperCase() : null;
+  const key = spoke.key.toUpperCase();
+  if (name !== null && (name === key || name.startsWith(`${key}-`))) return null;
+  return spoke.key;
+}
+
 /** Where seat `i` of `n` sits along a spoke, as a fraction of the spoke's reach. */
 export function spokeFraction(i: number, n: number): number {
   if (n <= 1) return 0.66;
@@ -131,9 +147,9 @@ export function spokeAnchors(
 export type LabelSide = "below" | "above" | "right" | "left";
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 
-/** A 9px mono upper-case name is about this wide per character. */
-const CHAR_PX = 5.9;
-const LABEL_H = 11;
+/** 11px mono with the node name’s 0.06em tracking; include the stroke in the box. */
+const CHAR_PX = 7.3;
+const LABEL_H = 14;
 
 /** A name's box when it sits on `side` of a node of radius `r` at `p`. */
 export function labelBox(p: Point, r: number, text: string, side: LabelSide): Box {

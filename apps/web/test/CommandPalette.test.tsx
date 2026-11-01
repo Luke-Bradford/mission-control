@@ -93,7 +93,7 @@ describe("CommandPalette", () => {
     const rows = await screen.findAllByRole("option");
     expect(rows[0]?.textContent).toContain("shop-app#3349");
     key("Enter");
-    expect(window.location.pathname).toBe("/board/shop-app/3349");
+    expect(window.location.pathname).toBe("/tickets/shop-app/3349");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(JSON.parse(readKey(PALETTE_RECENT_KEY) ?? "[]")).toEqual(["ticket:shop-app#3349"]);
   });
@@ -156,7 +156,7 @@ describe("CommandPalette", () => {
     );
     key("Enter");
     expect(window.location.pathname).toMatch(
-      /^\/comms\/agents\/shop-app-dev\/contacts\/CAPCOM$|^\/board\//,
+      /^\/comms\/agents\/shop-app-dev\/contacts\/CAPCOM$|^\/tickets\//,
     );
   });
 

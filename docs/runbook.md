@@ -33,6 +33,13 @@ Claude seats and HTTP remain available. A successful catalog is cached for confi
 edits and reloads. Config writes refuse unvalidated Codex models and efforts with
 400. Existing Claude model identifiers and effort options keep loading.
 
+A Claude seat (FLIGHT's included) can state its `effort` (`low`, `medium`, `high` or
+`max`); the hub passes it as `--effort`, and the Agent page shows it beside the model.
+Omit it and the CLI picks its own default, which changes between CLI versions, so set it
+for any seat whose cost or quality matters. Pair it with a template's `budget_usd` (see
+Template profiles) for a hard per-run dollar cap. Choose `max` only where a comparison
+shows a quality gain.
+
 `updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
 binary they started on. Update Codex manually between runs. Resuming a run uses
 the run's saved model.
@@ -155,12 +162,14 @@ profiles:
     checks: []                  # CI checks named in the brief
     tries: 2                    # CI failures before the run parks (1 to 10)
     rounds: 2                   # blocking reviews before the run parks (1 to 10)
+    budget_usd: 12.50           # optional Claude spend cap per run; omit until you choose one
 ```
 
 - **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
+- **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
 ## Moving from Control Centre
@@ -231,6 +240,20 @@ the live hub's data.
 
 The API is under `/api/*`. A POST must be `application/json` (415 otherwise) and, if it carries an
 `Origin`, one on `localhost` or `127.0.0.1` (403 otherwise).
+
+## PR flow API
+
+`GET /api/prs/flow` requires the operator token. It returns every open PR grouped by repository,
+with its next owner, current stage, age, waits, dependents and latest actor. FLIGHT reads the same
+record at the start of every wake; the HUD panel uses it to explain delays.
+
+The 24-hour and 7-day metrics use immutable merged-PR history. Stage timings total each PR's
+recorded intervals in that stage, within the merged cohort; missing stage history stays unknown.
+Rework counts blocking review reports, including earlier rounds, rather than CI retries.
+Historical timings can lag late backfills by at most 30 seconds; new merges and window boundaries
+invalidate them immediately. Live ownership and waits are read fresh on every request.
+FLIGHT wakes after five unowned minutes, a stage's seven-day p90, or fifteen minutes waiting for
+the controller or operator. Repeated polls do not reset stage clocks or repeat the same wake fact.
 
 ### As a launchd job (optional; nothing loads it for you)
 
@@ -1045,7 +1068,7 @@ your acceptance on <head>" with the label or path that matched. It shows in Need
 card and on the PR chip. If the diff cannot be read, the PR waits too. Look at the work, then:
 
 ```sh
-curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept"}'
+curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept","sha":"<full reviewed head sha>"}'
 ```
 
 `accept` lets the engine merge on its next pass through the usual gates (hard-rule clearance, holds,
@@ -1469,6 +1492,32 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **Review previews and screenshots.** When a PR changes web files (paths under the repo's
+  `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
+  the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
+  copy of the live data with loop writes off. The preview is pinned to the reviewed commit; an operator preview is reused only for that same head. Browser requests are GET-only, and queued calls recheck the running review and preview instance before returning results. It is built in the background when the review run
+  starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
+  every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
+  when the run ends (a preview the operator started for that PR is used and left running). If the
+  preview cannot start (capacity, the two-preview limit, a failed build), `preview_browser` says
+  so and RETRO notes the live-data check was not run. RETRO's
+  `preview_browser` tool waits up to 40 s for a building preview, then answers "still building" so RETRO calls again (Codex ends a tool call at 60 s); once it is up the tool opens a page, sets the width (320..3840) and theme, and runs up to
+  20 steps (click, type, read, measure, screenshot). Chrome runs behind a proxy that reaches only
+  the preview's `host:port`; every other request, the operator-token bootstrap and the live
+  stream included, is refused. Each call starts on a fresh page. A screenshot is kept in
+  `review-screenshots/` beside the database for 90 days (`QA_RETENTION_DAYS`) and listed under its
+  review round in `GET /api/qa/findings` (`reviews[].screenshots`: `id`, `label`, `width`,
+  `theme`, `at`). `GET /api/qa/review-shots/:id` serves one PNG, with the operator token.
+- **PR readiness: Comms, rework and try-it.** `GET /api/qa/uat/:repoId/:number` carries, for one
+  PR: `comms`, the newest 20 messages whose ref or ticket is the PR or its ticket (sender, time,
+  text; newest first); `rounds`, each reported review round newest first with its blocking findings
+  as `file:line summary`, the author seat's newest message before the next round (`reply`), the
+  first branch commit before the next round (`fixSha`) and a `result` (`clean`, `resolved` or
+  `open`); and `tryIt`, the branch name as the run pushed it, `git fetch origin <branch> && git
+  switch <branch>` plus the repo's `run_command` from `config.yaml` when it sets one. `previewUrl`
+  is the URL of the PR's running branch preview (see Branch previews), else null. `uat` says whether the PR's open run is parked for the
+  operator's acceptance (`waiting`), when it parked (`since`) and the note the operator last sent it
+  back with (`note`); a PR with no such run answers `{ waiting: false, since: null, note: null }`.
 - **Workflow figures.** `GET /api/qa/flow?days=` (1..90, default 30) serves four figures from one
   window, each defined once in the metric registry (`QA_FLOW_METRICS`) and returned as `metrics`:
   - `escapedDefects`: issues labelled `bug`, filed after a PR merged, whose body names the PR (`#N`
@@ -1606,6 +1655,14 @@ Screenshots are not kept in the repo, because they would show a real board. Run 
 copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=1`) to see the HUD.
 
 ### Checking the write floors
+
+Every Claude crew CLI receives `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Claude strips recognized credentials
+from Bash, hooks and MCP subprocess environments. The parent CLI retains its authentication.
+The supervisor also starts every seat with a minimal inherited environment, excluding operator
+provider and GitHub tokens. The real-CLI floor suite checks fake provider credentials against a
+local fake Messages API; it makes no paid provider calls. See the
+[upstream scrub reference](https://code.claude.com/docs/en/env-vars#what-the-subprocess-environment-scrub-removes)
+for recognized names and exceptions. The flag alone leaves GitHub tokens and proxy settings in place.
 
 The floors (what a Codex or Claude seat can write) are otherwise tested by reading generated config.
 `apps/server/test/seat-floors.test.ts` launches the installed `codex` and `claude` CLIs through the
@@ -2052,6 +2109,50 @@ a preview after 20 minutes without a browser request, and removes its worktree a
 expiry, explicit close, or live-hub shutdown. Preparation has a five-minute deadline, and an
 operator close cancels preparation as well as a running child. Previews only run branches from the
 repository checked out by the hub; PR numbers in another configured repository are not eligible.
+
+### PR screenshot evidence
+
+A PR that changes the HUD carries screenshots of the pages it affects before it leaves draft. This
+applies only to the repository whose checkout runs the hub, and only on the live hub.
+
+**What is captured.** The files the PR changes (the first 100 the GitHub poll stores) are mapped to
+pages: a page's own directory under `apps/web/src/` or its `pages/` file affects that page;
+`hud.css`, `shell/`, `components/` and any file that cannot be placed affect every page in the nav
+catalogue; test files and paths outside `apps/web` affect none. For each page the hub renders
+1600×1000 in the light and in the dark scheme, on main and on the PR head. Both sides are
+hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
+one `VACUUM INTO` snapshot of the live database, so they show the same data. Each side is a
+detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
+its pages are done. Captures run one at a time; a failed capture is tried again after ten minutes.
+
+**What is stored.** Under `pr-evidence/<repo>/<pr>/<head sha>/` in the data dir (directories
+`0700`, files `0600`): `<page>-<light|dark>-<before|after|diff>.png` and `manifest.json`, which
+lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
+first). A pixel counts as changed when its colour differs by more than 24 across the three
+channels; regions group changes on a 16 px grid. The three newest heads of a PR are kept. The
+manifest is written last, so a head with no manifest was never captured. Nothing is uploaded.
+
+**Where it is read.** `GET /api/prs/<n>/evidence` answers the newest head's manifest (`?sha=` for
+one head, `?repo=` when two repos have the number) and `GET /api/prs/<n>/evidence/<sha>/<name>.png`
+an image. Neither needs the operator token, like the other read routes. The PR body gets a
+`## Screenshot evidence` section with one line per pair and links to its three images; it is
+rewritten for each new head and kept when RETRO's Minor findings are posted. RETRO's brief lists
+the pairs and the images are copied into its scratch copy under `.mc-review/evidence/`.
+
+**The hold.** The engine does not request RETRO's review, mark a web PR ready, or merge it until
+the pairs for its current head exist, so the reviewer always has them and a PR already out of
+draft cannot merge on a new head without them. Each pass that is held records a loop event naming
+the pages still missing; the run is not parked, and moves on at the next pass once the capture
+lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
+the hold then says `capture failed: <reason>`; the review is let through at that point, with a line
+in RETRO's brief saying no pairs were made, but mark-ready and merge keep waiting. A push makes a
+new head, which needs its own pairs.
+
+**Limits.** Anything on a page that depends on the clock (relative times, live counts) differs
+between the two renders and shows as a changed region; read the regions against the diff. A PR
+with more than 100 changed files is judged on the first 100 the poll stores. A capture needs a
+system Chrome, `playwright-core` and the repo's pnpm store offline, as the FLIGHT screenshots and
+branch previews do.
 
 ## Audit API
 

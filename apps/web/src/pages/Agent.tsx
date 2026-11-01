@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew, CrewRow, LimitRow } from "@mc/core";
 import { useEffect } from "react";
+import { HandoffPanel } from "../agent/HandoffPanel.tsx";
 import { Header } from "../agent/Header.tsx";
 import { NeedBanner } from "../agent/NeedBanner.tsx";
 import { Picker } from "../agent/Picker.tsx";
@@ -29,7 +30,9 @@ export function Agent({ id }: { id: string | null }) {
   const tz = useTz();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
-  const traceRun = new URLSearchParams(useSearch()).get("trace");
+  const params = new URLSearchParams(useSearch());
+  const traceRun = params.get("trace");
+  const handoffRun = params.get("handoff");
 
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
   const inView = all?.filter((r) => matchesSession(r)) ?? [];
@@ -77,6 +80,7 @@ export function Agent({ id }: { id: string | null }) {
   return (
     <section id="page-agent">
       <h1 className="sr-only">Agents</h1>
+      {handoffRun && <HandoffPanel runId={handoffRun} />}
       {traceRun && id !== null ? (
         <RunTracePanel agentId={id} runId={traceRun} />
       ) : (
@@ -86,6 +90,7 @@ export function Agent({ id }: { id: string | null }) {
             <>
               <NeedBanner row={row} items={items} />
               <Header row={row} limits={limits} />
+              {!handoffRun && row.kind === "crew" && row.run && <HandoffPanel runId={row.run.id} />}
               <div className="agrid">
                 <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
                 <div className="side">

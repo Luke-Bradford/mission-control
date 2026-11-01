@@ -5,7 +5,7 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
-import { needLine, seatItems } from "../crew.ts";
+import { needLine, needOwnerLabel, seatItems } from "../crew.ts";
 
 /**
  * When the agent has needs (catalogue 2.4.2): `{id} needs you.`, the Overview's need line, and Ack
@@ -52,7 +52,9 @@ function NeedBannerBody({
     <div id="needBanner">
       {parts.length > 0 && (
         <div className="banner">
-          <b>{row.id} needs you.</b>
+          <b>
+            {row.id} {needOwnerLabel(row, items)}.
+          </b>
           {parts.map((p, i) => (
             <span key={p.key} className="needpart">
               {i > 0 && <span aria-hidden="true">· </span>}

@@ -5,6 +5,48 @@ import { cleanText, redactJwts } from "../src/clean.ts";
 const ESC = "\u001b";
 
 describe("cleanText", () => {
+  it.each(["start", "middle", "end"])("redacts npm credentials at the %s of a line", (where) => {
+    const token = `npm_${"aB09".repeat(9)}`;
+    const input =
+      where === "start"
+        ? `${token} suffix`
+        : where === "end"
+          ? `prefix ${token}`
+          : `prefix ${token} suffix`;
+    expect(cleanText(input)).toBe(input.replace(token, "[redacted]"));
+  });
+
+  it("consumes a longer npm token whole and leaves unrelated short identifiers alone", () => {
+    expect(cleanText(`npm_${"a".repeat(50)}`)).toBe("[redacted]");
+    expect(cleanText("npm_config_registry")).toBe("npm_config_registry");
+  });
+
+  it.each([
+    [
+      "https://user:password@registry.example/private/package",
+      "https://***@registry.example/private/package",
+    ],
+    [
+      "HTTP://user@registry.example:4873/path?q=1#part",
+      "HTTP://***@registry.example:4873/path?q=1#part",
+    ],
+    ["https://u%40name:p%2Fword@registry.example/path", "https://***@registry.example/path"],
+    ["https://user:p@ss@[::1]:4873/path", "https://***@[::1]:4873/path"],
+    [
+      "https://registry.example:4873/path?email=user@example.test",
+      "https://registry.example:4873/path?email=user@example.test",
+    ],
+  ])("redacts only URL userinfo in %s", (input, output) => {
+    expect(cleanText(`before ${input} after`)).toBe(`before ${output} after`);
+  });
+
+  it("never exposes credentials when the input slice ends before the URL's @", () => {
+    const key = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(2000)}\n-----END PRIVATE KEY-----\n`;
+    const input = `${key}https://alice:${"p".repeat(10_000)}@registry.example/path`;
+    const output = cleanText(input, 100);
+    expect(output).toBe("[redacted]\nhttps://***…");
+  });
+
   it("removes ANSI escape sequences and C0 controls but keeps newlines and tabs", () => {
     expect(cleanText(`${ESC}[1;31mred${ESC}[0m plain`)).toBe("red plain");
     expect(cleanText(`${ESC}]0;title\u0007after`)).toBe("after");

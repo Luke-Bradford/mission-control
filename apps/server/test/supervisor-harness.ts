@@ -25,6 +25,7 @@ import type { CliHold } from "../src/cli-update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import type { ReviewPreviews } from "../src/review-preview.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -81,11 +82,18 @@ const prep = vi.hoisted(() => ({
   closing: 0,
   /** The `peers` each prepare call was given, in order. */
   peers: [] as unknown[],
+  handoffGate: null as Promise<void> | null,
+  handoffChecks: 0,
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
   return {
     ...real,
+    handoffCheckoutStatus: async (...a: Parameters<typeof real.handoffCheckoutStatus>) => {
+      prep.handoffChecks++;
+      if (prep.handoffGate) await prep.handoffGate;
+      return real.handoffCheckoutStatus(...a);
+    },
     existingCheckout: async (...a: Parameters<typeof real.existingCheckout>) => {
       prep.resumeChecks++;
       if (prep.resumeGate) await prep.resumeGate;
@@ -166,6 +174,14 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
       prep.sessions.push(session);
       return new Proxy(session, {
         get(target, key) {
+          if (key === "close")
+            return async () => {
+              if (prep.closeGate) {
+                prep.closing++;
+                await prep.closeGate;
+              }
+              return target.close();
+            };
           if (key === "send" && prep.failWrite) {
             return () => {
               throw new Error("session ended");
@@ -295,6 +311,9 @@ function make(
     tokens?: RunTokens;
     lock?: TestLock;
     hubRoot?: string;
+    reviewPreviews?: ReviewPreviews;
+    prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
+    prEvidenceRepo?: string;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
@@ -376,6 +395,9 @@ function make(
     tokens,
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
+    ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
+    ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
+    ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),
@@ -450,6 +472,8 @@ beforeEach(() => {
   prep.failWrite = false;
   prep.sessions = [];
   prep.peers = [];
+  prep.handoffGate = null;
+  prep.handoffChecks = 0;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");

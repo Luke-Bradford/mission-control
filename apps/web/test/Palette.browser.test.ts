@@ -30,7 +30,7 @@ describeRendered("The command palette in a browser", () => {
         expect(dialog.x).toBeGreaterThanOrEqual(0);
         expect(dialog.x + dialog.width).toBeLessThanOrEqual(width);
         expect(dialog.y + dialog.height).toBeLessThanOrEqual(900);
-        expect((await page.boxes(".palette-row")).length).toBe(9);
+        expect((await page.boxes(".palette-row")).length).toBe(10);
         expect((await page.unclipped(".palette-list")).every(Boolean)).toBe(true);
         const shot = process.env.PALETTE_SHOT;
         if (shot) await page.screenshot(`${shot}-${width}.png`);

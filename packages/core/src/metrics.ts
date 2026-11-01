@@ -33,6 +33,7 @@ export type MetricUnit =
   | "milliseconds"
   | "rounds"
   | "test files"
+  | "state"
   | "quota percentage points per interval";
 
 export interface MetricDef {

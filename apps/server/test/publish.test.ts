@@ -17,6 +17,7 @@ import {
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   DEFAULT_AWAY,
+  EVIDENCE_HEADING,
   MC_PR_BODY_MAX,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
@@ -1189,6 +1190,108 @@ describe("postMinorFindings", () => {
     answer();
     const r = await editRunPrBody(deps(), R.id, 12, "Hello.");
     expect(r).toEqual({ text: prEditedText(12) });
+  });
+});
+
+describe("setEvidenceSection", () => {
+  const R = run({ loop: { prNumber: 12 } as never });
+  const VIEW_OK = JSON.stringify({ headRefName: BRANCH, state: "OPEN" });
+  const BODY =
+    "#7 — Fix\n\n## What changed\n\nDid it.\n\nCloses #7.\n\nOpened by GUIDO-1 (Mission Control).\n";
+  let posted: string | null;
+
+  /** gh answers: one fresh body/open-PR read, then the edit. */
+  const answer = (body: string, editCode = 0) => {
+    posted = null;
+    ghAnswers = [
+      () => ({ code: 0, stdout: JSON.stringify({ body, headRefName: BRANCH, state: "OPEN" }) }),
+      (args) => {
+        const file = args.find((a) => a.startsWith("--body-file="))?.slice("--body-file=".length);
+        if (file !== undefined) posted = readFileSync(file, "utf8");
+        return { code: editCode, stdout: "" };
+      },
+    ];
+  };
+
+  beforeEach(() => {
+    store.upsertRun(R);
+  });
+
+  it("puts the section before the Closes line, keeping the rest and one Opened-by line", async () => {
+    answer(BODY);
+    const r = await createPublisher(deps()).setEvidenceSection(R, `${EVIDENCE_HEADING}\n\nlines`);
+    expect(r).toEqual({ ok: true });
+    expect(posted).toBe(
+      `#7 — Fix\n\n## What changed\n\nDid it.\n\n${EVIDENCE_HEADING}\n\nlines\n\nCloses #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+    );
+  });
+
+  it("replaces an earlier section instead of adding a second", async () => {
+    const withOld = BODY.replace("Closes #7.", `${EVIDENCE_HEADING}\n\nold\n\nCloses #7.`);
+    answer(withOld);
+    await createPublisher(deps()).setEvidenceSection(R, `${EVIDENCE_HEADING}\n\nnew`);
+    expect(posted).toContain("new");
+    expect(posted).not.toContain("old");
+    expect((posted ?? "").split(EVIDENCE_HEADING)).toHaveLength(2);
+  });
+
+  it("edits nothing when the body already holds the section", async () => {
+    const section = `${EVIDENCE_HEADING}\n\nsame`;
+    answer(BODY.replace("Closes #7.", `${section}\n\nCloses #7.`));
+    const r = await createPublisher(deps()).setEvidenceSection(R, section);
+    expect(r).toEqual({ ok: true });
+    expect(ghCalls.some((c) => c[1] === "edit")).toBe(false);
+  });
+
+  it("is transient when the PR cannot be read", async () => {
+    ghAnswers = [() => ({ code: 1, stdout: "", stderr: "net" })];
+    const r = await createPublisher(deps()).setEvidenceSection(R, `${EVIDENCE_HEADING}\n\nx`);
+    expect(r).toMatchObject({ ok: false, transient: true });
+  });
+
+  it("is kept by the Minor-findings rewrite", async () => {
+    const rv = (() => {
+      const id = store.requestReview({
+        authorRunId: R.id,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 12,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: START,
+      });
+      if (id === null) throw new Error("no review");
+      store.setReviewState(id, ["queued"], "running", { at: START, runId: "rr" });
+      store.recordFindings(id, "rr", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "ok",
+        findings: [
+          { severity: "Minor", file: "a.ts", line: 3, summary: "first", scenario: "w", fix: "f" },
+        ],
+        at: START,
+      });
+      return { id, sha: SHA, retro: "RETRO" };
+    })();
+    store.addEvidence(R.id, "Changed it.", START);
+    let sent: string | null = null;
+    ghAnswers = [
+      () => ({ code: 0, stdout: VIEW_OK }),
+      (args) => {
+        const file = args.find((a) => a.startsWith("--body-file="))?.slice("--body-file=".length);
+        if (file !== undefined) sent = readFileSync(file, "utf8");
+        return { code: 0, stdout: "" };
+      },
+    ];
+    await createPublisher(
+      deps({ prEvidenceSection: () => `${EVIDENCE_HEADING}\n\nkept lines` }),
+    ).postMinorFindings(R, rv);
+    expect(sent).toContain(MINOR_HEADING);
+    expect(sent).toContain(`${EVIDENCE_HEADING}\n\nkept lines`);
+    expect((sent as unknown as string).indexOf("kept lines")).toBeLessThan(
+      (sent as unknown as string).indexOf("Closes #7."),
+    );
   });
 });
 

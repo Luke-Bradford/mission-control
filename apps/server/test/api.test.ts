@@ -1,3 +1,4 @@
+import { joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -111,6 +112,7 @@ import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
+import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -581,6 +583,28 @@ const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
 describe("Comms API", () => {
+  it("keeps ended runs and old crew traffic behind explicit history, including an empty current view", async () => {
+    store.upsertRun(
+      run({ id: "old-crew", agentId: "alpha", startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR }),
+    );
+    store.upsertRun(run({ id: "live-crew", agentId: "beta", startedAt: NOW - HOUR }));
+    const old = commsRow("alpha", "crew", "Ended run handoff", NOW - 90 * 60_000);
+    commsRow("beta", "crew", "Live crew update", NOW - 10 * 60_000);
+    commsRow("CAPCOM", "crew", "Old operator update", NOW - 25 * HOUR);
+    await withCommsApp(async (app) => {
+      const recent = (await app.inject({ method: "GET", url: "/api/comms/crew" })).json();
+      expect(recent.messages.map((m: { text: string }) => m.text)).toEqual(["Live crew update"]);
+      expect(recent.hasEarlier).toBe(true);
+      const history = (
+        await app.inject({ method: "GET", url: "/api/comms/crew?history=1" })
+      ).json();
+      expect(history.messages.some((m: { id: string }) => m.id === old.id)).toBe(true);
+      expect(history.messages).toHaveLength(3);
+      expect(
+        (await app.inject({ method: "GET", url: "/api/comms/crew?history=bad" })).statusCode,
+      ).toBe(400);
+    });
+  });
   const commsConfig = (): CcConfig => ({
     ...config,
     crew: {
@@ -1401,6 +1425,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
   ["GET", "/api/repos/shop-app/map/tree"],
+  ["GET", "/api/repos/shop-app/map/graph"],
   ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
@@ -1411,6 +1436,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/drafts/guido-1/copied"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
+  ["GET", "/api/prs/flow"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
   ["GET", "/api/flight/schedule"],
@@ -1463,6 +1489,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
+  ["GET", "/api/runs/guido-1/handoff"],
   ["GET", "/api/runs/guido-1/attempts"],
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
@@ -1481,7 +1508,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
-  ["POST", "/api/prs/shop-app/12/uat", { action: "accept" }],
+  ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
@@ -1532,10 +1559,16 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/test-lock/history"],
   ["GET", "/api/guard/hits?days=7"],
   ["GET", "/api/hud-screenshots/:id"],
+  ["GET", "/api/prs/:n/evidence"],
+  ["GET", "/api/prs/:n/evidence/:sha/:name"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
+  ["GET", "/api/qa/review-shots/:id"],
+  ["GET", "/api/qa/uat/:repoId/:number"],
+  ["GET", "/api/qa/queue"],
+  ["GET", "/api/repos/:repoId/prs/:number/files"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2259,6 +2292,7 @@ describe("local access", () => {
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
+      if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
@@ -2275,6 +2309,11 @@ describe("local access", () => {
                 payload: body,
               })
             : await post(url, json, body);
+      if (url === "/api/repos/:repoId/prs/:number/files") {
+        // This DB-backed read has no placeholder PR; unlike worktree files it answers unknown.
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);
@@ -2354,7 +2393,17 @@ describe("local access", () => {
         expect(r.statusCode).toBe(409);
         continue;
       }
+      if (url.startsWith("/api/qa/review-shots/")) {
+        // no screenshot is stored for the placeholder id
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
       if (url === "/api/attention/unknown") {
+        expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url.startsWith("/api/qa/uat/")) {
+        // the placeholder PR is not in this fixture
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -2367,6 +2416,7 @@ describe("local access", () => {
         url === "/api/repos/shop-app/map/conflicts" ||
         url === "/api/repos/shop-app/map" ||
         url === "/api/repos/shop-app/map/tree" ||
+        url === "/api/repos/shop-app/map/graph" ||
         url === "/api/repos/shop-app/map/live"
       ) {
         // This fixture has no crew checkout to check.
@@ -2627,6 +2677,29 @@ describe("local access", () => {
 });
 
 describe("agents", () => {
+  it("serves durable outgoing and received handoffs, and rejects unknown runs", async () => {
+    const old = run({
+      id: "handoff-old",
+      ticket: "shop-app#7",
+      branch: "feature/7-work",
+      endedAt: NOW,
+    });
+    store.upsertRun(old);
+    const h = recordRunHandoff(store, old, null);
+    expect(h).not.toBeNull();
+    expect((await get(`/api/runs/${old.id}/handoff`)).json()).toMatchObject({
+      runId: old.id,
+      ticket: "shop-app#7",
+    });
+    store.upsertRun(run({ id: "handoff-next", ticket: "shop-app#7" }));
+    expect(store.claimHandoff(old.id, "claim")).toBe(true);
+    expect(store.acceptHandoff(old.id, "claim", "guido-1", "handoff-next")).toBe(true);
+    expect((await get("/api/runs/handoff-next/handoff")).json()).toMatchObject({
+      runId: old.id,
+      acceptedBy: "guido-1",
+    });
+    expect((await get("/api/runs/unknown/handoff")).statusCode).toBe(404);
+  });
   it("runs honours ?limit and validates it as an integer 1..500", async () => {
     for (let i = 1; i <= 3; i++) store.upsertRun(run({ id: `r${i}`, seq: i, startedAt: NOW - i }));
     const two = await get("/api/agents/shop-app-ta/runs?limit=2");
@@ -4119,43 +4192,101 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
-  it("serves a fixture repo's map snapshot under 300 KB, excluding observed loops", async () => {
+  it("serves a light map with an indexed graph only on demand, excluding observed loops", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
+    if (!session) throw Error("fixture session missing");
     session.checkout = mapCheckout(dir);
     const response = await get("/api/repos/shop-app/map");
     expect(response.statusCode).toBe(200);
-    expect(Buffer.byteLength(response.body)).toBeLessThan(300_000);
-    expect(response.json()).toMatchObject({
+    expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
+    const raw = response.json();
+    expect(raw).not.toHaveProperty("imports");
+    expect(raw).not.toHaveProperty("hist");
+    expect(raw).toMatchObject({
       repoId: "shop-app",
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
-      rules: { areas: DEFAULT_REPO_RULES.areas, hardRules: DEFAULT_REPO_RULES.hardRules },
-      hist: expect.objectContaining({
-        since: expect.any(Number),
-        prCount: 0,
-        fixCount: 0,
-        files: {},
-        coupling: [],
-      }),
       findings: [],
-      seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
+      seats: [{ seat: "guido-1", context: null }],
     });
-    expect(response.json().tree).toContainEqual(
+    const light = unpackMap(raw);
+    expect(light.tree).toContainEqual(
       expect.objectContaining({ path: "packages/core/src/map.ts", lines: expect.any(Number) }),
     );
-    expect(response.json().imports).toContainEqual({
+    const graphResponse = await get(`/api/repos/shop-app/map/graph?key=${raw.graphKey}`);
+    expect(graphResponse.statusCode).toBe(200);
+    const graph = graphResponse.json();
+    expect(
+      graph.imports.every((edge: unknown[]) => edge.length === 2 && edge.every(Number.isInteger)),
+    ).toBe(true);
+    const full = joinMapGraph(light, graph);
+    expect(full.imports).toContainEqual({
       from: "packages/core/src/map.ts",
       to: "packages/core/src/types.ts",
     });
-    expect(response.json().imports).toContainEqual({
+    expect(full.imports).toContainEqual({
       from: "apps/server/src/map/ring.ts",
       to: "packages/core/src/types.ts",
     });
-    expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
+    expect(full.hist.prCount).toBe(0);
+    const cached = await app.inject({
+      method: "GET",
+      url: `/api/repos/shop-app/map/graph?key=${raw.graphKey}`,
+      headers: { "if-none-match": graphResponse.headers.etag as string },
+    });
+    expect(cached.statusCode).toBe(304);
+    expect((await get("/api/repos/shop-app/map/graph?key=old")).statusCode).toBe(409);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
+  });
+
+  it("keeps a 1,074-file repository under 60 KB with 4,616 graph edges and history excluded", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw Error("missing session");
+    session.checkout = mapCheckout(dir);
+    const tree = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/core/test/fixtures/map-tree.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { path: string; lines: number }[];
+    const imports = Array.from({ length: 4616 }, (_, i) => ({
+      from: tree[i % tree.length]?.path as string,
+      to: tree[(i + 1) % tree.length]?.path as string,
+    }));
+    const hist: Awaited<ReturnType<typeof mapTree>>["hist"] = {
+      since: NOW - 90 * DAY,
+      prCount: 600,
+      fixCount: 80,
+      files: Object.fromEntries(tree.map((_, i) => [i, [10, 2, NOW, [7, 8]]])),
+      coupling: [],
+    };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      mapTree: async () => ({ tree, imports, hist }),
+    });
+    try {
+      const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+      expect(response.statusCode).toBe(200);
+      expect(unpackMap(response.json()).tree).toHaveLength(1074);
+      expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
+      expect(response.json()).not.toHaveProperty("imports");
+      expect(response.json()).not.toHaveProperty("hist");
+      const graph = await a.inject({
+        method: "GET",
+        url: `/api/repos/shop-app/map/graph?key=${response.json().graphKey}`,
+      });
+      expect(graph.statusCode).toBe(200);
+      expect(graph.json().imports).toHaveLength(4616);
+      expect(graph.json().hist.files).toHaveProperty("1073");
+    } finally {
+      await a.close();
+    }
   });
 
   it("reuses the map payload while its inputs are unchanged and rebuilds when one changes", async () => {
@@ -4307,7 +4438,9 @@ describe("boards, escalations, health", () => {
         commitOnDefault(checkout, "added.ts");
         const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
         expect(builds).toHaveLength(2);
-        expect(moved.json().tree).toContainEqual(expect.objectContaining({ path: "added.ts" }));
+        expect(unpackMap(moved.json()).tree).toContainEqual(
+          expect.objectContaining({ path: "added.ts" }),
+        );
       } finally {
         await a.close();
       }
@@ -4335,6 +4468,7 @@ describe("boards, escalations, health", () => {
         appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
         clock += 5000;
         const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(after.json().seq).toBeGreaterThan(before.json().seq);
         expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
           "packages/core/src/map.ts",
         ]);
@@ -5015,8 +5149,57 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([{ ...pr, preview: null }]);
+    expect(r.json()).toEqual([{ ...pr, check: null, preview: null, previewable: false }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
+  });
+
+  it("prs/flow returns every open PR with its ownership flow", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 4,
+          title: "Flow row",
+          url: "https://github.com/o/shop-app/pull/4",
+          branch: "feature/4-flow",
+          ticket: "shop-app#4",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "pending",
+          createdAt: NOW - HOUR,
+          updatedAt: NOW,
+          mergedAt: null,
+          mergeCommitSha: null,
+          headSha: null,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          checks: [],
+          closingIssues: [],
+        },
+      ],
+      NOW,
+    );
+
+    const response = await get("/api/prs/flow");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().repos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          repoId: "shop-app",
+          rows: expect.arrayContaining([
+            expect.objectContaining({
+              pr: 4,
+              ticket: "shop-app#4",
+              owner: "nobody",
+              stage: "building",
+            }),
+          ]),
+        }),
+      ]),
+    );
   });
 
   // #26 A1: the Board reads only the PRs it can put on a card.
@@ -5045,11 +5228,11 @@ describe("boards, escalations, health", () => {
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
-      { ...pr(4, "shop-app#9"), preview: null },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      { ...pr(5, null), preview: null },
-      { ...pr(4, "shop-app#9"), preview: null },
+      { ...pr(5, null), check: null, preview: null, previewable: false },
+      { ...pr(4, "shop-app#9"), check: null, preview: null, previewable: false },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
@@ -5129,7 +5312,9 @@ describe("boards, escalations, health", () => {
         "createdAt",
         "updatedAt",
         "mergedAt",
+        "check",
         "preview",
+        "previewable",
       ].sort(),
     );
     expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
@@ -5138,6 +5323,67 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);
     expect((await get("/api/repos/shop-app/prs?days=0")).statusCode).toBe(400);
     expect((await get("/api/repos/shop-app/prs?all=2")).statusCode).toBe(400);
+  });
+
+  it("repos/:repoId/prs?shape=summary carries the review state: queued place for an open PR, null otherwise", async () => {
+    const pr = (number: number, state: "open" | "merged") => ({
+      repoId: "shop-app",
+      number,
+      title: `t${number}`,
+      url: `https://github.com/o/shop-app/pull/${number}`,
+      branch: `chore/x${number}`,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: clock - 1000,
+      updatedAt: clock - 500,
+      mergedAt: state === "merged" ? clock - 500 : null,
+      mergeCommitSha: null,
+      headSha: null,
+      mergeable: null,
+      author: null,
+      assignees: [] as string[],
+      closingIssues: [] as number[],
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [pr(1, "open"), pr(2, "open"), pr(3, "open"), pr(4, "merged")],
+      0,
+    );
+    const ask = (prNumber: number, at: number, attempt: number) =>
+      store.requestReview({
+        authorRunId: "c1",
+        repoId: "shop-app",
+        seatId: "RETRO-1",
+        prNumber,
+        sha: "c".repeat(40),
+        epoch: 0,
+        attempt,
+        round: 1,
+        at,
+      });
+    ask(1, clock - 300, 1);
+    ask(2, clock - 200, 2);
+    ask(4, clock - 100, 3);
+    const byNumber = async (query: string) =>
+      Object.fromEntries(
+        (
+          (await get(`/api/repos/shop-app/prs${query}`)).json() as {
+            number: number;
+            check: unknown;
+          }[]
+        ).map((p) => [p.number, p.check]),
+      );
+    for (const query of ["?shape=summary", "", "?detail=1"]) {
+      expect(await byNumber(query)).toEqual({
+        1: { kind: "queued", position: 1 },
+        2: { kind: "queued", position: 2 },
+        3: null,
+        4: null,
+      });
+    }
   });
 
   it("repos returns the configured repos as id, github, project and projectUrl", async () => {
@@ -5994,7 +6240,7 @@ describe("SSE stream", () => {
       const frames = mapFixture(vendor).trim().split("\n");
       appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
       bus.emit("boards");
-      await selected.until('"type":"call.end"');
+      await selected.until('"type":"invalidate"');
       const deltas = selected
         .text()
         .split("\n")
@@ -6005,6 +6251,7 @@ describe("SSE stream", () => {
         [1, "call.start"],
         [2, "edit"],
         [3, "call.end"],
+        [4, "invalidate"],
       ]);
       expect(deltas[0]).toMatchObject({
         seat: "guido-1",
@@ -6278,6 +6525,25 @@ describe("crew routes", () => {
       ["end", "guido-1", { hold: undefined }],
     ]);
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
+  });
+
+  it("records the operator stop and its optional reason", async () => {
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: null,
+      cliSessionId: null,
+      state: "stopped",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const r = await post5("end", { hold: true, reason: "Wait for CI" });
+    expect(r.statusCode).toBe(200);
+    expect(store.seatSession("guido-1")?.stop).toEqual({
+      by: "operator",
+      reason: "Wait for CI",
+      at: NOW,
+    });
   });
 
   it("ends a set-aside run by id, and refuses an unknown run, a bad body and a supervisor refusal", async () => {
@@ -8692,6 +8958,23 @@ describe("operator token", () => {
     expect(store.getSetting("crew.paused")).toBeNull();
   });
 
+  it("requires the operator token for PR flow", async () => {
+    for (const headers of [{}, { [OPERATOR_HEADER]: "wrong" }]) {
+      const response = await guarded.inject({ method: "GET", url: "/api/prs/flow", headers });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    }
+    expect(
+      (
+        await guarded.inject({
+          method: "GET",
+          url: "/api/prs/flow",
+          headers: { [OPERATOR_HEADER]: "tok-1" },
+        })
+      ).statusCode,
+    ).toBe(200);
+  });
+
   describe("controller check route", () => {
     const calls: [string, string, string, string | undefined][] = [];
     const SHA7 = "abcdef1";
@@ -8898,10 +9181,10 @@ describe("operator token", () => {
     });
 
     it("needs the operator token", async () => {
-      expect((await post({}, { action: "accept" })).statusCode).toBe(401);
-      expect((await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept" })).statusCode).toBe(
-        401,
-      );
+      expect((await post({}, { action: "accept", sha: SHA })).statusCode).toBe(401);
+      expect(
+        (await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept", sha: SHA })).statusCode,
+      ).toBe(401);
       expect(calls).toEqual([]);
     });
 
@@ -8920,8 +9203,8 @@ describe("operator token", () => {
     });
 
     it("records a verdict for the waiting head and names a refusal", async () => {
-      expect((await post(key, { action: "accept" })).statusCode).toBe(200);
-      const refused = await post(key, { action: "send_back", note: "unreadable" });
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(200);
+      const refused = await post(key, { action: "send_back", sha: SHA, note: "unreadable" });
       expect(refused.statusCode).toBe(409);
       expect(refused.json().error).toContain("head moved");
       expect(calls).toEqual([
@@ -8930,10 +9213,18 @@ describe("operator token", () => {
       ]);
     });
 
+    it("refuses a stale displayed head before calling the engine", async () => {
+      const result = await post(key, { action: "accept", sha: "b".repeat(40) });
+      expect(result.statusCode).toBe(409);
+      expect(result.json().error).toContain("head changed");
+      expect(calls).toEqual([]);
+      expect((await post(key, { action: "accept" })).statusCode).toBe(400);
+    });
+
     it("answers 404 for a PR that is not waiting and 409 when loop writes are off", async () => {
-      expect((await post(key, { action: "accept" }, "13")).statusCode).toBe(404);
+      expect((await post(key, { action: "accept", sha: SHA }, "13")).statusCode).toBe(404);
       noWrites = true;
-      expect((await post(key, { action: "accept" })).statusCode).toBe(409);
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(409);
       expect(calls).toEqual([]);
     });
 
@@ -9524,6 +9815,55 @@ it("starts, lists and closes an operator-only PR preview", async () => {
       (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
         .statusCode,
     ).toBe(404);
+    // No preview manager (a preview hub), or no crew checkout for the repo: the start route would
+    // answer 409, so the row must say false.
+    const noManager = buildApp({ config, store, bus, previewRepoId: "shop-app" });
+    try {
+      expect((await noManager.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noManager.close();
+    }
+    const crew = config.crew;
+    if (!crew) throw new Error("crew missing");
+    const noCheckout = buildApp({
+      config: { ...config, crew: { ...crew, sessions: [] } },
+      store,
+      bus,
+      previews,
+      previewRepoId: "shop-app",
+    });
+    try {
+      expect((await noCheckout.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+        previewable: false,
+      });
+    } finally {
+      await noCheckout.close();
+    }
+    // A repo with preview support: an open PR can start one, a closed PR cannot. Another repo cannot.
+    const rowOf = async (repoId: string, number: number, query = "") =>
+      (await a.inject(`/api/repos/${repoId}/prs${query}`))
+        .json()
+        .find((pr: { number: number }) => pr.number === number);
+    for (const query of ["?all=1", "?all=1&shape=summary", "?all=1&detail=1"]) {
+      expect(await rowOf("shop-app", 41, query)).toMatchObject({
+        previewable: true,
+        preview: null,
+      });
+      expect(await rowOf("shop-app", 42, query)).toMatchObject({ previewable: false });
+      expect(await rowOf("site-builder", 41, query)).toMatchObject({
+        previewable: false,
+        preview: null,
+      });
+    }
+    expect((await a.inject("/api/repos/shop-app/prs/41")).json()).toMatchObject({
+      previewable: true,
+      preview: null,
+    });
+    expect((await a.inject("/api/repos/site-builder/prs/41")).json()).toMatchObject({
+      previewable: false,
+    });
     const started = await a.inject({
       method: "POST",
       url: "/api/previews",
@@ -9532,6 +9872,10 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect(await rowOf("shop-app", 41)).toMatchObject({
+      previewable: true,
+      preview: { port: 7431 },
+    });
     expect(
       (await a.inject("/api/repos/shop-app/prs"))
         .json()

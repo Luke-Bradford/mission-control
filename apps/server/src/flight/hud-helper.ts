@@ -12,6 +12,7 @@ process.once("message", async (job: HudHelperJob) => {
     const png = await renderHudWithPlaywright(job.url, hudRenderRequest(job.hubOrigin), {
       deadlineMs: job.deadlineMs,
       ...(job.executablePath === undefined ? {} : { executablePath: job.executablePath }),
+      ...(job.colorScheme === undefined ? {} : { colorScheme: job.colorScheme }),
     });
     reply = { ok: true, png: png.toString("base64") };
   } catch (e) {

@@ -6,6 +6,31 @@ import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
 
 const GAP = LiveMap.REFETCH_GAP_MS;
+it("a QA deep link selects every PR file, including one absent from main's tree", async () => {
+  const snapshot = structuredClone(mapSnapshotFixture);
+  const files = ["src/main.ts", "new/pr-only.ts"];
+  const view = render(<CrewMapView snapshot={snapshot} focusedFiles={files} focusedPr="7" />);
+  expect(view.container.querySelectorAll('[data-pr-selected="true"]')).toHaveLength(2);
+  expect(screen.getByText("PR #7 · 2 selected files")).toBeTruthy();
+  const selected = screen.getByRole("complementary", { name: "Selection detail" });
+  expect(within(selected).getByRole("heading", { name: "src/main.ts" })).toBeTruthy();
+});
+
+it("clearing a QA focus removes its PR-only tiles and search results without a new snapshot", () => {
+  const snapshot = structuredClone(mapSnapshotFixture);
+  snapshot.conflicts = [];
+  const view = render(
+    <CrewMapView snapshot={snapshot} focusedFiles={["qa-only/new.ts"]} focusedPr="7" />,
+  );
+  expect(view.container.querySelectorAll('[data-pr-selected="true"]')).toHaveLength(1);
+  view.rerender(<CrewMapView snapshot={snapshot} />);
+  expect(view.container.querySelectorAll('[data-pr-selected="true"]')).toHaveLength(0);
+  expect(view.container.querySelector('[title*="qa-only/new.ts"]')).toBeNull();
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file" }), {
+    target: { value: "qa-only" },
+  });
+  expect(screen.getByText("No file matches.")).toBeTruthy();
+});
 // these exercise ordering and resync; the throttle has its own test below
 beforeEach(() => {
   LiveMap.REFETCH_GAP_MS = 0;
@@ -96,7 +121,7 @@ it("loads live data, resyncs a gap and reconnect, and closes its subscription", 
   expect(sources[0].close).toHaveBeenCalledOnce();
 });
 
-it("treats zero-sequence snapshots as authoritative instead of double-counting edit churn", async () => {
+it("applies an ordered call after an authoritative zero-sequence snapshot once", async () => {
   const listeners: Record<string, (e: MessageEvent) => void> = {};
   vi.stubGlobal(
     "EventSource",
@@ -108,25 +133,30 @@ it("treats zero-sequence snapshots as authoritative instead of double-counting e
     },
   );
   const snapshot = { ...structuredClone(mapSnapshotFixture), seq: 0 };
-  const get = vi.fn().mockImplementation(async () => structuredClone(snapshot));
-  const receive = vi.fn();
+  const get = vi.fn(async () => structuredClone(snapshot)),
+    receive = vi.fn();
   const live = new LiveMap("sample", get, receive, vi.fn());
   live.start();
   await waitFor(() => expect(receive).toHaveBeenCalledTimes(1));
-  listeners.map(
-    new MessageEvent("map", {
-      data: JSON.stringify({
-        type: "edit",
-        seq: 1,
-        seat: "GUIDO-1",
-        file: "src/main.ts",
-        add: 12,
-        rem: 3,
-      }),
+  const event = new MessageEvent("map", {
+    data: JSON.stringify({
+      type: "call.start",
+      seq: 1,
+      seat: "GUIDO-1",
+      id: "new",
+      tool: "Bash",
+      detail: "pwd",
+      files: [],
+      since: 100,
     }),
-  );
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  expect(receive.mock.lastCall?.[0].seats[0].scope.modified[0].add).toBe(12);
+  });
+  listeners.map(event);
+  await waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(receive.mock.lastCall?.[0].calls).toBeUndefined();
+  expect(receive.mock.lastCall?.[0].seats[0].calls.at(-1)?.id).toBe("new");
+  listeners.map(event);
+  expect(receive).toHaveBeenCalledTimes(2);
   live.stop();
 });
 

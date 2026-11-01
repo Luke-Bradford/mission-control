@@ -107,6 +107,8 @@ export interface CommsTicketContext {
   issueNumber: number | null;
 }
 export interface CommsMessagesResponse {
+  /** Crew's current view has archived messages available through Earlier. */
+  hasEarlier?: boolean;
   messages: CommsMessage[];
   cursor?: string | null;
   unread?: number;

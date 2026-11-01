@@ -65,6 +65,9 @@ function fakePlaywright(
   const popupClose = vi.fn(async () => {});
   const pageEvents = new Map<string, Array<() => void>>();
   const page = {
+    click: vi.fn(async () => {
+      order.push("click");
+    }),
     goto: vi.fn(async () => {
       order.push("goto");
       pageHandler?.({ close: popupClose });
@@ -170,6 +173,47 @@ describe("hudRenderRequest", () => {
 });
 
 describe("renderHudWithPlaywright", () => {
+  it("captures the old Audit readiness view when main predates the QA route", async () => {
+    const url = "http://127.0.0.1:7420/qa";
+    const fake = fakePlaywright({ pageUrl: "http://127.0.0.1:7420/audit" });
+    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+    expect(fake.page.goto).toHaveBeenCalledTimes(2);
+    expect(fake.page.click).toHaveBeenCalledWith(
+      '[aria-label="QA view"] button:text-is("PR readiness")',
+      expect.anything(),
+    );
+  });
+  it("selects non-default Audit views before capturing them", async () => {
+    for (const [tab, label] of [
+      ["readiness", "PR readiness"],
+      ["hotspots", "Hotspots"],
+    ]) {
+      const url = `http://127.0.0.1:7420/audit?evidence-tab=${tab}`;
+      const fake = fakePlaywright({ pageUrl: url });
+      await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+      expect(fake.page.click).toHaveBeenCalledWith(
+        `[aria-label="QA view"] button:text-is("${label}")`,
+        expect.anything(),
+      );
+      expect(fake.order.indexOf("click")).toBeGreaterThan(fake.order.indexOf("pageReady"));
+      expect(fake.page.screenshot).toHaveBeenCalledOnce();
+    }
+  });
+  it("opens the page in the colour scheme it is asked for, and in none when it is not", async () => {
+    const dark = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(dark.playwright),
+      colorScheme: "dark",
+    });
+    expect(dark.browser.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({ colorScheme: "dark" }),
+    );
+    const plain = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(plain.playwright));
+    const opened = (plain.browser.newContext.mock.calls as unknown as [object][])[0]?.[0];
+    expect(opened).not.toHaveProperty("colorScheme");
+  });
+
   it("sandboxes Chrome and installs context routes before creating the main page", async () => {
     const fake = fakePlaywright();
     const png = await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));

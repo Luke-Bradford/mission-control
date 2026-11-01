@@ -40,6 +40,8 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { prEvidenceStore } from "../src/pr-evidence/store.ts";
+import { createReviewPreviews } from "../src/review-preview.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -448,6 +450,7 @@ describe("startWatch", () => {
       "mcp__mc__read_ticket",
       "mcp__mc__answer_question",
       "mcp__mc__start_seat",
+      "mcp__mc__reassign_ticket",
       "mcp__mc__message_seat",
       "mcp__mc__comms_pin",
       "mcp__mc__flight_state",
@@ -627,6 +630,30 @@ describe("startReview", () => {
     expect(store.seatSession("retro")?.state).toBe("idle");
   });
 
+  it("does not launch a web review when screenshot evidence staging is incomplete", async () => {
+    const r = reviewOfPush();
+    const evidence = prEvidenceStore(join(dir, "evidence"));
+    evidence.save(
+      {
+        repoId: "mc",
+        pr: 9,
+        sha: r.sha,
+        mainSha: r.fork,
+        capturedAt: 1,
+        pairs: [
+          { page: "board", scheme: "light", changedPixels: 0, changedPercent: 0, regions: [] },
+        ],
+      },
+      [],
+    );
+    const { sup } = make({ scratchRetro: true, prEvidence: evidence, prEvidenceRepo: "mc" });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow("image is missing");
+    expect(userLines()).toHaveLength(0);
+    expect(existsSync(scratch(r.reviewId))).toBe(false);
+    expect(store.runs("retro", 1)).toHaveLength(0);
+  });
+
   it("refuses scratch storage inside hub data before preparing a review", async () => {
     const r = reviewOfPush();
     const worktrees = join(dir, "db", "scratch");
@@ -665,6 +692,71 @@ describe("startReview", () => {
     );
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
+  });
+
+  it("a web PR's review brief says its preview is starting, and the preview closes when the run ends", async () => {
+    const r = reviewOfPush();
+    const opened: unknown[] = [];
+    const closed: string[] = [];
+    const reviewPreviews = {
+      origin: () => null,
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
+      open: async (input: unknown) => {
+        opened.push(input);
+        return true;
+      },
+      close: async (runId: string) => {
+        closed.push(runId);
+      },
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(opened).toEqual([{ runId, repoId: "mc", pr: 9, branch: BRANCH, sha: r.sha }]);
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Preview: this PR changes web files");
+    expect(brief).toContain("mc preview_browser");
+    await sup.endRun("retro");
+    await until(() => expect(closed).toContain(runId));
+  });
+
+  it("a review still starts when its preview build never finishes", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = createReviewPreviews({
+      previews: {
+        start: () => new Promise(() => {}),
+        close: async () => true,
+        touch: () => true,
+        get: () => null,
+      },
+      files: () => ["apps/web/a.tsx"],
+      webGlobs: async () => ["apps/web/**"],
+      checkout: () => "/clone",
+    });
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("- Preview: this PR changes web files");
+    expect(store.run(runId)?.endedAt).toBeNull();
+  });
+
+  it("a PR that changes no web files gets no preview line", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = {
+      origin: () => null,
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
+      open: async () => false,
+      close: async () => {},
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("- Preview:");
   });
 
   it("a review brief carries the Done-when table from the author's report", async () => {
@@ -1273,7 +1365,8 @@ describe("a run set aside in review", () => {
     expect(ended(seen)).toEqual([
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
     ]);
-    await until(() => expect(existsSync(wt())).toBe(false));
+    expect(existsSync(wt())).toBe(true);
+    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(before);
     expect(starts()).toHaveLength(1);
   });
@@ -1542,7 +1635,7 @@ describe("a run set aside in review", () => {
     expect(store.run(runId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
   });
 
-  it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {
+  it("endRunByEngine ends an unfinished aside run, preserves its worktree and leaves the seat row", async () => {
     const { sup, runId, seen } = await aside(false);
     const other = await sup.startRun("guido-1", 43);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
@@ -1553,14 +1646,21 @@ describe("a run set aside in review", () => {
     expect(ended(seen).filter((e) => e.runId === runId)).toEqual([
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "engine" },
     ]);
-    expect(existsSync(wt())).toBe(false);
+    expect(existsSync(wt())).toBe(true);
+    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(row);
     expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
     expect(sup.seatFacts("guido-1")).not.toBeNull();
   });
 
-  it("endRunByEngine leaves a note when an aside run's worktree will not go", async () => {
+  it("endRunByEngine leaves a note when a completed aside run's worktree will not go", async () => {
     const { sup, runId } = await aside(false);
+    store.setRunLoop(runId, {
+      ...store.run(runId)?.loop,
+      ...NEW_LOOP,
+      phase: "done",
+      aside: { worktree: wt(), wake: false },
+    });
     prep.failRemove = true;
     await sup.endRunByEngine(runId);
     expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });

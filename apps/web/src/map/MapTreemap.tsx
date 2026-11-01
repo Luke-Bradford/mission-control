@@ -20,14 +20,19 @@ type Branch = {
   children: Branch[];
   lines?: number;
   byName?: Map<string, Branch>;
+  weight?: number;
 };
-const weight = (node: Branch): number =>
-  node.lines === undefined
-    ? Math.max(
-        1,
-        node.children.reduce((n, c) => n + weight(c), 0),
-      )
-    : Math.max(4, node.lines);
+const weight = (node: Branch): number => {
+  if (node.weight !== undefined) return node.weight;
+  node.weight =
+    node.lines === undefined
+      ? Math.max(
+          1,
+          node.children.reduce((n, c) => n + weight(c), 0),
+        )
+      : Math.max(4, node.lines);
+  return node.weight;
+};
 /** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
 export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
   const root: Branch = { path: "", name: "", children: [] };
@@ -157,13 +162,16 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
 
 function useSize() {
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 1000, height: 700 });
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const update = () => {
       const r = el.getBoundingClientRect();
-      if (r.width && r.height) setSize({ width: r.width, height: r.height });
+      const next = { width: r.width || 1000, height: r.height || 700 };
+      setSize((current) =>
+        current?.width === next.width && current.height === next.height ? current : next,
+      );
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
@@ -209,6 +217,7 @@ export function branchOnlyFiles(
 }
 
 type TileProps = {
+  focused: boolean;
   path: string;
   x: number;
   y: number;
@@ -246,6 +255,8 @@ const Tile = memo(function Tile(t: TileProps) {
       data-strong={t.strong || undefined}
       data-play-current={t.playCurrent || undefined}
       data-conflict={t.conflict || undefined}
+      data-pr-selected={t.focused || undefined}
+      aria-pressed={t.focused}
       style={
         {
           ...style({ x: t.x, y: t.y, width: t.width, height: t.height }),
@@ -278,6 +289,7 @@ export const MapTreemap = memo(function MapTreemap({
   marks = noMarks,
   currentMark = null,
   markSeat = null,
+  focusedFiles = [],
 }: {
   snapshot: MapSnapshot;
   visual: Record<string, ChangeVisual>;
@@ -290,10 +302,18 @@ export const MapTreemap = memo(function MapTreemap({
   marks?: Map<string, number>;
   currentMark?: string | null;
   markSeat?: string | null;
+  focusedFiles?: readonly string[];
 }) {
   const [ref, size] = useSize();
+  const focused = useMemo(() => new Set(focusedFiles), [focusedFiles]);
   const files = useMemo(() => [...snapshot.tree, ...extraFiles], [snapshot.tree, extraFiles]);
-  const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
+  const layout = useMemo(
+    () =>
+      size
+        ? treemapLayout(files, size.width, size.height)
+        : { tiles: [], folders: [], byPath: new Map<string, TreemapTile>() },
+    [files, size],
+  );
   // the branches a conflicting file is changed on, for the tile's description
   const conflictBranches = useMemo(() => {
     const out = new Map<string, Set<string>>();
@@ -360,6 +380,7 @@ export const MapTreemap = memo(function MapTreemap({
             lines={changed.length ? `+${added} −${removed}` : ""}
             note={description}
             conflict={conflict}
+            focused={focused.has(tile.path)}
             intensity={strength(first)}
             intensity2={second ? strength(second) : strength(first)}
             colour={first ? colour(first.seat) : "var(--void-line)"}
@@ -393,8 +414,8 @@ export const MapTreemap = memo(function MapTreemap({
                 data-current={currentMark === path || undefined}
                 key={path}
                 style={{
-                  left: `${Math.min(Math.max(x, 10), size.width - 10)}px`,
-                  top: `${Math.min(Math.max(y, 10), size.height - 10)}px`,
+                  left: `${Math.min(Math.max(x, 10), (size?.width ?? 0) - 10)}px`,
+                  top: `${Math.min(Math.max(y, 10), (size?.height ?? 0) - 10)}px`,
                 }}
               >
                 {n}

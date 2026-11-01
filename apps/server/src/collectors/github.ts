@@ -217,7 +217,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 const PR_FIELDS = `
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
-        files(first: ${PR_FILES_MAX}) { nodes { path changeType } }
+        files(first: ${PR_FILES_MAX}) { pageInfo { hasNextPage endCursor } nodes { path changeType } }
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
@@ -1169,6 +1169,42 @@ function prFiles(raw: unknown): { files?: PrFileInput[] } {
   };
 }
 
+/** Read the rest of a large diff; never join file lists from different heads. */
+async function completePrFiles(
+  repo: CcConfig["repos"][number],
+  node: Record<string, unknown>,
+  gql: Gql,
+): Promise<PullRequestView | null> {
+  const pr = mapPr(repo, node);
+  if (!pr || pr.changedFiles == null || (pr.files?.length ?? 0) >= pr.changedFiles) return pr;
+  const [owner = "", name = ""] = repo.github.split("/");
+  let info = path(node, "files", "pageInfo");
+  const seen = new Set<string>();
+  while ((pr.files?.length ?? 0) < pr.changedFiles) {
+    const after = path(info, "endCursor");
+    if (path(info, "hasNextPage") !== true || typeof after !== "string" || seen.has(after))
+      throw new Error(`#${pr.number}: incomplete changed-file list`);
+    seen.add(after);
+    const data = await call(
+      gql,
+      `query PullRequestFiles($owner: String!, $name: String!, $number: Int!, $after: String!) {
+      ${RATE_LIMIT_SELECTION}
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        headRefOid
+        files(first: ${PR_FILES_MAX}, after: $after) { pageInfo { hasNextPage endCursor } nodes { path changeType } }
+      } }
+    }`,
+      { owner, name, number: pr.number, after },
+    );
+    const next = path(data, "repository", "pullRequest");
+    if (path(next, "headRefOid") !== pr.headSha)
+      throw new Error(`#${pr.number}: head changed while reading its files`);
+    pr.files = [...(pr.files ?? []), ...(prFiles(path(next, "files")).files ?? [])];
+    info = path(next, "files", "pageInfo");
+  }
+  return pr;
+}
+
 /**
  * Pull requests, newest update first. `all: false` reads page 1 only (every poll); `all: true`
  * pages until a node is older than PR_KEEP_MS or PR_MAX_PAGES, returning only nodes within it.
@@ -1216,7 +1252,7 @@ async function fetchPrs(
     nodes += conn.nodes.length;
     for (const n of conn.nodes) {
       if (!isObj(n)) continue;
-      const pr = mapPr(repo, n);
+      const pr = await completePrFiles(repo, n, gql);
       if (!pr) continue;
       if (all && now - pr.updatedAt > PR_KEEP_MS) {
         reachedOld = true;
@@ -1296,7 +1332,7 @@ export async function collectWaitedPrs(
         "repository",
         "pullRequest",
       );
-      const pr = isObj(node) ? mapPr(repo, node) : null;
+      const pr = isObj(node) ? await completePrFiles(repo, node, gql) : null;
       if (pr) prs.push(pr);
     }
   } catch (e) {
@@ -1357,7 +1393,7 @@ async function readNamedPrs(
       "repository",
       "pullRequest",
     );
-    const pr = isObj(node) ? mapPr(repo, node) : null;
+    const pr = isObj(node) ? await completePrFiles(repo, node, gql) : null;
     if (pr) prs.push(pr);
   }
   return store.upsertPullRequests(repo.id, prs, readAt);

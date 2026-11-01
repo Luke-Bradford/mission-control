@@ -1,8 +1,9 @@
-import type { Crew, MapSnapshot, PullRequestView } from "@mc/core";
+import type { Crew, PullRequestView } from "@mc/core";
 import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { ImpactLens, prSeats } from "../lenses/lenses.tsx";
+import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
 
 /**
  * What a PR's changes reach through imports. The repo map is read only once the operator asks, and
@@ -11,7 +12,7 @@ import { ImpactLens, prSeats } from "../lenses/lenses.tsx";
 export function PrImpact({ pr }: { pr: PullRequestView }) {
   const [asked, setAsked] = useState(false);
   const [focus, setFocus] = useState<string | null>(null);
-  const map = useResource<MapSnapshot>(asked ? RESOURCES.repoMap(pr.repoId) : null);
+  const map = useGraphSnapshot(asked ? pr.repoId : null);
   const crew = useResource<Crew>(asked ? RESOURCES.crew : null).data;
   const names = useMemo(
     () => Object.fromEntries((crew?.rows ?? []).map((row) => [row.id, callSign(row)])),
@@ -28,6 +29,9 @@ export function PrImpact({ pr }: { pr: PullRequestView }) {
     return map.error ? (
       <span className="warn-t">
         Impact unavailable: the map for {pr.repoId} could not be read ({map.error.message}).
+        <button type="button" onClick={map.retry}>
+          Retry impact
+        </button>
       </span>
     ) : (
       <span className="fg2" role="status">

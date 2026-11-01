@@ -1,5 +1,5 @@
 import type { ProfileStep, ReviewDepth } from "./profiles.ts";
-import type { ReviewVerdict } from "./review.ts";
+import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
@@ -23,6 +23,7 @@ export interface ConfigProfile {
   nodes?: ProfileStep[];
   trigger?: string;
   budget?: number | null;
+  budgetUsd?: number | null;
   orchestrationOnly?: boolean;
   planRequired: boolean;
   reviewer: { role: string; depth: ReviewDepth };
@@ -550,6 +551,16 @@ export interface QaFindingView {
   resolvedReviewId: number | null;
 }
 
+/** One screenshot RETRO took on a review's preview; `GET /api/qa/review-shots/:id` serves its PNG. */
+export interface ReviewShotView {
+  id: string;
+  label: string;
+  /** The viewport width in px. */
+  width: number;
+  theme: "dark" | "light";
+  at: number;
+}
+
 /** One completed RETRO review round, including clean rounds with no findings. */
 export interface QaReviewRoundView {
   reviewId: number;
@@ -562,6 +573,8 @@ export interface QaReviewRoundView {
   blocking: number;
   minor: number;
   endedAt: number;
+  /** The screenshots RETRO took on the PR's preview during this round, oldest first. */
+  screenshots: ReviewShotView[];
 }
 
 /** `GET /api/qa/findings`. */
@@ -692,4 +705,65 @@ export interface TicketHistory {
   timeline: TicketEvent[];
   /** Pass as `before` for the next page; null on the last. */
   nextBefore: string | null;
+}
+
+/** One comms message on a PR's readiness card. */
+export interface PrUatComms {
+  id: string;
+  at: number;
+  from: string;
+  to: string;
+  label: string | null;
+  text: string;
+}
+
+/** A blocking finding as one line: `file:line summary`. */
+export interface PrUatFinding {
+  severity: string;
+  file: string;
+  line: number;
+  summary: string;
+}
+
+/**
+ * One review round that ran on the PR. `result`: `clean` (nothing blocking), `resolved` (every
+ * blocking finding has a resolution) or `open` (at least one blocking finding has none).
+ */
+export interface PrUatRound {
+  round: number;
+  /** PR-wide chronological review number; unlike the engine round it survives Send back. */
+  sequence?: number;
+  reviewId: number;
+  at: number;
+  sha: string;
+  blocking: PrUatFinding[];
+  /** The author seat's newest message between this round and the next, if any. */
+  reply: { at: number; from: string; text: string } | null;
+  /** The first commit the branch got between this round and the next, if any. */
+  fixSha: string | null;
+  result: "clean" | "resolved" | "open";
+}
+
+/** What the operator needs to accept one PR: its comms, rework story and how to try the branch. */
+export interface PrUatView {
+  /** The immutable PR head these details describe. */
+  sha?: string | null;
+  qaSummary?: string | null;
+  files?: string[];
+  tests?: ReportedTest[];
+  testsAdded?: { file: string; failedOnBase: boolean }[];
+  screenshots?: ReviewShotView[];
+  flightId?: string | null;
+  repoId: string;
+  number: number;
+  /** The newest comms that name the PR or its ticket, newest first. */
+  comms: PrUatComms[];
+  /** Review rounds, newest first. */
+  rounds: PrUatRound[];
+  tryIt: { branch: string; commands: string[]; previewUrl: string | null };
+  /**
+   * Whether the PR waits for the operator's acceptance, since when (the park's time) and the note
+   * the operator last sent it back with; null where there is none.
+   */
+  uat: { waiting: boolean; since: number | null; note: string | null };
 }

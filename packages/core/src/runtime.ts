@@ -81,6 +81,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
+  MC_TOOL_NAMES.reassignTicket,
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.commsPin,
   MC_TOOL_NAMES.flightState,
@@ -165,6 +166,7 @@ export const MC_TOOL_GRANTS: Readonly<
       MC_TOOL_NAMES.callFlight,
       MC_TOOL_NAMES.reportFindings,
       MC_TOOL_NAMES.restoreFile,
+      MC_TOOL_NAMES.previewBrowser,
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsInbox,
       MC_TOOL_NAMES.commsSend,
@@ -387,6 +389,7 @@ export const SCRATCH_TOOLS = [
   MC_TOOLS.callFlight,
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
+  MC_TOOLS.previewBrowser,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsInbox,
   MC_TOOLS.commsSend,
@@ -760,7 +763,11 @@ function protectedGlobs(extra: readonly string[]): readonly string[] {
  * includes `a/b`), and a glob that names a folder covers everything in it (`apps` and `apps/**`
  * both cover `apps/x.ts`). Area globs hold no other syntax (the config loader refuses it).
  */
+const globPatterns = new Map<string, RegExp>();
 export function globMatches(glob: string, path: string, ignoreCase = false): boolean {
+  const key = JSON.stringify([glob, ignoreCase]);
+  const cached = globPatterns.get(key);
+  if (cached) return cached.test(path);
   let re = "";
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i] as string;
@@ -778,7 +785,10 @@ export function globMatches(glob: string, path: string, ignoreCase = false): boo
       re += c.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
     }
   }
-  return new RegExp(`^${re}(?:/.*)?$`, ignoreCase ? "si" : "s").test(path);
+  const compiled = new RegExp(`^${re}(?:/.*)?$`, ignoreCase ? "si" : "s");
+  if (globPatterns.size >= 512) globPatterns.delete(globPatterns.keys().next().value as string);
+  globPatterns.set(key, compiled);
+  return compiled.test(path);
 }
 
 /** Whether a writer with this area may change `path`: no area is the whole checkout. */
@@ -843,12 +853,15 @@ export function protectedFileRules(
  *   successful PostToolUse while it keeps running, which would free the test lock early, and
  *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
  *   command and `run_in_background` is refused before any hook;
+ * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
+ *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls;
  * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
  *   changes underneath it.
  */
 export const CREW_CLI_ENV = {
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
   DISABLE_AUTOUPDATER: "1",
 } as const;
 
@@ -1238,6 +1251,8 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
+  /** Per-run Claude spend cap, passed as `--max-budget-usd`; absent: no CLI cap. */
+  maxBudgetUsd?: number | null;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
   /**
@@ -1352,6 +1367,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
+    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",

@@ -244,6 +244,8 @@ export interface CcConfig {
     needsYouLabels?: string[];
     /** Commands that run a whole suite (the guard serialises them): each is one of the repo's commands.writer entries or a word-extension of one. */
     fullSuite?: string[];
+    /** The command that runs the repo's app from a checkout; the QA readiness card shows it under the branch commands. */
+    runCommand?: string;
     /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
     requiredChecks?: string[];
     /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
@@ -502,6 +504,7 @@ const fileSchema = z
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
+        run_command: nonEmpty.optional(),
         required_checks: z
           .array(
             nonEmpty.refine(
@@ -681,6 +684,7 @@ const fileSchema = z
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
+        ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         requiredChecks: r.required_checks,
         commands: r.commands ?? defaultSeatCommands(),
         protectedFiles: r.protected,

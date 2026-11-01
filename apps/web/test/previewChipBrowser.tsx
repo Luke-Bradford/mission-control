@@ -1,6 +1,8 @@
 import "@fontsource/barlow-semi-condensed/latin-500.css";
 import "@fontsource/ibm-plex-sans/latin-400.css";
 import "../src/hud.css";
+import "../src/board/board.css";
+import "../src/agent/agent.css";
 import type { RunView } from "@mc/core";
 import { createRoot } from "react-dom/client";
 import { RunRow } from "../src/agent/RunsPanel.tsx";
@@ -38,6 +40,7 @@ const pr = {
   headSha: null,
   mergeable: null,
   preview,
+  previewable: params.get("state") === "start",
 };
 const runPr = {
   repoId: pr.repoId,
@@ -52,45 +55,59 @@ const runView = { ...run(), prs: [runPr], ticket: pr.ticket, ticketTitle: pr.tit
 createRoot(root).render(
   <div className="app">
     <div className="shell shell-full">
-      <main className="preview-chip-browser">
-        <section className="panel" data-surface="board">
-          <h2>Board card</h2>
-          <div className="kcards">
-            <Card
-              item={boardItem({
-                repoId: "mission-control",
-                issueNumber: 1174,
-                title: "A long Board card title that keeps the preview row under real pressure",
-                status: "In review",
-                state: "review",
-              })}
-              showRepo={false}
-              agent={null}
-              step={null}
-              queued={null}
-              reviewer={null}
-              pr={pr}
-              mine={false}
-              unacked={false}
-              outcome="Merged"
-              when=""
-              statusOutOfDate={null}
-              you={null}
-            />
-          </div>
-        </section>
-        <section className="panel" data-surface="agent">
-          <h2>Agent page</h2>
-          <RunRow
-            row={crewRow({ repoId: "mission-control" })}
-            run={runView}
-            tz="UTC"
-            prs={[runPr]}
-            previewPrs={[pr]}
-            open={false}
-            onToggle={() => {}}
-          />
-        </section>
+      <main>
+        <div
+          className="preview-chip-browser"
+          style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}
+        >
+          <section className="panel" data-surface="board">
+            <div className="ph">
+              <h2>Board card</h2>
+            </div>
+            <div
+              className="kcards"
+              style={{ width: 280, maxWidth: "100%", padding: "var(--sp-3)" }}
+            >
+              <Card
+                item={boardItem({
+                  repoId: "mission-control",
+                  issueNumber: 1174,
+                  title: "A long Board card title that keeps the preview row under real pressure",
+                  status: "In review",
+                  state: "review",
+                })}
+                showRepo={false}
+                agent={null}
+                step={null}
+                queued={null}
+                reviewer={null}
+                pr={pr}
+                mine={false}
+                unacked={false}
+                outcome="Merged"
+                when=""
+                statusOutOfDate={null}
+                you={null}
+              />
+            </div>
+          </section>
+          <section className="panel" data-surface="agent">
+            <div className="ph">
+              <h2>Agent page</h2>
+            </div>
+            <div style={{ padding: "var(--sp-3)" }}>
+              <RunRow
+                row={crewRow({ repoId: "mission-control" })}
+                run={runView}
+                tz="UTC"
+                prs={[runPr]}
+                previewPrs={[pr]}
+                open={false}
+                onToggle={() => {}}
+              />
+            </div>
+          </section>
+        </div>
       </main>
     </div>
   </div>,

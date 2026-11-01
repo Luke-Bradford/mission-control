@@ -69,6 +69,7 @@ import {
   grantUngrantableText,
   guardHookCommand,
   HUD_STATE_LABEL,
+  handoffText,
   hasPlanSection,
   inferTicket,
   isProtectedPath,
@@ -90,12 +91,14 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathInArea,
+  prEvidenceAffectedPages,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
   type RepoRules,
   ROLE_PROMPT_DIR,
   type Run,
+  type RunHandoff,
   type RunLoop,
   type RunPlan,
   retiringText,
@@ -121,6 +124,7 @@ import {
   trimHookCommand,
   watchCheckoutName,
   watchStartRefusedText,
+  wrapExternalText,
 } from "@mc/core";
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
@@ -153,6 +157,8 @@ import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
+import { stageReviewEvidence } from "../pr-evidence/review.ts";
+import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -161,6 +167,13 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
+import type { ReviewPreviews } from "../review-preview.ts";
+import {
+  enrichHandoff,
+  inheritedHandoffLoop,
+  publicHandoff,
+  recordRunHandoff,
+} from "../run-handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
@@ -196,6 +209,8 @@ import {
   existingDetached,
   existingReadOnlyCheckout,
   existingScratch,
+  findHandoffCheckout,
+  inheritedHandoffCommits,
   installAfterSync,
   prepareCheckout,
   prepareDetachedCheckout,
@@ -413,6 +428,10 @@ export interface SupervisorDeps {
   login: () => string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
+  /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
+  prEvidence?: PrEvidenceStore;
+  /** The repo whose web PRs carry screenshot pairs. */
+  prEvidenceRepo?: RepoId;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -458,6 +477,8 @@ export interface SupervisorDeps {
   stopGraceMs?: number;
   /** Bounded Comms context appended to each user line that starts a seat turn. */
   inbox?: (seatId: string, runId: string) => InboxContext;
+  /** Opens a preview of a web PR's head for its review run and closes it when the run ends. */
+  reviewPreviews?: ReviewPreviews;
 }
 
 export interface InboxContext {
@@ -843,6 +864,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  const handoffJobs = new Map<string, Promise<void>>();
+  const handoffWorktrees = new Map<string, string>();
   const deferredRecoveries = new Set<string>();
   let recoveringDeferred: Promise<void> | null = null;
   let unpauseResume: (() => void) | undefined;
@@ -876,6 +899,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /** Whether this server runs crew now: enabled, configured, no lock note and holding the lock. */
   const mayAct = () => deps.enabled && crew !== undefined && lockNote === null && holdsLock;
+
+  /** The one end path: persist context before a seat row or worktree can be released. */
+  function recordEnded(
+    runId: string,
+    at: number,
+    status: Run["status"],
+    by: NonNullable<Run["endedBy"]>,
+    removedAside = false,
+  ): void {
+    store.setRunEnded(runId, at, status, by);
+    const run = store.run(runId);
+    if (!run || (!findSeat(run.agentId) && !removedAside)) return;
+    const row = store.seatSession(run.agentId);
+    const path =
+      run.loop?.aside?.worktree ??
+      handoffWorktrees.get(runId) ??
+      (row?.runId === runId ? row.worktree : null);
+    handoffWorktrees.delete(runId);
+    const h = recordRunHandoff(store, run, path);
+    if (h) {
+      bus.emit("agents");
+      bus.emit("boards");
+    }
+    if (h?.gitState !== "pending" || handoffJobs.has(runId)) return;
+    const info = findSeat(run.agentId);
+    if (!info) return;
+    const job = enrichHandoff(store, h, info.session.checkout, crew?.worktrees ?? "")
+      .catch((e) => log(`${run.agentId}: handoff status could not be saved: ${errText(e)}`))
+      .finally(() => {
+        handoffJobs.delete(runId);
+        bus.emit("agents");
+        bus.emit("boards");
+      });
+    handoffJobs.set(runId, job);
+  }
 
   /** `gone`: the run is unknown, ended, or not its seat's current one. */
   const runGone = (runId: string, seatId: string): boolean =>
@@ -1078,7 +1136,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       emit({ kind: "seat-free", seatId, runId: l.run.id });
       return;
     }
-    store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
+    recordEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     removeRunFiles(l.run.id);
     closeRunItems(l.info);
     // read before the seat row changes
@@ -1125,6 +1183,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "turn-start":
+        if (l.resumedAt !== null && !runGone(l.run.id, l.info.seat.id))
+          store.addLoopEvent(
+            `${l.run.id}:resume-confirmed:${l.resumedAt}`,
+            l.run.id,
+            "Session resumed",
+            now(),
+          );
         l.inTurn = true;
         store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);
@@ -1798,6 +1863,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
+          maxBudgetUsd: run.profile?.profile.budgetUsd,
           mode: def.mode,
           profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
@@ -1884,6 +1950,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function removeRunFiles(runId: string): void {
+    void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
@@ -2084,7 +2151,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (open) {
       const at = now();
       const facts = foldOpenRun(run);
-      store.setRunEnded(run.id, at, "failed", "exit");
+      recordEnded(run.id, at, "failed", "exit");
       removeRunFiles(run.id);
       const info = findSeat(row.seatId);
       if (info && opts.record !== false)
@@ -2119,6 +2186,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     worktree: string | null,
   ): Promise<void> {
     if (worktree === null) return;
+    await handoffJobs.get(runId);
+    if (store.handoff(runId) !== null) return;
     const seatId = info.seat.id;
     try {
       await inClone(info.session.checkout, () =>
@@ -3027,7 +3096,46 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
+    let handoff: RunHandoff | null = null;
+    const handoffClaim = randomUUID();
     try {
+      for (const [source, job] of handoffJobs) if (store.run(source)?.ticket === ref) await job;
+      handoff = store.openHandoff(info.repo.id, ref);
+      if (!handoff && !readOnly && !planner) {
+        const source = store
+          .runsOnTicket(info.repo.id, ref)
+          .filter((r) => r.endedAt !== null && r.branch !== null && r.reviewId == null)
+          .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
+        if (source?.branch && findSeat(source.agentId)) {
+          const path =
+            source.loop?.aside?.worktree ??
+            (await findHandoffCheckout(
+              info.session.checkout,
+              source.branch,
+              crew?.worktrees ?? "",
+            ));
+          handoff = recordRunHandoff(store, source, path);
+        }
+      }
+      if (handoff && !readOnly && !planner && !store.claimHandoff(handoff.runId, handoffClaim))
+        throw new SupervisorError(409, "another seat is taking this ticket's handoff");
+      if (handoff && !readOnly && !planner) {
+        const source = live.get(handoff.fromSeat);
+        if (source?.run.id === handoff.runId && source.session.alive)
+          throw new SupervisorError(
+            409,
+            "the previous author is still stopping; retry after it exits",
+          );
+        if (!(await endAndRemoveKeeper(handoff.fromSeat, handoff.runId)))
+          throw new SupervisorError(
+            409,
+            "the previous author's CLI could not be stopped; its worktree was preserved",
+          );
+      }
+      if (handoff?.gitState === "pending") {
+        await enrichHandoff(store, handoff, info.session.checkout, crew?.worktrees ?? "");
+        handoff = store.handoff(handoff.runId);
+      }
       let ticket: TicketView | null;
       try {
         ticket = await deps.fetchTicket(info.repo, issue);
@@ -3119,6 +3227,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : card.size !== null && !PLAN_SIZES.includes(card.size)
               ? { skipped: `Size ${card.size}` }
               : undefined;
+      if (
+        handoff &&
+        !readOnly &&
+        !planner &&
+        store.openHandoff(info.repo.id, ref)?.runId !== handoff.runId
+      )
+        throw new SupervisorError(409, "a newer handoff arrived; retry this ticket");
       const title = ticket.title;
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
@@ -3138,6 +3253,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
+                ...(handoff
+                  ? { handoff: { branch: handoff.branch, worktree: handoff.worktree } }
+                  : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
                   markPending: (path) => store.markCheckoutPending(path, now()),
@@ -3172,6 +3290,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let runId = `${seatId}:${compactUtc(startedAt)}`;
       if (store.run(runId) !== null) runId = `${runId}-${seq}`;
       const cliSessionId = randomUUID();
+      const handoffLoop =
+        handoff && !readOnly && !planner
+          ? inheritedHandoffLoop(store.run(handoff.runId)?.loop, opts?.loop)
+          : opts?.loop;
       const run: Run = {
         id: runId,
         agentId: seatId,
@@ -3198,10 +3320,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         transcriptPath: crewTranscriptPath(deps.dbPath, runId),
         prs: [],
         summary: null,
-        ...(opts?.loop
+        ...(handoffLoop
           ? {
               loop: {
-                ...opts.loop,
+                ...handoffLoop,
                 // a ticket that lists a controller check needs the controller's pass, whatever it says later
                 ...(ticketControllerCheck(ticket) === null
                   ? {}
@@ -3213,7 +3335,43 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(plan === undefined ? {} : { plan }),
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
+      const handoffCommits =
+        handoff && !readOnly && !planner
+          ? await inheritedHandoffCommits(
+              info.session.checkout,
+              checkout,
+              store.runCommits(handoff.runId),
+            )
+          : [];
+      if (handoff && !readOnly && !planner) {
+        if (!store.acceptHandoff(handoff.runId, handoffClaim, seatId, runId))
+          throw new SupervisorError(409, "the ticket handoff changed before launch");
+      }
       store.upsertRun(run);
+      handoffWorktrees.set(runId, checkout.path);
+      if (handoff && !readOnly && !planner) {
+        for (const sha of handoffCommits)
+          store.addRunCommit({
+            runId,
+            repoId: info.repo.id,
+            branch: checkout.branch,
+            sha,
+            at: startedAt,
+          });
+        const old = store.seatSession(handoff.fromSeat);
+        if (
+          handoff.fromSeat !== seatId &&
+          old?.worktree === checkout.path &&
+          (old.runId === null || store.run(old.runId)?.endedAt !== null)
+        )
+          store.setSeatSession({ ...old, worktree: null, updatedAt: startedAt });
+        store.addLoopEvent(
+          `${runId}:handoff:${handoff.runId}`,
+          runId,
+          `Handed off from ${handoff.fromSeat}: ${handoff.next}`,
+          startedAt,
+        );
+      }
       setRunPathGrants(store, runId, grants);
       // the lines report_evidence will hold the seat to, as the ticket words them now
       if (def.loop === "build" && !readOnly)
@@ -3309,6 +3467,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
+      if (handoff) brief += `\n\n${wrapExternalText(handoffText(publicHandoff(handoff)))}`;
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       const briefPieces = [
@@ -3337,7 +3496,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
-        store.setRunEnded(runId, at, "failed", "exit");
+        recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
         setSeat(seatId, {
           runId,
@@ -3388,6 +3547,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }).catch(() => {});
       return { runId, branch: checkout.branch };
     } finally {
+      if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
       starting.delete(seatId);
     }
   }
@@ -3492,7 +3652,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
-        store.setRunEnded(runId, at, "failed", "exit");
+        recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
         setSeat(seatId, {
           runId,
@@ -3616,28 +3776,55 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, repoDocs, references } = await inClone(checkout, async () => {
-        const s = await prepareScratch({
-          checkout,
-          worktreesRoot: crew?.worktrees ?? "",
-          sessionId: info.session.id,
-          seatId,
-          reviewId,
-          sha: review.sha,
-          peers: clonePeers(deps.config, deps.hubRoot),
-        });
-        try {
-          return {
-            scratch: s,
-            inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
-            references: await repoReferenceIndex(checkout, s.baseSha),
-          };
-        } catch (e) {
-          await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
-          throw e;
-        }
-      });
+      const { scratch, inputs, repoDocs, references, screenshots } = await inClone(
+        checkout,
+        async () => {
+          const s = await prepareScratch({
+            checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            sessionId: info.session.id,
+            seatId,
+            reviewId,
+            sha: review.sha,
+            peers: clonePeers(deps.config, deps.hubRoot),
+          });
+          try {
+            const inputs = await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null);
+            const screenshots = await stageReviewEvidence(
+              deps.prEvidence,
+              info.repo.id,
+              review.prNumber,
+              review.sha,
+              s.path,
+            ).catch((e) => {
+              throw new SupervisorError(
+                409,
+                `screenshot evidence cannot be staged: ${errText(e)}`,
+                { cause: e },
+              );
+            });
+            if (
+              screenshots === undefined &&
+              deps.prEvidenceRepo === info.repo.id &&
+              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
+            )
+              throw new SupervisorError(
+                409,
+                "screenshot evidence is not ready for this review head",
+              );
+            return {
+              scratch: s,
+              inputs,
+              screenshots,
+              repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
+              references: await repoReferenceIndex(checkout, s.baseSha),
+            };
+          } catch (e) {
+            await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
+            throw e;
+          }
+        },
+      );
       if (stopping) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
@@ -3677,6 +3864,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       store.upsertRun(run);
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
+      // A web PR's review gets a preview of its head, built in the background: the review does not
+      // wait for it, and one that cannot start does not stop the review.
+      const previewStarting =
+        deps.reviewPreviews === undefined
+          ? false
+          : await deps.reviewPreviews.open({
+              runId,
+              repoId: info.repo.id,
+              pr: review.prNumber,
+              branch: author.branch ?? "",
+              sha: review.sha,
+            });
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
       const prevReply =
@@ -3706,8 +3905,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
+        ...(screenshots === undefined ? {} : { evidence: screenshots }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
+        ...(previewStarting ? { preview: true } : {}),
         ...(second === null
           ? {}
           : {
@@ -3745,7 +3946,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
-        store.setRunEnded(runId, at, "failed", "exit");
+        recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
         setSeat(seatId, {
           runId,
@@ -3832,7 +4033,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       store.upsertRun(ended, facts !== null);
       if (facts) persistDigest(store, digests, run.id, facts.digest);
-      store.setRunEnded(run.id, at, "ok", "operator");
+      recordEnded(run.id, at, "ok", "operator");
       removeRunFiles(run.id);
     }
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
@@ -3858,7 +4059,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   ): Promise<void> {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
-    store.setRunEnded(run.id, at, "ok", endedBy);
+    recordEnded(run.id, at, "ok", endedBy);
     removeRunFiles(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
@@ -3895,7 +4096,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // Recorded first, so nothing after it can end the run twice.
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
-    store.setRunEnded(runId, at, "ok", reason ?? "engine");
+    recordEnded(runId, at, "ok", reason ?? "engine");
     removeRunFiles(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
@@ -3934,6 +4135,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // Closing can replay late turn events; the engine's final seat state must stand.
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
+    await handoffJobs.get(runId);
+    const handoff = store.handoff(runId);
+    if (handoff !== null) {
+      await enrichHandoff(store, handoff, info.session.checkout, crew?.worktrees ?? "");
+      return;
+    }
     if (worktree === null) return;
     try {
       await inClone(info.session.checkout, () =>
@@ -4032,7 +4239,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (existsSync(aside.worktree)) void dropScratch(info, runId, run.seq, aside.worktree);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
-        store.setRunEnded(runId, at, "failed", "exit");
+        recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
@@ -4297,6 +4504,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dropRestored();
         return;
       }
+      store.releaseHandoffClaims();
       sweepRunFiles();
       // each run's restored token and holds are kept for a seat that is attached to, and dropped
       // (`dropGrant`) for every run that is not
@@ -4365,6 +4573,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       } catch {
         // already gone
       }
+      await Promise.allSettled([...handoffJobs.values()]);
       holdsLock = false;
     },
 
@@ -4495,6 +4704,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!mayAct()) return false;
       const run = store.run(runId);
       if (!run || run.endedAt !== null || !run.loop?.aside) return false;
+      if (config.loops.some((loop) => loop.id === run.agentId)) return false;
       if (starting.has(run.agentId) || live.has(run.agentId)) return false;
       if (
         store
@@ -4502,7 +4712,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.aside)
       )
         return false;
-      store.setRunEnded(run.id, now(), "ok", "operator");
+      recordEnded(run.id, now(), "ok", "operator", true);
       removeRunFiles(run.id);
       transcripts.delete(run.transcriptPath);
       digests.delete(run.id);

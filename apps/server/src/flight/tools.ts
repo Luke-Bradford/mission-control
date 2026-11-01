@@ -48,6 +48,7 @@ import {
   ciNoFailedText,
   ciNotActionsText,
   ciNotFailedText,
+  clockHm,
   closeComment,
   closedDecision,
   closedText,
@@ -706,6 +707,11 @@ const PassArgs = z.looseObject({
 });
 const GRANT_PATH_MAX = 120;
 const GRANT_PATHS_MAX = 10;
+const ReassignTicketArgs = z.strictObject({
+  issue: issueNumber,
+  seat: z.string().regex(SEAT_ID),
+  reason: basisArg,
+});
 const StartSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
@@ -1018,7 +1024,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at, undefined, "FLIGHT"))
       return null;
     bus.emit("settings");
-    return `FLIGHT lifted the crew pause on ${call} (${pause.reason})`;
+    return `FLIGHT lifted the crew pause for ${call} (set by ${pause.by} at ${clockHm(pause.at, config.operator.timezone)}: ${pause.reason})`;
   };
   const unendedRun = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -1218,7 +1224,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: answeredText(call) };
   }
 
-  async function startSeat(ctx: McToolContext, args: unknown): Promise<Result> {
+  async function startSeat(
+    ctx: McToolContext,
+    args: unknown,
+    handoff?: { fromSeat: string; branch: string },
+  ): Promise<Result> {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
@@ -1273,11 +1283,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
-    if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
+    if (
+      !FLIGHT_STARTABLE.includes(column) &&
+      !(handoff && (column === "In review" || column === "In progress"))
+    )
+      return fail(wrongColumnText(ref, column));
     // the previous run's PR: a ticket is not started again while one is open on it
     const openPr = store
       .pullRequests(repo.id)
-      .find((p) => p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(issue)));
+      .find(
+        (p) =>
+          p.state === "open" &&
+          (p.ticket === ref || p.closingIssues?.includes(issue)) &&
+          (!handoff || p.branch !== handoff.branch),
+      );
     if (openPr !== undefined) return fail(openPrText(ref, openPr.number));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
@@ -1326,7 +1345,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
-    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
+    } else if (
+      !handoff &&
+      column !== "Ready" &&
+      !card.labels.includes(READY_LABEL) &&
+      !hasPlanSection(body)
+    ) {
       return fail(notReadyText(ref));
     }
     // Files outside the area: the approval is a logged decision, made before the start. The run
@@ -1417,7 +1441,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       ref,
       about: `${ref}: ${card.title}`,
-      decision: `${planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
+      decision: `${handoff ? `Reassigned from ${seatCallSign(handoff.fromSeat)} to ${call}` : planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
       basis,
     });
     store.recordFlightArrival({
@@ -1432,7 +1456,37 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("agents");
     bus.emit("flight");
-    return { text: startedText(call, ref) };
+    return {
+      text: `${startedText(call, ref)}${wasStopped ? ` FLIGHT overrode the operator's stop for ${call}.` : ""}${unpaused ? ` ${unpaused}.` : ""}`,
+    };
+  }
+
+  async function reassignTicket(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, ReassignTicketArgs, args);
+    if (!c.ok) return c.result;
+    const repo = repoOf(),
+      target = seatCfg(c.args.seat);
+    if (!repo || !target || seatDef(target).loop !== "build")
+      return fail("ticket handoffs need a build seat in this session");
+    const ref = `${repo.id}#${c.args.issue}`;
+    const runs = store.runsOnTicket(repo.id, ref);
+    if (runs.some((r) => r.endedAt === null))
+      return fail(`${ref} still has a live run; it was not reassigned`);
+    const source = runs
+      .filter(
+        (r) =>
+          r.branch !== null &&
+          r.reviewId == null &&
+          r.loop?.phase !== "done" &&
+          (seatCfg(r.agentId) !== undefined || store.handoff(r.id) !== null),
+      )
+      .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
+    if (!source?.branch) return fail(`${ref} has no unfinished author to hand off`);
+    return startSeat(
+      ctx,
+      { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
+      { fromSeat: source.agentId, branch: source.branch },
+    );
   }
 
   async function messageSeat(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3170,6 +3224,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               ...cur,
               state: "stopped",
               reason: row.reason,
+              stop: row.stop,
               runId: ended ? null : cur.runId,
               updatedAt: at,
             });
@@ -3743,6 +3798,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: startSeat,
     },
     {
+      name: MC_TOOL_NAMES.reassignTicket,
+      description:
+        "Reassign an unfinished ticket after its author ended. Refuses a live run. The next build seat receives the handoff note and preserved branch; all start, quota, area and sandbox checks still apply. Give issue, seat and reason.",
+      inputSchema: z.toJSONSchema(ReassignTicketArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: reassignTicket,
+    },
+    {
       name: MC_TOOL_NAMES.messageSeat,
       description:
         "Read focus with read_focus: true, or replace persisted focus with focus (lane:name, label:name and/or repo#issue selectors; null clears). These operations are separate from messaging. Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park. Give runId (with unpark) for a run set aside in review; the seat is on another run then, so the text is not delivered.",
@@ -4073,6 +4137,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.readTicket,
     MC_TOOL_NAMES.answerQuestion,
     MC_TOOL_NAMES.startSeat,
+    MC_TOOL_NAMES.reassignTicket,
     MC_TOOL_NAMES.messageSeat,
     MC_TOOL_NAMES.flightState,
     MC_TOOL_NAMES.screenshotHud,

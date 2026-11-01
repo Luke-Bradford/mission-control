@@ -2,6 +2,7 @@
  * What a run was about, as the API serves it: the PRs the run published joined to the stored PR
  * rows, and the run's ticket resolved through them (#26 A3).
  */
+
 import {
   type PullRequestView,
   type RepoId,
@@ -13,6 +14,7 @@ import {
   UAT_PARK,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
+import { publicHandoff } from "./run-handoffs.ts";
 import type { Store } from "./store.ts";
 
 /** Compact list diagnostics without mutating the single-run record. */
@@ -105,6 +107,7 @@ export function runView(
   cache: PrCache,
   boards: BoardTitleCache = new Map(),
 ): RunView {
+  const handoff = store.handoff(run.id) ?? store.receivedHandoff(run.id);
   const prs = runPrs(config, store, run, cache);
   const ticket = runTicket(run, prs);
   const t = ticket === null ? null : parseTicket(ticket);
@@ -119,6 +122,7 @@ export function runView(
   }
   return {
     ...runSummary(run),
+    ...(handoff ? { handoff: publicHandoff(handoff) } : {}),
     usage: runUsage(store, run),
     prs,
     ticket,

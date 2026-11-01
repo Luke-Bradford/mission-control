@@ -7,7 +7,7 @@ export const PREVIEW_IDLE_MS = 20 * 60_000;
 export const PREVIEW_START_MS = 5 * 60_000;
 export const PREVIEW_ACTIVITY_HEADER = "x-mc-preview-activity";
 
-export type PreviewErrorCode = "capacity" | "limit" | "already-running" | "no-port";
+export type PreviewErrorCode = "capacity" | "limit" | "already-running" | "no-port" | "head";
 
 /** A refusal a route can safely show to the operator. */
 export class PreviewHubError extends Error {
@@ -26,6 +26,10 @@ export interface PreviewStart {
   pr: number;
   branch: string;
   checkout: string;
+  /** An immutable head; absent only for legacy callers. */
+  sha?: string;
+  /** Cancels only this caller's reserved start. */
+  signal?: AbortSignal;
 }
 
 export interface PreviewView {
@@ -34,6 +38,8 @@ export interface PreviewView {
   port: number;
   url: string;
   startedAt: number;
+  sha?: string;
+  instanceId?: string;
 }
 
 interface Preview extends PreviewView {
@@ -95,18 +101,33 @@ export class PreviewManager {
   }
 
   async start(input: PreviewStart): Promise<PreviewView> {
+    if (input.sha !== undefined && !/^[a-f0-9]{40}$/i.test(input.sha))
+      throw new PreviewHubError("head", "a preview head must be a full commit SHA");
     const pending = await this.reserve(input.pr);
+    const abort = () => pending.controller.abort();
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted) abort();
     const { port } = pending;
     const token = randomBytes(32).toString("base64url");
     let child: PreviewProcess & { dbPath?: string };
     const timeout = setTimeout(() => pending.controller.abort(), PREVIEW_START_MS);
     try {
+      pending.controller.signal.throwIfAborted();
       child = await this.deps.start({ ...input, port, token, signal: pending.controller.signal });
+      if (pending.controller.signal.aborted) {
+        try {
+          await child.stop();
+        } finally {
+          if (child.dbPath) await this.deps.remove(child.dbPath);
+        }
+        pending.controller.signal.throwIfAborted();
+      }
     } catch (e) {
       this.release(input.pr);
       throw e;
     } finally {
       clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", abort);
     }
     // The idle lifetime starts once the URL can actually be used, not while checkout/build runs.
     const startedAt = this.now();
@@ -116,6 +137,8 @@ export class PreviewManager {
       port,
       url: `http://127.0.0.1:${port}`,
       startedAt,
+      ...(input.sha === undefined ? {} : { sha: input.sha }),
+      instanceId: randomBytes(12).toString("hex"),
       lastRequestAt: startedAt,
       token,
       dbPath: child.dbPath ?? "",

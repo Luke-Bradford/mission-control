@@ -2187,6 +2187,66 @@ describe("change reporting", () => {
 });
 
 describe("collectWaitedPrs", () => {
+  it("reads files after the first hundred, including a web file on page two", async () => {
+    const first = Array.from({ length: 100 }, (_, i) => ({
+      path: `apps/server/src/file${i}.ts`,
+      changeType: "MODIFIED",
+    }));
+    const sha = "a".repeat(40);
+    const gql: Gql = async (q, v) => {
+      if (q.includes("query PullRequestFiles(")) {
+        expect(v.after).toBe("file100");
+        return {
+          repository: {
+            pullRequest: {
+              headRefOid: sha,
+              files: {
+                nodes: [{ path: "apps/web/src/board/Card.tsx", changeType: "MODIFIED" }],
+                pageInfo: { hasNextPage: false, endCursor: "file101" },
+              },
+            },
+          },
+        };
+      }
+      return {
+        repository: {
+          pullRequest: pull(7, {
+            changedFiles: 101,
+            commits: { nodes: [{ commit: { oid: sha } }] },
+            files: { nodes: first, pageInfo: { hasNextPage: true, endCursor: "file100" } },
+          }),
+        },
+      };
+    };
+    await collectWaitedPrs(repo, store, gql, [7], () => NOW);
+    expect(store.prFilePaths(repo.id, 7)).toHaveLength(101);
+    expect(store.prFilePaths(repo.id, 7)).toContain("apps/web/src/board/Card.tsx");
+  });
+
+  it("keeps the previous snapshot when the head changes between file pages", async () => {
+    await collectWaitedPrs(
+      repo,
+      store,
+      async () => ({ repository: { pullRequest: pull(7) } }),
+      [7],
+      () => NOW,
+    );
+    const before = store.pullRequests(repo.id);
+    const gql: Gql = async (q) => ({
+      repository: {
+        pullRequest: q.includes("query PullRequestFiles(")
+          ? { headRefOid: "b".repeat(40), files: { nodes: [] } }
+          : pull(7, {
+              changedFiles: 101,
+              files: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "first" } },
+            }),
+      },
+    });
+    await collectWaitedPrs(repo, store, gql, [7], () => NOW + 1);
+    expect(store.pullRequests(repo.id)).toEqual(before);
+    expect(statusOf()?.error).toContain("head changed");
+  });
+
   it("reads only the given numbers and keeps the other rows", async () => {
     const mergedAt = "2026-10-17T11:00:00Z";
     await collectGithub(repo, store, stub({ prPages: [prPage([pull(1)])] }).gql, NOW);

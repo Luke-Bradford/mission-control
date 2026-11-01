@@ -15,7 +15,7 @@
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -23,7 +23,13 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { LOOPBACK_HOST, type RepoId } from "@mc/core";
+import {
+  evidenceSectionText,
+  LOOPBACK_HOST,
+  QA_RETENTION_DAYS,
+  type RepoId,
+  type Run,
+} from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
 import { ChangeBus } from "./bus.ts";
@@ -59,7 +65,7 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
-import { renderHudInHelper } from "./flight/hud-render.ts";
+import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { operatorCall } from "./flight/operator-call.ts";
 import { createCrewTidy } from "./flight/tidy.ts";
@@ -80,9 +86,16 @@ import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { createPrEvidence } from "./pr-evidence/capture.ts";
+import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
+import { prEvidenceStore } from "./pr-evidence/store.ts";
+import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
+import { previewBrowserInHelper } from "./preview-browser.ts";
+import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -124,6 +137,8 @@ export async function main(): Promise<void> {
     throw e;
   }
   const preview = isPreview(port, process.env);
+  // Preview hubs must share the hub's repository, not the isolated crew clone.
+  const hubRoot = findHubRoot();
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
@@ -135,8 +150,12 @@ export async function main(): Promise<void> {
   const previewRoot = join(dirname(dbPath), "previews");
   if (!preview) {
     await rm(previewRoot, { recursive: true, force: true });
+    const previewSources = new Set([
+      ...(hubRoot === null ? [] : [hubRoot]),
+      ...(config.crew?.sessions ?? []).map(({ checkout }) => checkout),
+    ]);
     await Promise.all(
-      (config.crew?.sessions ?? []).map(({ checkout }) =>
+      [...previewSources].map((checkout) =>
         runPreviewCommand("git", ["-C", checkout, "worktree", "prune"]).catch(() => {}),
       ),
     );
@@ -160,7 +179,9 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, branch: _branch, checkout, port: previewPort, token, signal }) => {
+        start: async ({ pr, sha, port: previewPort, token, signal }) => {
+          if (hubRoot === null) throw new Error("the hub checkout is unavailable for previews");
+          const checkout = hubRoot;
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
           const worktree = join(root, "worktree");
@@ -184,7 +205,7 @@ export async function main(): Promise<void> {
             );
             await runPreviewCommand(
               "git",
-              ["-C", checkout, "worktree", "add", "-f", "--detach", worktree, previewRef],
+              ["-C", checkout, "worktree", "add", "-f", "--detach", worktree, sha ?? previewRef],
               undefined,
               signal,
             );
@@ -313,14 +334,73 @@ export async function main(): Promise<void> {
       }, 15_000).unref();
     }
   }
-  // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
-  const hubRoot = findHubRoot();
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
-  const previewRepoId = config.crew?.sessions.find(
-    (session) => hubRoot !== null && resolve(session.checkout) === hubRoot,
-  )?.repoId;
+  const previewRepoId = await resolvePreviewRepo(
+    hubRoot,
+    config.repos,
+    config.crew?.sessions ?? [],
+  );
+  // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
+  const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
+  const evidenceCheckout = hubRoot ?? undefined;
+  const prEvidence =
+    !preview && previewRepoId !== undefined && evidenceCheckout !== undefined
+      ? createPrEvidence({
+          store: evidenceStore,
+          repoId: previewRepoId,
+          workDir: join(dirname(dbPath), "pr-evidence-work"),
+          baseUrl: `http://${HOST}:${port}`,
+          // Read the remote's immutable default head directly: another preview fetch must not
+          // overwrite our baseline through the checkout's shared FETCH_HEAD.
+          mainSha: async (signal) =>
+            (
+              await gitOutput(
+                evidenceCheckout,
+                ["ls-remote", "--exit-code", "origin", "HEAD"],
+                signal,
+              )
+            ).split(/\s/)[0] ?? "",
+          snapshot: async (to) => {
+            const source = new DatabaseSync(dbPath);
+            try {
+              source.prepare("VACUUM INTO ?").run(to);
+            } finally {
+              source.close();
+            }
+          },
+          startSide: evidenceSideStarter({
+            checkout: evidenceCheckout,
+            root: join(dirname(dbPath), "pr-evidence-work", "sides"),
+            run: runEvidenceCommand,
+            freePort,
+            launch: async ({ worktree, port: sidePort, db, signal }) => {
+              const child = spawn(
+                process.execPath,
+                ["--experimental-strip-types", "apps/server/src/main.ts"],
+                {
+                  cwd: worktree,
+                  env: evidenceEnvironment(sidePort, db),
+                  stdio: "ignore",
+                },
+              );
+              try {
+                await waitForPreview(child, sidePort, signal);
+              } catch (e) {
+                await stopPreview(child).catch(() => {});
+                throw e;
+              }
+              return { stop: async () => await stopPreview(child) };
+            },
+          }),
+          render: (origin, path, colorScheme, signal) => {
+            const guard = hudRenderRequest(origin);
+            return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
+          },
+          log: (line) => log(line),
+        })
+      : undefined;
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
@@ -355,6 +435,24 @@ export async function main(): Promise<void> {
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);
+  // RETRO's screenshots on a review's preview are kept with the review for the QA retention window.
+  const reviewShots = hudShotStore(join(dirname(dbPath), "review-screenshots"), {
+    keep: 2_000,
+    maxAgeMs: QA_RETENTION_DAYS * 86_400_000,
+  });
+  // Only Mission Control's own branches can be previewed (the manager builds this repo's web app).
+  const reviewPreviews =
+    previews === undefined
+      ? undefined
+      : createReviewPreviews({
+          previews,
+          files: (repoId, pr) => store.prFilePaths(repoId, pr),
+          webGlobs: async (repoId) =>
+            repoId !== previewRepoId ? [] : ((await flightAreas(repoId))?.[WEB_AREA_LABEL] ?? []),
+          checkout: (repoId) =>
+            config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout ?? null,
+          log: (line) => log(line),
+        });
   const supervisor = createSupervisor({
     config,
     store,
@@ -373,7 +471,11 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
+    ...(prEvidence === undefined
+      ? {}
+      : { prEvidence: evidenceStore, prEvidenceRepo: previewRepoId as RepoId }),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
+    ...(reviewPreviews === undefined ? {} : { reviewPreviews }),
   });
   // a seat that frees up is about to take new work: read the boards first
   refreshOnSeatFree(
@@ -426,6 +528,27 @@ export async function main(): Promise<void> {
     },
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
+    ...(prEvidence === undefined
+      ? {}
+      : {
+          // the section for the PR's current head, so a rewrite of the body keeps it
+          prEvidenceSection: (run: Run) => {
+            const n = run.loop?.prNumber;
+            const sha = n == null ? null : store.pullRequest(run.repoId, n)?.headSha;
+            const manifest = n == null || !sha ? null : evidenceStore.manifest(run.repoId, n, sha);
+            return manifest === null ? null : evidenceSectionText(manifest, prEvidence.baseUrl);
+          },
+        }),
+    ...(reviewPreviews === undefined
+      ? {}
+      : {
+          previewBrowser: {
+            ready: (runId) => reviewPreviews.ready(runId),
+            identity: (runId) => reviewPreviews.identity(runId),
+            browse: (job, guard) => previewBrowserInHelper(job, guard),
+            saveShot: (png) => reviewShots.save(png),
+          },
+        }),
   };
   const mcTools = createMcTools(mcDeps);
 
@@ -463,6 +586,7 @@ export async function main(): Promise<void> {
     bus,
     supervisor,
     publisher: createPublisher(mcDeps),
+    ...(prEvidence === undefined ? {} : { evidence: prEvidence }),
     board: engineBoard,
     pollGithub: () => scheduler.refreshBoards(),
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
@@ -680,6 +804,8 @@ export async function main(): Promise<void> {
     previewRepoId,
     previewActivity,
     hudShots,
+    prEvidence: evidenceStore,
+    reviewShots,
     queueReorder,
     mapRing,
     warmMap: true,
@@ -721,11 +847,17 @@ export async function main(): Promise<void> {
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
+  let stopEvidenceSweep: (() => void) | undefined;
+  app.addHook("onClose", async () => {
+    stopEvidenceSweep?.();
+    await prEvidence?.stop();
+  });
 
   const shutdown = onSignal({
     drain: () => mcpCalls.drain(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      await prEvidence?.stop();
       await previews?.closeAll();
       stopDiscovery();
       crewReloader.stop();
@@ -767,6 +899,32 @@ export async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  // Github's board topic and a retry tick cover every open hub-repo PR, including ones without
+  // a live run. Preview/read-only hubs never capture or edit Github.
+  if (engineOn && prEvidence && previewRepoId && hubRoot) {
+    const repo = config.repos.find((r) => r.id === previewRepoId);
+    if (repo) {
+      const sweep = createEvidenceSweep({
+        store,
+        evidence: prEvidence,
+        repoId: previewRepoId,
+        post: (manifest) => postPrEvidence(gh, hubRoot, repo.github, manifest, prEvidence.baseUrl),
+        trusted: (pr) => trustedEvidenceHead(gh, hubRoot, repo.github, pr),
+        log,
+      });
+      const unsubscribe = bus.subscribe((topic) => {
+        if (topic === "boards") void sweep.tick();
+      });
+      const retry = setInterval(() => void sweep.tick(), 60_000);
+      retry.unref();
+      void sweep.tick();
+      stopEvidenceSweep = () => {
+        sweep.stop();
+        clearInterval(retry);
+        unsubscribe();
+      };
+    }
+  }
   // Branch tidying writes to GitHub, so it runs wherever the engine does.
   if (engineOn) {
     const tidy = branchTidy;
@@ -815,6 +973,49 @@ export function previewEnvironment(
     MC_PREVIEW_ACTIVITY_TOKEN: token,
     MC_PREVIEW_PARENT_PID: String(process.pid),
   };
+}
+
+/** The environment of a hub that serves one commit for screenshots: a read-only preview. */
+function evidenceEnvironment(sidePort: number, db: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.MC_CONFIG;
+  return {
+    ...env,
+    MC_PORT: String(sidePort),
+    MC_DB: db,
+    MC_NO_LOOP_WRITES: "1",
+    MC_NO_CREW: "1",
+    // the child leaves when this hub does
+    MC_PREVIEW_PARENT_PID: String(process.pid),
+  };
+}
+
+/** A loopback port nothing listens on now. */
+async function freePort(): Promise<number> {
+  return await new Promise<number>((resolvePort, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen({ host: HOST, port: 0 }, () => {
+      const address = probe.address();
+      probe.close(() =>
+        typeof address === "object" && address !== null
+          ? resolvePort(address.port)
+          : reject(new Error("no free port")),
+      );
+    });
+  });
+}
+
+/** What a git command prints, trimmed. */
+async function gitOutput(checkout: string, args: string[], signal?: AbortSignal): Promise<string> {
+  return await new Promise<string>((resolveOut, reject) => {
+    execFile(
+      "git",
+      ["-C", checkout, ...args],
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, signal, timeout: 60_000 },
+      (err, out) => (err ? reject(err) : resolveOut(out.trim())),
+    );
+  });
 }
 
 const PREVIEW_READY_MS = 30_000;

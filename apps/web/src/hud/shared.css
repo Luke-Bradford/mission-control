@@ -39,6 +39,16 @@
   font-size: var(--fs-s);
 }
 
+/* the GitHub link beside an in-app number: a ↗ drawn here, named by its aria-label */
+.rref > a.rref-gh {
+  justify-content: center;
+  color: var(--fg-2);
+}
+
+.rref > a.rref-gh::after {
+  content: "↗";
+}
+
 .rchip {
   color: var(--c, var(--fg-2));
   background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);

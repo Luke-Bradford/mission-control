@@ -156,6 +156,7 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
+import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -720,7 +721,7 @@ describe("resume_seat", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.text).toBe(
-      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause on GUIDO-1 (ci); the operator had stopped the seat.",
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci); the operator had stopped the seat.",
     );
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
@@ -728,7 +729,9 @@ describe("resume_seat", () => {
         about: "resume_seat",
         seatId: "guido-1",
         targetRunId: "r-guido",
-        decision: expect.stringContaining("FLIGHT lifted the crew pause on GUIDO-1 (ci)"),
+        decision: expect.stringContaining(
+          "FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)",
+        ),
       }),
     ]);
     expect(readCrewPause(store)).toBeNull();
@@ -828,7 +831,13 @@ describe("resume_seat", () => {
   it("reports a failed resume that ended its run", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-guido");
-    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    const stop = { by: "CAPCOM", reason: "Wait for CI", at: NOW - 60_000 };
+    store.setSeatSession({
+      ...row("guido-1", "r-guido"),
+      state: "stopped",
+      reason: "operator",
+      stop,
+    });
     resumeImpl = async () => {
       const run = store.run("r-guido");
       if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
@@ -842,6 +851,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toContain("ended after the failed resume");
+    expect(store.seatSession("guido-1")?.stop).toEqual(stop);
     expect(result.text).not.toContain("nothing was changed");
     expect(store.seatSession("guido-1")?.state).toBe("stopped");
     expect(store.seatSession("guido-1")?.reason).toBe("operator");
@@ -957,7 +967,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toBe(
-      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci).",
     );
   });
 
@@ -1190,6 +1200,7 @@ describe("tool list", () => {
       "read_ticket",
       "answer_question",
       "start_seat",
+      "reassign_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -1756,6 +1767,96 @@ describe("start_seat", () => {
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
 
+  it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    store.upsertRun(
+      run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
+    );
+    expect(
+      (
+        await call("reassign_ticket", {
+          issue: 7,
+          seat: "guido-1",
+          reason: "The old seat hit quota",
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      kind: "start",
+      ref: "mc#7",
+      basis: "The old seat hit quota",
+    });
+    expect(store.flightDecisions(0, 10)[0]?.decision).toContain(
+      "Reassigned from GUIDO-CX to GUIDO-1",
+    );
+  });
+
+  it("refuses to reassign a ticket with a live author and never ends it", async () => {
+    store.upsertRun(run("live", "guido-cx", { ticket: "mc#7", branch: "feature/7-live" }));
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Move it" })).isError,
+    ).toBe(true);
+    expect(startCalls).toEqual([]);
+    expect(store.run("live")?.endedAt).toBeNull();
+  });
+  it("reassigns a removed author only when it has a durable crew handoff", async () => {
+    const old = run("removed", "removed-seat", {
+      ticket: "mc#7",
+      branch: "feature/7-old",
+      endedAt: NOW - 1000,
+    });
+    store.upsertRun(old);
+    const args = { issue: 7, seat: "guido-1", reason: "Continue after the seat was removed" };
+    expect((await call("reassign_ticket", args)).isError).toBe(true);
+    recordRunHandoff(store, old, null);
+    expect((await call("reassign_ticket", args)).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+  });
+  it.each(["In progress", "In review"])(
+    "continues the preserved author's open PR from %s",
+    async (status) => {
+      cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+      board(sc(7, { status }));
+      store.upsertRun(
+        run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
+      );
+      const savedPr = {
+        repoId: "mc",
+        number: 9,
+        title: "PR",
+        url: "u",
+        branch: "feature/7-old",
+        ticket: "mc#7",
+        state: "open" as const,
+        isDraft: true,
+        review: null,
+        ci: "pending" as const,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      };
+      store.upsertPullRequests("mc", [savedPr], NOW);
+      expect(
+        (
+          await call("reassign_ticket", {
+            issue: 7,
+            seat: "guido-1",
+            reason: "Continue CI and review",
+          })
+        ).isError,
+      ).toBeUndefined();
+      expect(startCalls).toHaveLength(1);
+      startCalls.length = 0;
+      store.upsertPullRequests("mc", [{ ...savedPr, branch: "feature/7-unrelated" }], NOW);
+      expect(
+        await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Continue" }),
+      ).toEqual(refused(openPrText("mc#7", 9)));
+      expect(startCalls).toEqual([]);
+    },
+  );
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [
@@ -3352,11 +3453,80 @@ describe("flight_state", () => {
     expect(await prs()).toEqual([]);
   });
 
-  it("lists a stopped seat", async () => {
+  it("lists each paused or stopped seat as unavailable, with its control record", async () => {
+    writeCrewPause(
+      store,
+      { seats: ["guido-1"], reason: "Controller lifts the rest", at: NOW - 60_000, by: "operator" },
+      NOW - 60_000,
+    );
+    store.setSeatSession({
+      ...row("inco-1", ""),
+      runId: null,
+      state: "stopped",
+      stop: { by: "operator", reason: "Wait for CI", at: NOW - 60_000 },
+    });
+    const seats = (
+      (await state()) as {
+        seats: {
+          id: string;
+          state: string;
+          free: boolean;
+          pause: unknown;
+          stop: unknown;
+        }[];
+      }
+    ).seats;
+    expect(seats.find((x) => x.id === "guido-1")).toMatchObject({
+      state: null,
+      free: false,
+      pause: { by: "operator", reason: "Controller lifts the rest", at: NOW - 60_000 },
+      stop: null,
+    });
+    expect(seats.find((x) => x.id === "inco-1")).toMatchObject({
+      state: "stopped",
+      free: false,
+      pause: null,
+      stop: { by: "operator", reason: "Wait for CI", at: NOW - 60_000 },
+    });
+  });
+
+  it("does not call a crash an operator stop", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
-    const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
-      .seats;
-    expect(seats.find((x) => x.id === "guido-1")).toMatchObject({ state: "stopped", free: true });
+    const seats = ((await state()) as { seats: { id: string; stop: unknown }[] }).seats;
+    expect(seats.find((x) => x.id === "guido-1")?.stop).toBeNull();
+  });
+
+  it("does not call a paused or stopped review seat idle", async () => {
+    const queuedReview = () =>
+      store.requestReview({
+        authorRunId: "r-guido",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: NOW,
+      });
+    const reviewer = async () =>
+      (
+        (await state()) as {
+          reviewQueue: { seats: { seat: string; queued: number; idle: boolean }[] };
+        }
+      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
+
+    expect(queuedReview()).not.toBeNull();
+    writeCrewPause(
+      store,
+      { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
+      NOW,
+    );
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
+
+    writeCrewPause(store, null, NOW);
+    store.setSeatSession({ ...row("retro-1", ""), runId: null, state: "stopped" });
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
   });
 
   it("lists a run set aside in review, with its park, and the seat's run ids", async () => {
@@ -3407,7 +3577,7 @@ describe("flight_state", () => {
     store.upsertRun(run("r-old", "guido-1", { endedAt: NOW - 1000, status: "ok" }));
     store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
-    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 }, NOW);
     store.upsertPullRequests(
       "mc",
       [
@@ -3453,6 +3623,8 @@ describe("flight_state", () => {
     const bare = {
       runId: null,
       state: null,
+      pause: null,
+      stop: null,
       ticket: null,
       title: null,
       phase: null,
@@ -3592,6 +3764,18 @@ describe("flight_state", () => {
           failingChecks: [],
         },
       ],
+      prFlow: expect.objectContaining({
+        unowned: 0,
+        rows: [
+          expect.objectContaining({
+            pr: 9,
+            owner: "review seat",
+            stage: "review",
+            lastAction: "review started",
+          }),
+        ],
+        metrics: expect.any(Array),
+      }),
       items: [
         {
           key: "ask:1",
@@ -4908,9 +5092,21 @@ describe("brief_item", () => {
     },
   );
 
+  it("refuses briefing hard-rule information as a decision without deleting its engine marker", async () => {
+    const noteKey = "flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
+    raise(noteKey, { kind: "flag" });
+    const key = `note:${noteKey}`;
+    for (const owner of ["flight", "operator"] as const)
+      expect(await call("brief_item", B({ key, for: owner }))).toEqual(
+        refused(`Not briefed: ${key} is not an item in the operator's Needs-you list.`),
+      );
+    expect(store.notes().some((n) => n.key === noteKey)).toBe(true);
+    expect(store.briefs().has(key)).toBe(false);
+  });
+
   it.each([
     ["hub-update-held", "blocked"],
-    ["flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag"],
+    ["flag:r1:diagnostic", "flag"],
     ["flag:r1:floor:abc", "flag"],
     ["ratelimit:r1", "ratelimit"],
   ])("requires passing up %s with a brief", async (noteKey, kind) => {
@@ -8704,14 +8900,18 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     });
     it("starts a seat the operator stopped, and says so in the decision", async () => {
       store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
-      expect((await start()).isError).toBeUndefined();
+      const result = await start();
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("overrode the operator's stop for GUIDO-1");
       expect(startCalls).toHaveLength(1);
       expect(store.seatSession("guido-1")?.state).toBe("idle");
       expect(decisions().find((d) => d.kind === "start")?.decision).toContain("stopped the seat");
     });
     it("starts a paused seat by letting it out of the pause, naming FLIGHT", async () => {
       writeCrewPause(store, { seats: ["guido-1", "inco-1"], reason: "ci", at: NOW, by: "op" }, NOW);
-      expect((await start()).isError).toBeUndefined();
+      const result = await start();
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)");
       // the record stays the operator's
       expect(readCrewPause(store)).toMatchObject({
         seats: ["inco-1"],

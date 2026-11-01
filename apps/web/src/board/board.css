@@ -290,3 +290,11 @@
     cursor: pointer;
   }
 }
+
+.kcard .handoff-link {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-micro);
+  margin-top: var(--sp-1);
+}

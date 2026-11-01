@@ -27,6 +27,7 @@ import {
   modelLine,
   type NeedPart,
   needLine,
+  needOwnerLabel,
   needsLamp,
   SET_ASIDE_LABEL,
   seatItems,
@@ -68,7 +69,8 @@ function WorkCell({
   actions?: ReactNode;
 }) {
   const prs = useReviewPrs(row ?? undefined);
-  const prNumber = row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
+  const prNumber =
+    row?.reviewing?.prNumber ?? row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
   const current = row && isCurrentWork(row);
   if (!current) {
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
@@ -83,6 +85,26 @@ function WorkCell({
               {doing || DASH}
             </span>
           ) : null)}
+        {actions}
+      </span>
+    );
+  }
+  if (row?.reviewing) {
+    return (
+      <span role="cell" className="ellip s ticket-cell work-cell" title={doing}>
+        <span className="ellip">
+          {row.crewPause ? "Paused review" : "Checking"}{" "}
+          <RepoRef repoId={row.repoId} number={row.reviewing.prNumber} kind="pr" bare />
+          {row.reviewing.ref && (
+            <>
+              {" "}
+              (<TicketRef ticket={row.reviewing.ref} bare />)
+            </>
+          )}
+        </span>
+        <span className="ellip xs muted" title={doing}>
+          {doing}
+        </span>
         {actions}
       </span>
     );
@@ -290,7 +312,7 @@ function LoopsStrip({
         const to = agentPath(row.id);
         // A loop waiting on the operator says so in words and takes the warn colour.
         const tone = asks > 0 ? "warn" : status.tone;
-        const state = asks > 0 ? "needs you" : status.label;
+        const state = asks > 0 ? needOwnerLabel(row, items) : status.label;
         return (
           <a
             key={row.id}

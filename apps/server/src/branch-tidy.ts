@@ -177,6 +177,8 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       if (run.loop?.parked?.kind === "pr-closed") continue;
       if (run.repoId === repoId && run.endedAt === null && run.branch !== null) out.add(run.branch);
     }
+    for (const h of deps.store.latestHandoffs(repoId))
+      if (h.acceptedRunId === null) out.add(h.branch);
     return out;
   }
 

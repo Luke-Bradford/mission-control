@@ -410,8 +410,8 @@ describe("Setup › Loops templates", () => {
     const buttons = within(within(t).getByRole("list")).getAllByRole("button");
     expect(within(t).getByRole("list").classList.contains("loop-templates")).toBe(true);
     expect(buttons.map((b) => b.textContent)).toEqual([
-      "feature · label type:feature, or any other ticket with no template label · — running · 6 steps",
-      "small-change · label chore or test or docs, or Size XS or S with no template label · — running · 4 steps",
+      "feature · label type:feature, or any other ticket with no template label · 6 steps",
+      "small-change · label chore or test or docs, or Size XS or S with no template label · 4 steps",
     ]);
     expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
     const f = screen.getByRole("region", { name: "feature" });
@@ -470,7 +470,7 @@ describe("Setup › Loops templates", () => {
     ],
   };
 
-  it("counts running seats per template and lists current occupants only on their step as inert text", async () => {
+  it("shows no running count per template and lists current occupants only on their step as inert text", async () => {
     const unsafeId = "<img src=x onerror=alert(1)>";
     const fetchFn = stubFetch({
       "/api/crew?shape=summary": {
@@ -480,9 +480,9 @@ describe("Setup › Loops templates", () => {
     });
     render(<Loops config={cfg} />);
     await settled(fetchFn, "/api/crew?shape=summary");
-    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
-    expect(screen.getByRole("button", { name: /^small-change/ }).textContent).toContain(
-      "1 running",
+    expect(screen.getByRole("button", { name: /^feature/ }).textContent).not.toContain("running");
+    expect(screen.getByRole("button", { name: /^small-change/ }).textContent).not.toContain(
+      "running",
     );
     const card = screen.getByText("3 · implement").parentElement as HTMLElement;
     expect(within(card).getByText("on this step")).toBeTruthy();
@@ -497,7 +497,7 @@ describe("Setup › Loops templates", () => {
   });
 
   // Sessions are crew sessions (#387); a repo id is not a session.
-  it.each(["s1"])("filters template counts and occupants for %s", async (session) => {
+  it.each(["s1"])("filters step occupants for %s", async (session) => {
     const fetchFn = stubFetch({
       "/api/crew?shape=summary": {
         ...crew,
@@ -510,15 +510,16 @@ describe("Setup › Loops templates", () => {
     setSession(session);
     render(<Loops config={cfg} />);
     await settled(fetchFn, "/api/crew?shape=summary");
-    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
     expect(screen.queryByText("elsewhere")).toBeNull();
   });
 
-  it("shows zero running after an empty crew loads", async () => {
+  it("shows no placeholder copy and no running count once the crew loads empty", async () => {
     const fetchFn = stubFetch({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } });
     render(<Loops config={cfg} />);
     await settled(fetchFn, "/api/crew?shape=summary");
-    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("0 running");
+    expect(screen.getByRole("button", { name: /^feature/ }).textContent).not.toMatch(/running/);
+    expect(document.body.textContent).not.toMatch(/fixed today|will replace this source/);
+    expect(screen.getByRole("region", { name: "Feature loop chain" })).toBeTruthy();
   });
 
   it("picking a profile draws its steps", () => {

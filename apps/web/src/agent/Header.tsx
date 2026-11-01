@@ -5,11 +5,13 @@ import type {
   CrewRow,
   LimitRow,
   PullRequestView,
+  ReviewCheckState,
   RunLoopView,
 } from "@mc/core";
+import { reviewCheckPill } from "@mc/core";
 import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
-import { useSecond, useTz } from "../clock.ts";
+import { useNow, useSecond, useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -490,9 +492,16 @@ export function Header({
           {callSign(row)}
           {role.suffix !== null && <span className="rt">{` · ${role.suffix}`}</span>}
         </span>
-        <span title={seatStatus(row).reason ?? seatStatus(row).label}>
-          <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
-        </span>
+        {row.review?.check &&
+        !row.crewPause &&
+        row.hudState !== "stopped" &&
+        row.hudState !== "error" ? (
+          <HeaderReviewState check={row.review.check} />
+        ) : (
+          <span title={seatStatus(row).reason ?? seatStatus(row).label}>
+            <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+          </span>
+        )}
         <span className="chips">
           {row.kind === "crew" ? (
             <>
@@ -586,4 +595,15 @@ function CurrentDoingLine({
 function TickingDoingLine({ row, tz, repoPrs }: Parameters<typeof CurrentDoingLine>[0]) {
   const now = useSecond();
   return <DoingLine row={row} now={now} tz={tz} repoPrs={repoPrs} />;
+}
+
+/** Review ages tick independently, keeping the header's controls stable. */
+function HeaderReviewState({ check }: { check: ReviewCheckState }) {
+  const now = useNow();
+  const pill = reviewCheckPill(check, now);
+  return (
+    <span className="header-review-state" title={pill.label}>
+      <Pill tone={pill.tone}>{pill.label}</Pill>
+    </span>
+  );
 }

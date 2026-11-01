@@ -24,13 +24,14 @@ import {
   type RunPr,
   type RunStatus,
   type RunView,
+  reviewCheckPill,
   STALL_MS,
   seatCallSign,
   type TestLockState,
 } from "@mc/core";
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
-import { cutText, hhmm, mss, percent, prLabel, shortSha, wkdTime } from "./fmt.ts";
+import { cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -137,9 +138,20 @@ export type ReviewingRow = CrewRow & { reviewing?: ReviewingPr | null };
 export const READY_KIND = "ready";
 export const READY_TO_MERGE = "Ready to merge";
 
-/** An idle reviewing seat's doing line: the PR, its short sha and the ticket ref when there is one. */
-export const reviewingLine = (r: ReviewingPr): string =>
-  `Reviewing PR #${r.prNumber} (${shortSha(r.sha)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+/**
+ * A review seat's doing line while it checks a PR: the Board pill's words (seat, minutes since the
+ * run started) then the PR and the ticket ref when there is one.
+ */
+export const reviewingLine = (
+  row: Pick<CrewRow, "id" | "kind" | "displayCallSign" | "run" | "stateSince">,
+  r: ReviewingPr,
+  now: number,
+): string => {
+  const seat = seatCallSign(row.id);
+  const since = row.run?.startedAt ?? row.stateSince;
+  const checking = reviewCheckPill({ kind: "checking", seat, since }, now).label;
+  return `${checking}${DOING_SEP}${prLabel(r.prNumber)}${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+};
 
 /** Whether the seat has a session open: running, or idle at the end of a turn of an open run. */
 const sessionOpen = (row: CrewRow): boolean =>
@@ -184,6 +196,7 @@ export function doingLine(
   repoPrs?: readonly PullRequestView[],
 ): string {
   if (row.crewPause) return `Paused: ${row.crewPause.reason}`;
+  if (row.reviewing && row.hudState === "idle") return reviewingLine(row, row.reviewing, now);
   if (isSeatFree(row) && row.hudState === "idle") return SEAT_FREE_LINE;
   // In `review` the PR line (idle case below) wins: it carries the title.
   if (row.loop?.phase !== "review") {
@@ -220,7 +233,7 @@ export function doingLine(
       return "Waiting";
     case "idle": {
       const reviewing = row.reviewing;
-      if (reviewing) return reviewingLine(reviewing);
+      if (reviewing) return reviewingLine(row, reviewing, now);
       const review = seatReview(row, now, repoPrs);
       if (review) return reviewText(review);
       return (
@@ -281,8 +294,8 @@ export function seatReview(
   if (row.kind !== "crew" || row.hudState !== "idle" || row.note || !row.review) return null;
   // A loop step other than review is the better line; in review the PR line carries the title.
   if (loopLine(row) !== null && row.loop?.phase !== "review") return null;
-  const { prNumber, state } = row.review;
-  const lead = REVIEW_LEAD[state];
+  const { prNumber, state, check } = row.review;
+  const lead = check ? `${reviewCheckPill(check, now).label}${DOING_SEP}` : REVIEW_LEAD[state];
   if (!repoPrs) return { lead, prNumber, tail: null };
   const title = repoPrs.find((p) => p.number === prNumber)?.title;
   return { lead, prNumber, tail: title || seatActivity(row, now) };
@@ -302,6 +315,7 @@ export function runPrs(run: RunView, repoPrs: readonly PullRequestView[] | undef
         url: p.url,
         state: p.state,
         ticket: p.ticket,
+        ...(p.uat ? { uat: p.uat } : {}),
       }),
     );
   return [...run.prs, ...extra];
@@ -409,13 +423,27 @@ export function needLine(
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
   const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
   if (asks.length > 0) {
-    const oldest = asks.reduce((a, b) => (b.at < a.at ? b : a));
-    const labels = ASKS.filter((kind) => asks.some((i) => i.kind === kind)).map((kind, index) =>
-      index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
-    );
-    const kinds =
-      labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
-    parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
+    const others = asks.filter((i) => i.owner !== "operator");
+    for (const owner of new Set(others.map((i) => i.owner))) {
+      const group = others.filter((i) => i.owner === owner);
+      const ask = group.reduce((a, b) => (b.at < a.at ? b : a));
+      parts.push({
+        text: `${ATTENTION_LABEL[ask.kind]} for ${ask.owner === "loop" ? callSign(row) : ask.owner === "controller" ? "the controller" : "FLIGHT"}${group.length > 1 ? ` · ${group.length} items` : ""}`,
+        action: "open",
+        key: ask.key,
+      });
+    }
+    const operatorAsks = asks.filter((i) => i.owner === "operator");
+    if (operatorAsks.length > 0) {
+      const oldest = operatorAsks.reduce((a, b) => (b.at < a.at ? b : a));
+      const labels = ASKS.filter((kind) => operatorAsks.some((i) => i.kind === kind)).map(
+        (kind, index) =>
+          index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
+      );
+      const kinds =
+        labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+      parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
+    }
   }
   const tag = mine.find((i) => i.kind === "tag");
   if (tag && !parts.some((p) => p.action === "answer")) {
@@ -432,6 +460,21 @@ export function needLine(
     });
   }
   return parts;
+}
+
+/** Keep the operator and the owner distinct on compact loop and Agent headers. */
+export function needOwnerLabel(row: CrewRow, items: AttentionItem[]): string {
+  const mine = seatItems(row, items);
+  if (mine.some((i) => i.owner === "operator")) return "needs you";
+  if (mine.length > 0 && mine.every((i) => i.owner === "loop")) return "has an item to resolve";
+  const owners = [
+    ...new Set(
+      mine.map((i) =>
+        i.owner === "loop" ? callSign(row) : i.owner === "controller" ? "the controller" : "FLIGHT",
+      ),
+    ),
+  ];
+  return owners.length ? `waiting on ${owners.join(", ")}` : "has an item";
 }
 
 const MINUTE = 60_000;
@@ -658,8 +701,8 @@ export const isLoopInFlight = (row: Pick<CrewRow, "loop" | "run">): boolean =>
   row.loop !== null && row.loop.phase !== "done" && row.run !== null && row.run.endedAt === null;
 
 /** A crew seat with no open run: free for work, whatever its last run's ticket was. */
-export const isSeatFree = (row: Pick<CrewRow, "kind" | "run">): boolean =>
-  row.kind === "crew" && (row.run === null || row.run.endedAt !== null);
+export const isSeatFree = (row: Pick<CrewRow, "kind" | "run" | "reviewing">): boolean =>
+  row.kind === "crew" && !row.reviewing && (row.run === null || row.run.endedAt !== null);
 
 /** What a crew row's state pill says, beyond the engine's own states. */
 export const MAX_STATE_PILL_LENGTH = 10;
@@ -692,6 +735,8 @@ export type SeatStatus = { label: string; tone: HudTone; reason?: string };
 
 export function seatStatus(row: CrewRow): SeatStatus {
   if (row.crewPause) return { label: "Paused", tone: "warn", reason: row.crewPause.reason };
+  if (row.reviewing && (row.hudState === "idle" || row.hudState === "running"))
+    return { label: "Checking", tone: "neutral" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   const reason = row.loop?.parked ?? row.note ?? undefined;
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
@@ -770,6 +815,7 @@ export function useSeatName(): (id: string) => string {
 /** Whether Work should show current references rather than the last assignment. */
 export function isCurrentWork(row: CrewRow): boolean {
   if (row.paused || row.hudState === "stopped" || row.hudState === "error") return false;
+  if (row.reviewing && (row.hudState === "idle" || row.hudState === "running")) return true;
   if (["running", "stalled", "parked"].includes(row.hudState)) return true;
   if (isSeatFree(row)) return false;
   return (

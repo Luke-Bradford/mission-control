@@ -282,6 +282,13 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
+  it("passes a per-run dollar cap when one is supplied", () => {
+    const a = crewCliArgs({ ...base, maxBudgetUsd: 12.5 });
+    expect(count(a, "--max-budget-usd")).toBe(1);
+    expect(a[a.indexOf("--max-budget-usd") + 1]).toBe("12.5");
+    expect(crewCliArgs(base)).not.toContain("--max-budget-usd");
+  });
+
   it("resumes with --resume instead of --session-id", () => {
     const a = crewCliArgs({ ...base, resume: true });
     expect(a[a.indexOf("--resume") + 1]).toBe(base.sessionId);
@@ -374,6 +381,7 @@ describe("the allowlist in phase 2b", () => {
       holdItem: "mcp__mc__hold_item",
       releaseHold: "mcp__mc__release_hold",
       screenshotHud: "mcp__mc__screenshot_hud",
+      previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",
       waitOn: "mcp__mc__wait_on",
@@ -385,6 +393,7 @@ describe("the allowlist in phase 2b", () => {
       readTicket: "mcp__mc__read_ticket",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
+      reassignTicket: "mcp__mc__reassign_ticket",
       messageSeat: "mcp__mc__message_seat",
       commsRead: "mcp__mc__comms_read",
       commsInbox: "mcp__mc__comms_inbox",
@@ -434,6 +443,7 @@ describe("the allowlist in phase 2b", () => {
     expect(CREW_CLI_ENV).toEqual({
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
     });
   });
@@ -719,6 +729,7 @@ describe("crew constants", () => {
           "read_ticket",
           "answer_question",
           "start_seat",
+          "reassign_ticket",
           "message_seat",
           "comms_pin",
           "flight_state",
@@ -847,6 +858,7 @@ describe("mc tool grants", () => {
       "read_ticket",
       "answer_question",
       "start_seat",
+      "reassign_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -956,6 +968,7 @@ describe("scratch mode", () => {
       "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
+      "mcp__mc__preview_browser",
       "mcp__mc__comms_read",
       "mcp__mc__comms_inbox",
       "mcp__mc__comms_send",

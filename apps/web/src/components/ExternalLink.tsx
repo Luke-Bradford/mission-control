@@ -8,13 +8,15 @@ import { githubHref } from "../links.ts";
 export function ExternalLink({
   url,
   label,
+  className,
   children,
   allowedOrigin = "https://github.com",
 }: {
   url: string;
   allowedOrigin?: "https://github.com" | "https://teams.microsoft.com";
   label?: string;
-  children: ReactNode;
+  className?: string;
+  children?: ReactNode;
 }) {
   let href: string | null = null;
   if (allowedOrigin === "https://github.com") {
@@ -30,7 +32,13 @@ export function ExternalLink({
     }
   }
   return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label}>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={label}
+      className={className}
+    >
       {children}
     </a>
   ) : (
