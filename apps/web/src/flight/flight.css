@@ -624,7 +624,7 @@ button.flight-link:hover {
 /* Needs you */
 .flight-needs {
   display: grid;
-  grid-template-rows: minmax(260px, 2fr) minmax(170px, 1fr) minmax(130px, 0.6fr);
+  grid-template-rows: minmax(260px, 2fr) minmax(440px, auto) minmax(170px, 1fr) minmax(130px, 0.6fr);
   gap: var(--sp-3);
   min-height: 0;
 }
@@ -1189,7 +1189,10 @@ button.flight-link:hover {
 @media (max-width: 1439px) {
   /* Four groups side by side get too narrow here: two by two, each tall enough for its rows. */
   .flight-needs {
-    grid-template-rows: minmax(260px, 2fr) minmax(300px, 1.3fr) minmax(130px, 0.6fr);
+    grid-template-rows: minmax(260px, 2fr) minmax(440px, auto) minmax(300px, 1.3fr) minmax(
+        130px,
+        0.6fr
+      );
   }
   .flight-needs-groups {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1199,7 +1202,7 @@ button.flight-link:hover {
 
 @container flight (width < 900px) {
   .flight-needs {
-    grid-template-rows: minmax(240px, 1fr) auto auto;
+    grid-template-rows: minmax(240px, 1fr) auto auto auto;
   }
   .flight-needs-groups,
   .flight-knows-orders {

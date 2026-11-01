@@ -4,6 +4,7 @@ import {
   ApiError,
   apiDelete,
   apiGet,
+  apiOperatorGet,
   apiPost,
   apiPut,
   apiReviewImage,
@@ -41,6 +42,31 @@ describe("errorNote", () => {
 });
 
 describe("api", () => {
+  it("authenticates protected JSON reads, rotates a stale token once, and rejects external targets", async () => {
+    let boot = 0;
+    const mock = vi.fn(async (path: string, init?: RequestInit) =>
+      path === OPERATOR_BOOTSTRAP_PATH
+        ? json(200, { token: ++boot === 1 ? "old-token" : "new-token" })
+        : new Headers(init?.headers).get(OPERATOR_HEADER) === "new-token"
+          ? json(200, { repos: [] })
+          : json(401, { error: OPERATOR_TOKEN_REQUIRED }),
+    );
+    vi.stubGlobal("fetch", mock);
+    expect(await apiOperatorGet("/api/prs/flow")).toEqual({ repos: [] });
+    expect(boot).toBe(2);
+    expect(mock).toHaveBeenLastCalledWith(
+      "/api/prs/flow",
+      expect.objectContaining({
+        headers: { accept: "application/json", [OPERATOR_HEADER]: "new-token" },
+        credentials: "same-origin",
+      }),
+    );
+    await expect(apiOperatorGet("https://example.test/api/prs/flow")).rejects.toThrow(
+      "Invalid private API path",
+    );
+    expect(mock).toHaveBeenCalledTimes(4);
+  });
+
   it("retrieves a private PNG with the operator token and rejects other image targets", async () => {
     const id = "a".repeat(32);
     const mock = vi.fn(async (path: string) =>

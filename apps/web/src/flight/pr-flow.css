@@ -1,0 +1,121 @@
+#prFlowP {
+  min-width: 0;
+}
+.pr-flow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-6);
+  margin: 0;
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+.pr-flow-summary > div {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-1);
+}
+.pr-flow-summary dt {
+  font-size: var(--fs-s);
+  color: var(--muted);
+}
+.pr-flow-summary dd {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pr-flow-summary .pr-flow-median dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+}
+.pr-flow-scroll {
+  min-height: 0;
+  max-height: 480px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.pr-flow-table {
+  width: 100%;
+  min-width: 980px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.pr-flow-table col:nth-child(1) {
+  width: 25%;
+}
+.pr-flow-table col:nth-child(2) {
+  width: 15%;
+}
+.pr-flow-table col:nth-child(3) {
+  width: 15%;
+}
+.pr-flow-table col:nth-child(4) {
+  width: 19%;
+}
+.pr-flow-table col:nth-child(5) {
+  width: 10%;
+}
+.pr-flow-table col:nth-child(6) {
+  width: 16%;
+}
+.pr-flow-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--fs-s);
+}
+.pr-flow-table th,
+.pr-flow-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.pr-flow-table td {
+  font-size: var(--fs);
+}
+.pr-flow-table ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-1);
+}
+.pr-flow-title {
+  margin-top: var(--sp-1);
+}
+.pr-flow-note {
+  font-size: var(--fs-s);
+  color: var(--muted);
+}
+.pr-flow-ticket,
+.pr-flow-actor {
+  display: block;
+  margin-top: var(--sp-1);
+}
+.pr-flow-age > * {
+  display: block;
+}
+.pr-flow-age strong {
+  font-weight: 500;
+}
+.pr-flow-warn {
+  background: var(--warn-soft);
+  box-shadow: inset 2px 0 var(--warn-mark);
+}
+.pr-flow-crit {
+  background: var(--crit-soft);
+  box-shadow: inset 2px 0 var(--crit);
+}
+.pr-flow-warn .pr-flow-note {
+  color: var(--warn);
+}
+.pr-flow-crit .pr-flow-note {
+  color: var(--crit);
+}

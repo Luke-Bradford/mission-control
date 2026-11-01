@@ -3949,7 +3949,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight", async () =>
         flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
       );
-      // Reader: docs/runbook.md#pr-flow-api (FLIGHT's PR-flow panel)
+      // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
       api.get("/prs/flow", async (req, reply) => {
         if (
           operatorToken !== undefined &&
