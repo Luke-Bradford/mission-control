@@ -1,0 +1,55 @@
+name: Repeat one test file
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: Exact .test.ts or .test.tsx path under apps/ or packages/
+        required: true
+        type: string
+        default: apps/server/test/supervisor-events.test.ts
+      repetitions:
+        description: Number of repetitions (1–100; job limit is 60 minutes)
+        required: true
+        type: number
+        default: 10
+      name_pattern:
+        description: Optional Vitest test-name pattern; zero executed tests fails
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repeat-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Repeat the selected test
+        env:
+          TEST_FILE: ${{ inputs.file }}
+          TEST_REPETITIONS: ${{ inputs.repetitions }}
+          TEST_NAME_PATTERN: ${{ inputs.name_pattern }}
+        run: node --experimental-strip-types scripts/repeat-test.ts
+      - name: Save every result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repeated-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .mc-tmp/repeat-tests/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
