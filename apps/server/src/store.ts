@@ -3672,14 +3672,6 @@ export class Store {
     return rows.map((r) => ({ number: r.number, title: r.title }));
   }
 
-  /** The paths of the diff files the poll last stored for a PR (the first PR_FILES_MAX). */
-  prFilePaths(repoId: RepoId, number: number): string[] {
-    const rows = this.db
-      .prepare("SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ?")
-      .all(repoId, number) as { path: string }[];
-    return rows.map((r) => r.path);
-  }
-
   pullRequest(repoId: RepoId, number: number): PullRequestView | null {
     const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
       repoId,
@@ -4680,7 +4672,7 @@ export class Store {
       .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
   }
 
-  /** The paths a PR changes, as GitHub's diff listing gave them (the first PR_FILES_MAX). */
+  /** The complete paths a PR changes, as GitHub's paged diff listing gave them. */
   prFilePaths(repoId: string, pr: number): string[] {
     return (
       this.db
