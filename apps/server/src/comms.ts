@@ -433,39 +433,20 @@ export function resolvedCommsReason(
   const qualified = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
   const short = /^#(\d+)$/.exec(message.ref ?? message.ticket ?? "");
   const ticket = qualified ?? (subjectRepoId && short ? [short[0], subjectRepoId, short[1]] : null);
-  if (
-    ticket &&
-    store
-      .board(ticket[1] ?? "")
-      .some(
-        (c) =>
-          c.issueNumber === Number(ticket[2]) &&
-          c.updatedAt >= at &&
-          (c.closed || c.state === "done"),
-      )
-  )
+  const card = ticket ? store.boardItem(ticket[1] ?? "", Number(ticket[2])) : null;
+  if (card && card.updatedAt >= at && (card.closed || card.state === "done"))
     return "The related ticket resolved.";
   const repoId = ticket?.[1] ?? run?.repoId ?? subjectRepoId;
   if (repoId) {
-    const prs = store.pullRequests(repoId);
     const pr = /^PR (\d+)$/.exec(message.ref ?? "");
+    const named = pr ? store.pullRequest(repoId, Number(pr[1])) : null;
     if (
-      pr &&
-      prs.some(
-        (p) =>
-          p.number === Number(pr[1]) &&
-          p.state !== "open" &&
-          (p.mergedAt ?? (p.state === "closed" ? p.updatedAt : 0)) >= at,
-      )
+      named &&
+      named.state !== "open" &&
+      (named.mergedAt ?? (named.state === "closed" ? named.updatedAt : 0)) >= at
     )
       return "The related PR resolved.";
-    const linked = ticket
-      ? prs.filter(
-          (p) =>
-            p.ticket === `${ticket[1]}#${ticket[2]}` ||
-            p.closingIssues?.includes(Number(ticket[2])),
-        )
-      : [];
+    const linked = ticket ? store.pullRequestsClosingTicket(repoId, Number(ticket[2])) : [];
     if (
       linked.some((p) => p.state === "merged" && (p.mergedAt ?? 0) >= at) &&
       !linked.some((p) => p.state === "open")

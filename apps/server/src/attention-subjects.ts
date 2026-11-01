@@ -5,7 +5,8 @@ import type { Store } from "./store.ts";
 export function pendingRunApproval(store: Store, run: Run, knownPr?: PullRequestView): boolean {
   const loop = run.loop;
   if (!loop) return false;
-  const pr = knownPr ?? store.pullRequests(run.repoId).find((p) => p.number === loop.prNumber);
+  const pr =
+    knownPr ?? (loop.prNumber == null ? null : store.pullRequest(run.repoId, loop.prNumber));
   // Display obsolescence only: the stored verdicts and actual merge gates remain intact.
   if (pr && pr.state !== "open") return false;
   if (loop.mergeHold) return true;
