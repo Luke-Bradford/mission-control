@@ -1,0 +1,110 @@
+{
+  "copiedDatabase": true,
+  "crewDisabled": true,
+  "allExternalAndNonGetRequestsBlocked": true,
+  "measurements": [
+    {
+      "ms": 2849.663209,
+      "bytes": 54043,
+      "files": 1152,
+      "seq": 4
+    },
+    {
+      "ms": 1129.3053340000006,
+      "bytes": 54043,
+      "files": 1152,
+      "seq": 4
+    },
+    {
+      "ms": 75.23516699999982,
+      "bytes": 54043,
+      "files": 1152,
+      "seq": 4
+    }
+  ],
+  "results": [
+    {
+      "width": 1280,
+      "theme": "light",
+      "tiles": 1152,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map"
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "tiles": 1152,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map"
+      ]
+    },
+    {
+      "width": 1600,
+      "theme": "light",
+      "tiles": 1152,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map"
+      ]
+    },
+    {
+      "width": 1600,
+      "theme": "dark",
+      "tiles": 1152,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map",
+        "/api/repos/mission-control/map",
+        "/api/repos/mission-control/map"
+      ],
+      "idle": {
+        "seconds": 30.003931999905035,
+        "taskSeconds": 0.294887,
+        "scriptSeconds": 0.025454,
+        "layoutSeconds": 0.009859000000000001,
+        "styleSeconds": 0.032068,
+        "requests": 3,
+        "cpuPercent": 0.9828278506994794
+      }
+    },
+    {
+      "width": 1920,
+      "theme": "light",
+      "tiles": 1158,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map"
+      ]
+    },
+    {
+      "width": 1920,
+      "theme": "dark",
+      "tiles": 1158,
+      "layout": {
+        "horizontal": true,
+        "small": []
+      },
+      "requests": [
+        "/api/repos/mission-control/map"
+      ]
+    }
+  ]
+}

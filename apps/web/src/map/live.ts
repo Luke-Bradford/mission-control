@@ -1,5 +1,6 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
 import { applyDelta } from "./deltas.ts";
+import { shareMap } from "./structural.ts";
 
 /** One repo subscription; snapshot requests coalesce while deltas keep their order. */
 export class LiveMap {
@@ -39,7 +40,32 @@ export class LiveMap {
     this.error = error;
   }
 
+  private hidden = false;
+  private active() {
+    return !this.stopped && !this.hidden;
+  }
+  private visibility = () => {
+    this.hidden = document.visibilityState === "hidden";
+    if (this.hidden) {
+      this.source?.close();
+      this.source = null;
+      clearTimeout(this.retry);
+      clearTimeout(this.held);
+      this.held = undefined;
+      this.pending = [];
+      this.watermark = 0;
+      this.epoch++;
+      this.again = false;
+      this.stale = false;
+    } else this.connect();
+  };
   start() {
+    this.hidden = document.visibilityState === "hidden";
+    document.addEventListener("visibilitychange", this.visibility);
+    this.connect();
+  }
+  private connect() {
+    if (!this.active() || this.source) return;
     this.source = new EventSource(`/api/stream?map=${encodeURIComponent(this.repo)}`);
     this.source.addEventListener("open", () => {
       const first = !this.opened;
@@ -63,7 +89,7 @@ export class LiveMap {
       }
     });
     this.source.addEventListener("map", (e) => {
-      if (this.stopped) return;
+      if (!this.active()) return;
       try {
         const delta = JSON.parse((e as MessageEvent).data) as MapDelta;
         if (!Number.isSafeInteger(delta.seq) || typeof delta.type !== "string")
@@ -74,9 +100,7 @@ export class LiveMap {
           this.pending.push(delta);
           return;
         }
-        // The current collector returns seq: 0. Without a snapshot watermark an edit
-        // may already be counted, so use its events as invalidations, never add churn twice.
-        const next = this.snapshot.seq === 0 ? null : applyDelta(this.snapshot, delta, Date.now());
+        const next = applyDelta(this.snapshot, delta, Date.now());
         if (next) {
           this.snapshot = next;
           this.receive(next);
@@ -89,7 +113,7 @@ export class LiveMap {
   }
 
   async refresh() {
-    if (this.stopped) return;
+    if (!this.active()) return;
     if (this.fetching) {
       this.again = true;
       return;
@@ -102,24 +126,24 @@ export class LiveMap {
     const epoch = this.epoch;
     try {
       let snapshot: MapSnapshot = await this.get();
-      if (this.stopped) return;
+      if (!this.active()) return;
       if (epoch !== this.epoch) {
         this.again = true;
         return;
       }
       for (const delta of this.pending) {
-        const next: MapSnapshot | null =
-          snapshot.seq === 0 ? null : applyDelta(snapshot, delta, Date.now());
+        const next: MapSnapshot | null = applyDelta(snapshot, delta, Date.now());
         if (next) snapshot = next;
         else this.stale = true;
       }
       this.pending = [];
+      snapshot = shareMap(this.snapshot ?? undefined, snapshot);
       this.snapshot = snapshot;
       this.watermark = Math.max(this.watermark, snapshot.seq);
       this.receive(snapshot);
       this.error(null);
     } catch (e) {
-      if (!this.stopped) {
+      if (this.active()) {
         this.error(e instanceof Error ? e : new Error("Map unavailable"));
         this.retry = setTimeout(() => {
           void this.refresh();
@@ -127,14 +151,14 @@ export class LiveMap {
       }
     } finally {
       this.fetching = false;
-      if (this.again && !this.stopped) {
+      if (this.again && this.active()) {
         this.again = false;
         this.stale = false;
         clearTimeout(this.retry);
         this.retry = setTimeout(() => {
           void this.refresh();
         }, 0);
-      } else if (this.stale && !this.stopped) {
+      } else if (this.stale && this.active()) {
         this.stale = false;
         this.invalidate();
       }
@@ -160,6 +184,7 @@ export class LiveMap {
 
   stop() {
     this.stopped = true;
+    document.removeEventListener("visibilitychange", this.visibility);
     clearTimeout(this.retry);
     clearTimeout(this.held);
     this.source?.close();

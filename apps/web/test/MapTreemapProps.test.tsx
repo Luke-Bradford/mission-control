@@ -18,7 +18,7 @@ vi.mock("../src/map/MapTreemap.tsx", async (importOriginal) => {
   };
 });
 
-it("hands the treemap the same props across a 5 s clock tick, so it is not drawn again", () => {
+it("does not render the whole treemap for a 5 s detail-clock tick", () => {
   vi.useFakeTimers();
   try {
     const value: MapSnapshot = structuredClone(mapSnapshotFixture);
@@ -26,6 +26,7 @@ it("hands the treemap the same props across a 5 s clock tick, so it is not drawn
       { path: "src/a.ts", lines: 10 },
       { path: "src/b.ts", lines: 10 },
     ];
+    vi.setSystemTime(new Date("2026-11-01T12:00:01Z"));
     const now = Date.now();
     value.seats[0].recent = [{ file: "src/a.ts", at: now - 60_000 }];
     value.seats[0].scope = {
@@ -37,10 +38,10 @@ it("hands the treemap the same props across a 5 s clock tick, so it is not drawn
     const count = seen.length;
     act(() => vi.advanceTimersByTime(5_000));
     const after = seen.at(-1) as Props;
-    // the page re-rendered for the tick, with the same props throughout
+    // Detail clocks do not render the page or its treemap.
     for (const key of new Set([...Object.keys(before), ...Object.keys(after)]))
       expect(Object.is(before[key], after[key]), key).toBe(true);
-    expect(seen.length).toBeGreaterThan(count);
+    expect(seen.length).toBe(count);
   } finally {
     vi.useRealTimers();
   }

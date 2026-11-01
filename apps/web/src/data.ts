@@ -15,13 +15,17 @@ import {
   dockStreamPath,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
+  type MapPayload,
+  type MapSnapshot,
   type PullRequestView,
   prListPath,
   TOPICS,
   type Topic,
+  unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet, apiOperatorGet } from "./api.ts";
+import { shareMap } from "./map/structural.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
@@ -395,8 +399,20 @@ interface Entry {
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
 /** Only PR flow needs a protected JSON read. */
-const readResource = <T>(path: string): Promise<T> =>
-  path === RESOURCES.prFlow.path ? apiOperatorGet<T>(path) : apiGet<T>(path);
+const mapSnapshots = new Map<string, MapSnapshot>();
+const readResource = async <T>(path: string): Promise<T> => {
+  if (/^\/api\/repos\/[^/]+\/map$/.test(path)) {
+    const next = shareMap(
+      mapSnapshots.get(path),
+      unpackMap(await apiGet<MapPayload | MapSnapshot>(path)),
+    );
+    if (mapSnapshots.size >= 16 && !mapSnapshots.has(path))
+      mapSnapshots.delete(mapSnapshots.keys().next().value as string);
+    mapSnapshots.set(path, next);
+    return next as T;
+  }
+  return path === RESOURCES.prFlow.path ? apiOperatorGet<T>(path) : apiGet<T>(path);
+};
 
 class Hub {
   private readonly entries = new Map<string, Entry>();
@@ -404,6 +420,22 @@ class Hub {
   private generation = 0;
   /** Stamps each request as it starts, so answers can be told apart by age. */
   private seq = 0;
+
+  /** A new tree must not retain every older analysis graph for the lifetime of the HUD. */
+  private pruneGraphs(): void {
+    const unused = [...this.entries.values()].filter(
+      (e) =>
+        /^\/api\/repos\/[^/]+\/map\/graph\?key=/.test(e.path) &&
+        e.listeners.size === 0 &&
+        e.settledListeners.size === 0 &&
+        !e.inflight &&
+        !e.queued &&
+        !e.again &&
+        !e.fullAgain,
+    );
+    for (const entry of unused.slice(0, Math.max(0, unused.length - 16)))
+      this.entries.delete(entry.path);
+  }
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -420,6 +452,7 @@ class Hub {
         settledListeners: new Set(),
       };
       this.entries.set(path, e);
+      if (path.includes("/map/graph?key=")) this.pruneGraphs();
     }
     return e;
   }
@@ -450,12 +483,16 @@ class Hub {
   ): () => void {
     const e = this.entry(path, topic);
     e.settledListeners.add(fn);
-    return () => e.settledListeners.delete(fn);
+    return () => {
+      e.settledListeners.delete(fn);
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
+    };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
+    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -467,6 +504,7 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
@@ -674,6 +712,7 @@ class Hub {
    * What is still on screen is fetched again at once, rather than left idle until the next event.
    */
   clear(): void {
+    mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
       e.inflight = false;
