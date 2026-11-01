@@ -906,3 +906,9 @@
   display: flex;
   justify-content: center;
 }
+
+@media (min-width: 1600px) {
+  .comms-grid {
+    grid-template-columns: 280px minmax(0, 1fr) 420px;
+  }
+}

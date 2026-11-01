@@ -45,8 +45,9 @@ describe("crew call ring", () => {
       [1, "call.start"],
       [2, "edit"],
       [3, "call.end"],
+      [4, "invalidate"],
     ]);
-    expect(ring.sequence("repo")).toBe(3);
+    expect(ring.sequence("repo")).toBe(4);
     expect(ring.sequence("other")).toBe(0);
     // The future panel must refetch its snapshot on reconnect or any missing sequence (§6).
     const refetch = vi.fn();
@@ -59,7 +60,7 @@ describe("crew call ring", () => {
     stop();
     appendFileSync(transcriptPath, `${lines.slice(2).join("\n")}\n`);
     ring.poll();
-    expect(received).toHaveLength(3);
+    expect(received).toHaveLength(4);
     expect(ring.sequence("repo")).toBeGreaterThan(3);
   });
 
@@ -90,6 +91,7 @@ describe("crew call ring", () => {
       [1, "call.start", "two"],
       [2, "edit", "two"],
       [3, "call.end", "two"],
+      [4, "invalidate", false],
     ]);
     const refetch = vi.fn(() => ring.sequence("one"));
     const seq = refetch(); // Reconnect starts with a new snapshot, not replayed events.
@@ -101,7 +103,7 @@ describe("crew call ring", () => {
     expect(resumed.map((d) => d.seq)).toEqual(resumed.map((_, i) => seq + i + 1));
     expect(resumed.at(-1)?.seq).toBe(ring.sequence("one"));
     expect(ring.sequence("one")).toBeGreaterThan(3);
-    expect(ring.sequence("two")).toBe(3);
+    expect(ring.sequence("two")).toBe(4);
   });
 
   it("starts a restarted ring at the transcript's recent tail, not at offset 0", () => {

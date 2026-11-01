@@ -182,7 +182,14 @@ export class CallRing {
     }
     for (const [file, { add, rem }] of changes)
       if (add || rem)
-        this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
+        this.publish(source.repoId, {
+          type: "edit",
+          seat: source.seat,
+          sourceId: source.id,
+          file,
+          add,
+          rem,
+        });
   }
 
   /**
@@ -274,12 +281,12 @@ export class CallRing {
     for (;;) {
       const next = readNewLines(source.transcriptPath, tail.offset);
       if (next.reset) {
-        this.touch(source.repoId);
         this.runScopes.delete(source.id);
         this.rows.set(
           source.seat,
           (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
         );
+        this.publish(source.repoId, { type: "invalidate" });
       }
       for (const line of next.lines) {
         try {
@@ -303,7 +310,10 @@ export class CallRing {
       if (!(source.current === false && this.settled.has(source.id))) this.readTail(source, now);
       let entry = this.diffs.get(source.id);
       if (!entry || entry.source.cwd !== source.cwd) {
-        entry = { source, diff: new SeatDiff() };
+        entry = {
+          source,
+          diff: new SeatDiff(() => this.publish(source.repoId, { type: "invalidate" })),
+        };
         this.diffs.set(source.id, entry);
       }
       entry.source = source;
@@ -502,6 +512,9 @@ export class CallRing {
     calls.push(call);
     this.publish(source.repoId, {
       type: "call.start",
+      sourceId: source.id,
+      id: JSON.stringify([call.runId, call.id]),
+      since: call.since,
       seat: source.seat,
       tool: call.tool,
       detail: call.detail,
@@ -570,6 +583,9 @@ export class CallRing {
       scope.tests = { tests: call.tests, at };
     this.publish(source.repoId, {
       type: "call.end",
+      sourceId: source.id,
+      id: JSON.stringify([call.runId, call.id]),
+      at,
       seat: source.seat,
       files: call.files,
       resultTok: call.resultTok,
@@ -578,6 +594,8 @@ export class CallRing {
       why: call.why,
       tests: call.tests,
     });
+    if (call.writeTok !== undefined && !error && !refused)
+      this.publish(source.repoId, { type: "invalidate" });
   }
 
   private fold(source: RingSource, ev: Json, now: number): void {

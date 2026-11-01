@@ -1,3 +1,4 @@
+import { joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -1401,6 +1402,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
   ["GET", "/api/repos/shop-app/map/tree"],
+  ["GET", "/api/repos/shop-app/map/graph"],
   ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
@@ -2381,6 +2383,7 @@ describe("local access", () => {
         url === "/api/repos/shop-app/map/conflicts" ||
         url === "/api/repos/shop-app/map" ||
         url === "/api/repos/shop-app/map/tree" ||
+        url === "/api/repos/shop-app/map/graph" ||
         url === "/api/repos/shop-app/map/live"
       ) {
         // This fixture has no crew checkout to check.
@@ -4156,43 +4159,101 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
-  it("serves a fixture repo's map snapshot under 300 KB, excluding observed loops", async () => {
+  it("serves a light map with an indexed graph only on demand, excluding observed loops", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
+    if (!session) throw Error("fixture session missing");
     session.checkout = mapCheckout(dir);
     const response = await get("/api/repos/shop-app/map");
     expect(response.statusCode).toBe(200);
-    expect(Buffer.byteLength(response.body)).toBeLessThan(300_000);
-    expect(response.json()).toMatchObject({
+    expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
+    const raw = response.json();
+    expect(raw).not.toHaveProperty("imports");
+    expect(raw).not.toHaveProperty("hist");
+    expect(raw).toMatchObject({
       repoId: "shop-app",
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
-      rules: { areas: DEFAULT_REPO_RULES.areas, hardRules: DEFAULT_REPO_RULES.hardRules },
-      hist: expect.objectContaining({
-        since: expect.any(Number),
-        prCount: 0,
-        fixCount: 0,
-        files: {},
-        coupling: [],
-      }),
       findings: [],
-      seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
+      seats: [{ seat: "guido-1", context: null }],
     });
-    expect(response.json().tree).toContainEqual(
+    const light = unpackMap(raw);
+    expect(light.tree).toContainEqual(
       expect.objectContaining({ path: "packages/core/src/map.ts", lines: expect.any(Number) }),
     );
-    expect(response.json().imports).toContainEqual({
+    const graphResponse = await get(`/api/repos/shop-app/map/graph?key=${raw.graphKey}`);
+    expect(graphResponse.statusCode).toBe(200);
+    const graph = graphResponse.json();
+    expect(
+      graph.imports.every((edge: unknown[]) => edge.length === 2 && edge.every(Number.isInteger)),
+    ).toBe(true);
+    const full = joinMapGraph(light, graph);
+    expect(full.imports).toContainEqual({
       from: "packages/core/src/map.ts",
       to: "packages/core/src/types.ts",
     });
-    expect(response.json().imports).toContainEqual({
+    expect(full.imports).toContainEqual({
       from: "apps/server/src/map/ring.ts",
       to: "packages/core/src/types.ts",
     });
-    expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
+    expect(full.hist.prCount).toBe(0);
+    const cached = await app.inject({
+      method: "GET",
+      url: `/api/repos/shop-app/map/graph?key=${raw.graphKey}`,
+      headers: { "if-none-match": graphResponse.headers.etag as string },
+    });
+    expect(cached.statusCode).toBe(304);
+    expect((await get("/api/repos/shop-app/map/graph?key=old")).statusCode).toBe(409);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
+  });
+
+  it("keeps a 1,074-file repository under 60 KB with 4,616 graph edges and history excluded", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw Error("missing session");
+    session.checkout = mapCheckout(dir);
+    const tree = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/core/test/fixtures/map-tree.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { path: string; lines: number }[];
+    const imports = Array.from({ length: 4616 }, (_, i) => ({
+      from: tree[i % tree.length]?.path as string,
+      to: tree[(i + 1) % tree.length]?.path as string,
+    }));
+    const hist: Awaited<ReturnType<typeof mapTree>>["hist"] = {
+      since: NOW - 90 * DAY,
+      prCount: 600,
+      fixCount: 80,
+      files: Object.fromEntries(tree.map((_, i) => [i, [10, 2, NOW, [7, 8]]])),
+      coupling: [],
+    };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      mapTree: async () => ({ tree, imports, hist }),
+    });
+    try {
+      const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+      expect(response.statusCode).toBe(200);
+      expect(unpackMap(response.json()).tree).toHaveLength(1074);
+      expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
+      expect(response.json()).not.toHaveProperty("imports");
+      expect(response.json()).not.toHaveProperty("hist");
+      const graph = await a.inject({
+        method: "GET",
+        url: `/api/repos/shop-app/map/graph?key=${response.json().graphKey}`,
+      });
+      expect(graph.statusCode).toBe(200);
+      expect(graph.json().imports).toHaveLength(4616);
+      expect(graph.json().hist.files).toHaveProperty("1073");
+    } finally {
+      await a.close();
+    }
   });
 
   it("reuses the map payload while its inputs are unchanged and rebuilds when one changes", async () => {
@@ -4344,7 +4405,9 @@ describe("boards, escalations, health", () => {
         commitOnDefault(checkout, "added.ts");
         const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
         expect(builds).toHaveLength(2);
-        expect(moved.json().tree).toContainEqual(expect.objectContaining({ path: "added.ts" }));
+        expect(unpackMap(moved.json()).tree).toContainEqual(
+          expect.objectContaining({ path: "added.ts" }),
+        );
       } finally {
         await a.close();
       }
@@ -4372,6 +4435,7 @@ describe("boards, escalations, health", () => {
         appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
         clock += 5000;
         const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
+        expect(after.json().seq).toBeGreaterThan(before.json().seq);
         expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
           "packages/core/src/map.ts",
         ]);
@@ -6143,7 +6207,7 @@ describe("SSE stream", () => {
       const frames = mapFixture(vendor).trim().split("\n");
       appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
       bus.emit("boards");
-      await selected.until('"type":"call.end"');
+      await selected.until('"type":"invalidate"');
       const deltas = selected
         .text()
         .split("\n")
@@ -6154,6 +6218,7 @@ describe("SSE stream", () => {
         [1, "call.start"],
         [2, "edit"],
         [3, "call.end"],
+        [4, "invalidate"],
       ]);
       expect(deltas[0]).toMatchObject({
         seat: "guido-1",

@@ -147,9 +147,9 @@ export function spokeAnchors(
 export type LabelSide = "below" | "above" | "right" | "left";
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 
-/** A 9px mono upper-case name is about this wide per character. */
-const CHAR_PX = 5.9;
-const LABEL_H = 11;
+/** 11px mono with the node name’s 0.06em tracking; include the stroke in the box. */
+const CHAR_PX = 7.3;
+const LABEL_H = 14;
 
 /** A name's box when it sits on `side` of a node of radius `r` at `p`. */
 export function labelBox(p: Point, r: number, text: string, side: LabelSide): Box {
