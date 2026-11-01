@@ -136,12 +136,16 @@ const stageSince = (
   fallback: number,
 ): number => {
   if (run === null) return fallback;
-  const event = store
-    .runAttempts(run.id)
-    .filter((attempt) => attempt.kind === "loop")
-    .reverse()
-    .find((attempt) => flowStage(attempt.data as unknown as Run["loop"]) === stage);
-  return event?.at ?? fallback;
+  const events = store.runAttempts(run.id).filter((attempt) => attempt.kind === "loop");
+  let since: number | null = null;
+  for (const event of events.reverse()) {
+    if (flowStage(event.data as unknown as Run["loop"]) === stage) {
+      since = event.at;
+      continue;
+    }
+    if (since !== null) break;
+  }
+  return since ?? fallback;
 };
 
 /** Derives the single PR-flow record used by both FLIGHT and the HUD. */
@@ -195,8 +199,8 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
                       : "FLIGHT"
                     : active.agentId;
       const waitsOn = [
-        ...(active === null && run !== null && run.endedAt !== null
-          ? [`no run since ${clockHm(run.endedAt, "UTC")}`]
+        ...(active === null
+          ? [`no run since ${clockHm(run?.endedAt ?? pr.createdAt, "UTC")}`]
           : []),
         ...(loop?.controllerCheck ? ["controller check"] : []),
         ...(loop?.mergeHold
@@ -225,8 +229,13 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
               .find((candidate) => candidate.state === "open" && candidate.ticket === hold.ref);
             return dependent === undefined ? [hold.ref] : [hold.ref, `PR ${dependent.number}`];
           }),
-        lastAction: active === null && run?.endedAt !== null ? "run ended" : stage,
-        lastActor: run?.agentId ?? null,
+        lastAction:
+          active === null && run?.endedAt !== null
+            ? "run ended"
+            : reviewer !== undefined
+              ? `review ${reviewer.state}`
+              : stage,
+        lastActor: reviewer?.seatId ?? run?.agentId ?? null,
       };
     })
     .sort((a, b) => (a.owner === "nobody" ? -1 : b.owner === "nobody" ? 1 : a.pr - b.pr));
