@@ -10,7 +10,7 @@ import type { Store } from "./store.ts";
 /** One bounded overlay per repo, shared by the queue and Board PR list. */
 export function prAcceptanceFor(store: Store, repoId: string) {
   const waiting = new Map<number, NonNullable<PullRequestView["uat"]>>();
-  for (const run of store.loopRuns(0)) {
+  for (const run of store.activeLoopRuns(repoId)) {
     const loop = run.loop;
     if (
       run.repoId !== repoId ||
@@ -62,7 +62,7 @@ const SEND_BACK =
 /** Whether the PR waits for acceptance, since when, and the operator's newest send-back note. */
 function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
   const run = store
-    .loopRuns(0)
+    .activeLoopRuns(pr.repoId)
     .find((r) => r.repoId === pr.repoId && r.endedAt === null && r.loop?.prNumber === pr.number);
   const loop = run?.loop;
   if (run === undefined || !loop) return { waiting: false, since: null, note: null };

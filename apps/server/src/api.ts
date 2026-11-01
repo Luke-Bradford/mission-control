@@ -2998,7 +2998,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { repoId: string; number: string } }>(
         "/repos/:repoId/prs/:number/files",
         (req, reply) => {
-          const pr = /^[1-9]\d*$/.test(req.params.number)
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
             ? store.pullRequest(req.params.repoId, Number(req.params.number))
             : null;
           if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)

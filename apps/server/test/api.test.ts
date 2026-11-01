@@ -1470,7 +1470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
-  ["POST", "/api/prs/shop-app/12/uat", { action: "accept" }],
+  ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
