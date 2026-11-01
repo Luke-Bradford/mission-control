@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EvidenceManifest } from "@mc/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPrEvidence,
   type EvidenceTarget,
@@ -19,6 +19,7 @@ const tmp = (): string => {
   return d;
 };
 afterEach(() => {
+  vi.useRealTimers();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -361,21 +362,32 @@ describe("PrEvidence gate", () => {
   });
 
   it("ends a capture whose step hangs at the deadline, and the next PR is not stuck behind it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let entered!: () => void;
+    const hanging = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     const t = setup({
       captureMs: 30,
       startSide: async ({ sha, signal }) => {
-        if (sha === HEAD)
+        if (sha === HEAD) {
+          entered();
           return new Promise((_, reject) =>
             signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
           );
+        }
         return { origin: `http://side/${sha}`, stop: async () => {} };
       },
     });
-    await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    const first = t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    await hanging;
+    await vi.advanceTimersByTimeAsync(30);
+    await first;
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain(
       "capture failed: the capture ran past its deadline",
     );
-    // a second PR is captured: main's side answers, the other head's too
+    // Keep the clock fixed: a successful capture must not race a 30 ms wall-clock deadline.
+    // A second PR is captured: main's side answers, the other head's too
     await t.evidence.ensure({ repoId: "mc", pr: 8, sha: NEXT, paths: WEB });
     expect(t.store.manifest("mc", 8, NEXT)).not.toBeNull();
   });
