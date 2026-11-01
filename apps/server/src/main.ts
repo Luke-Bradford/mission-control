@@ -94,6 +94,7 @@ import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
+import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -801,7 +802,7 @@ export async function main(): Promise<void> {
     config,
     store,
     bus,
-    logger: true,
+    logger: { stream: rotatingLog(join(dirname(dbPath), "logs", "server.log")) },
     webRoot: WEB_ROOT,
     profilesPath,
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
@@ -868,7 +869,7 @@ export async function main(): Promise<void> {
     }
   }
   await app.listen({ host: HOST, port });
-  // newsyslog sends SIGTERM to this pid; launchd reopens the rotated log on restart.
+  // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
     const pidPath = join(dirname(dbPath), "server.pid");
     writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
