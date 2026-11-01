@@ -575,7 +575,7 @@ describe("cards", () => {
     await screen.findByText("Ticket 3349");
     const c = card(container, "shop-app#3349") as HTMLElement;
     expect(within(c).getByText("Reviewing:")).toBeTruthy();
-    expect(within(c).getByText("Running")).toBeTruthy();
+    expect(within(c).getByText("Checking")).toBeTruthy();
     expect(c.className).toContain("pulse-ok");
     const reviewer = within(c).getByRole("link", { name: "RETRO-1" });
     expect(reviewer.getAttribute("href")).toBe("/agent/RETRO-1");
