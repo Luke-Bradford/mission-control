@@ -31,7 +31,7 @@ The measured Comms `<small>` elements render at **10.8333 px in IBM Plex Sans**.
 
 The shell currently uses 12 px padding/gaps (`--sp-3`) at both requested widths. The design system calls for 24 px gutters at these widths and 16 below 1600. This is a documented mismatch to resolve explicitly in the plan; silently introducing another token scale would make the rule less useful. Panel containers often have zero padding because their `.ph`/`.pb` children supply it; a container's zero must not be reported as a zero-padding content violation.
 
-Buttons and fields are measured individually in the inventory. A small checkbox's graphic alone is not its full clickable label target. The later plan must preserve at least 24×24 px interaction targets and the current type minimums, while checking actual label bounds and focus states.
+Buttons and fields are measured individually; the inventory groups identical measured shapes/styles and retains their counts. A small checkbox's graphic alone is not its full clickable label target. The later plan must preserve at least 24×24 px interaction targets and the current type minimums, while checking actual label bounds and focus states.
 
 ## Comparable dense tools
 
