@@ -10,6 +10,7 @@ const { renderAt } = browserSession();
 const shots = process.env.MC_REVIEW_DISPLAY_SHOTS;
 const api = {
   "/api/config": CONFIG,
+  "/api/crew/changes": { sessions: [{ id: "s1", seats: [{ id: "guido-1" }] }] },
   "/api/crew?shape=summary": {
     rows: [
       REVIEWER,

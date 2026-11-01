@@ -92,7 +92,8 @@ function WorkCell({
     return (
       <span role="cell" className="ellip s ticket-cell work-cell" title={doing}>
         <span className="ellip">
-          Checking <RepoRef repoId={row.repoId} number={row.reviewing.prNumber} kind="pr" bare />
+          {row.crewPause ? "Paused review" : "Checking"}{" "}
+          <RepoRef repoId={row.repoId} number={row.reviewing.prNumber} kind="pr" bare />
           {row.reviewing.ref && (
             <>
               {" "}
