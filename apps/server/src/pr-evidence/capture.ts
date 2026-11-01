@@ -219,7 +219,10 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(deps.store.manifest(deps.repoId, t.pr, t.sha), t.sha, pages);
-      if (missing.length === 0) return null;
+      if (missing.length === 0)
+        return posted.has(keyOf(t))
+          ? null
+          : "kept in draft until its screenshot evidence links are posted to the PR";
       const why = failedWhy.get(keyOf(t));
       return `${evidenceRefusalText(missing)}; capture failed: ${why ?? ""}`.replace(
         /; capture failed: $/,

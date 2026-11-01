@@ -3066,9 +3066,9 @@ describe("the engine runs reviews", () => {
     /** The run reaches review with the PR's files known from the first pass. */
     async function toReviewed(files: typeof WEB_FILES | [], over: Partial<PullRequestView> = {}) {
       report();
-      setPr({ files: [...files], ...over });
+      setPr({ files: [...files], changedFiles: files.length, ...over });
       await h.engine.reconcileRun(RUN);
-      setPr({ ci: "passing", files: [...files], ...over });
+      setPr({ ci: "passing", files: [...files], changedFiles: files.length, ...over });
       await h.engine.reconcileRun(RUN);
     }
     async function reportClean(): Promise<void> {
@@ -3089,11 +3089,26 @@ describe("the engine runs reviews", () => {
       expect(reviewRows()).toHaveLength(1);
     });
 
-    it("lets the review go ahead once the head's capture has failed", async () => {
+    it("holds review when capture fails instead of reviewing without the pairs", async () => {
       const ev = evidence(new Set(), "capture failed: no Chrome");
       await withEvidence(ev);
       await toReviewed(WEB_FILES);
-      expect(reviewRows()).toHaveLength(1);
+      expect(reviewRows()).toHaveLength(0);
+      expect(h.steps).not.toContain("ready");
+    });
+
+    it("captures the whole HUD when a legacy diff omits files beyond the first hundred", async () => {
+      const ev = evidence(new Set());
+      await withEvidence(ev);
+      await toReviewed([], {
+        changedFiles: 101,
+        files: Array.from({ length: 100 }, (_, i) => ({
+          path: `apps/server/src/file${i}.ts`,
+          changeType: "MODIFIED",
+        })),
+      });
+      expect(reviewRows()).toHaveLength(0);
+      expect(ev.ensured.at(-1)?.paths).toEqual(["apps/web/src/hud.css"]);
     });
 
     it("holds mark-ready while a web PR's head has no pairs, names the missing pages, releases once they exist", async () => {

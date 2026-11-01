@@ -1122,11 +1122,17 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** A PR head and its changed files, with the PR-body write that follows its capture. */
   function evidenceTarget(run: Run, pr: number, sha: string) {
+    const row = store.pullRequests(run.repoId).find((p) => p.number === pr);
+    const paths = store.prFilePaths(run.repoId, pr);
+    // Old rows may still contain the former first-100-file snapshot. Until a complete read,
+    // photograph the whole HUD so a web file past that boundary cannot bypass the gate.
+    const complete =
+      row?.headSha === sha && row.changedFiles != null && paths.length === row.changedFiles;
     return {
       repoId: run.repoId,
       pr,
       sha,
-      paths: store.prFilePaths(run.repoId, pr),
+      paths: complete ? paths : ["apps/web/src/hud.css"],
       onStored: async (m: EvidenceManifest) => {
         const section = evidenceSectionText(m, deps.evidence?.baseUrl ?? "");
         const r = await publisher.setEvidenceSection(store.run(run.id) ?? run, section);
@@ -1207,21 +1213,13 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /**
    * Whether the PR's evidence hold applies to `sha`: a web PR without the pairs of this head. It
-   * records why (once per text), asks for the capture, and the caller stops its pass. `failedOk`
-   * lets a head through once its capture has failed: nobody is made to wait on a capture that
-   * will not come.
+   * records why (once per text), asks for the capture, and the caller stops its pass.
    */
-  function evidenceHeld(
-    run: Run,
-    cur: RunLoop,
-    sha: string,
-    at: number,
-    failedOk = false,
-  ): boolean {
+  function evidenceHeld(run: Run, cur: RunLoop, sha: string, at: number): boolean {
     if (!deps.evidence || cur.prNumber === null) return false;
     const target = evidenceTarget(run, cur.prNumber, sha);
     const held = deps.evidence.gate(target);
-    if (held === null || (failedOk && held.includes("capture failed"))) return false;
+    if (held === null) return false;
     store.addLoopEvent(
       `${run.id}:evidence:${sha}:${createHash("sha1").update(held).digest("hex").slice(0, 8)}`,
       run.id,
@@ -1490,7 +1488,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         }
         // the reviewer reads the pairs: wait for them, unless their capture has failed
-        if (evidenceHeld(run, cur, a.sha, at, true)) {
+        if (evidenceHeld(run, cur, a.sha, at)) {
           out.parked = true;
           return;
         }

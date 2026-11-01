@@ -172,11 +172,45 @@ describe("PrEvidence capture", () => {
     let calls = 0;
     await t.evidence.ensure(target);
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
+    expect(t.evidence.gate(target)).toContain("links are posted");
     fail = false;
     await t.evidence.ensure(target);
+    expect(t.evidence.gate(target)).toBeNull();
     await t.evidence.ensure(target);
     expect(calls).toBe(2); // the failed post was tried again, the good one not repeated
     expect(t.started).toHaveLength(2); // no second capture, only the post
+  });
+
+  it("reposts stored pairs after a hub restart before releasing draft", async () => {
+    const t = setup();
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    const restarted = createPrEvidence({
+      store: t.store,
+      repoId: "mc",
+      workDir: tmp(),
+      baseUrl: "http://localhost",
+      mainSha: async () => MAIN,
+      snapshot: async () => {
+        throw new Error("must not recapture");
+      },
+      startSide: async () => {
+        throw new Error("must not rebuild");
+      },
+      render: async () => {
+        throw new Error("must not render");
+      },
+    });
+    expect(restarted.gate(target)).toContain("links are posted");
+    let posted = false;
+    await restarted.ensure({
+      ...target,
+      onStored: async () => {
+        posted = true;
+      },
+    });
+    expect(posted).toBe(true);
+    expect(restarted.gate(target)).toBeNull();
   });
 
   it("stops both hubs and waits before retrying when a capture fails", async () => {
