@@ -32,10 +32,11 @@ export async function resolvePreviewRepo(
   if (hubRoot === null || sessions.length === 0) return undefined;
   const hubRepo = await originRepo(hubRoot);
   if (hubRepo === null) return undefined;
-  for (const session of sessions) {
-    const configured = repos.find((repo) => repo.id === session.repoId);
-    if (configured?.github.toLowerCase() !== hubRepo) continue;
-    if ((await originRepo(session.checkout)) === hubRepo) return configured.id;
+  for (const configured of repos) {
+    if (configured.github.toLowerCase() !== hubRepo) continue;
+    // The API starts previews from the first session for this repo; validate that exact checkout.
+    const session = sessions.find((candidate) => candidate.repoId === configured.id);
+    if (session && (await originRepo(session.checkout)) === hubRepo) return configured.id;
   }
   return undefined;
 }

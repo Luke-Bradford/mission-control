@@ -79,12 +79,24 @@ describe("the repository allowed to run branch previews", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("skips an unavailable crew clone and selects a matching one", async () => {
+  it("does not enable an unavailable first checkout through a later matching session", async () => {
     await expect(
       resolvePreviewRepo(hub, repos, [
         { repoId: "hub", checkout: join(dir, "absent") },
         ...sessions(),
       ]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not enable a foreign first checkout through a later matching session", async () => {
+    const foreign = join(dir, "foreign");
+    execFileSync("git", ["init", "-q", foreign]);
+    origin(foreign, "https://github.com/example/other.git");
+    await expect(
+      resolvePreviewRepo(hub, repos, [{ repoId: "hub", checkout: foreign }, ...sessions()]),
+    ).resolves.toBeUndefined();
+    await expect(
+      resolvePreviewRepo(hub, repos, [...sessions(), { repoId: "hub", checkout: foreign }]),
     ).resolves.toBe("hub");
   });
 });
