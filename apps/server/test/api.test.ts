@@ -1525,6 +1525,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/flow"],
   ["GET", "/api/qa/milestones"],
+  ["GET", "/api/qa/review-shots/:id"],
   ["GET", "/api/qa/uat/:repoId/:number"],
 ];
 
@@ -2342,6 +2343,11 @@ describe("local access", () => {
       if (url === "/api/flight/runaway/lift") {
         // nothing is tripped in this fixture
         expect(r.statusCode).toBe(409);
+        continue;
+      }
+      if (url.startsWith("/api/qa/review-shots/")) {
+        // no screenshot is stored for the placeholder id
+        expect(r.statusCode).toBe(404);
         continue;
       }
       if (url === "/api/attention/unknown") {

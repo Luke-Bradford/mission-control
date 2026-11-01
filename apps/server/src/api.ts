@@ -407,6 +407,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
+  reviewShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
@@ -2270,6 +2272,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
         },
       );
+
+      // Reader: docs/runbook.md#qa-board-data (the PR readiness page shows a review's preview screenshots)
+      api.get<{ Params: { id: string } }>("/qa/review-shots/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const png = deps.reviewShots?.read(req.params.id) ?? null;
+        if (!png) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, no-store")
+          .header("x-content-type-options", "nosniff")
+          .type("image/png")
+          .send(png);
+      });
 
       // Reader: docs/runbook.md#qa-board-data (escaped defects, review queue age, rework ratio and tests per PR, each with its definition)
       api.get<{ Querystring: { days?: unknown } }>(

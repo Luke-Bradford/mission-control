@@ -160,6 +160,7 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
+import type { ReviewPreviews } from "../review-preview.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
@@ -457,6 +458,8 @@ export interface SupervisorDeps {
   stopGraceMs?: number;
   /** Bounded Comms context appended to each user line that starts a seat turn. */
   inbox?: (seatId: string, runId: string) => InboxContext;
+  /** Opens a preview of a web PR's head for its review run and closes it when the run ends. */
+  reviewPreviews?: ReviewPreviews;
 }
 
 export interface InboxContext {
@@ -1869,6 +1872,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function removeRunFiles(runId: string): void {
+    void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
@@ -3662,6 +3666,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       store.upsertRun(run);
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
+      // A web PR's review gets a preview of its head, built in the background: the review does not
+      // wait for it, and one that cannot start does not stop the review.
+      const previewStarting =
+        deps.reviewPreviews === undefined
+          ? false
+          : await deps.reviewPreviews.open({
+              runId,
+              repoId: info.repo.id,
+              pr: review.prNumber,
+              branch: author.branch ?? "",
+            });
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
       const prevReply =
@@ -3693,6 +3708,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
+        ...(previewStarting ? { preview: true } : {}),
         ...(second === null
           ? {}
           : {
