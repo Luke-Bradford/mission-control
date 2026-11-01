@@ -115,6 +115,7 @@ import {
   type ReviewFinding,
   type ReviewRequest,
   type ReviewRow,
+  type ReviewShotView,
   type ReviewState,
   type ReviewVerdict,
   type Run,
@@ -284,6 +285,11 @@ CREATE TABLE IF NOT EXISTS review_checks (
   review_id INTEGER NOT NULL, check_id TEXT NOT NULL, result TEXT NOT NULL, note TEXT,
   PRIMARY KEY (review_id, check_id)
 );
+CREATE TABLE IF NOT EXISTS review_shots (
+  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, shot_id TEXT NOT NULL, label TEXT NOT NULL,
+  width INTEGER NOT NULL, theme TEXT NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS review_shots_review ON review_shots (review_id);
 CREATE TABLE IF NOT EXISTS review_tests (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, command TEXT NOT NULL, file TEXT,
   passed INTEGER NOT NULL, failed INTEGER NOT NULL, skipped INTEGER NOT NULL, duration INTEGER NOT NULL
@@ -2535,6 +2541,9 @@ export class Store {
               .prepare(`DELETE FROM review_tests WHERE review_id IN (${marks})`)
               .run(...ids.map(({ id }) => id));
             this.db
+              .prepare(`DELETE FROM review_shots WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
               .prepare(`DELETE FROM review_resolutions WHERE review_id IN (${marks})`)
               .run(...ids.map(({ id }) => id));
             this.db
@@ -4654,6 +4663,45 @@ export class Store {
       blocking: r.blocking as number,
       minor: r.minor as number,
       endedAt: r.ended_at as number,
+      screenshots: this.reviewShots(r.id as number),
+    }));
+  }
+
+  /** Records a screenshot RETRO took on a review's preview; `shotId` names its stored PNG. */
+  addReviewShot(
+    reviewId: number,
+    shot: { shotId: string; label: string; width: number; theme: ReviewShotView["theme"] },
+    at: number,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO review_shots (review_id, shot_id, label, width, theme, at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
+  }
+
+  /** The paths a PR changes, as GitHub's diff listing gave them (the first PR_FILES_MAX). */
+  prFilePaths(repoId: string, pr: number): string[] {
+    return (
+      this.db
+        .prepare("SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ? ORDER BY path")
+        .all(repoId, pr) as Row[]
+    ).map((r) => r.path as string);
+  }
+
+  reviewShots(reviewId: number): ReviewShotView[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT shot_id, label, width, theme, at FROM review_shots WHERE review_id = ? ORDER BY id",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      id: r.shot_id as string,
+      label: r.label as string,
+      width: r.width as number,
+      theme: r.theme as ReviewShotView["theme"],
+      at: r.at as number,
     }));
   }
 

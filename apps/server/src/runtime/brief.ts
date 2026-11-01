@@ -18,6 +18,7 @@ import {
   evidenceImageName,
   type LoopKind,
   MC_LINE_PREFIX,
+  MC_TOOL_NAMES,
   profileRouteText,
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
@@ -232,6 +233,8 @@ export interface ReviewBriefInput {
   evidenceMissing?: string;
   /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
   second?: { reason: string; findings: readonly StoredFinding[] };
+  /** True for a web PR: its preview is starting in the background. */
+  preview?: boolean;
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";
@@ -291,6 +294,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
         ]
       : []),
     ...(i.evidenceMissing ? [`- ${EVIDENCE_HEADING.slice(3)}: ${i.evidenceMissing}`] : []),
+    ...(i.preview !== true
+      ? []
+      : [
+          `- Preview: this PR changes web files, so its head is starting on a copy of the live data, with loop writes off. Use mc ${MC_TOOL_NAMES.previewBrowser} to open its pages (set the width and theme); if it says the preview is still building, call it again in a minute (a build can take up to 5 minutes). Click every link and button the change touches, fill its forms with bad input, read the page and take screenshots; each screenshot is kept with this review. The browser reaches only the preview. Real data shows what fixtures miss: long text, many rows, odd states. If the tool says there is no preview, say in your summary that the live-data check was not run.`,
+        ]),
     ...(i.touches.length > 0
       ? [
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,

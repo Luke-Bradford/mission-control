@@ -355,6 +355,7 @@ describe("the mc tools", () => {
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
       ["report_evidence", ["writer", "read-only"]],
+      [MC_TOOL_NAMES.previewBrowser, ["scratch"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
       ["report_plan", []],
@@ -370,6 +371,7 @@ describe("the mc tools", () => {
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
       MC_TOOLS.reportEvidence,
+      MC_TOOLS.previewBrowser,
       MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
       MC_TOOLS.reportPlan,
@@ -5881,5 +5883,176 @@ describe("restore_file", () => {
     ).toBe(true);
     store.upsertRun({ ...live, endedAt: NOW });
     expect((await restore("apps/a.ts")).text).toBe(MC_RUN_ENDED);
+  });
+});
+
+describe("preview_browser", () => {
+  const ctx = { seatId: "retro", runId: "retro:preview" };
+  const ORIGIN = "http://127.0.0.1:7431";
+  const png = Buffer.from("PNG");
+  let reviewId: number;
+  let previewIdentity: string;
+  let browse: ReturnType<typeof vi.fn>;
+  let cfg: CcConfig;
+  const call = (args: unknown, origin: string | null = ORIGIN) => {
+    const ts = make({
+      config: cfg,
+      previewBrowser: {
+        ready: async () => ({
+          origin,
+          identity: origin === null ? null : previewIdentity,
+          note: origin === null ? "the preview did not start" : null,
+        }),
+        identity: () => (origin === null ? null : previewIdentity),
+        browse: browse as never,
+        saveShot: () => "a".repeat(32),
+      },
+    });
+    return tool(MC_TOOL_NAMES.previewBrowser, ts).call(ctx, args);
+  };
+  beforeEach(() => {
+    previewIdentity = "instance:1";
+    cfg = config();
+    const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === ctx.seatId);
+    if (!seat) throw new Error("no review seat");
+    seat.mode = "scratch";
+    browse = vi.fn(async () => ({
+      url: `${ORIGIN}/needs-you`,
+      report: ["step 1: screenshot wide"],
+      shots: [{ label: "wide", png }],
+    }));
+    const id = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "f".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    reviewId = id;
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: ctx.runId });
+    store.upsertRun(run({ id: ctx.runId, agentId: ctx.seatId, reviewId: id }));
+    const session = store.seatSession("guido-1");
+    if (session === null) throw new Error("no seat session");
+    store.setSeatSession({ ...session, seatId: ctx.seatId, runId: ctx.runId });
+  });
+
+  it("runs the job on the review's preview, keeps the screenshot and returns it", async () => {
+    const r = await call({
+      path: "/needs-you",
+      width: 1280,
+      theme: "light",
+      steps: [{ screenshot: "wide" }],
+    });
+    expect(r.isError).toBeUndefined();
+    expect(browse).toHaveBeenCalledTimes(1);
+    expect(browse.mock.calls[0]?.[1].origin).toBe(ORIGIN);
+    expect(r.image?.data).toBe(png.toString("base64"));
+    expect(store.reviewShots(reviewId)).toEqual([
+      { id: "a".repeat(32), label: "wide", width: 1280, theme: "light", at: NOW },
+    ]);
+  });
+
+  it("does not run queued work or save results after the run ends", async () => {
+    let finish: (() => void) | undefined;
+    browse.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ url: ORIGIN, report: [], shots: [{ label: "late", png }] });
+        }),
+    );
+    const first = call({ path: "/" });
+    await vi.waitFor(() => expect(browse).toHaveBeenCalledTimes(1));
+    const second = call({ path: "/" });
+    const run = store.run(ctx.runId);
+    if (!run || !finish) throw new Error("missing pending browser run");
+    store.upsertRun({ ...run, endedAt: NOW, status: "ok" });
+    finish();
+    const results = await Promise.all([first, second]);
+    expect(results.every((result) => result.isError)).toBe(true);
+    expect(browse).toHaveBeenCalledTimes(1);
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("discards screenshots when the review reports during a browse", async () => {
+    browse.mockImplementationOnce(async () => {
+      store.setReviewState(reviewId, ["running"], "reported", { at: NOW });
+      return { url: ORIGIN, report: [], shots: [{ label: "late", png }] };
+    });
+    expect((await call({ path: "/" })).isError).toBe(true);
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("discards screenshots when the preview instance changes on the same port", async () => {
+    browse.mockImplementationOnce(async () => {
+      previewIdentity = "instance:2";
+      return { url: ORIGIN, report: [], shots: [{ label: "late", png }] };
+    });
+    const result = await call({ path: "/" });
+    expect(result.isError).toBe(true);
+    expect(result.image).toBeUndefined();
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("refuses any other host before a browser starts", async () => {
+    for (const path of [
+      "http://evil.example/",
+      "//evil.example/x",
+      "https://127.0.0.1:7431/",
+      "http://127.0.0.1:7432/",
+      "file:///etc/passwd",
+      "data:text/html,hi",
+      "needs-you",
+    ]) {
+      const r = await call({ path });
+      expect(r.isError, path).toBe(true);
+    }
+    expect(browse).not.toHaveBeenCalled();
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("answers before a Codex tool timeout while the preview is still building", async () => {
+    vi.useFakeTimers();
+    try {
+      const ts = make({
+        config: cfg,
+        previewBrowser: {
+          ready: () => new Promise(() => {}),
+          identity: () => previewIdentity,
+          browse: browse as never,
+          saveShot: () => "a".repeat(32),
+        },
+      });
+      const pending = tool(MC_TOOL_NAMES.previewBrowser, ts).call(ctx, { path: "/" });
+      await vi.advanceTimersByTimeAsync(40_000);
+      const r = await pending;
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("still building");
+      expect(browse).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says there is no preview for a review without one", async () => {
+    const r = await call({ path: "/" }, null);
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("No preview for this review");
+    expect(browse).not.toHaveBeenCalled();
+  });
+
+  it("refuses bad widths, themes, unknown steps and too many screenshots", async () => {
+    for (const args of [
+      { path: "/", width: 100 },
+      { path: "/", theme: "blue" },
+      { path: "/", steps: [{ eval: "1" }] },
+      { path: "/", steps: Array.from({ length: 7 }, () => ({ screenshot: "s" })) },
+    ])
+      expect((await call(args)).isError).toBe(true);
+    expect(browse).not.toHaveBeenCalled();
   });
 });

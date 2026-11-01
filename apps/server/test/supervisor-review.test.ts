@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { createReviewPreviews } from "../src/review-preview.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -659,6 +660,71 @@ describe("startReview", () => {
     );
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
+  });
+
+  it("a web PR's review brief says its preview is starting, and the preview closes when the run ends", async () => {
+    const r = reviewOfPush();
+    const opened: unknown[] = [];
+    const closed: string[] = [];
+    const reviewPreviews = {
+      origin: () => null,
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
+      open: async (input: unknown) => {
+        opened.push(input);
+        return true;
+      },
+      close: async (runId: string) => {
+        closed.push(runId);
+      },
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(opened).toEqual([{ runId, repoId: "mc", pr: 9, branch: BRANCH, sha: r.sha }]);
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Preview: this PR changes web files");
+    expect(brief).toContain("mc preview_browser");
+    await sup.endRun("retro");
+    await until(() => expect(closed).toContain(runId));
+  });
+
+  it("a review still starts when its preview build never finishes", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = createReviewPreviews({
+      previews: {
+        start: () => new Promise(() => {}),
+        close: async () => true,
+        touch: () => true,
+        get: () => null,
+      },
+      files: () => ["apps/web/a.tsx"],
+      webGlobs: async () => ["apps/web/**"],
+      checkout: () => "/clone",
+    });
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("- Preview: this PR changes web files");
+    expect(store.run(runId)?.endedAt).toBeNull();
+  });
+
+  it("a PR that changes no web files gets no preview line", async () => {
+    const r = reviewOfPush();
+    const reviewPreviews = {
+      origin: () => null,
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
+      open: async () => false,
+      close: async () => {},
+    };
+    const { sup } = make({ scratchRetro: true, reviewPreviews });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("- Preview:");
   });
 
   it("a review brief carries the Done-when table from the author's report", async () => {

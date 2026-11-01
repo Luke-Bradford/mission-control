@@ -197,6 +197,18 @@ import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
 import { runPathGrants } from "../path-grants.ts";
+import {
+  PREVIEW_READY_WAIT_MS,
+  PREVIEW_SHOTS_MAX,
+  PREVIEW_STEPS_MAX,
+  PREVIEW_THEMES,
+  PREVIEW_WIDTH_MAX,
+  PREVIEW_WIDTH_MIN,
+  type PreviewGuard,
+  type PreviewJob,
+  type PreviewResult,
+  previewRequest,
+} from "../preview-browser.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
@@ -210,7 +222,7 @@ import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
-import type { McTool, McToolContext } from "./server.ts";
+import type { McTool, McToolContext, McToolResult } from "./server.ts";
 
 export interface McToolsDeps {
   config: CcConfig;
@@ -259,6 +271,18 @@ export interface McToolsDeps {
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
   onComms?: (to: string, text: string, from: string) => void;
+  /** RETRO's browser on a review's preview; absent: `preview_browser` says there is none. */
+  previewBrowser?: {
+    /** Waits for this review run's preview to start; `origin` is null when there is none to use. */
+    ready(
+      runId: string,
+    ): Promise<{ origin: string | null; note: string | null; identity: string | null }>;
+    identity(runId: string): string | null;
+    /** Runs the job in a browser that reaches only the guard's origin. */
+    browse(job: PreviewJob, guard: PreviewGuard): Promise<PreviewResult>;
+    /** Stores a PNG; the id it can be read back by. */
+    saveShot(png: Buffer): string;
+  };
 }
 
 /**
@@ -300,6 +324,25 @@ const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const CallArgs = z.strictObject({
   reason: text(MC_TEXT_MAX),
   ref: z.string().trim().min(1).max(120).optional(),
+});
+const PreviewBrowserArgs = z.strictObject({
+  path: z.string().min(1).max(500),
+  width: z.number().int().min(PREVIEW_WIDTH_MIN).max(PREVIEW_WIDTH_MAX).default(1280),
+  theme: z.enum(PREVIEW_THEMES).default("dark"),
+  steps: z
+    .array(
+      z.union([
+        z.strictObject({ click: text(300) }),
+        z.strictObject({
+          type: z.strictObject({ selector: text(300), text: z.string().max(5000) }),
+        }),
+        z.strictObject({ read: text(300) }),
+        z.strictObject({ measure: text(300) }),
+        z.strictObject({ screenshot: text(80) }),
+      ]),
+    )
+    .max(PREVIEW_STEPS_MAX)
+    .default([]),
 });
 const CommsReadArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
 const CommsSendArgs = z.strictObject({
@@ -1137,6 +1180,9 @@ export function queued<T>(queue: Map<string, Promise<unknown>>, key: string, fn:
   return next;
 }
 
+/** Each review run's preview browser calls, one at a time. */
+const previewQueue = new Map<string, Promise<unknown>>();
+
 /** Each ticket's last report_plan call. */
 const planQueue = new Map<string, Promise<unknown>>();
 
@@ -1618,6 +1664,109 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };
     }
+  }
+
+  async function previewBrowser(ctx: McToolContext, args: unknown): Promise<McToolResult> {
+    const parsed = PreviewBrowserArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const currentReview = () => {
+      const live = liveRun(ctx);
+      const review = live?.run.reviewId == null ? null : store.review(live.run.reviewId);
+      return live && review?.runId === live.run.id && review.state === "running" ? review : null;
+    };
+    if (currentReview() === null) return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+    const job: PreviewJob = parsed.data;
+    const shotCount = job.steps.filter((step) => "screenshot" in step).length;
+    if (shotCount > PREVIEW_SHOTS_MAX)
+      return {
+        text: `At most ${PREVIEW_SHOTS_MAX} screenshots a call; this one asks for ${shotCount}.`,
+        isError: true,
+      };
+    const browser = deps.previewBrowser;
+    if (!browser)
+      return {
+        text: "No preview for this review: it is not a web PR. Say in your summary that the live-data check was not run.",
+        isError: true,
+      };
+    return queued(previewQueue, ctx.runId, async (): Promise<McToolResult> => {
+      const review = currentReview();
+      if (review === null) return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+      let preview: Awaited<ReturnType<typeof browser.ready>> | "building";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        preview = await Promise.race([
+          browser.ready(ctx.runId),
+          new Promise<"building">((resolve) => {
+            timer = setTimeout(() => resolve("building"), PREVIEW_READY_WAIT_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (preview === "building")
+        return {
+          text: "The preview is still building. Call mc preview_browser again in a minute; a build can take up to 5 minutes.",
+          isError: true,
+        };
+      if (preview.origin === null || preview.identity === null)
+        return {
+          text: `No preview for this review: ${preview.note ?? "it is not a web PR"}. Say in your summary that the live-data check was not run.`,
+          isError: true,
+        };
+      const identity = preview.identity;
+      const current = () =>
+        currentReview()?.id === review.id && browser.identity(ctx.runId) === identity;
+      if (!current())
+        return {
+          text: "The review or its preview changed. Call mc preview_browser again if the review is still running.",
+          isError: true,
+        };
+      const guard = previewRequest(preview.origin);
+      try {
+        guard.page(job.path);
+      } catch (error) {
+        return { text: error instanceof Error ? error.message : "Refused.", isError: true };
+      }
+      let result: PreviewResult;
+      try {
+        result = await browser.browse(job, guard);
+      } catch (error) {
+        return {
+          text: error instanceof Error ? error.message : "Preview browser failed.",
+          isError: true,
+        };
+      }
+      if (!current())
+        return {
+          text: "The review or its preview ended before the browser finished; screenshots were not saved.",
+          isError: true,
+        };
+      const saved: string[] = [];
+      for (const shot of result.shots) {
+        try {
+          const shotId = browser.saveShot(shot.png);
+          store.addReviewShot(
+            review.id,
+            { shotId, label: shot.label, width: job.width, theme: job.theme },
+            now(),
+          );
+          saved.push(`${shot.label} (${shotId})`);
+        } catch {
+          saved.push(`${shot.label} (not stored)`);
+        }
+      }
+      const last = result.shots.at(-1);
+      return {
+        text: [
+          `${job.path} at ${job.width} px, ${job.theme} theme.`,
+          ...result.report,
+          ...(saved.length > 0 ? [`Screenshots kept with this review: ${saved.join(", ")}.`] : []),
+        ].join("\n"),
+        ...(last === undefined
+          ? {}
+          : { image: { data: last.png.toString("base64"), mimeType: "image/png" as const } }),
+      };
+    });
   }
 
   async function restoreFile(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2810,6 +2959,42 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer", "read-only"],
       call: reportEvidence,
+    },
+    {
+      name: MC_TOOL_NAMES.previewBrowser,
+      description: `Open a page of this review's live-data preview in a browser, then click, type, read and screenshot, in order. The browser reaches only the preview. Each call starts on a fresh page: give the path, the viewport width (${PREVIEW_WIDTH_MIN}-${PREVIEW_WIDTH_MAX}) and the theme, then up to ${PREVIEW_STEPS_MAX} steps. A step is one of click {selector or text=...}, type {selector, text}, read {selector} (its text), measure {selector} (each match's position and size, to find clipping), screenshot {label}. Screenshots are kept with the review and shown on the PR readiness page.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", minLength: 1, maxLength: 500 },
+          width: { type: "integer", minimum: PREVIEW_WIDTH_MIN, maximum: PREVIEW_WIDTH_MAX },
+          theme: { type: "string", enum: [...PREVIEW_THEMES] },
+          steps: {
+            type: "array",
+            maxItems: PREVIEW_STEPS_MAX,
+            items: {
+              type: "object",
+              properties: {
+                click: { type: "string" },
+                type: {
+                  type: "object",
+                  properties: { selector: { type: "string" }, text: { type: "string" } },
+                  required: ["selector", "text"],
+                  additionalProperties: false,
+                },
+                read: { type: "string" },
+                measure: { type: "string" },
+                screenshot: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      modes: ["scratch"],
+      call: previewBrowser,
     },
     {
       name: MC_TOOL_NAMES.restoreFile,

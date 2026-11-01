@@ -1427,6 +1427,22 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
+- **Review previews and screenshots.** When a PR changes web files (paths under the repo's
+  `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
+  the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
+  copy of the live data with loop writes off. The preview is pinned to the reviewed commit; an operator preview is reused only for that same head. Browser requests are GET-only, and queued calls recheck the running review and preview instance before returning results. It is built in the background when the review run
+  starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
+  every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
+  when the run ends (a preview the operator started for that PR is used and left running). If the
+  preview cannot start (capacity, the two-preview limit, a failed build), `preview_browser` says
+  so and RETRO notes the live-data check was not run. RETRO's
+  `preview_browser` tool waits up to 40 s for a building preview, then answers "still building" so RETRO calls again (Codex ends a tool call at 60 s); once it is up the tool opens a page, sets the width (320..3840) and theme, and runs up to
+  20 steps (click, type, read, measure, screenshot). Chrome runs behind a proxy that reaches only
+  the preview's `host:port`; every other request, the operator-token bootstrap and the live
+  stream included, is refused. Each call starts on a fresh page. A screenshot is kept in
+  `review-screenshots/` beside the database for 90 days (`QA_RETENTION_DAYS`) and listed under its
+  review round in `GET /api/qa/findings` (`reviews[].screenshots`: `id`, `label`, `width`,
+  `theme`, `at`). `GET /api/qa/review-shots/:id` serves one PNG, with the operator token.
 - **PR readiness: Comms, rework and try-it.** `GET /api/qa/uat/:repoId/:number` carries, for one
   PR: `comms`, the newest 20 messages whose ref or ticket is the PR or its ticket (sender, time,
   text; newest first); `rounds`, each reported review round newest first with its blocking findings

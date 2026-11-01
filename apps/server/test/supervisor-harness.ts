@@ -25,6 +25,7 @@ import type { CliHold } from "../src/cli-update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import type { ReviewPreviews } from "../src/review-preview.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -295,6 +296,7 @@ function make(
     tokens?: RunTokens;
     lock?: TestLock;
     hubRoot?: string;
+    reviewPreviews?: ReviewPreviews;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
@@ -376,6 +378,7 @@ function make(
     tokens,
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
+    ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),
