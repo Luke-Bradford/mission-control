@@ -7,7 +7,7 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { nextWakeAt } from "../src/flight/state.ts";
+import { nextWakeAt, wakeReasons } from "../src/flight/state.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr-flow.ts";
 import { Store } from "../src/store.ts";
 
@@ -225,6 +225,34 @@ describe("PR flow ownership and clocks", () => {
     expect(row()).toMatchObject({ stage: "clearance", owner: "FLIGHT" });
   });
 
+  it("ignores old-epoch and other-author reviews after a same-head resume", () => {
+    store.upsertRun(run());
+    store.upsertPullRequests("mc", [pr()], T);
+    store.setRunLoop("author", { ...NEW_LOOP, prNumber: 7, phase: "review" }, T);
+    const old = review(T + M);
+    store.recordFindings(old, `review-${old}`, {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: T + 2 * M,
+    });
+    store.setRunLoop("author", { ...NEW_LOOP, prNumber: 7, epoch: 1 }, T + 3 * M);
+    expect(row()).toMatchObject({ stage: "building", owner: "guido" });
+    store.setRunLoop("author", { ...NEW_LOOP, prNumber: 7, epoch: 1, phase: "review" }, T + 4 * M);
+    store.requestReview({
+      authorRunId: "other",
+      repoId: "mc",
+      seatId: "wrong-seat",
+      prNumber: 7,
+      sha: "head",
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: T + 5 * M,
+    });
+    expect(row()).toMatchObject({ stage: "review", owner: "review seat" });
+  });
+
   it("uses timestamp order rather than insertion order and records the newest real action and actor", () => {
     store.upsertRun(run());
     store.upsertPullRequests("mc", [pr()], T);
@@ -261,7 +289,7 @@ describe("PR flow ownership and clocks", () => {
     expect(row()).toMatchObject({ lastActor: "CI", lastActionAt: T + 7 * M });
     store.addFlightDecision({
       kind: "hold",
-      seatId: "flight-1",
+      seatId: "guido",
       targetRunId: "author",
       ref: "mc#7",
       questionId: null,
@@ -272,7 +300,7 @@ describe("PR flow ownership and clocks", () => {
     });
     expect(row()).toMatchObject({
       lastAction: "wait for dependency",
-      lastActor: "flight-1",
+      lastActor: "FLIGHT",
       lastActionAt: T + 8 * M,
     });
     store.addLoopEvent(
@@ -406,9 +434,36 @@ describe("dependencies and immutable flow metrics", () => {
     for (const stage of week?.stageTimes ?? [])
       expect(stage).toMatchObject({ p50Ms: M, p90Ms: 2 * M });
   });
+  it("keeps live owners fresh, includes new merges immediately, and expires metrics at window boundaries", () => {
+    merged(7, T, M);
+    expect(flow(T + 8 * M).metrics[0]?.merged).toBe(1);
+    store.upsertRun(run("next", { ticket: "mc#8", branch: "feature/8", startedAt: T + 8 * M }));
+    store.setRunLoop("next", { ...NEW_LOOP, phase: "ci", prNumber: 8 }, T + 8 * M + 1);
+    store.upsertPullRequests("mc", [pr(8, { createdAt: T + 8 * M })], T + 8 * M);
+    expect(flow(T + 8 * M + 2).rows[0]).toMatchObject({ pr: 8, owner: "CI" });
+    store.upsertPullRequests(
+      "mc",
+      [pr(8, { state: "merged", createdAt: T + 8 * M, mergedAt: T + 8 * M + 3 })],
+      T + 8 * M + 3,
+    );
+    expect(flow(T + 8 * M + 4).metrics[0]?.merged).toBe(2);
+    expect(flow(T + DAY + 8 * M).metrics[0]?.merged).toBe(2);
+    expect(flow(T + DAY + 8 * M + 1).metrics[0]?.merged).toBe(1);
+  });
 });
 
 describe("PR flow timed wake boundaries", () => {
+  it("targets only the PR identity, so another PR's clearance decision cannot settle it", () => {
+    const reasons = wakeReasons(
+      "{}",
+      JSON.stringify({ prFlow: [`7:stage:clearance:${T}`, `8:waiting:controller:${T}`] }),
+    );
+    expect(reasons.map((r) => r.targets)).toEqual([
+      ["7", "#7"],
+      ["8", "#8"],
+    ]);
+  });
+
   it.each(["operator", "controller"] as const)(
     "schedules and emits stable %s and p90 facts at their boundaries",
     (owner) => {

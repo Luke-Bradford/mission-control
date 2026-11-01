@@ -9,6 +9,7 @@ import {
   type ReviewRow,
   type Run,
   type RunLoop,
+  reviewFor,
   ticketWaits,
 } from "@mc/core";
 import type { Store } from "./store.ts";
@@ -33,6 +34,13 @@ const percentile = (values: number[], p: number): number | null => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? null;
 };
+
+// Historical cohorts may be backfilled after merge. Bound reuse to 30s, and expire at exact
+// window boundaries or whenever the immutable merge set changes. Live rows never use this cache.
+const metricCache = new WeakMap<
+  Store,
+  Map<string, { key: string; at: number; until: number; metrics: FlightPrFlow["metrics"] }>
+>();
 
 interface Position {
   stage: Stage;
@@ -87,8 +95,10 @@ function position(
   if (loop?.merging || loop?.phase === "done") return { stage: "merge", owner: "hub" };
   if (fixing) return { stage: "rework", owner: "seat", reason: "fixing blocking review findings" };
   if (loop?.phase === "ci") return { stage: "CI", owner: "CI" };
+  if (loop?.phase === "working") return { stage: "building", owner: "seat" };
   if (
     review &&
+    (loop == null || review.epoch === loop.epoch) &&
     (review.sha === sha ||
       (sha !== null &&
         review.sha === carriedFrom(loop?.carry, loop?.reviewWaivedSha, sha) &&
@@ -157,6 +167,7 @@ function history(
     const a = e.attempt;
     if (e.fix) fixing = true;
     if (a?.kind === "loop") {
+      if (a.data.epoch !== loop?.epoch) fixing = false;
       loop = a.data.phase ? (a.data as unknown as RunLoop) : null;
       if (loop?.pushFor) sha = loop.pushFor;
       if (loop?.phase === "ci" || loop?.phase === "working") fixing = false;
@@ -204,12 +215,23 @@ function history(
 export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow {
   const prs = store.pullRequests(repoId);
   const merged = store.prHistory(repoId, now - WEEK, now);
+  let cache = metricCache.get(store);
+  if (!cache) {
+    cache = new Map();
+    metricCache.set(store, cache);
+  }
+  const key = JSON.stringify(merged.map((p) => [p.number, p.createdAt, p.mergedAt, p.headSha]));
+  const previous = cache.get(repoId);
+  const cached =
+    previous && previous.key === key && now >= previous.at && now < previous.until
+      ? previous.metrics
+      : null;
   const runs = store
     .runsActiveSince(
       Math.min(
-        now - WEEK,
+        now,
         ...prs.filter((p) => p.state === "open").map((p) => p.createdAt),
-        ...merged.map((p) => p.createdAt),
+        ...(cached ? [] : merged.map((p) => p.createdAt)),
       ),
     )
     .filter((r) => r.repoId === repoId && r.reviewId == null);
@@ -236,15 +258,17 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       const run = related.at(-1) ?? null;
       const active = run?.endedAt === null ? run : null;
       const reviews = store.reviewsOfPr(repoId, pr.number);
-      const currentReview = reviews.findLast(
-        (r) =>
-          (r.sha === pr.headSha ||
-            (pr.headSha !== null &&
-              r.sha === carriedFrom(run?.loop?.carry, run?.loop?.reviewWaivedSha, pr.headSha) &&
-              r.state === "reported" &&
-              r.blocking === 0)) &&
-          r.state !== "superseded",
-      );
+      const candidateReviews = run ? reviews.filter((r) => r.authorRunId === run.id) : reviews;
+      const fact =
+        pr.headSha === null
+          ? null
+          : reviewFor(
+              candidateReviews,
+              run?.loop?.epoch ?? candidateReviews.at(-1)?.epoch ?? 0,
+              pr.headSha,
+              carriedFrom(run?.loop?.carry, run?.loop?.reviewWaivedSha, pr.headSha),
+            );
+      const currentReview = candidateReviews.find((r) => r.id === fact?.id) ?? null;
       const h = run ? readHistory(pr, run) : null;
       const latestPoint = h?.points.at(-1);
       const fixing = latestPoint?.position.stage === "rework";
@@ -367,7 +391,7 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
           (pr.ticket !== null && d.ref === pr.ticket) ||
           d.ref === `${repoId}/PR ${pr.number}`,
       ))
-        actions.push({ at: d.at, text: d.decision, actor: d.seatId ?? "FLIGHT" });
+        actions.push({ at: d.at, text: d.decision, actor: "FLIGHT" });
       for (const hold of holds.filter((v) => v.ref === pr.ticket))
         actions.push({ at: hold.at, text: hold.basis, actor: "FLIGHT" });
       const last = actions
@@ -396,32 +420,36 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       (a, b) => Number(b.ownerKind === "nobody") - Number(a.ownerKind === "nobody") || a.pr - b.pr,
     );
 
-  const samples = merged.map((pr) => {
-    const byStage = new Map<Stage, number>();
-    const related = authors(pr, runs);
-    related.forEach((run, index) => {
-      const points = readHistory(pr, run).points;
-      const end = Math.min(
-        pr.mergedAt ?? now,
-        run.endedAt ?? now,
-        related[index + 1]?.startedAt ?? now,
-      );
-      points.forEach((point, i) => {
-        const duration = Math.min(points[i + 1]?.at ?? end, end) - Math.max(point.at, pr.createdAt);
-        if (duration > 0)
-          byStage.set(point.position.stage, (byStage.get(point.position.stage) ?? 0) + duration);
+  const samples = cached
+    ? []
+    : merged.map((pr) => {
+        const byStage = new Map<Stage, number>();
+        const related = authors(pr, runs);
+        related.forEach((run, index) => {
+          const points = readHistory(pr, run).points;
+          const end = Math.min(
+            pr.mergedAt ?? now,
+            run.endedAt ?? now,
+            related[index + 1]?.startedAt ?? now,
+          );
+          points.forEach((point, i) => {
+            const duration =
+              Math.min(points[i + 1]?.at ?? end, end) - Math.max(point.at, pr.createdAt);
+            if (duration > 0)
+              byStage.set(
+                point.position.stage,
+                (byStage.get(point.position.stage) ?? 0) + duration,
+              );
+          });
+        });
+        const rounds = store
+          .reviewsOfPr(repoId, pr.number)
+          .filter((r) => r.blocking > 0 && r.endedAt !== null).length;
+        return { pr, byStage, rounds };
       });
-    });
-    const rounds = store
-      .reviewsOfPr(repoId, pr.number)
-      .filter((r) => r.blocking > 0 && r.endedAt !== null).length;
-    return { pr, byStage, rounds };
-  });
-  return {
-    generatedAt: now,
-    rows,
-    unowned: rows.filter((r) => r.ownerKind === "nobody").length,
-    metrics: [24 * 60 * 60_000, WEEK].map((windowMs) => {
+  const metrics =
+    cached ??
+    [24 * 60 * 60_000, WEEK].map((windowMs) => {
       const cohort = samples.filter((s) => (s.pr.mergedAt ?? 0) >= now - windowMs);
       const durations = cohort.map((s) =>
         Math.max(0, (s.pr.mergedAt ?? s.pr.createdAt) - s.pr.createdAt),
@@ -447,7 +475,18 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
           ),
         },
       };
-    }),
+    });
+  if (!cached) {
+    const boundaries = merged
+      .flatMap((p) => [24 * 60 * 60_000, WEEK].map((window) => (p.mergedAt ?? 0) + window + 1))
+      .filter((at) => at > now);
+    cache.set(repoId, { key, at: now, until: Math.min(now + 30_000, ...boundaries), metrics });
+  }
+  return {
+    generatedAt: now,
+    rows,
+    unowned: rows.filter((r) => r.ownerKind === "nobody").length,
+    metrics,
   };
 }
 

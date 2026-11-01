@@ -1543,6 +1543,10 @@ const factTargets = (category: string, item: unknown): string[] => {
   // a question's decision may name it as its item key, ask:<id>
   if (typeof first !== "string")
     return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  if (category === "prFlow") {
+    const pr = first.split(":")[0];
+    return pr && /^\d+$/.test(pr) ? [pr, `#${pr}`] : [];
+  }
   let parts = first.split(":");
   if (category === "signals") parts = parts.slice(1);
   if (category === "parked") parts = parts.slice(0, -1);
