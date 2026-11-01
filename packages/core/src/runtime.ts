@@ -811,12 +811,15 @@ export function protectedFileRules(
  *   successful PostToolUse while it keeps running, which would free the test lock early, and
  *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
  *   command and `run_in_background` is refused before any hook;
+ * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
+ *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls;
  * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
  *   changes underneath it.
  */
 export const CREW_CLI_ENV = {
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
   DISABLE_AUTOUPDATER: "1",
 } as const;
 

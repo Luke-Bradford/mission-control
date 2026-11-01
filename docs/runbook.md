@@ -1605,6 +1605,14 @@ copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=
 
 ### Checking the write floors
 
+Every Claude crew CLI receives `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Claude strips recognized credentials
+from Bash, hooks and MCP subprocess environments. The parent CLI retains its authentication.
+The supervisor also starts every seat with a minimal inherited environment, excluding operator
+provider and GitHub tokens. The real-CLI floor suite checks fake provider credentials against a
+local fake Messages API; it makes no paid provider calls. See the
+[upstream scrub reference](https://code.claude.com/docs/en/env-vars#what-the-subprocess-environment-scrub-removes)
+for recognized names and exceptions. The flag alone leaves GitHub tokens and proxy settings in place.
+
 The floors (what a Codex or Claude seat can write) are otherwise tested by reading generated config.
 `apps/server/test/seat-floors.test.ts` launches the installed `codex` and `claude` CLIs through the
 production config (`codexSeatConfig`, `crewSandboxSettings`) with a temp HOME and fake auth, runs a
