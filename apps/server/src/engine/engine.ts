@@ -55,8 +55,10 @@ import {
   ENGINE_TICK_MS,
   EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
+  type EvidenceManifest,
   effectiveHardRules,
   evidenceNoteKey,
+  evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
   fillLoopText,
@@ -153,6 +155,7 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
+import type { PrEvidence } from "../pr-evidence/capture.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -209,6 +212,8 @@ export interface EngineDeps {
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
   pollGithub?: () => void;
+  /** Screenshot pairs of a web PR: captured for each head, and required before it leaves draft. */
+  evidence?: PrEvidence;
   /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
   rules: (repoId: RepoId, mainSha?: string) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
@@ -1115,6 +1120,21 @@ export function createEngine(deps: EngineDeps): Engine {
     return { park: controllerCheckParkText(sha, check ?? "") };
   }
 
+  /** A PR head and its changed files, with the PR-body write that follows its capture. */
+  function evidenceTarget(run: Run, pr: number, sha: string) {
+    return {
+      repoId: run.repoId,
+      pr,
+      sha,
+      paths: store.prFilePaths(run.repoId, pr),
+      onStored: async (m: EvidenceManifest) => {
+        const section = evidenceSectionText(m, deps.evidence?.baseUrl ?? "");
+        const r = await publisher.setEvidenceSection(store.run(run.id) ?? run, section);
+        if (!r.ok) throw new Error(r.text);
+      },
+    };
+  }
+
   /**
    * Why the repo's `uat` rule makes this merge wait for the operator's acceptance: null merges.
    * A ticket label or a touched path matches; a diff that cannot be read counts as a match, so the
@@ -1182,6 +1202,33 @@ export function createEngine(deps: EngineDeps): Engine {
     // delivered by the line above: not again from the inbox
     if (stored !== null && (sent === "sent" || sent === "dup"))
       store.markCommsInboxRead(run.agentId, [stored.id]);
+    return true;
+  }
+
+  /**
+   * Whether the PR's evidence hold applies to `sha`: a web PR without the pairs of this head. It
+   * records why (once per text), asks for the capture, and the caller stops its pass. `failedOk`
+   * lets a head through once its capture has failed: nobody is made to wait on a capture that
+   * will not come.
+   */
+  function evidenceHeld(
+    run: Run,
+    cur: RunLoop,
+    sha: string,
+    at: number,
+    failedOk = false,
+  ): boolean {
+    if (!deps.evidence || cur.prNumber === null) return false;
+    const target = evidenceTarget(run, cur.prNumber, sha);
+    const held = deps.evidence.gate(target);
+    if (held === null || (failedOk && held.includes("capture failed"))) return false;
+    store.addLoopEvent(
+      `${run.id}:evidence:${sha}:${createHash("sha1").update(held).digest("hex").slice(0, 8)}`,
+      run.id,
+      `#${cur.prNumber} ${held}`,
+      at,
+    );
+    void deps.evidence.ensure(target);
     return true;
   }
 
@@ -1442,6 +1489,11 @@ export function createEngine(deps: EngineDeps): Engine {
           log(`${run.id}: no PR number to review`);
           return;
         }
+        // the reviewer reads the pairs: wait for them, unless their capture has failed
+        if (evidenceHeld(run, cur, a.sha, at, true)) {
+          out.parked = true;
+          return;
+        }
         const round =
           1 +
           store
@@ -1576,6 +1628,11 @@ export function createEngine(deps: EngineDeps): Engine {
       case "mark-ready": {
         const sha = checkedSha ?? store.runPush(run.id)?.sha;
         if (sha === undefined) return;
+        // a web PR stays in draft until the pairs for this head exist; the merge step waits too
+        if (evidenceHeld(run, cur, sha, at)) {
+          out.parked = true;
+          return;
+        }
         const r = await publisher.markReady(live(), away ? sha : undefined);
         if (!r.ok && away && r.text === READY_UNDO_FAILED) {
           cur.merging = { sha, done: ["ready"] };
@@ -1641,6 +1698,11 @@ export function createEngine(deps: EngineDeps): Engine {
             at,
           );
           out.again = true;
+          return;
+        }
+        // a PR already out of draft (a conflict made a new head) still needs this head's pairs
+        if (evidenceHeld(run, cur, a.sha, at)) {
+          out.parked = true;
           return;
         }
         const r = await publisher.merge(live(), a.sha);
@@ -1859,6 +1921,9 @@ export function createEngine(deps: EngineDeps): Engine {
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
+    // a web PR's head needs its screenshot pairs; asking is cheap once they exist
+    if (deps.evidence && run.endedAt === null && pr?.state === "open" && pr.headSha)
+      void deps.evidence.ensure(evidenceTarget(run, pr.number, pr.headSha));
     if (pr?.state === "merged" && !input.merging?.done.includes("merge")) {
       if (input.merging)
         input.merging = { ...input.merging, done: [...input.merging.done, "merge"] };

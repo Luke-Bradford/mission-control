@@ -76,6 +76,9 @@ interface BrowserRoute {
   abort(): Promise<void>;
 }
 
+/** The `prefers-color-scheme` a render emulates; the HUD follows it unless the operator pinned a theme. */
+export type HudColorScheme = "light" | "dark";
+
 interface HudPage {
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
@@ -106,6 +109,7 @@ interface HudBrowser {
     serviceWorkers: "block";
     extraHTTPHeaders: Record<string, string>;
     viewport: { width: number; height: number };
+    colorScheme?: HudColorScheme;
   }): Promise<HudBrowserContext>;
   close(): Promise<void>;
 }
@@ -133,6 +137,8 @@ export interface HudRenderOptions {
   deadlineMs?: number;
   closeTimeoutMs?: number;
   quietMs?: number;
+  /** Emulated colour scheme; absent: the browser's default. */
+  colorScheme?: HudColorScheme;
 }
 
 const loadPlaywright = async (): Promise<HudPlaywright> =>
@@ -280,6 +286,7 @@ export async function renderHudWithPlaywright(
       // the hub refuses the operator bootstrap to any request carrying this header
       extraHTTPHeaders: { [HUD_RENDERER_HEADER]: "1" },
       viewport: { width: 1600, height: 1000 },
+      ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
     });
     ensureActive();
     await context.route("**/*", async (route) => {
@@ -359,6 +366,7 @@ export interface HudHelperJob {
   hubOrigin: string;
   executablePath?: string;
   deadlineMs: number;
+  colorScheme?: HudColorScheme;
 }
 
 export interface HudHelperOptions {
@@ -366,6 +374,7 @@ export interface HudHelperOptions {
   helperPath?: string;
   executablePath?: string;
   deadlineMs?: number;
+  colorScheme?: HudColorScheme;
   /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
   graceMs?: number;
 }
@@ -438,6 +447,7 @@ export function renderHudInHelper(
       hubOrigin: guard.origin,
       deadlineMs,
       ...(options.executablePath === undefined ? {} : { executablePath: options.executablePath }),
+      ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
     };
     child.send(job);
   });

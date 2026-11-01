@@ -739,6 +739,41 @@ describe("Store", () => {
     expect(store.pullRequests("r1").find((p) => p.number === 1)?.checks).toEqual(passed);
   });
 
+  it("reads the file paths of a pull request as the poll stored them", () => {
+    const base = {
+      repoId: "r1",
+      number: 8,
+      title: "t",
+      url: "u",
+      branch: "feature/8-x",
+      ticket: null,
+      state: "open" as const,
+      isDraft: true,
+      review: null,
+      ci: "pending" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: "sha1",
+      mergeable: null,
+    };
+    store.upsertPullRequests(
+      "r1",
+      [
+        {
+          ...base,
+          files: [
+            { path: "apps/web/src/board/Card.tsx", changeType: "MODIFIED" },
+            { path: "docs/a.md", changeType: "ADDED" },
+          ],
+        },
+      ],
+      0,
+    );
+    expect(store.prFilePaths("r1", 8).sort()).toEqual(["apps/web/src/board/Card.tsx", "docs/a.md"]);
+    expect(store.prFilePaths("r1", 9)).toEqual([]);
+  });
+
   it("appends each polled check run to ci_runs and updates it in place when it concludes", () => {
     const pr = {
       repoId: "r1",

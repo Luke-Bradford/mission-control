@@ -223,6 +223,8 @@ export interface McToolsDeps {
   git?: typeof crewGit;
   /** Defaults to sandbox-exec; tests may supply an isolated helper runner. */
   restoreSandbox?: RestoreSandboxRunner;
+  /** The PR body's screenshot-evidence section for the run's PR head, when it has pairs. */
+  prEvidenceSection?: (run: Run) => string | null;
   /** gh, through its one wrapper (`createGh`): draft_pr lists and opens PRs with it. */
   gh: GhRunner;
   /** The DB's path: draft_pr writes its PR body file into `{DB dir}/crew/`. */

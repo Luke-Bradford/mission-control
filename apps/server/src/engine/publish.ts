@@ -11,6 +11,7 @@ import {
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   type CiRerun,
+  EVIDENCE_HEADING,
   globMatches,
   grantedPath,
   isProtectedPath,
@@ -36,6 +37,7 @@ import {
   type ReviewStatusState,
   type Run,
   STDERR_TEXT_MAX,
+  withSection,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import {
@@ -191,6 +193,8 @@ export interface Publisher {
     run: Run,
     review: { id: number; sha: string; retro: string },
   ): Promise<PublishResult>;
+  /** Sets (or, with null, removes) the evidence section of the run's open PR body. */
+  setEvidenceSection(run: Run, section: string | null): Promise<PublishResult>;
   /** Sets the run's repo's mc/review commit status on `sha`. */
   setReviewStatus(
     run: Run,
@@ -620,11 +624,42 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (prTextProblem(runPrBody(ticket, note, section, withTitle), own) !== null) {
         section = [MINOR_HEADING, "", minorFallback(review.retro, minors.length)].join("\n");
       }
-      const body = runPrBody(ticket, note, section, withTitle);
+      const evidence = deps.prEvidenceSection?.(run) ?? null;
+      const sections = [section, evidence].filter((x): x is string => x !== null);
+      const combined = sections.length === 0 ? null : sections.join("\n\n");
+      const body = runPrBody(ticket, note, combined, withTitle);
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
       const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
-        seatWroteBody(current, issue) ? withEngineSection(current, issue, section) : body,
+        seatWroteBody(current, issue)
+          ? withEngineSection(withSection(current, EVIDENCE_HEADING, null), issue, combined)
+          : body,
       );
+      if (r.isError === true) {
+        return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
+      }
+      return { ok: true };
+    },
+
+    async setEvidenceSection(run, section) {
+      const prNumber = run.loop?.prNumber ?? null;
+      const repo = repoOf(run);
+      if (prNumber === null || repo === undefined) {
+        return { ok: false, text: prNotRunsText(0), transient: false };
+      }
+      const viewed = await ghJson(
+        ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=body"],
+        "pr view",
+      );
+      if (isRefusal(viewed)) return viewed;
+      if (typeof viewed.body !== "string") return final("the PR body could not be read");
+      // the hub appends its own "Opened by" line on every edit, so the one read back is dropped
+      const current = viewed.body
+        .replace(/\r\n/g, "\n")
+        .replace(/\n*Opened by [^\n]* \(Mission Control\)\.\s*$/, "")
+        .trimEnd();
+      const next = withSection(current, EVIDENCE_HEADING, section);
+      if (next === current) return { ok: true };
+      const r = await editRunPrBody(deps, run.id, prNumber, next);
       if (r.isError === true) {
         return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
       }
