@@ -146,6 +146,8 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...original, homedir: vi.fn(original.homedir) };
 });
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe("startRun eligibility", () => {
   const AREAS = {
     "area:server": ["apps/server/**"],
@@ -727,6 +729,10 @@ describe("startRun", () => {
   });
 
   it("runs the CLI with a minimal env, with no git identity (the commit tool sets it)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "fake-parent-provider-token");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "fake-parent-cloud-token");
+    vi.stubEnv("GITHUB_TOKEN", "fake-parent-github-token");
+    vi.stubEnv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "0");
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
@@ -749,6 +755,7 @@ describe("startRun", () => {
       "TERM",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
+      "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
       ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
@@ -774,6 +781,10 @@ describe("startRun", () => {
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
     // a timed-out suite is killed, not moved to the background still holding the test lock
     expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
     // pnpm stays on its installed version: the sandbox cannot fetch the repo's pin (#953)
     expect(env).toMatchObject(CREW_PNPM_ENV);
     expect(env.pnpm_config_pm_on_fail).toBe("ignore");

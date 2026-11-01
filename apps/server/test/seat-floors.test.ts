@@ -29,13 +29,13 @@ import {
   type CrewSandboxInput,
   crewPnpmStoreDir,
   crewSandboxSettings,
-  crewSandboxTmp,
   MC_TMP_DIR_NAME,
   PNPM_STORE_ENV,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { CODEX_PROJECT_DIR, codexSeatConfig } from "../src/runtime/codex-floor.ts";
+import { crewTempRoot } from "../src/runtime/supervisor.ts";
 import { type FakeAnthropic, startFakeAnthropic } from "./fake-anthropic.ts";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -206,10 +206,10 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
 
   beforeEach(() => {
     l = makeLayout();
-    // The supervisor's own shape: a private folder under /tmp/claude-<uid>, which the settings deny reading as a whole.
-    const parent = crewSandboxTmp(process.getuid?.() ?? 0);
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    tempRoot = realpathSync(mkdtempSync(join(parent, "mc-floor-")));
+    // Use the production short private root; the old shared Claude temp tree is denied whole.
+    const ownRoot = crewTempRoot(join(l.root, "db.sqlite"), "floor", process.getuid?.() ?? 0);
+    mkdirSync(ownRoot, { recursive: true, mode: 0o700 });
+    tempRoot = realpathSync(ownRoot);
   });
   afterEach(async () => {
     await api?.close();
@@ -304,6 +304,64 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
     },
     120_000,
   );
+  it("removes fake provider credentials from a real Claude Bash subprocess", async () => {
+    const command =
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash expands this probe inside the seat.
+      'printf "marker=%s anthropic=%s aws=%s npm=%s db=%s\\n" "$MC_ENV_PROBE_MARKER" "${ANTHROPIC_API_KEY:+present}" "${AWS_SECRET_ACCESS_KEY:+present}" "${NPM_TOKEN:+present}" "${DB_PASSWORD:+present}"';
+    api = await startFakeAnthropic(command);
+    const input: CrewSandboxInput = {
+      ...l,
+      tempRoot,
+      denyRead: [],
+      pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+    };
+    const settings = crewSandboxSettings(input, "writer", {
+      command: "/usr/bin/true",
+      timeoutS: 5,
+    });
+    const output = await runToEnd(
+      claudeCli as string,
+      [
+        "-p",
+        "run the environment probe",
+        "--output-format",
+        "json",
+        "--model",
+        "claude-fake",
+        ...CREW_ISOLATION_FLAGS,
+        "--tools",
+        "Bash",
+        "--settings",
+        settings,
+        "--allowedTools",
+        "Bash",
+      ],
+      {
+        cwd: l.cwd,
+        env: {
+          PATH: process.env.PATH,
+          HOME: l.home,
+          TMPDIR: tempRoot,
+          CLAUDE_CODE_TMPDIR: tempRoot,
+          ANTHROPIC_BASE_URL: api.url,
+          ANTHROPIC_API_KEY: "sk-ant-fake",
+          AWS_SECRET_ACCESS_KEY: "fake-aws-secret",
+          NPM_TOKEN: "fake-npm-token",
+          DB_PASSWORD: "fake-db-password",
+          MC_ENV_PROBE_MARKER: "present",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          ...CREW_CLI_ENV,
+          ...CREW_PNPM_ENV,
+          ...CREW_GIT_ENV,
+        },
+      },
+      90_000,
+    );
+    expect(api.bashCalls(), output).toBe(1);
+    expect(api.toolResults().join("\n"), output).toMatch(
+      /^marker=present anthropic= aws= npm= db=$/m,
+    );
+  }, 120_000);
 });
 
 /** A hub stand-in on loopback: counts every request a probe makes to it. */
@@ -450,9 +508,9 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
   let api: FakeAnthropic | null = null;
   beforeEach(() => {
     l = makeLayout();
-    const parent = crewSandboxTmp(process.getuid?.() ?? 0);
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    tempRoot = realpathSync(mkdtempSync(join(parent, "mc-loop-")));
+    const ownRoot = crewTempRoot(join(l.root, "db.sqlite"), "floor", process.getuid?.() ?? 0);
+    mkdirSync(ownRoot, { recursive: true, mode: 0o700 });
+    tempRoot = realpathSync(ownRoot);
   });
   afterEach(async () => {
     await api?.close();
