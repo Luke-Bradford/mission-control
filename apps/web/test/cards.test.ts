@@ -334,7 +334,7 @@ describe("cardReviewer", () => {
       id: "RETRO-1",
       index: 3,
       hudState: "running",
-      status: { label: "Running", tone: "ok" },
+      status: { label: "Checking", tone: "neutral" },
     });
     expect(cardReviewer(boardItem(), pr({ number: 41 }), [seat])).toBeNull();
     const byRef = retro({ prNumber: 99, sha: "c".repeat(40), ref: ticketRef(boardItem()) });
@@ -342,7 +342,7 @@ describe("cardReviewer", () => {
       id: "RETRO-1",
       index: 3,
       hudState: "running",
-      status: { label: "Running", tone: "ok" },
+      status: { label: "Checking", tone: "neutral" },
     });
     expect(cardReviewer(boardItem(), pr(), [retro(null)])).toBeNull();
   });
