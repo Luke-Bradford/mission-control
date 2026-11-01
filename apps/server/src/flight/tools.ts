@@ -48,6 +48,7 @@ import {
   ciNoFailedText,
   ciNotActionsText,
   ciNotFailedText,
+  clockHm,
   closeComment,
   closedDecision,
   closedText,
@@ -1007,7 +1008,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at, undefined, "FLIGHT"))
       return null;
     bus.emit("settings");
-    return `FLIGHT lifted the crew pause on ${call} (${pause.reason})`;
+    return `FLIGHT lifted the crew pause for ${call} (set by ${pause.by} at ${clockHm(pause.at, config.operator.timezone)}: ${pause.reason})`;
   };
   const unendedRun = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -1421,7 +1422,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("agents");
     bus.emit("flight");
-    return { text: startedText(call, ref) };
+    return {
+      text: `${startedText(call, ref)}${wasStopped ? ` FLIGHT overrode the operator's stop for ${call}.` : ""}${unpaused ? ` ${unpaused}.` : ""}`,
+    };
   }
 
   async function messageSeat(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3159,6 +3162,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               ...cur,
               state: "stopped",
               reason: row.reason,
+              stop: row.stop,
               runId: ended ? null : cur.runId,
               updatedAt: at,
             });

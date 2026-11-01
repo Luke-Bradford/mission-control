@@ -700,7 +700,7 @@ describe("resume_seat", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.text).toBe(
-      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause on GUIDO-1 (ci); the operator had stopped the seat.",
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci); the operator had stopped the seat.",
     );
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
@@ -708,7 +708,9 @@ describe("resume_seat", () => {
         about: "resume_seat",
         seatId: "guido-1",
         targetRunId: "r-guido",
-        decision: expect.stringContaining("FLIGHT lifted the crew pause on GUIDO-1 (ci)"),
+        decision: expect.stringContaining(
+          "FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)",
+        ),
       }),
     ]);
     expect(readCrewPause(store)).toBeNull();
@@ -808,7 +810,13 @@ describe("resume_seat", () => {
   it("reports a failed resume that ended its run", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-guido");
-    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    const stop = { by: "CAPCOM", reason: "Wait for CI", at: NOW - 60_000 };
+    store.setSeatSession({
+      ...row("guido-1", "r-guido"),
+      state: "stopped",
+      reason: "operator",
+      stop,
+    });
     resumeImpl = async () => {
       const run = store.run("r-guido");
       if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
@@ -822,6 +830,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toContain("ended after the failed resume");
+    expect(store.seatSession("guido-1")?.stop).toEqual(stop);
     expect(result.text).not.toContain("nothing was changed");
     expect(store.seatSession("guido-1")?.state).toBe("stopped");
     expect(store.seatSession("guido-1")?.reason).toBe("operator");
@@ -937,7 +946,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toBe(
-      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci).",
     );
   });
 
@@ -3329,11 +3338,80 @@ describe("flight_state", () => {
     expect(await prs()).toEqual([]);
   });
 
-  it("lists a stopped seat", async () => {
+  it("lists each paused or stopped seat as unavailable, with its control record", async () => {
+    writeCrewPause(
+      store,
+      { seats: ["guido-1"], reason: "Controller lifts the rest", at: NOW - 60_000, by: "operator" },
+      NOW - 60_000,
+    );
+    store.setSeatSession({
+      ...row("inco-1", ""),
+      runId: null,
+      state: "stopped",
+      stop: { by: "operator", reason: "Wait for CI", at: NOW - 60_000 },
+    });
+    const seats = (
+      (await state()) as {
+        seats: {
+          id: string;
+          state: string;
+          free: boolean;
+          pause: unknown;
+          stop: unknown;
+        }[];
+      }
+    ).seats;
+    expect(seats.find((x) => x.id === "guido-1")).toMatchObject({
+      state: null,
+      free: false,
+      pause: { by: "operator", reason: "Controller lifts the rest", at: NOW - 60_000 },
+      stop: null,
+    });
+    expect(seats.find((x) => x.id === "inco-1")).toMatchObject({
+      state: "stopped",
+      free: false,
+      pause: null,
+      stop: { by: "operator", reason: "Wait for CI", at: NOW - 60_000 },
+    });
+  });
+
+  it("does not call a crash an operator stop", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
-    const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
-      .seats;
-    expect(seats.find((x) => x.id === "guido-1")).toMatchObject({ state: "stopped", free: true });
+    const seats = ((await state()) as { seats: { id: string; stop: unknown }[] }).seats;
+    expect(seats.find((x) => x.id === "guido-1")?.stop).toBeNull();
+  });
+
+  it("does not call a paused or stopped review seat idle", async () => {
+    const queuedReview = () =>
+      store.requestReview({
+        authorRunId: "r-guido",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: NOW,
+      });
+    const reviewer = async () =>
+      (
+        (await state()) as {
+          reviewQueue: { seats: { seat: string; queued: number; idle: boolean }[] };
+        }
+      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
+
+    expect(queuedReview()).not.toBeNull();
+    writeCrewPause(
+      store,
+      { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
+      NOW,
+    );
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
+
+    writeCrewPause(store, null, NOW);
+    store.setSeatSession({ ...row("retro-1", ""), runId: null, state: "stopped" });
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
   });
 
   it("lists a run set aside in review, with its park, and the seat's run ids", async () => {
@@ -3430,6 +3508,8 @@ describe("flight_state", () => {
     const bare = {
       runId: null,
       state: null,
+      pause: null,
+      stop: null,
       ticket: null,
       title: null,
       phase: null,
@@ -8693,14 +8773,18 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     });
     it("starts a seat the operator stopped, and says so in the decision", async () => {
       store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
-      expect((await start()).isError).toBeUndefined();
+      const result = await start();
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("overrode the operator's stop for GUIDO-1");
       expect(startCalls).toHaveLength(1);
       expect(store.seatSession("guido-1")?.state).toBe("idle");
       expect(decisions().find((d) => d.kind === "start")?.decision).toContain("stopped the seat");
     });
     it("starts a paused seat by letting it out of the pause, naming FLIGHT", async () => {
       writeCrewPause(store, { seats: ["guido-1", "inco-1"], reason: "ci", at: NOW, by: "op" }, NOW);
-      expect((await start()).isError).toBeUndefined();
+      const result = await start();
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)");
       // the record stays the operator's
       expect(readCrewPause(store)).toMatchObject({
         seats: ["inco-1"],

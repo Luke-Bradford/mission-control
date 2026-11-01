@@ -1294,6 +1294,13 @@ export interface RepoPreview {
   loops: AgentId[];
 }
 
+/** An operator's deliberate stop, kept apart from a crash or ordinary run end. */
+export interface SeatStop {
+  by: string;
+  reason: string | null;
+  at: number;
+}
+
 /** One seat's live session; `runId` is null when no run is active. `reason` shows in the doing line. */
 export interface SeatSessionRow {
   /** Absent on legacy callers; stored as Claude by default. */
@@ -1303,6 +1310,8 @@ export interface SeatSessionRow {
   cliSessionId: string | null;
   state: SeatState;
   reason: string | null;
+  /** Present only while an operator's Stop leaves this seat stopped. */
+  stop?: SeatStop | null;
   worktree: string | null;
   updatedAt: number;
   /** Start of the current error, preserved across seat updates until recovery. */
