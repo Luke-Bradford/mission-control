@@ -1,23 +1,22 @@
-import { type PullRequestView, prPill, type RunPr, reviewCheckPill } from "@mc/core";
+import {
+  type PullRequestPreviewFacts,
+  type PullRequestView,
+  prPill,
+  type RunPr,
+  reviewCheckPill,
+} from "@mc/core";
+import { useEffect, useRef, useState } from "react";
+import { apiPost } from "../api.ts";
 import { useNow } from "../clock.ts";
+import { ACTIONS, hub } from "../data.ts";
 import { ticketPath } from "../router.ts";
-import { Pill } from "./Pill.tsx";
+import { Pill, PillButton } from "./Pill.tsx";
 import { parseTicket, RepoRef } from "./RepoRef.tsx";
 import "./PrChip.css";
 
-/**
- * A PR a run published: its repo chip and `PR #3240` linked to GitHub (plain text when no
- * https://github.com URL can be made), its title on hover, and a pill once it is merged or
- * closed, and a "held" pill while FLIGHT or the controller holds its merge. `bare` leaves the repo chip out, for a page that shows one repo.
- */
-/** A running branch preview, added to Board and Agent PR payloads by the server. */
-export interface PrPreview {
-  pr: number;
-  branch: string;
-  port: number;
-  url: string;
-  startedAt: number;
-}
+/** Preview facts arrive with the Board and Agent PR rows; capability is decided by the server. */
+export type PrPreview = NonNullable<PullRequestPreviewFacts["preview"]>;
+export type PreviewPr = PullRequestView & Partial<PullRequestPreviewFacts>;
 
 function previewUrl(preview: PrPreview | null | undefined): string | null {
   if (!preview) return null;
@@ -29,6 +28,86 @@ function previewUrl(preview: PrPreview | null | undefined): string | null {
   }
 }
 
+/** Starts a supported preview and keeps its link in step with the PR payload. */
+function PreviewAction({
+  number,
+  initialPreview,
+  startable,
+}: {
+  number: number;
+  initialPreview?: PrPreview | null;
+  startable: boolean;
+}) {
+  const [preview, setPreview] = useState(initialPreview);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef(false);
+  const focusLink = useRef(false);
+  const link = useRef<HTMLAnchorElement>(null);
+  const url = previewUrl(preview);
+  useEffect(() => {
+    setPreview(initialPreview);
+    setError(null);
+  }, [initialPreview]);
+  useEffect(() => {
+    if (url && focusLink.current) {
+      link.current?.focus();
+      focusLink.current = false;
+    }
+  }, [url]);
+  if (url)
+    return (
+      <a
+        ref={link}
+        className="pill ok preview-link"
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open preview for PR #${number}`}
+      >
+        Preview
+      </a>
+    );
+  if (!startable) return null;
+  return (
+    <>
+      <PillButton
+        tone="plain"
+        className="preview-start"
+        aria-label={`Start preview for PR #${number}`}
+        aria-busy={starting}
+        disabled={starting}
+        onClick={async (event) => {
+          event.stopPropagation();
+          if (pending.current) return;
+          focusLink.current = document.activeElement === event.currentTarget;
+          pending.current = true;
+          setStarting(true);
+          setError(null);
+          try {
+            setPreview(await apiPost<PrPreview>(ACTIONS.startPreview, { pr: number }));
+            hub.refetchTopic("boards");
+          } catch (cause) {
+            setError(
+              cause instanceof Error ? cause.message : "Could not start the preview. Try again.",
+            );
+          } finally {
+            pending.current = false;
+            setStarting(false);
+          }
+        }}
+      >
+        {starting ? "Starting preview…" : "Start preview"}
+      </PillButton>
+      {error && (
+        <span className="preview-error crit-t" role="alert">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
 /**
  * A PR published by a run, with its GitHub reference and any live branch preview. The preview
  * arrives with the Board or Agent PR row; this component never lists previews itself.
@@ -37,11 +116,13 @@ export function PrChip({
   pr,
   bare,
   preview: initialPreview,
+  previewable = false,
   showState = true,
 }: {
   pr: RunPr | PullRequestView;
   bare?: boolean;
   preview?: PrPreview | null;
+  previewable?: boolean;
   /** The Board owns its full PR status line, so it supplies this as false. */
   showState?: boolean;
 }) {
@@ -54,7 +135,6 @@ export function PrChip({
         ? reviewCheckPill(check, now)
         : null;
   const hold = "hold" in pr ? pr.hold : undefined;
-  const url = previewUrl(initialPreview);
   const ticket = pr.ticket ? parseTicket(pr.ticket) : null;
   return (
     <span className="rpr">
@@ -68,18 +148,12 @@ export function PrChip({
         to={ticket ? ticketPath(ticket.repoId, ticket.number) : undefined}
       />
       {showState && pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
-      {initialPreview !== undefined &&
-        (url ? (
-          <a
-            className="pill ok preview-link"
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Open preview for PR #${pr.number}`}
-          >
-            Preview
-          </a>
-        ) : null)}
+      <PreviewAction
+        key={`${pr.repoId}:${pr.number}`}
+        number={pr.number}
+        initialPreview={initialPreview}
+        startable={previewable && pr.state === "open" && initialPreview == null}
+      />
       {hold && (
         <Pill tone="warn" title={`merge held by ${hold.by}: ${hold.reason}`}>
           held

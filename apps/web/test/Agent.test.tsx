@@ -544,7 +544,7 @@ describe("Agent page: what past runs were", () => {
               url: "http://127.0.0.1:5175",
               startedAt: NOW,
             },
-          } as ReturnType<typeof prView> & { preview: object },
+          },
         ]}
         open={false}
         onToggle={() => {}}

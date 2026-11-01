@@ -15,7 +15,7 @@ import { RESOURCES, type Resource, useResource } from "../data.ts";
 import { cost, dayMonth, dur, hhmm, kTokens } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { PrChip, type PrPreview } from "../hud/PrChip.tsx";
+import { PrChip, type PreviewPr } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { followLink, navigate, tracePath, useSearch } from "../router.ts";
@@ -132,7 +132,7 @@ export const RunRow = memo(function RunRow({
   tz: string | null;
   prs: ReturnType<typeof runPrs>;
   /** Decorated PR rows from the Agent payload, keyed here only for this run's PR chip. */
-  previewPrs?: readonly PullRequestView[];
+  previewPrs?: readonly PreviewPr[];
   open: boolean;
   onToggle: (id: string) => void;
   /** Test instrumentation for the static row boundary. */
@@ -199,11 +199,14 @@ export const RunRow = memo(function RunRow({
               pr={pr}
               bare
               preview={
-                (
-                  previewPrs?.find((candidate) => candidate.number === pr.number) as
-                    | (PullRequestView & { preview?: PrPreview | null })
-                    | undefined
+                previewPrs?.find(
+                  (candidate) => candidate.repoId === pr.repoId && candidate.number === pr.number,
                 )?.preview
+              }
+              previewable={
+                previewPrs?.find(
+                  (candidate) => candidate.repoId === pr.repoId && candidate.number === pr.number,
+                )?.previewable
               }
             />
           ))}

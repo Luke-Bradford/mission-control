@@ -252,6 +252,8 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{ pr }`; starts a branch preview and returns its URL. */
+  startPreview: "/api/previews",
   /** Body `{ base, profile }`; returns the refreshed template profiles. */
   createProfile: "/api/profiles",
   flightMemory: (repoId: string, topic: string) =>

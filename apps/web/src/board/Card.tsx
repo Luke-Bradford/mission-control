@@ -13,7 +13,7 @@ import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
-import { PrChip, type PrPreview } from "../hud/PrChip.tsx";
+import { PrChip, type PreviewPr } from "../hud/PrChip.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
@@ -51,7 +51,8 @@ function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec |
         pr={pr}
         bare
         showState={false}
-        preview={(pr as PullRequestView & { preview?: PrPreview | null }).preview}
+        preview={(pr as PreviewPr).preview}
+        previewable={(pr as PreviewPr).previewable}
       />
       {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
       {checks && <span className="xs muted">{checks}</span>}
