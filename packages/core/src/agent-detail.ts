@@ -1,4 +1,4 @@
-import type { AttentionOwner } from "./hud.ts";
+import type { AttentionOwner } from "./hud-model.ts";
 import type { DoneWhenEntry } from "./mcp.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { CrewRow } from "./types.ts";

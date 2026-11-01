@@ -1,3 +1,26 @@
+import {
+  type AttentionKind,
+  type AttentionOwner,
+  HUD_COLUMNS,
+  type HudColumn,
+  type HudState,
+  type HudTone,
+  type PillSpec,
+} from "./hud-model.ts";
+
+export {
+  ATTENTION_KINDS,
+  type AttentionKind,
+  type AttentionOwner,
+  HUD_COLUMNS,
+  HUD_STATES,
+  type HudColumn,
+  type HudState,
+  type HudTone,
+  type PillSpec,
+  type PillTone,
+} from "./hud-model.ts";
+
 import type {
   AgentState,
   AwaySettings,
@@ -141,18 +164,6 @@ export function startOfLocalDay(ms: number, timeZone: string): number {
   return wall - offsetAt(wall, timeZone);
 }
 
-export const HUD_STATES = [
-  "running",
-  "stalled",
-  "blocked",
-  "parked",
-  "waiting",
-  "idle",
-  "stopped",
-  "error",
-] as const;
-export type HudState = (typeof HUD_STATES)[number];
-
 export const HUD_STATE_LABEL: Record<HudState, string> = {
   running: "Running",
   stalled: "Stalled",
@@ -218,9 +229,6 @@ export const HUD_STATE_RANK: Record<HudState, number> = {
   stopped: 5,
 };
 
-/** The colour family of a pill; `neutral` is grey with a dot. */
-export type HudTone = "ok" | "warn" | "crit" | "neutral";
-
 /** Mockup L112–114: green is being worked, amber waits, red is broken, grey is everything else. */
 export const HUD_STATE_TONE: Record<HudState, HudTone> = {
   running: "ok",
@@ -250,10 +258,6 @@ export const HUD_STATE_LAMP: Record<HudState, { kind: HudLampKind; pulse: boolea
   idle: { kind: "off", pulse: false },
   stopped: { kind: "off", pulse: false },
 };
-
-/** `plain` is a pill without the dot (a word, not a state). */
-export type PillTone = HudTone | "plain";
-export type PillSpec = { label: string; tone: PillTone };
 
 export const CI_PILL: Record<NonNullable<PullRequestView["ci"]>, PillSpec> = {
   passing: { label: "CI passing", tone: "ok" },
@@ -373,18 +377,6 @@ export function crewHudState(
   }
 }
 
-export const HUD_COLUMNS = [
-  "Backlog",
-  "Refinement",
-  "Blocked",
-  "Ready",
-  "In progress",
-  "In review",
-  "Ready for QA",
-  "Done",
-] as const;
-export type HudColumn = (typeof HUD_COLUMNS)[number];
-
 /** Shown on a card whose GitHub state and project Status disagree. */
 export const STATUS_OUT_OF_DATE = "Status out of date";
 
@@ -434,31 +426,6 @@ export function prYouAction(
   if (pr.isDraft) return "decide on the draft";
   return pr.review === "approved" ? "merge" : "review";
 }
-
-/** Sort order of the Needs-you list (catalogue 2.5.1). */
-export const ATTENTION_KINDS = [
-  "lock",
-  "stalled",
-  "error",
-  "person",
-  "decision",
-  "approval",
-  "question",
-  "blocked",
-  "review",
-  "ready",
-  "flag",
-  "ratelimit",
-  "tag",
-  "parked",
-  "pr",
-  "message",
-  "stray",
-] as const;
-export type AttentionKind = (typeof ATTENTION_KINDS)[number];
-
-/** Who an attention item waits on: the operator, FLIGHT, the controller, a lane's login or a loop. */
-export type AttentionOwner = "operator" | "flight" | "controller" | "loop" | `lane:${string}`;
 export const OWNER_OPERATOR = "operator" satisfies AttentionOwner;
 export const FLIGHT_TRIAGE_LABEL = {
   waiting: "Waiting for FLIGHT triage",

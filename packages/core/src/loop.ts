@@ -1,7 +1,10 @@
+import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop-shared.ts";
+
+export { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop-shared.ts";
+
 /** The first loop's texts: what a seat is told when `mc report_evidence` is taken or refused. */
 import { clockHm } from "./hud.ts";
 import { COMMIT_PATHS_NAMED, REFERENCE_ADVICE } from "./mcp.ts";
-import { FLIGHT_FLOOR_PATHS } from "./repo-rules.ts";
 import type { MoveColumn } from "./repos.ts";
 import {
   carriedFrom,
@@ -25,8 +28,9 @@ import {
   reviewFor,
   reviewParkText,
 } from "./review.ts";
-import type { SeatState } from "./runtime.ts";
+import { FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
+import type { SeatState } from "./runtime-model.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
 import type { TicketView } from "./views.ts";
 
@@ -141,9 +145,6 @@ export const TAKE_STALE_MS = 5 * 60_000;
 export const CI_EXCERPT_LINES = 80;
 export const CI_EXCERPT_MAX = 8192;
 
-/** With no reset time, a rate-limited seat is tried once per this long. */
-export const RATE_LIMIT_RETRY_MS = 3_600_000;
-
 /** The `cardFor` mark of a phase and epoch: the card move for it is done. */
 export const cardMark = (phase: string, epoch: number): string => `${phase}:${epoch}`;
 /** The key of a run's blocked note for one epoch. */
@@ -220,7 +221,7 @@ function withoutFences(body: string): string {
       return;
     }
     const m = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
-    if (m?.[1] !== undefined && m[1].startsWith(open.ch) && m[1].length >= open.len) {
+    if (m?.[1]?.startsWith(open.ch) && m[1].length >= open.len) {
       for (let j = open.from; j <= i; j++) out[j] = " ".repeat(lines[j]?.length ?? 0);
       open = null;
     }
@@ -273,7 +274,7 @@ export function withControllerCheckItem(
     const kept = out
       .slice(from, to)
       .split(/(?<=\n)/)
-      .filter((line, i) => {
+      .filter((_line, i) => {
         // a bullet inside a code fence is example text, not a done-when item
         const same = bulletText(blanked[i] ?? "") === want;
         removed ||= same;
@@ -441,10 +442,6 @@ const resumeText = (seat: { quietTurns: number }, ref: string): string =>
 export const NUDGE_TEXT =
   "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
 export const NUDGE_TRIES = 3;
-
-/** Fills `{name}` placeholders of a loop text; an unknown name is left as written. */
-export const fillLoopText = (template: string, vars: Readonly<Record<string, string>>): string =>
-  template.replace(/\{(\w+)\}/g, (whole, name: string) => vars[name] ?? whole);
 
 /** The HUD's line for each loop phase (`loopText`). */
 export const LOOP_TEXT_WORKING = "Working on {ref}";

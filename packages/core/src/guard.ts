@@ -1,9 +1,13 @@
+import type { FlightPowers } from "./guard-model.ts";
+
+export { FLIGHT_POWERS, type FlightPowers } from "./guard-model.ts";
+
 /**
  * The guard's pure core: the command rules, the full-suite matcher and the secret scan. The hub
  * route (`POST /api/guard/check`) and Mission Control's push and PR build on these; nothing here does I/O.
  */
 import { MC_TOOL_NAMES, MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
-import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
+import { CODEX_SHELL, type CrewMode } from "./runtime-model.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
@@ -57,10 +61,6 @@ export interface GuardEvent {
     pages?: string;
   };
 }
-
-/** What FLIGHT may do on a repo: `superuser` is set only in the user config, never by the repo. */
-export const FLIGHT_POWERS = ["standard", "superuser"] as const;
-export type FlightPowers = (typeof FLIGHT_POWERS)[number];
 
 /** FLIGHT's mc tools only a superuser repo's seats may call; the power tickets add them. */
 export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [

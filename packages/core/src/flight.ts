@@ -1,14 +1,20 @@
+import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
+
+export {
+  CATCH_UP_KINDS,
+  type CatchUpKind,
+  FLIGHT_NOT_TRIAGING_CAUSES,
+  type FlightNotTriagingCause,
+} from "./flight-model.ts";
+
 import { priorityRank } from "./board.ts";
-import type { AttentionKind, HudColumn, TicketSize } from "./hud.ts";
+import type { TicketSize } from "./hud.ts";
+import type { AttentionKind, HudColumn } from "./hud-model.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { Verdict } from "./review.ts";
-import type { LoopKind, SeatState } from "./runtime.ts";
+import type { LoopKind, SeatState } from "./runtime-model.ts";
 import type { LoopPhase } from "./types.ts";
-
-/** How a notification relates to what the person already knows. */
-export const CATCH_UP_KINDS = ["new", "follow-up", "old"] as const;
-export type CatchUpKind = (typeof CATCH_UP_KINDS)[number];
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -1226,18 +1232,6 @@ export const FLIGHT_NOT_TRIAGING_KEY = "flight:not-triaging";
 /** hold_item on FLIGHT_NOT_TRIAGING_KEY: FLIGHT clears it by triaging what it counts. */
 export const HOLD_NOT_TRIAGING_REFUSED =
   "Not held: the not-triaging item is the operator's. Triage the items it counts and it clears.";
-/**
- * Why FLIGHT is not triaging, most telling first: its watch could not keep it running, its watch
- * reports it down, the operator stopped it, it is not running, or it is live and missed a window.
- */
-export const FLIGHT_NOT_TRIAGING_CAUSES = [
-  "start-failed",
-  "down",
-  "stopped",
-  "off",
-  "late",
-] as const;
-export type FlightNotTriagingCause = (typeof FLIGHT_NOT_TRIAGING_CAUSES)[number];
 /**
  * How long FLIGHT may be not running, with no watch note and no operator Stop, before the item
  * shows: the watch restarts it within a pass after a crash, a rotation or a hub restart, and such a

@@ -2120,6 +2120,33 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).
 
+## Repeating a suspected flaky test
+
+Use **Actions → Repeat one test file → Run workflow** on the branch to check. Supply one exact
+`.test.ts` or `.test.tsx` path under `apps/` or `packages/`, a count from 1 to 100, and optionally
+a Vitest test-name pattern. The job runs that file repeatedly with one worker and keeps going
+after a failed repetition, up to its 60-minute job limit. This is a manual diagnostic; it does
+not replace the full CI checks required for merging.
+
+Download the `repeated-test-results-<run id>-<attempt>` artifact. Each repetition has a log and
+Vitest JSON report. `summary.json` records the checked-out SHA, tracked-file dirty status, input
+file and pattern, every outcome, and requested/completed counts. A finished summary has
+`finalized: true`; `success: true` requires every requested repetition to execute at least one
+test and pass. A missing or invalid report, an unsuccessful process, or a pattern that executes
+no tests fails the diagnostic. A cancelled or timed-out job can leave an unfinished summary;
+it is not passing evidence. Artifacts are retained for seven days.
+
+For the same diagnostic locally, from the repository root:
+
+```sh
+TEST_FILE=apps/server/test/supervisor-events.test.ts TEST_REPETITIONS=10 \
+  node --experimental-strip-types scripts/repeat-test.ts
+```
+
+Set `TEST_NAME_PATTERN` for a particular test. Local results are written to
+`.mc-tmp/repeat-tests/`; copy any evidence you want to retain before the next invocation.
+A dirty checkout's result is not proof of an unchanged commit.
+
 ## Affected tests before a crew push
 
 This repo requires `pnpm -s lint`, `pnpm -s typecheck` and
