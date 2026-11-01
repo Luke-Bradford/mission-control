@@ -8,7 +8,7 @@ import {
   type PullRequestView,
   type ReviewShotView,
 } from "@mc/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, apiReviewImage } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -230,7 +230,12 @@ function Detail({
     <div className="uat-detail">
       <Panel title={`${pr.repoId} · ${prLabel(pr.number)}`} className="uat-decision-panel">
         <div className="pb uat-stack">
-          <div className="uat-detail-head">
+          <Decide
+            pr={pr}
+            disabled={disabled}
+            waiting={Boolean(pr.uat && data?.uat.waiting)}
+            summary={data?.qaSummary ?? "No review summary has been captured for this head."}
+          >
             <div>
               <h2>{pr.title}</h2>
               <div className="uat-meta">
@@ -245,12 +250,7 @@ function Detail({
                 )}
               </div>
             </div>
-            <Decide pr={pr} disabled={disabled} waiting={Boolean(pr.uat && data?.uat.waiting)} />
-          </div>
-          <p>
-            <strong>QA:</strong>{" "}
-            {data?.qaSummary ?? "No review summary has been captured for this head."}
-          </p>
+          </Decide>
           {detail.loading && !data && <p role="status">Loading this PR’s evidence…</p>}
           {(detail.error || full.error) && (
             <p className="crit-t" role="alert">
@@ -357,10 +357,14 @@ function Decide({
   pr,
   disabled,
   waiting,
+  children,
+  summary,
 }: {
   pr: PullRequestSummary;
   disabled: boolean;
   waiting: boolean;
+  children: ReactNode;
+  summary: string;
 }) {
   const [open, setOpen] = useState(false),
     [note, setNote] = useState(""),
@@ -405,27 +409,35 @@ function Decide({
     }
   }
   return (
-    <div className="uat-actions-area">
-      <fieldset className="uat-actions" aria-label="Decide">
-        <button
-          type="button"
-          className="uat-accept"
-          disabled={disabled || !waiting || busy || done}
-          onClick={() => void decide("accept")}
-        >
-          Accept
-        </button>
-        <button
-          type="button"
-          className="uat-send"
-          disabled={disabled || !waiting || busy || done}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          Send back…
-        </button>
-      </fieldset>
-      {!waiting && !done && <p className="uat-meta">This PR is still in review.</p>}
+    <>
+      <div className="uat-detail-head">
+        {children}
+        <div className="uat-actions-area">
+          <fieldset className="uat-actions" aria-label="Decide">
+            <button
+              type="button"
+              className="uat-accept"
+              disabled={disabled || !waiting || busy || done}
+              onClick={() => void decide("accept")}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="uat-send"
+              disabled={disabled || !waiting || busy || done}
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              Send back…
+            </button>
+          </fieldset>
+          {!waiting && !done && <p className="uat-meta">This PR is still in review.</p>}
+        </div>
+      </div>
+      <p>
+        <strong>QA:</strong> {summary}
+      </p>
       {open && (
         <form
           className="uat-send-form"
@@ -459,7 +471,7 @@ function Decide({
           {error}
         </p>
       )}
-    </div>
+    </>
   );
 }
 
