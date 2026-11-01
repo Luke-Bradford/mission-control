@@ -21,7 +21,7 @@ import {
   type Topic,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { apiGet } from "./api.ts";
+import { apiGet, apiOperatorGet } from "./api.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
@@ -61,6 +61,7 @@ const pageDocument = (): PageDocument | undefined =>
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
@@ -384,6 +385,10 @@ interface Entry {
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
+/** Only PR flow needs a protected JSON read. */
+const readResource = <T>(path: string): Promise<T> =>
+  path === RESOURCES.prFlow.path ? apiOperatorGet<T>(path) : apiGet<T>(path);
+
 class Hub {
   private readonly entries = new Map<string, Entry>();
   /** Bumped by clear(): a response to a request from an older generation is dropped. */
@@ -494,7 +499,7 @@ class Hub {
       // Re-read the newest millisecond as well: several rows can share a timestamp.
       const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
       const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
-      let data = await apiGet<unknown>(path);
+      let data = await readResource<unknown>(path);
       if (e.path === RESOURCES.flightLedger.path || e.path === RESOURCES.flightLedgerOpen.path) {
         const ledger = data as FlightLedgerView;
         let page = ledger;
@@ -580,7 +585,7 @@ class Hub {
   async read<T>(ref: ResourceRef): Promise<T> {
     const gen = this.generation;
     const seq = ++this.seq;
-    const data = await apiGet<T>(ref.path);
+    const data = await readResource<T>(ref.path);
     const e = this.entry(ref.path, ref.topic);
     if (gen === this.generation && seq > e.appliedSeq) {
       e.appliedSeq = seq;
