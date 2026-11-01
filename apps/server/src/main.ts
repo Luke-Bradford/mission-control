@@ -78,6 +78,7 @@ import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
@@ -316,9 +317,11 @@ export async function main(): Promise<void> {
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
-  const previewRepoId = config.crew?.sessions.find(
-    (session) => hubRoot !== null && resolve(session.checkout) === hubRoot,
-  )?.repoId;
+  const previewRepoId = await resolvePreviewRepo(
+    hubRoot,
+    config.repos,
+    config.crew?.sessions ?? [],
+  );
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
