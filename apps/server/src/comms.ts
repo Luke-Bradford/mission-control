@@ -467,10 +467,7 @@ export function resolvedCommsReason(
         )
       : [];
     if (
-      linked.some(
-        (p) =>
-          p.state === "merged" && (p.mergedAt ?? (p.state === "closed" ? p.updatedAt : 0)) >= at,
-      ) &&
+      linked.some((p) => p.state === "merged" && (p.mergedAt ?? 0) >= at) &&
       !linked.some((p) => p.state === "open")
     )
       return "The related PR merged.";

@@ -176,3 +176,57 @@ it("routes a controller-owned cleanup to the operator only after an explicit rec
   });
   expect(needsYouItems(attentionItems(config, store, NOW)).some((i) => i.key === key)).toBe(true);
 });
+
+it.each(["closed", "merged"] as const)(
+  "retires the %s PR's approval note but keeps controller cleanup",
+  (state) => {
+    const loop = {
+      ...NEW_LOOP,
+      prNumber: 7,
+      controllerCheckRequired: true,
+      mergeHold: { by: "CAPCOM" as const, reason: "Awaiting approval", at: NOW - 30 * 60_000 },
+    };
+    store.upsertRun(run({ loop }));
+    const pr = {
+      repoId: "repo",
+      number: 7,
+      title: "PR",
+      url: "u",
+      branch: "feature/7",
+      ticket: "repo#7",
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: NOW - 40 * 60_000,
+      updatedAt: NOW - 5 * 60_000,
+      mergedAt: null,
+      headSha: "head",
+      mergeable: null,
+    };
+    store.upsertPullRequests("repo", [pr], NOW);
+    for (const key of ["blocked:run:0", "cleanup:run"])
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: "run",
+        seatId: "guido",
+        repoId: "repo",
+        text: key,
+        at: NOW - 20 * 60_000,
+      });
+    const visible = () =>
+      attentionItems(config, store, NOW)
+        .filter((i) => i.key.startsWith("note:"))
+        .map((i) => i.key);
+    expect(visible()).toContain("note:blocked:run:0");
+    store.upsertPullRequests(
+      "repo",
+      [{ ...pr, state, mergedAt: state === "merged" ? NOW - 5 * 60_000 : null }],
+      NOW,
+    );
+    expect(visible()).not.toContain("note:blocked:run:0");
+    expect(visible()).toContain("note:cleanup:run");
+    expect(store.run("run")?.loop).toEqual(loop);
+  },
+);

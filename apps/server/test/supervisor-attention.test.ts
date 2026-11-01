@@ -22,8 +22,8 @@ it("records a real confirmed same-run recovery and retires only its earlier bloc
   await noKeepers();
   const next = make();
   next.sup.start();
-  await until(() => expect(next.sup.sessionAlive("guido-1")).toBe(true));
-  await next.sup.message("guido-1", "Continue the work", { interrupt: false });
+  await until(() => expect(next.sup.sessionAlive?.("guido-1")).toBe(true));
+  await next.sup.message?.("guido-1", "Continue the work", { interrupt: false });
   await until(() =>
     expect(
       store.loopEventsOfRun(runId).some((e) => e.key.startsWith(`${runId}:resume-confirmed:`)),

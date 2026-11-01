@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { Decisions } from "../src/comms/Decisions.tsx";
@@ -1077,6 +1077,45 @@ describe("current crew and Earlier", () => {
     expect(screen.queryByText("No messages yet.")).toBeNull();
     failed = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry messages" }));
+    expect(await screen.findByText(old.text)).toBeTruthy();
+  });
+  it("keeps a named loading state while Earlier is pending", async () => {
+    const base = stubFetch({ ...routes(), "/api/comms/crew?history=1": { messages: [old] } });
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (input === "/api/comms/crew?history=1") await pending;
+      return base(input, init);
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Earlier" }));
+    expect(await screen.findByText("Loading earlier messages…")).toBeTruthy();
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+    await act(async () => release());
+    expect(await screen.findByText(old.text)).toBeTruthy();
+  });
+  it("removes an ended run's current messages on refresh without keeping them in a paging cache", async () => {
+    let ended = false;
+    const fetch = stubFetch({
+      ...routes(),
+      "/api/comms/crew": () => ({
+        status: 200,
+        body: { messages: ended ? [] : [old], hasMore: true, hasEarlier: true },
+      }),
+      "/api/comms/crew?history=1": { messages: [old], hasMore: false },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    expect(await screen.findByText(old.text)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+    ended = true;
+    await act(async () => {
+      await hub.refetchTopic("agents");
+    });
+    await waitFor(() => expect(screen.queryByText(old.text)).toBeNull());
+    expect(fetch.mock.calls.some(([path]) => path.includes("before="))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Earlier" }));
     expect(await screen.findByText(old.text)).toBeTruthy();
   });
   it("reveals a linked message from an ended run through Earlier", async () => {
