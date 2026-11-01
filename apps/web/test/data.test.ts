@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { forgetOperatorToken } from "../src/api.ts";
 import { ACTIONS, hub, parseTopic, RESOURCES, startStream } from "../src/data.ts";
 import { flightLedger, ledgerEntry } from "./flightSummaryFixture.ts";
 
@@ -19,6 +20,29 @@ describe("parseTopic", () => {
 });
 
 describe("hub", () => {
+  it("refreshes protected PR flow after a FLIGHT-only decision event", async () => {
+    forgetOperatorToken();
+    let decision = "old action";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        Response.json(
+          path === "/api/operator/bootstrap" ? { token: "fixture-token" } : { decision },
+        ),
+      ),
+    );
+    const ref = RESOURCES.prFlow;
+    const off = hub.subscribe(ref.path, ref.topic, () => {});
+    await vi.waitFor(() =>
+      expect(hub.snapshot(ref.path, ref.topic).data).toEqual({ decision: "old action" }),
+    );
+    decision = "FLIGHT held this PR";
+    hub.refetchTopic("flight");
+    await vi.waitFor(() => expect(hub.snapshot(ref.path, ref.topic).data).toEqual({ decision }));
+    off();
+    forgetOperatorToken();
+  });
+
   it("loads every ledger page and keeps the last copy of overlapping keys", async () => {
     const path = RESOURCES.flightLedger.path;
     const fetchMock = vi.fn(async (url: string) =>

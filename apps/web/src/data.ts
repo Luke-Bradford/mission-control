@@ -61,7 +61,7 @@ const pageDocument = (): PageDocument | undefined =>
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
-  prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention"] },
+  prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).

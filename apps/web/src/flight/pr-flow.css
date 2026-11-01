@@ -119,3 +119,11 @@
 .pr-flow-crit .pr-flow-note {
   color: var(--crit);
 }
+
+.pr-flow-table td > a,
+.pr-flow-table li > a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}

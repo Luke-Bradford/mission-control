@@ -44,6 +44,10 @@ describeRendered("FLIGHT PR flow panel", () => {
       });
       await page.boxes(".pr-flow-table tbody tr");
       expect(await page.unclipped("#prFlowP")).toEqual([true]);
+      for (const link of await page.boxes(".pr-flow-table td > a, .pr-flow-table li > a")) {
+        expect(link.height).toBeGreaterThanOrEqual(24);
+        expect(link.width).toBeGreaterThanOrEqual(24);
+      }
       expect(await page.unclipped(".pr-flow-table td")).not.toContain(false);
       expect(await page.reachable("#prFlowP")).toEqual([true]);
       expect(

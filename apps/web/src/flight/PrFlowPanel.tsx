@@ -54,7 +54,7 @@ function FlowRow({ repo, row, now }: { repo: Repo; row: FlightPrFlowRow; now: nu
         )}
         {row.ticket && (
           <div className="pr-flow-ticket">
-            <TicketRef ticket={row.ticket} />
+            <TicketRef ticket={row.ticket} bare={row.ticket.startsWith(`${repo.repoId}#`)} />
           </div>
         )}
       </td>
