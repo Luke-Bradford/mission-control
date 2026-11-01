@@ -52,6 +52,10 @@ describeRendered("Saved ticket handoff", () => {
       for (const link of await page.boxes(".handoff-link"))
         expect(link.height).toBeGreaterThanOrEqual(24);
       if (shots) {
+        await page.evaluate(() => {
+          const note = document.querySelector<HTMLElement>(".handoff-body");
+          if (note) note.scrollTop = 0;
+        }, null);
         mkdirSync(shots, { recursive: true });
         await page.screenshot(join(shots, `handoff-${width}-${theme}.png`));
       }
