@@ -14,6 +14,7 @@ import { Drafts } from "./Drafts.tsx";
 import { HeldNeeds } from "./HeldNeeds.tsx";
 import { needsGroups } from "./needsGroups.ts";
 import { Pending } from "./Pending.tsx";
+import { PrFlowPanel } from "./PrFlowPanel.tsx";
 
 export const NOTHING_DEFAULTED = "FLIGHT has no default waiting on your objection.";
 export const NOTHING_HANDLING = "FLIGHT is not handling anything for you right now.";
@@ -72,6 +73,7 @@ export function NeedsYouTab() {
           <AskedOfYou withDefaults={false} withHeld={false} />
         </div>
       </Panel>
+      <PrFlowPanel />
       <div className="flight-needs-groups">
         <Panel
           id="defaultsP"

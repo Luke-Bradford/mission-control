@@ -68,6 +68,33 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 export const apiGet = <T>(path: string): Promise<T> =>
   request<T>(path, { headers: { accept: "application/json" } });
 
+/** Explicit protected JSON reads; public GETs keep their existing bootstrap-free path. */
+export async function apiOperatorGet<T>(path: string): Promise<T> {
+  if (!path.startsWith("/api/") || path.includes("\\"))
+    throw new Error("Invalid private API path.");
+  await loadOperatorToken();
+  const read = () =>
+    request<T>(path, {
+      headers: {
+        accept: "application/json",
+        ...(operatorToken ? { [OPERATOR_HEADER]: operatorToken } : {}),
+      },
+    });
+  try {
+    return await read();
+  } catch (error) {
+    if (
+      !(error instanceof ApiError) ||
+      error.status !== 401 ||
+      (error.body as { error?: unknown } | undefined)?.error !== OPERATOR_TOKEN_REQUIRED
+    )
+      throw error;
+    forgetOperatorToken();
+    await loadOperatorToken();
+    return read();
+  }
+}
+
 /** Review images require the same operator token as their metadata's private retrieval route. */
 export async function apiReviewImage(id: string): Promise<Blob> {
   if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid review image.");
