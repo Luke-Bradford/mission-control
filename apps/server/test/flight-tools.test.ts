@@ -700,7 +700,7 @@ describe("resume_seat", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.text).toBe(
-      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause on GUIDO-1 (ci); the operator had stopped the seat.",
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci); the operator had stopped the seat.",
     );
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
@@ -708,7 +708,9 @@ describe("resume_seat", () => {
         about: "resume_seat",
         seatId: "guido-1",
         targetRunId: "r-guido",
-        decision: expect.stringContaining("FLIGHT lifted the crew pause on GUIDO-1 (ci)"),
+        decision: expect.stringContaining(
+          "FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)",
+        ),
       }),
     ]);
     expect(readCrewPause(store)).toBeNull();
@@ -937,7 +939,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toBe(
-      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause on GUIDO-1 (ci).",
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci).",
     );
   });
 
