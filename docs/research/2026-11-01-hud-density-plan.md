@@ -74,7 +74,7 @@ The four behavior gaps folded into #1193 remain explicit build outcomes: preserv
 
 ## Mockup and approval checks
 
-After plan approval, mock up Overview, Agent and one representative grouped form. Use 1920×1080 and 2560×1440, both themes, at 1×. Include the rail, expanded dock, eleven-row crew fixture and empty/long form cases.
+After plan approval, mock up Overview, Agent and one representative grouped form. Use 1920×1080 and 2560×1440, both themes, at 1×. Include the rail, expanded dock, eleven-row crew fixture and one/many/empty/long form cases.
 
 Also check 1280, 1600 and 1600×700. Render 1440×900 before showing the work. Record type, targets, clipping, scroll, focus, validation and disconnection checks. Use fictional content; real identities, machine paths and other-project references stay private.
 
