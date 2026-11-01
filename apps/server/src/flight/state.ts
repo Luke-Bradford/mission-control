@@ -307,7 +307,12 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       reworkRounds: { p50: percentile(rounds, 50), p90: percentile(rounds, 90) },
     };
   });
-  return { generatedAt: now, rows, unowned: rows.filter((row) => row.owner === "nobody").length, metrics };
+  return {
+    generatedAt: now,
+    rows,
+    unowned: rows.filter((row) => row.owner === "nobody").length,
+    metrics,
+  };
 }
 
 /**
