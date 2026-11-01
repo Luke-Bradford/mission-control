@@ -190,8 +190,8 @@ it("shows distinct per-file commits and dirty labels while keeping diff buttons 
     },
   });
   render(<SideTabs row={row} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Files 3" }));
-  const file = screen.getByRole("button", { name: "a.ts+0 −0abc1234" });
+  fireEvent.click(await screen.findByRole("button", { name: "Files" }));
+  const file = await screen.findByRole("button", { name: "a.ts+0 −0abc1234" });
   expect(file.tabIndex).toBe(0);
   file.focus();
   expect(document.activeElement).toBe(file);

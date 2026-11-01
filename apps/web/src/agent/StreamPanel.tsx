@@ -134,7 +134,30 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
   return (
     <div className={`ev ${CLS[ev.kind]}`}>
       <span className="at num">{ev.at !== null && tz ? hhmm(ev.at, tz) : DASH}</span>
-      <span className="who">{WHO[ev.kind]}</span>
+      <span className="who">
+        <span
+          className="event-mark"
+          role="img"
+          aria-label={
+            ev.kind === "sys" && ev.text === "Context compacted"
+              ? "Compaction event"
+              : `${WHO[ev.kind]} event`
+          }
+        >
+          {ev.kind === "tool"
+            ? "⌘"
+            : ev.kind === "sys" && ev.text === "Context compacted"
+              ? "◇"
+              : ev.kind === "guard"
+                ? "!"
+                : ev.kind === "msg" || ev.kind === "a2a"
+                  ? "↳"
+                  : "·"}
+        </span>
+        <span className="event-kind">
+          {ev.kind === "sys" && ev.text === "Context compacted" ? "compact" : WHO[ev.kind]}
+        </span>
+      </span>
       <div className="txt">
         {ev.kind === "a2a" ? (
           <MentionText text={ev.text} />
@@ -245,7 +268,7 @@ export function SeatComposer({
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
   const loopResource = useResource<{ loop: RunLoop | null }>(
-    row.run ? RESOURCES.runLoop(row.run.id) : null,
+    row.run && row.loop?.phase === "parked" ? RESOURCES.runLoop(row.run.id) : null,
   );
   const loop = loopResource.data?.loop;
   const parkedReview = reviewPark(loop);

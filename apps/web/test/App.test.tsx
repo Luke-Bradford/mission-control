@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { navigate } from "../src/router.ts";
 import { toggleDock } from "../src/shell/overlays.ts";
+import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, REPOS } from "./fixtures.ts";
 
@@ -245,7 +246,7 @@ describe("App", () => {
       "/api/repos": REPOS,
       "/api/config": CONFIG,
       "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
-      "/api/crew/shop-app-ta": crewRow(),
+      "/api/agents/shop-app-ta": agentView(crewRow()),
     });
     at("/agent/shop-app-ta?popout=1");
     await screen.findByRole("region", { name: "shop-app-ta details" });
@@ -265,8 +266,8 @@ describe("App", () => {
         rows: [crewRow(), crewRow({ id: "other-seat", index: 3 })],
         firstRunToday: null,
       },
-      "/api/crew/shop-app-ta": crewRow(),
-      "/api/crew/other-seat": crewRow({ id: "other-seat", index: 3 }),
+      "/api/agents/shop-app-ta": agentView(crewRow()),
+      "/api/agents/other-seat": agentView(crewRow({ id: "other-seat", index: 3 })),
     });
     const { container } = at("/agent/shop-app-ta?popout=1");
     await screen.findByRole("region", { name: "shop-app-ta details" });
@@ -283,9 +284,13 @@ describe("App", () => {
       "/api/repos": REPOS,
       "/api/config": CONFIG,
       "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
-      "/api/crew/shop-app-ta": crewRow(),
+      "/api/agents/shop-app-ta": agentView(crewRow()),
     });
     at("/agent/shop-app-ta");
+    fireEvent.click(await screen.findByText("More"));
+    const more = (await screen.findByText("More")).closest("details") as HTMLDetailsElement;
+    more.open = true;
+    fireEvent(more, new Event("toggle", { bubbles: true }));
     await screen.findByRole("button", { name: "Pop out" });
   });
 

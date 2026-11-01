@@ -415,3 +415,13 @@ it("says how many bytes a cut result lost (#934)", () => {
   const text = JSON.stringify(readStream(p, 10).events);
   expect(text).toContain("kept\\n(cut from 123456 bytes)");
 });
+
+it("keeps a compaction as a typed system event in the activity timeline", () => {
+  const path = write(
+    "compact.jsonl",
+    `${JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: at(1) })}\n`,
+  );
+  expect(readStream(path, 10).events).toEqual([
+    expect.objectContaining({ kind: "sys", text: "Context compacted" }),
+  ]);
+});
