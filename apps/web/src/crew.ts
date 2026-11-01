@@ -423,12 +423,15 @@ export function needLine(
   const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
   if (asks.length > 0) {
     const others = asks.filter((i) => i.owner !== "operator");
-    for (const ask of others)
+    for (const owner of new Set(others.map((i) => i.owner))) {
+      const group = others.filter((i) => i.owner === owner);
+      const ask = group.reduce((a, b) => (b.at < a.at ? b : a));
       parts.push({
-        text: `${ATTENTION_LABEL[ask.kind]} for ${ask.owner === "loop" ? callSign(row) : ask.owner === "controller" ? "the controller" : "FLIGHT"}`,
+        text: `${ATTENTION_LABEL[ask.kind]} for ${ask.owner === "loop" ? callSign(row) : ask.owner === "controller" ? "the controller" : "FLIGHT"}${group.length > 1 ? ` · ${group.length} items` : ""}`,
         action: "open",
         key: ask.key,
       });
+    }
     const operatorAsks = asks.filter((i) => i.owner === "operator");
     if (operatorAsks.length > 0) {
       const oldest = operatorAsks.reduce((a, b) => (b.at < a.at ? b : a));
@@ -456,6 +459,21 @@ export function needLine(
     });
   }
   return parts;
+}
+
+/** Keep the operator and the owner distinct on compact loop and Agent headers. */
+export function needOwnerLabel(row: CrewRow, items: AttentionItem[]): string {
+  const mine = seatItems(row, items);
+  if (mine.some((i) => i.owner === "operator")) return "needs you";
+  if (mine.length > 0 && mine.every((i) => i.owner === "loop")) return "has an item to resolve";
+  const owners = [
+    ...new Set(
+      mine.map((i) =>
+        i.owner === "loop" ? callSign(row) : i.owner === "controller" ? "the controller" : "FLIGHT",
+      ),
+    ),
+  ];
+  return owners.length ? `waiting on ${owners.join(", ")}` : "has an item";
 }
 
 const MINUTE = 60_000;

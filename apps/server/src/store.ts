@@ -5101,16 +5101,21 @@ export class Store {
   }
 
   /** Fixed delivery target, otherwise the sender's run that was open when it wrote the line. */
-  commsRun(id: string): Run | null {
+  commsRun(id: string, inferSender = true): Run | null {
     const number = commsMessageNumber(id);
     if (number === null) return null;
-    const row = this.statement(`SELECT r.* FROM runs r JOIN comms c ON c.id = ?
-      WHERE r.id = c.target_run_id OR
-        (r.agent_id = c.from_id AND r.started_at <= c.at AND
-         (r.ended_at IS NULL OR r.ended_at >= c.at))
-      ORDER BY (r.id = c.target_run_id) DESC, r.started_at DESC, r.id DESC LIMIT 1`).get(number) as
-      | Row
-      | undefined;
+    const source = this.statement("SELECT target_run_id, from_id, at FROM comms WHERE id = ?").get(
+      number,
+    ) as Row | undefined;
+    if (!source) return null;
+    if (source.target_run_id !== null) return this.run(source.target_run_id as string);
+    if (!inferSender) return null;
+    const row = this.statement(`SELECT * FROM runs WHERE agent_id = ? AND started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC, seq DESC, id DESC LIMIT 1`).get(
+      source.from_id as string,
+      source.at as number,
+      source.at as number,
+    ) as Row | undefined;
     return row ? toRun(row) : null;
   }
 
@@ -5349,10 +5354,11 @@ export class Store {
     if (since === undefined) return base;
     return {
       where: `(${base.where}) AND at >= ? AND (
-        NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = comms.from_id)
+        (target_run_id IS NOT NULL AND EXISTS (SELECT 1 FROM runs r WHERE r.id = comms.target_run_id AND r.ended_at IS NULL))
+        OR (target_run_id IS NULL AND (NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = comms.from_id)
         OR (SELECT r.ended_at IS NULL FROM runs r WHERE r.agent_id = comms.from_id AND
           r.started_at <= comms.at AND (r.ended_at IS NULL OR r.ended_at >= comms.at)
-          ORDER BY r.started_at DESC, r.seq DESC, r.id DESC LIMIT 1) = 1
+          ORDER BY r.started_at DESC, r.seq DESC, r.id DESC LIMIT 1) = 1))
       )`,
       args: [...base.args, since],
     };

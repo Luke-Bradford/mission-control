@@ -535,7 +535,11 @@ describe("Comms routes", () => {
         messages: [stored("comms:50", "Newest page", NOW)],
         hasMore: true,
       },
-      "/api/comms/crew?before=comms%3A50": {
+      "/api/comms/crew?history=1": {
+        messages: [stored("comms:50", "Newest page", NOW)],
+        hasMore: true,
+      },
+      "/api/comms/crew?history=1&before=comms%3A50": {
         messages: [stored("comms:49", "From the page before", NOW - MIN)],
         hasMore: false,
       },
@@ -547,13 +551,16 @@ describe("Comms routes", () => {
     render(<CommsConversation view={{ kind: "crew" }} row={null} />);
     await screen.findByText("Newest page");
     expect(screen.queryByText("From the page before")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    fireEvent.click(screen.getByRole("button", { name: "Earlier" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
     await screen.findByText("From the page before");
     const texts = [...document.querySelectorAll(".comms-bubble")].map((b) => b.textContent ?? "");
     expect(texts[0]).toContain("From the page before");
     expect(texts[1]).toContain("Newest page");
     expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
-    expect(fetch.mock.calls.map(([p]) => p)).toContain("/api/comms/crew?before=comms%3A50");
+    expect(fetch.mock.calls.map(([p]) => p)).toContain(
+      "/api/comms/crew?history=1&before=comms%3A50",
+    );
   });
 
   it("offers no older messages when the route has none", async () => {
@@ -572,7 +579,14 @@ describe("Comms routes", () => {
   it("says so when older messages cannot be loaded", async () => {
     stubFetch({
       "/api/comms/crew": { messages: [stored("comms:50", "Newest page", NOW)], hasMore: true },
-      "/api/comms/crew?before=comms%3A50": () => ({ status: 500, body: { error: "boom" } }),
+      "/api/comms/crew?history=1": {
+        messages: [stored("comms:50", "Newest page", NOW)],
+        hasMore: true,
+      },
+      "/api/comms/crew?history=1&before=comms%3A50": () => ({
+        status: 500,
+        body: { error: "boom" },
+      }),
       "/api/comms/mentions": { mentions: [] },
       "/api/comms/pins": { messages: [] },
       "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
@@ -580,7 +594,8 @@ describe("Comms routes", () => {
     });
     render(<CommsConversation view={{ kind: "crew" }} row={null} />);
     await screen.findByText("Newest page");
-    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    fireEvent.click(screen.getByRole("button", { name: "Earlier" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
     await screen.findByText("Could not load older messages.");
     expect(screen.getByRole("button", { name: "Load older" })).toBeTruthy();
   });
@@ -1017,5 +1032,59 @@ describe("Decisions", () => {
     expect(within(decisions).getByText("Which cache should we use?")).toBeTruthy();
     expect(within(decisions).getByText("default in 1:30")).toBeTruthy();
     expect(within(decisions).getByText("default in 1:00")).toBeTruthy();
+  });
+});
+
+describe("current crew and Earlier", () => {
+  const old = {
+    id: "comms:91",
+    at: NOW - 2 * MIN,
+    from: "old-seat",
+    to: "crew",
+    ticket: null,
+    text: "Ended run handoff",
+    operator: false,
+    reactions: [],
+  };
+  const routes = () => ({
+    "/api/config": CONFIG,
+    "/api/comms/crew": { messages: [], hasEarlier: true },
+    "/api/comms/pins": { messages: [] },
+    "/api/flight": { seat: null, decisions: [] },
+    "POST /api/comms/read": { ok: true },
+  });
+  it("loads Earlier from an empty current view and returns to current crew", async () => {
+    stubFetch({ ...routes(), "/api/comms/crew?history=1": { messages: [old], hasMore: false } });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    expect(await screen.findByText("No messages yet.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Earlier" }));
+    expect(await screen.findByText(old.text)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Current crew" }));
+    await waitFor(() => expect(screen.queryByText(old.text)).toBeNull());
+  });
+  it("reports an archive failure and retries instead of claiming there are no messages", async () => {
+    let failed = true;
+    stubFetch({
+      ...routes(),
+      "/api/comms/crew?history=1": () => ({
+        status: failed ? 502 : 200,
+        body: failed ? { error: "offline" } : { messages: [old] },
+      }),
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Earlier" }));
+    expect(await screen.findByText("Could not load earlier messages.")).toBeTruthy();
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+    failed = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry messages" }));
+    expect(await screen.findByText(old.text)).toBeTruthy();
+  });
+  it("reveals a linked message from an ended run through Earlier", async () => {
+    stubFetch({ ...routes(), "/api/comms/crew?history=1": { messages: [old] } });
+    render(
+      <CommsConversation view={{ kind: "crew" }} row={null} jumpId={old.id} onJumped={() => {}} />,
+    );
+    expect(await screen.findByText(old.text)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Current crew" })).toBeTruthy();
   });
 });

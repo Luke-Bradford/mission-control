@@ -86,6 +86,7 @@ import {
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention, protectedDecisionItem } from "./attention-holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
@@ -1163,7 +1164,7 @@ function buildAttentionItems(
   for (const row of rows) {
     if (row.hudState === "stalled" && row.run && row.lastOutputAt !== null) {
       items.push({
-        owner: OWNER_OPERATOR,
+        owner: row.kind === "loop" ? OWNER_LOOP : OWNER_OPERATOR,
         key: `stall:${row.id}:${row.run.id}:${row.lastOutputAt}`,
         kind: "stalled",
         agentId: row.id,
@@ -1182,7 +1183,7 @@ function buildAttentionItems(
       const st =
         row.loopKind === "crew" ? undefined : status.get(collectorName(row.loopKind, row.id));
       items.push({
-        owner: OWNER_OPERATOR,
+        owner: row.kind === "loop" ? OWNER_LOOP : OWNER_OPERATOR,
         key:
           row.kind === "crew"
             ? `error:${row.id}:${row.stateSince}`
@@ -1232,13 +1233,24 @@ function buildAttentionItems(
       if (action === null) continue;
       // a draft another login's run opened is that lane's to decide
       const lane = pr.isDraft ? otherLogin(pr, hubLogin) : null;
+      const crewed = config.crew?.sessions.some((session) => session.repoId === repo.id) ?? false;
+      const loopOwner =
+        loopRow && (!crewed || pr.branch === loopRow.run?.branch || pr.ticket === loopRow.ticket)
+          ? loopRow
+          : null;
       items.push({
-        owner: lane === null ? OWNER_OPERATOR : laneOwner(lane),
+        owner: loopOwner
+          ? OWNER_LOOP
+          : lane === null
+            ? pr.isDraft
+              ? OWNER_CONTROLLER
+              : OWNER_OPERATOR
+            : laneOwner(lane),
         key: `pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`,
         kind: "pr",
-        agentId: null,
+        agentId: loopOwner?.id ?? null,
         repoId: pr.repoId,
-        text: `PR #${pr.number} · You: ${action}`,
+        text: `PR #${pr.number} · ${loopOwner ? (loopOwner.displayCallSign ?? loopOwner.id) : pr.isDraft ? "Controller" : "You"}: ${action}`,
         tool: null,
         at: pr.updatedAt,
         url: pr.url,
@@ -1303,6 +1315,12 @@ function buildAttentionItems(
       ...(brief === undefined ? {} : { brief }),
       acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
     };
+    if (
+      brief?.for === "operator" &&
+      brief.recommendation.trim() !== "" &&
+      (i.owner === OWNER_CONTROLLER || i.owner === OWNER_FLIGHT)
+    )
+      return { ...item, owner: OWNER_OPERATOR };
     // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
@@ -1592,7 +1610,12 @@ function crewItems(
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
     const run = n.runId === null ? null : store.run(n.runId);
-    if (n.kind === "blocked" && run !== null && endedParkGone(config, store, run, boardOf))
+    if (
+      n.kind === "blocked" &&
+      noteOwner(store, n) !== OWNER_CONTROLLER &&
+      run !== null &&
+      endedParkGone(config, store, run, boardOf)
+    )
       continue;
     const pr =
       run?.loop?.prNumber === undefined || run.loop.prNumber === null
@@ -1615,23 +1638,28 @@ function crewItems(
     const resolved =
       run !== null &&
       (run.endedAt !== null ||
+        (n.kind === "blocked" && run.loop?.parked == null && (run.loop?.unparkedAt ?? 0) > n.at) ||
+        (n.kind === "blocked" && confirmedResumeAfter(store, run, n.at)) ||
         run.loop?.phase === "done" ||
         (pr !== undefined && pr.state !== "open") ||
         (ticket !== null &&
           boardOf(ticket.repoId).some(
             (b) => b.issueNumber === ticket.number && (b.closed || b.state === "done"),
           )));
-    const control = run?.loop;
-    const approvalPending =
-      control?.mergeHold != null ||
-      control?.controllerCheckRequired === true ||
-      (control?.controllerCheck != null && !control.controllerCheck.pass) ||
-      (control?.uat != null && !control.uat.accepted);
+    const approvalPending = run !== null && pendingRunApproval(store, run, pr);
+    const subjectClosed =
+      pr !== undefined &&
+      pr.state !== "open" &&
+      (pr.mergedAt ?? (pr.state === "closed" ? pr.updatedAt : 0)) >= n.at &&
+      run?.loop?.parked?.kind !== "budget" &&
+      run?.loop?.parked?.kind !== "account" &&
+      (run === null || store.seatSession(run.agentId)?.state !== "stopped");
     if (
       (n.kind === "blocked" || n.kind === "review") &&
+      noteItem.owner !== OWNER_CONTROLLER &&
       resolved &&
       !approvalPending &&
-      !protectedDecisionItem(store, { ...noteItem, acked: false }, config, now)
+      (subjectClosed || !protectedDecisionItem(store, { ...noteItem, acked: false }, config, now))
     )
       continue;
     out.push(noteItem);

@@ -15,6 +15,7 @@ import {
   commsTooLongText,
   scanSecrets,
 } from "@mc/core";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
 import { statNoted } from "./file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
@@ -403,35 +404,35 @@ export function resolvedCommsReason(
   )
     return "The operator marked it done.";
   const position = commsPosition(message.id);
-  const run = !includeRun
-    ? null
-    : position?.source.startsWith("stream:")
+  const run = position?.source.startsWith("stream:")
+    ? includeRun
       ? store.run(position.source.slice("stream:".length))
-      : store.commsRun(message.id);
+      : null
+    : store.commsRun(message.id, includeRun);
   const controls = run?.loop;
   if (
     run &&
     (controls?.parked?.kind === "budget" ||
       controls?.parked?.kind === "account" ||
-      controls?.mergeHold ||
-      controls?.controllerCheckRequired ||
-      (controls?.controllerCheck && !controls.controllerCheck.pass) ||
-      (controls?.uat && !controls.uat.accepted) ||
+      pendingRunApproval(store, run) ||
       store.seatSession(run.agentId)?.state === "stopped")
   )
     return null;
   const at = message.at;
   if (at === null) return null;
   if (run?.endedAt != null && run.endedAt >= at) return "The related run ended.";
+  if (run && message.label === "blocker" && confirmedResumeAfter(store, run, at))
+    return "The related run resumed.";
   if (
     run &&
     message.label === "blocker" &&
-    store
-      .loopEventsOfRun(run.id)
-      .some((e) => e.key.startsWith(`${run.id}:resume-confirmed:`) && e.at > at)
+    controls?.parked == null &&
+    (controls?.unparkedAt ?? 0) > at
   )
-    return "The related run resumed.";
-  const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+    return "The related park was lifted.";
+  const qualified = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+  const short = /^#(\d+)$/.exec(message.ref ?? message.ticket ?? "");
+  const ticket = qualified ?? (subjectRepoId && short ? [short[0], subjectRepoId, short[1]] : null);
   if (
     ticket &&
     store
@@ -452,13 +453,24 @@ export function resolvedCommsReason(
       pr &&
       prs.some(
         (p) =>
-          p.number === Number(pr[1]) && p.state !== "open" && (p.mergedAt ?? p.updatedAt) >= at,
+          p.number === Number(pr[1]) &&
+          p.state !== "open" &&
+          (p.mergedAt ?? (p.state === "closed" ? p.updatedAt : 0)) >= at,
       )
     )
       return "The related PR resolved.";
-    const linked = prs.filter((p) => p.ticket === message.ticket);
+    const linked = ticket
+      ? prs.filter(
+          (p) =>
+            p.ticket === `${ticket[1]}#${ticket[2]}` ||
+            p.closingIssues?.includes(Number(ticket[2])),
+        )
+      : [];
     if (
-      linked.some((p) => p.state === "merged" && (p.mergedAt ?? p.updatedAt) >= at) &&
+      linked.some(
+        (p) =>
+          p.state === "merged" && (p.mergedAt ?? (p.state === "closed" ? p.updatedAt : 0)) >= at,
+      ) &&
       !linked.some((p) => p.state === "open")
     )
       return "The related PR merged.";
