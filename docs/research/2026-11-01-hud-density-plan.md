@@ -1,6 +1,8 @@
 # Desktop density plan for operator approval
 
-Stage 2 of #1193, following the [desktop research](2026-11-01-hud-density.md) and its 240-image gallery in PR #1341. The operator saw the report before this proposal. This plan has not been approved. It permits no mockup or product change until the operator approves it; the later mockup needs separate approval before build tickets.
+Stage 2 of #1193, following the [desktop research](2026-11-01-hud-density.md) and its 240-image gallery in PR #1341. The operator saw the report before this proposal. This plan has not been approved. 
+
+Plan approval permits the mockup stage. The mockup then needs separate approval before build tickets.
 
 ## The decision
 
@@ -72,6 +74,8 @@ The four behavior gaps folded into #1193 remain explicit build outcomes: preserv
 
 ## Mockup and approval checks
 
-After this plan is approved, mock up Overview, Agent and one representative grouped form at 1920×1080 and 2560×1440, in both themes, at 1×. Include the rail and expanded dock, eleven-row crew fixture, one/many/empty/long form cases, validation and disconnection. Also check 1280, 1600 and 1600×700, and render 1440×900 before showing the work. Record type, targets, clipping, scroll and focus checks. Use fictional content; real project identities, paths and other-project references stay private.
+After plan approval, mock up Overview, Agent and one representative grouped form. Use 1920×1080 and 2560×1440, both themes, at 1×. Include the rail, expanded dock, eleven-row crew fixture and empty/long form cases.
+
+Also check 1280, 1600 and 1600×700. Render 1440×900 before showing the work. Record type, targets, clipping, scroll, focus, validation and disconnection checks. Use fictional content; real identities, machine paths and other-project references stay private.
 
 The operator then approves that mockup before build tickets. #677 also requires its remaining per-page mockups under `docs/mockups/2026-10/` and their own approvals; these three density screens do not satisfy the whole site-review ticket. File no product build ticket from this proposal before the required approval. No crew, schedule or product setting changes in this stage.
