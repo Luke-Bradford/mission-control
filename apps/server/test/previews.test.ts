@@ -37,6 +37,20 @@ describe("PreviewManager", () => {
     }
   });
 
+  it("rejects a head that is not an immutable commit before starting a process", async () => {
+    const start = vi.fn(async () => ({ stop: () => {} }));
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start,
+      remove: async () => {},
+    });
+    await expect(
+      manager.start({ pr: 41, branch: "feature/41", checkout: "/repo", sha: "--orphan=other" }),
+    ).rejects.toMatchObject({ code: "head" });
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("reserves distinct ports while concurrent starts are still preparing", async () => {
     let release: (() => void) | undefined;
     const preparing = new Promise<void>((resolve) => (release = resolve));
@@ -128,9 +142,10 @@ describe("PreviewManager", () => {
     const starting = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    const rejected = expect(starting).rejects.toMatchObject({ name: "AbortError" });
     ready?.();
     await expect(manager.close(41)).resolves.toBe(true);
-    await expect(starting).resolves.toMatchObject({ pr: 41 });
+    await rejected;
     expect(manager.list()).toEqual([]);
     expect(stop).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledOnce();
