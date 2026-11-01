@@ -191,24 +191,17 @@ describe("Needs-you owners", () => {
     expect(owners(c)[key]).toBe("operator");
   });
 
-  it("a hard-rule flag is the operator's, or the controller's where the rules say it merges", () => {
-    note("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag");
-    expect(owners()["note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"]).toBe(
-      "operator",
-    );
-    store.setSetting(hardRulesBySettingKey("shop-app"), "controller");
-    expect(owners()["note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"]).toBe(
-      "controller",
-    );
-  });
-
-  it("routes a hard-rule flag whose run id contains a colon, as crew run ids do", () => {
-    const key = "flag:guido-1:20261021T165337Z:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
-    note(key, "flag");
-    expect(owners()[`note:${key}`]).toBe("operator");
-    store.setSetting(hardRulesBySettingKey("shop-app"), "controller");
-    expect(owners()[`note:${key}`]).toBe("controller");
-  });
+  it.each(["r1", "guido-1:20261021T165337Z"])(
+    "keeps hard-rule information out of attention for run %s without deleting its marker",
+    (runId) => {
+      const key = `flag:${runId}:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af`;
+      note(key, "flag");
+      expect(owners()[`note:${key}`]).toBeUndefined();
+      store.setSetting(hardRulesBySettingKey("shop-app"), "controller");
+      expect(owners()[`note:${key}`]).toBeUndefined();
+      expect(store.notes().some((n) => n.key === key)).toBe(true);
+    },
+  );
 
   it("a cleanup note is the controller's, and a review note the operator's", () => {
     note("review:r1:abc", "review");
@@ -225,12 +218,13 @@ describe("Needs-you owners", () => {
     expect(owners()[`note:${noReportNoteKey("r1")}`]).toBe("controller");
   });
 
-  it("a flake note is the controller's", () => {
+  it("keeps a flake as information rather than an attention item", () => {
     note("flake:r1:abc", "flag");
-    expect(owners()["note:flake:r1:abc"]).toBe("controller");
+    expect(owners()["note:flake:r1:abc"]).toBeUndefined();
+    expect(store.notes().some((n) => n.key === "flake:r1:abc")).toBe(true);
   });
 
-  it("a draft PR from another login's run is that lane's; the hub's own is the operator's", () => {
+  it("a draft PR from another login's run is that lane's; the hub's own is the controller's", () => {
     store.replaceBoard("shop-app", [boardItem({})]);
     const key = `pr:shop-app#7:${NOW - 9 * DAY}`;
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
@@ -238,10 +232,10 @@ describe("Needs-you owners", () => {
     store.replacePullRequests("shop-app", [pr({ author: HUB, assignees: ["other"] })], 0);
     expect(owners()[key]).toBe("lane:other");
     store.replacePullRequests("shop-app", [pr({ author: HUB, assignees: [HUB] })], 0);
-    expect(owners()[key]).toBe("operator");
+    expect(owners()[key]).toBe("controller");
     // the hub's login unknown: nothing can be said to be another's
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
-    expect(owners(base, null)[key]).toBe("operator");
+    expect(owners(base, null)[key]).toBe("controller");
   });
 
   it("an escalation is the loop's, unless it names the operator", () => {
@@ -301,9 +295,9 @@ describe("Needs-you items clear themselves", () => {
         .filter((i) => i.kind === "pr")
         .map((i) => i.text);
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
-    expect(texts()).toEqual(["PR #7 · You: decide on the draft"]);
+    expect(texts()).toEqual(["PR #7 · Controller: decide on the draft"]);
     store.replacePullRequests("shop-app", [pr({ author: "someone", isDraft: false })], 0);
-    expect(texts()).not.toContain("PR #7 · You: decide on the draft");
+    expect(texts()).not.toContain("PR #7 · Controller: decide on the draft");
     store.replacePullRequests("shop-app", [pr({ state: "merged" })], 0);
     expect(texts()).toEqual([]);
     store.replacePullRequests("shop-app", [pr({ state: "closed" })], 0);
