@@ -1,5 +1,5 @@
 import type { RunPr } from "@mc/core";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrChip } from "../src/hud/PrChip.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -63,6 +63,110 @@ describe("PrChip", () => {
 
     expect(screen.queryByRole("button", { name: "Start preview for PR #7" })).toBeNull();
   });
+
+  it("starts a supported preview once, without opening the surrounding card, then links to it", async () => {
+    const live = {
+      pr: 7,
+      branch: "feature/preview",
+      port: 7431,
+      url: "http://127.0.0.1:7431",
+      startedAt: 1,
+    };
+    let finish!: (response: Response) => void;
+    const fetch = stubFetch({ "/api/config": CONFIG });
+    const originalFetch = fetch.getMockImplementation();
+    if (!originalFetch) throw new Error("fetch stub missing");
+    fetch.mockImplementation((path, init) =>
+      path === "/api/previews"
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : originalFetch(path, init),
+    );
+    const navigate = vi.fn();
+    render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: simulates the Board card's mouse shortcut around its links and button
+      // biome-ignore lint/a11y/useKeyWithClickEvents: the real control inside is keyboard-accessible
+      <div onClick={navigate}>
+        <PrChip pr={pr} previewable preview={null} />
+      </div>,
+    );
+    const button = screen.getByRole("button", { name: "Start preview for PR #7" });
+    button.focus();
+    fireEvent.click(button);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(button.textContent).toBe("Starting preview…");
+    expect(button.hasAttribute("disabled")).toBe(true);
+    const calls = fetch.mock.calls.filter(
+      ([path, init]) => path === "/api/previews" && init?.method === "POST",
+    );
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0][1]?.body as string)).toEqual({ pr: 7 });
+    await act(async () => {
+      finish(new Response(JSON.stringify(live)));
+    });
+    const link = await screen.findByRole("link", { name: "Open preview for PR #7" });
+    expect(link.getAttribute("href")).toBe(live.url);
+    expect(document.activeElement).toBe(link);
+    expect(screen.queryByRole("button", { name: "Start preview for PR #7" })).toBeNull();
+  });
+
+  it("shows a server refusal and allows retrying", async () => {
+    let attempts = 0;
+    stubFetch({
+      "/api/config": CONFIG,
+      "POST /api/previews": () =>
+        ++attempts === 1
+          ? {
+              status: 409,
+              body: { error: "At most two previews can run. Close one and try again." },
+            }
+          : {
+              status: 200,
+              body: {
+                pr: 7,
+                branch: "feature/preview",
+                port: 7431,
+                url: "http://127.0.0.1:7431",
+                startedAt: 1,
+              },
+            },
+    });
+    render(<PrChip pr={pr} previewable preview={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start preview for PR #7" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Close one and try again.");
+    const retry = screen.getByRole("button", { name: "Start preview for PR #7" });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(retry);
+    await screen.findByRole("link", { name: "Open preview for PR #7" });
+    expect(attempts).toBe(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers Start again after the payload reports that its preview ended", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    const live = {
+      pr: 7,
+      branch: "feature/preview",
+      port: 7431,
+      url: "http://127.0.0.1:7431",
+      startedAt: 1,
+    };
+    const view = render(<PrChip pr={pr} previewable preview={live} />);
+    expect(screen.queryByRole("button", { name: "Start preview for PR #7" })).toBeNull();
+    view.rerender(<PrChip pr={pr} previewable preview={null} />);
+    expect(screen.getByRole("button", { name: "Start preview for PR #7" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open preview for PR #7" })).toBeNull();
+  });
+
+  it.each(["closed", "merged"] as const)(
+    "does not start a %s PR even with stale capability",
+    (state) => {
+      stubFetch({ "/api/config": CONFIG });
+      render(<PrChip pr={{ ...pr, state }} previewable preview={null} />);
+      expect(screen.queryByRole("button", { name: "Start preview for PR #7" })).toBeNull();
+    },
+  );
 
   it("shows a warn held pill naming who holds the merge and why", async () => {
     stubFetch({ "/api/config": CONFIG });
