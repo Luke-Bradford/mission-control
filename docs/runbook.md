@@ -284,23 +284,17 @@ taking over one second produce a summary carrying the method and URL path (never
 string; the operator token travels as a header). Every 5xx includes its error message and stack
 through the existing redacting logger. Other hub warnings remain logged.
 
-For a launchd hub, add this entry to `/etc/newsyslog.d/mission-control.conf`, replacing
-`<home>` with the home directory and `<user>:<group>` with the hub's account and group.
-Use absolute paths (newsyslog does not expand `~`). If `MC_DB` is set, the pid file is
-`server.pid` beside that database instead.
+The hub writes these JSON lines to `<data dir>/logs/server.log`, with owner-only file permissions.
+Before the next record would exceed 20 MB, or on the first write of a new UTC day, it rotates the
+file and keeps seven numbered archives (`server.log.1` is newest). A single record larger than
+20 MB is kept whole in its own file. Rotation happens in the hub without a restart and works for
+both launchd and manually started hubs. Each preview uses its own database's data directory.
+If writing or rotation fails, records go to stderr, with one warning until writing recovers.
 
-```text
-# logfilename                                  owner:group     mode count size when flags pid_file                                                signal
-<home>/Library/Logs/mission-control/server.log  <user>:<group>  600  7     20480 @T00 B     <home>/.local/share/mission-control/server.pid           15
-```
-
-The system's newsyslog job rotates at 20 MB (the size column is in KB) or daily at midnight,
-whichever comes first, and keeps seven archives. The
-`B` flag avoids inserting plain text into the JSON log. Signal 15 requests the hub's existing
-graceful shutdown; launchd's `KeepAlive` starts it again and reopens the new log. Rotation
-therefore includes a hub restart and the crew's normal shutdown and resume. This entry requires
-the launchd job; do not install it for a manually started hub. Check the expanded entry with
-`sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
+The launchd `StandardOutPath` and `StandardErrorPath` remain bootstrap/fallback logs. Existing
+files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no longer grows
+`server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
+that entry: the built-in rotation replaces it and does not need a service restart.
 
 ### FLIGHT runaway breaker
 
