@@ -1,5 +1,5 @@
 /** Puts a web PR's screenshot pairs where its reviewer can read them. */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { EVIDENCE_KINDS, type EvidencePair, evidenceImageName } from "@mc/core";
 import type { PrEvidenceStore } from "./store.ts";
@@ -23,13 +23,20 @@ export async function stageReviewEvidence(
 ): Promise<StagedEvidence | undefined> {
   const manifest = store?.manifest(repoId, pr, sha) ?? null;
   if (store === undefined || manifest === null || manifest.pairs.length === 0) return undefined;
-  await mkdir(join(scratchPath, REVIEW_EVIDENCE_DIR), { recursive: true });
-  for (const p of manifest.pairs) {
-    for (const kind of EVIDENCE_KINDS) {
-      const name = evidenceImageName(p.page, p.scheme, kind);
-      const png = store.image(repoId, pr, sha, name);
-      if (png) await writeFile(join(scratchPath, REVIEW_EVIDENCE_DIR, name), png);
+  await mkdir(join(scratchPath, ".mc-review"), { recursive: true });
+  const stage = await mkdtemp(join(scratchPath, ".mc-review", ".evidence-"));
+  try {
+    for (const p of manifest.pairs) {
+      for (const kind of EVIDENCE_KINDS) {
+        const name = evidenceImageName(p.page, p.scheme, kind);
+        const png = store.image(repoId, pr, sha, name);
+        if (!png) throw new Error(`screenshot evidence image is missing: ${name}`);
+        await writeFile(join(stage, name), png, { flag: "wx", mode: 0o600 });
+      }
     }
+    await rename(stage, join(scratchPath, REVIEW_EVIDENCE_DIR));
+  } finally {
+    await rm(stage, { recursive: true, force: true });
   }
   return { dir: REVIEW_EVIDENCE_DIR, mainSha: manifest.mainSha, pairs: manifest.pairs };
 }

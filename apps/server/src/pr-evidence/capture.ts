@@ -6,6 +6,7 @@ import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   EVIDENCE_KINDS,
+  EVIDENCE_PAGE_PATHS,
   EVIDENCE_SCHEMES,
   type EvidenceManifest,
   type EvidencePage,
@@ -14,7 +15,6 @@ import {
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
-  HUD_PAGE_PATHS,
   prEvidenceAffectedPages,
 } from "@mc/core";
 import { decodePng, diffImages } from "./png.ts";
@@ -44,10 +44,15 @@ export interface PrEvidenceDeps {
   mainSha(signal: AbortSignal): Promise<string>;
   /** Writes a consistent copy of the live database to `to`. */
   snapshot(to: string): Promise<void>;
-  /** Serves `sha`'s HUD from the database at `db` until `stop`. */
+  /** Serves `sha`'s HUD from `db`; on cancellation rejects only after cleaning owned resources. */
   startSide(input: { sha: string; db: string; signal: AbortSignal }): Promise<EvidenceSide>;
   /** One screenshot of a page on a side, in a colour scheme. */
-  render(origin: string, path: string, scheme: EvidenceScheme): Promise<Buffer>;
+  render(
+    origin: string,
+    path: string,
+    scheme: EvidenceScheme,
+    signal: AbortSignal,
+  ): Promise<Buffer>;
   retryMs?: number;
   /** The deadline of one capture; default EVIDENCE_CAPTURE_MS. */
   captureMs?: number;
@@ -72,6 +77,31 @@ export interface PrEvidence {
   ensure(target: EvidenceTarget): Promise<void>;
   /** Why the PR must stay in draft (the pages without pairs), or null when it may leave. */
   gate(target: EvidenceTarget): string | null;
+  /** Cancel captures and wait for their owned hubs/worktrees to be removed. */
+  stop(): Promise<void>;
+}
+
+/** Stop waiting for a read/render at cancellation. Owned side startup awaits its cleanup. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let cancelled = false;
+    const abort = () => {
+      cancelled = true;
+      reject(signal.reason);
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        if (!cancelled) resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
@@ -86,17 +116,37 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   const failedWhy = new Map<string, string>();
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
+  const controllers = new Set<AbortController>();
+  let stopped = false;
   /** Captures run one at a time: each builds two hubs. */
   let queue: Promise<void> = Promise.resolve();
 
-  async function render(side: EvidenceSide, pages: EvidencePage[]) {
+  function manifest(t: EvidenceTarget): EvidenceManifest | null {
+    const m = deps.store.manifest(deps.repoId, t.pr, t.sha);
+    if (!m) return null;
+    return {
+      ...m,
+      pairs: m.pairs.filter((p) =>
+        EVIDENCE_KINDS.every((kind) =>
+          deps.store.hasImage(deps.repoId, t.pr, t.sha, evidenceImageName(p.page, p.scheme, kind)),
+        ),
+      ),
+    };
+  }
+
+  async function render(side: EvidenceSide, pages: EvidencePage[], signal: AbortSignal) {
     const shots = new Map<string, Buffer>();
     for (const page of pages)
-      for (const scheme of EVIDENCE_SCHEMES)
+      for (const scheme of EVIDENCE_SCHEMES) {
+        signal.throwIfAborted();
         shots.set(
           `${page}:${scheme}`,
-          await deps.render(side.origin, HUD_PAGE_PATHS[page], scheme),
+          await abortable(
+            deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
+            signal,
+          ),
         );
+      }
     return shots;
   }
 
@@ -111,10 +161,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   ): Promise<Map<string, Buffer>> {
     const db = join(dir, `${name}.sqlite`);
     await copyFile(snapshot, db);
+    signal.throwIfAborted();
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      return await render(side, pages);
+      return await render(side, pages, signal);
     } finally {
       await side.stop().catch(() => {});
     }
@@ -128,9 +179,10 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     await mkdir(deps.workDir, { recursive: true, mode: 0o700 });
     const dir = await mkdtemp(join(deps.workDir, "capture-"));
     try {
-      const mainSha = await deps.mainSha(signal);
+      signal.throwIfAborted();
+      const mainSha = await abortable(deps.mainSha(signal), signal);
       const snapshot = join(dir, "snapshot.sqlite");
-      await deps.snapshot(snapshot);
+      await abortable(deps.snapshot(snapshot), signal);
       const before = await photograph(mainSha, snapshot, dir, "main", pages, signal);
       const after = await photograph(t.sha, snapshot, dir, "head", pages, signal);
       const pairs: EvidencePair[] = [];
@@ -153,6 +205,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
             images.push({ name: evidenceImageName(page, scheme, kind), png: png[kind] });
         }
       }
+      signal.throwIfAborted();
       deps.store.save(
         { repoId: deps.repoId, pr: t.pr, sha: t.sha, mainSha, capturedAt: now(), pairs },
         images,
@@ -176,26 +229,27 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   return {
     baseUrl: deps.baseUrl,
     async ensure(t) {
-      if (t.repoId !== deps.repoId) return;
+      if (stopped || t.repoId !== deps.repoId) return;
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return;
       const key = keyOf(t);
-      const have = deps.store.manifest(deps.repoId, t.pr, t.sha);
+      const have = manifest(t);
       if (evidenceMissing(have, t.sha, pages).length === 0) return post(t);
       const failed = failedAt.get(key);
       if (failed !== undefined && now() - failed < retryMs) return;
       const going = running.get(key);
       if (going) return going;
       const job = queue.then(async () => {
+        if (stopped) return;
+        posted.delete(key);
+        const controller = new AbortController();
+        controllers.add(controller);
+        const timer = setTimeout(
+          () => controller.abort(new Error("the capture ran past its deadline")),
+          deps.captureMs ?? EVIDENCE_CAPTURE_MS,
+        );
         try {
-          // a step that hangs ends the capture at the deadline: the next one is not stuck behind it
-          const signal = AbortSignal.timeout(deps.captureMs ?? EVIDENCE_CAPTURE_MS);
-          const expired = new Promise<never>((_, reject) =>
-            signal.addEventListener("abort", () =>
-              reject(new Error("the capture ran past its deadline")),
-            ),
-          );
-          await Promise.race([capture(t, pages, signal), expired]);
+          await capture(t, pages, controller.signal);
           failedAt.delete(key);
           failedWhy.delete(key);
         } catch (e) {
@@ -204,8 +258,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           failedWhy.set(key, why);
           log(`#${t.pr}: screenshot capture failed: ${why}`);
           return;
+        } finally {
+          clearTimeout(timer);
+          controllers.delete(controller);
         }
-        await post(t);
+        if (!stopped) await post(t);
       });
       queue = job.finally(() => {});
       running.set(
@@ -218,7 +275,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (t.repoId !== deps.repoId) return null;
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
-      const missing = evidenceMissing(deps.store.manifest(deps.repoId, t.pr, t.sha), t.sha, pages);
+      const missing = evidenceMissing(manifest(t), t.sha, pages);
       if (missing.length === 0)
         return posted.has(keyOf(t))
           ? null
@@ -228,6 +285,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         /; capture failed: $/,
         "",
       );
+    },
+    async stop() {
+      stopped = true;
+      for (const controller of controllers) controller.abort(new Error("the hub is shutting down"));
+      await Promise.allSettled([...running.values()]);
     },
   };
 }

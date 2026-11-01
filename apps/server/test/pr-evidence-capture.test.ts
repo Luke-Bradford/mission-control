@@ -236,6 +236,98 @@ describe("PrEvidence capture", () => {
 });
 
 describe("PrEvidence gate", () => {
+  it("waits for cancelled startup cleanup before advancing the capture queue", async () => {
+    let cleaned!: () => void;
+    let cancelling!: () => void;
+    const cleaning = new Promise<void>((r) => {
+      cancelling = r;
+    });
+    const release = new Promise<void>((r) => {
+      cleaned = r;
+    });
+    const started: string[] = [];
+    const t = setup({
+      captureMs: 40,
+      startSide: async ({ sha, signal }) => {
+        started.push(sha);
+        if (sha === HEAD) {
+          await new Promise<void>((r) =>
+            signal.addEventListener("abort", () => r(), { once: true }),
+          );
+          cancelling();
+          await release;
+          throw signal.reason;
+        }
+        return { origin: `http://side/${sha}`, stop: async () => {} };
+      },
+    });
+    const first = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const second = t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
+    await cleaning;
+    expect(started).toEqual([MAIN, HEAD]);
+    cleaned();
+    await Promise.all([first, second]);
+    expect(started).toEqual([MAIN, HEAD, MAIN, NEXT]);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+  });
+  it("stops an expired side before another capture starts and never saves its late render", async () => {
+    let release!: (png: Buffer) => void;
+    let active = 0;
+    let maxActive = 0;
+    let blocked = true;
+    const t = setup({
+      captureMs: 40,
+      startSide: async ({ sha }) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        return {
+          origin: `http://side/${sha}`,
+          stop: async () => {
+            active--;
+          },
+        };
+      },
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && blocked) {
+          blocked = false;
+          return new Promise((r) => {
+            release = r;
+          });
+        }
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(active).toBe(0);
+    await t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
+    release(encodePng(pageBox(HEAD, "light")));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(maxActive).toBe(1);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    expect(t.store.manifest("mc", 8, NEXT)).not.toBeNull();
+  });
+
+  it("shutdown cancels an in-flight render, cleans up and starts no queued capture", async () => {
+    let rendering!: () => void;
+    const entered = new Promise<void>((r) => {
+      rendering = r;
+    });
+    const t = setup({
+      render: async () => {
+        rendering();
+        return new Promise(() => {});
+      },
+    });
+    const first = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const second = t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
+    await entered;
+    await t.evidence.stop();
+    await Promise.all([first, second]);
+    expect(t.started.map((s) => s.sha)).toEqual([MAIN]);
+    expect(t.stopped).toEqual([MAIN]);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+  });
+
   it("leaves another repo's PR alone", async () => {
     const t = setup();
     const other = { repoId: "other", pr: 7, sha: HEAD, paths: WEB };
@@ -271,8 +363,11 @@ describe("PrEvidence gate", () => {
   it("ends a capture whose step hangs at the deadline, and the next PR is not stuck behind it", async () => {
     const t = setup({
       captureMs: 30,
-      startSide: async ({ sha }) => {
-        if (sha === HEAD) return new Promise(() => {}); // never answers
+      startSide: async ({ sha, signal }) => {
+        if (sha === HEAD)
+          return new Promise((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+          );
         return { origin: `http://side/${sha}`, stop: async () => {} };
       },
     });

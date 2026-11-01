@@ -297,6 +297,8 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
+    prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
+    prEvidenceRepo?: string;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
@@ -379,6 +381,8 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
+    ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
+    ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),

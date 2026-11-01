@@ -3044,6 +3044,7 @@ describe("the engine runs reviews", () => {
       return {
         ensured,
         deps: {
+          async stop() {},
           baseUrl: "http://127.0.0.1:7421",
           async ensure(t: { pr: number; sha: string; paths: readonly string[] }) {
             ensured.push({ pr: t.pr, sha: t.sha, paths: t.paths });

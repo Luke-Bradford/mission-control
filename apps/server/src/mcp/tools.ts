@@ -43,6 +43,7 @@ import {
   doneWhenBadLineText,
   doneWhenCount,
   doneWhenMissingText,
+  EVIDENCE_HEADING,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -182,9 +183,11 @@ import {
   scanText,
   seatCallSign,
   seatDef,
+  sectionOf,
   specialPathsText,
   unclosedMarkdown,
   VERDICTS,
+  withSection,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
@@ -1373,9 +1376,11 @@ export async function editRunPrBody(
     if (refused !== null) return refused;
   }
 
+  const fullBody = prBody(body, repo, issue, seatCallSign(place.seat.id));
+  if (fullBody === info.body) return { text: prEditedText(prNumber) };
   const file = crewPrBodyPath(deps.dbPath);
   try {
-    await writeFile(file, prBody(body, repo, issue, seatCallSign(place.seat.id)), {
+    await writeFile(file, fullBody, {
       mode: 0o600,
       flag: "wx",
     });
@@ -1873,7 +1878,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     // the engine's own section outlives the seat's rewrite
     return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
       const section = minorSection(current);
-      return section === null ? own : `${own}\n\n${section}`;
+      return withSection(
+        section === null ? own : `${own}\n\n${section}`,
+        EVIDENCE_HEADING,
+        sectionOf(current, EVIDENCE_HEADING),
+      );
     });
   }
 

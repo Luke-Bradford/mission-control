@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { evidenceSideStarter } from "../src/pr-evidence/hubs.ts";
+import { evidenceSideStarter, runEvidenceCommand } from "../src/pr-evidence/hubs.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -38,6 +38,36 @@ function setup(over: { failAt?: string } = {}) {
 }
 
 describe("evidenceSideStarter", () => {
+  it("cancels the build process group including a child process", async () => {
+    const root = mkdtempSync(join(tmpdir(), "mc-evidence-build-"));
+    dirs.push(root);
+    const pidfile = join(root, "pid");
+    const controller = new AbortController();
+    const job = runEvidenceCommand(
+      process.execPath,
+      [
+        "-e",
+        `const {spawn}=require('node:child_process');const fs=require('node:fs');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(child.pid));setInterval(()=>{},1000);`,
+        pidfile,
+      ],
+      root,
+      controller.signal,
+    );
+    await expect.poll(() => readFileSync(pidfile, "utf8")).toMatch(/^\d+$/);
+    const pid = Number(readFileSync(pidfile, "utf8"));
+    controller.abort(new Error("cancel build"));
+    await expect(job).rejects.toThrow("cancel build");
+    await expect
+      .poll(() => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .toBe(false);
+  });
   it("checks the commit out, builds the web app, serves it on a free port, and cleans up on stop", async () => {
     const t = setup();
     const side = await t.start({ sha: SHA, db: "/x/head.sqlite" });

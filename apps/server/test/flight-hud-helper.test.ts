@@ -17,7 +17,10 @@ const alive = (pid: number): boolean => {
   }
 };
 
-async function run(mode: string, over: { deadlineMs?: number; graceMs?: number } = {}) {
+async function run(
+  mode: string,
+  over: { deadlineMs?: number; graceMs?: number; signal?: AbortSignal } = {},
+) {
   const pidfile = join(mkdtempSync(join(tmpdir(), "hud-helper-")), "pid");
   const result = renderHudInHelper(
     `http://127.0.0.1:7420/map?mode=${mode}&pidfile=${pidfile}`,
@@ -37,6 +40,14 @@ async function run(mode: string, over: { deadlineMs?: number; graceMs?: number }
 }
 
 describe("renderHudInHelper", () => {
+  it("kills a cancelled capture's helper and Chrome process group", async () => {
+    const controller = new AbortController();
+    const { result, grandchild } = await run("hang", { signal: controller.signal });
+    const pid = await grandchild();
+    controller.abort(new Error("capture cancelled"));
+    await expect(result).rejects.toThrow("capture cancelled");
+    await expect.poll(() => alive(pid)).toBe(false);
+  });
   it("returns the helper's PNG and kills everything the helper started", async () => {
     const { result, grandchild } = await run("ok");
     expect(await result).toEqual(Buffer.from("png"));

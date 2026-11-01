@@ -646,20 +646,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (prNumber === null || repo === undefined) {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
-      const viewed = await ghJson(
-        ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=body"],
-        "pr view",
-      );
-      if (isRefusal(viewed)) return viewed;
-      if (typeof viewed.body !== "string") return final("the PR body could not be read");
-      // the hub appends its own "Opened by" line on every edit, so the one read back is dropped
-      const current = viewed.body
-        .replace(/\r\n/g, "\n")
-        .replace(/\n*Opened by [^\n]* \(Mission Control\)\.\s*$/, "")
-        .trimEnd();
-      const next = withSection(current, EVIDENCE_HEADING, section);
-      if (next === current) return { ok: true };
-      const r = await editRunPrBody(deps, run.id, prNumber, next);
+      const r = await editRunPrBody(deps, run.id, prNumber, (body) => {
+        const current = body
+          .replace(/\r\n/g, "\n")
+          .replace(/\n*Opened by [^\n]* \(Mission Control\)\.\s*$/, "")
+          .trimEnd();
+        return withSection(current, EVIDENCE_HEADING, section);
+      });
       if (r.isError === true) {
         return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
       }

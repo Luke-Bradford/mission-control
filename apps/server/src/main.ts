@@ -85,8 +85,9 @@ import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
-import { evidenceSideStarter } from "./pr-evidence/hubs.ts";
+import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
+import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
 import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
@@ -349,15 +350,16 @@ export async function main(): Promise<void> {
           repoId: previewRepoId,
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
-          mainSha: async (signal) => {
-            await runPreviewCommand(
-              "git",
-              ["-C", evidenceCheckout, "fetch", "origin", "HEAD"],
-              undefined,
-              signal,
-            );
-            return await gitOutput(evidenceCheckout, ["rev-parse", "FETCH_HEAD"]);
-          },
+          // Read the remote's immutable default head directly: another preview fetch must not
+          // overwrite our baseline through the checkout's shared FETCH_HEAD.
+          mainSha: async (signal) =>
+            (
+              await gitOutput(
+                evidenceCheckout,
+                ["ls-remote", "--exit-code", "origin", "HEAD"],
+                signal,
+              )
+            ).split(/\s/)[0] ?? "",
           snapshot: async (to) => {
             const source = new DatabaseSync(dbPath);
             try {
@@ -369,7 +371,7 @@ export async function main(): Promise<void> {
           startSide: evidenceSideStarter({
             checkout: evidenceCheckout,
             root: join(dirname(dbPath), "pr-evidence-work", "sides"),
-            run: runPreviewCommand,
+            run: runEvidenceCommand,
             freePort,
             launch: async ({ worktree, port: sidePort, db, signal }) => {
               const child = spawn(
@@ -390,9 +392,9 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme) => {
+          render: (origin, path, colorScheme, signal) => {
             const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { colorScheme });
+            return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
           },
           log: (line) => log(line),
         })
@@ -833,6 +835,7 @@ export async function main(): Promise<void> {
     drain: () => mcpCalls.drain(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      await prEvidence?.stop();
       await previews?.closeAll();
       stopDiscovery();
       crewReloader.stop();
@@ -874,6 +877,33 @@ export async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  // Github's board topic and a retry tick cover every open hub-repo PR, including ones without
+  // a live run. Preview/read-only hubs never capture or edit Github.
+  if (engineOn && prEvidence && previewRepoId && hubRoot) {
+    const repo = config.repos.find((r) => r.id === previewRepoId);
+    if (repo) {
+      const sweep = createEvidenceSweep({
+        store,
+        evidence: prEvidence,
+        repoId: previewRepoId,
+        post: (manifest) => postPrEvidence(gh, hubRoot, repo.github, manifest, prEvidence.baseUrl),
+        trusted: (pr) => trustedEvidenceHead(gh, hubRoot, repo.github, pr),
+        log,
+      });
+      const unsubscribe = bus.subscribe((topic) => {
+        if (topic === "boards") void sweep.tick();
+      });
+      const retry = setInterval(() => void sweep.tick(), 60_000);
+      retry.unref();
+      void sweep.tick();
+      app.addHook("onClose", async () => {
+        sweep.stop();
+        clearInterval(retry);
+        unsubscribe();
+        await prEvidence.stop();
+      });
+    }
+  }
   // Branch tidying writes to GitHub, so it runs wherever the engine does.
   if (engineOn) {
     const tidy = createBranchTidy({
@@ -963,12 +993,12 @@ async function freePort(): Promise<number> {
 }
 
 /** What a git command prints, trimmed. */
-async function gitOutput(checkout: string, args: string[]): Promise<string> {
+async function gitOutput(checkout: string, args: string[], signal?: AbortSignal): Promise<string> {
   return await new Promise<string>((resolveOut, reject) => {
     execFile(
       "git",
       ["-C", checkout, ...args],
-      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, signal, timeout: 60_000 },
       (err, out) => (err ? reject(err) : resolveOut(out.trim())),
     );
   });

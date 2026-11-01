@@ -3612,28 +3612,55 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, repoDocs, references } = await inClone(checkout, async () => {
-        const s = await prepareScratch({
-          checkout,
-          worktreesRoot: crew?.worktrees ?? "",
-          sessionId: info.session.id,
-          seatId,
-          reviewId,
-          sha: review.sha,
-          peers: clonePeers(deps.config, deps.hubRoot),
-        });
-        try {
-          return {
-            scratch: s,
-            inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
-            references: await repoReferenceIndex(checkout, s.baseSha),
-          };
-        } catch (e) {
-          await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
-          throw e;
-        }
-      });
+      const { scratch, inputs, repoDocs, references, screenshots } = await inClone(
+        checkout,
+        async () => {
+          const s = await prepareScratch({
+            checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            sessionId: info.session.id,
+            seatId,
+            reviewId,
+            sha: review.sha,
+            peers: clonePeers(deps.config, deps.hubRoot),
+          });
+          try {
+            const inputs = await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null);
+            const screenshots = await stageReviewEvidence(
+              deps.prEvidence,
+              info.repo.id,
+              review.prNumber,
+              review.sha,
+              s.path,
+            ).catch((e) => {
+              throw new SupervisorError(
+                409,
+                `screenshot evidence cannot be staged: ${errText(e)}`,
+                { cause: e },
+              );
+            });
+            if (
+              screenshots === undefined &&
+              deps.prEvidenceRepo === info.repo.id &&
+              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
+            )
+              throw new SupervisorError(
+                409,
+                "screenshot evidence is not ready for this review head",
+              );
+            return {
+              scratch: s,
+              inputs,
+              screenshots,
+              repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
+              references: await repoReferenceIndex(checkout, s.baseSha),
+            };
+          } catch (e) {
+            await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
+            throw e;
+          }
+        },
+      );
       if (stopping) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
@@ -3687,13 +3714,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             });
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);
-      const screenshots = await stageReviewEvidence(
-        deps.prEvidence,
-        info.repo.id,
-        review.prNumber,
-        review.sha,
-        scratch.path,
-      ).catch(() => undefined);
       const prevReply =
         prev === null
           ? null
@@ -3722,14 +3742,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
-        ...(screenshots === undefined &&
-        deps.prEvidenceRepo === info.repo.id &&
-        prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
-          ? {
-              evidenceMissing:
-                "none were made for this head (the capture failed or was skipped); judge the UI from the diff and say so.",
-            }
-          : {}),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),

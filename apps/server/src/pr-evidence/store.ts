@@ -6,6 +6,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +29,7 @@ export interface PrEvidenceStore {
   /** The manifest of `sha`, or of the newest head when none is given. */
   manifest(repoId: string, pr: number, sha?: string): EvidenceManifest | null;
   image(repoId: string, pr: number, sha: string, name: string): Buffer | null;
+  hasImage(repoId: string, pr: number, sha: string, name: string): boolean;
   /** The repos that have evidence for a PR number. */
   reposWith(pr: number): string[];
 }
@@ -87,6 +89,16 @@ export function prEvidenceStore(root: string): PrEvidenceStore {
         return readFileSync(join(dir, sha, name));
       } catch {
         return null;
+      }
+    },
+    hasImage(repoId, pr, sha, name) {
+      const dir = prDir(repoId, pr);
+      if (dir === null || !SHA.test(sha) || !isEvidenceImageName(name)) return false;
+      try {
+        const st = statSync(join(dir, sha, name));
+        return st.isFile() && st.size > 0;
+      } catch {
+        return false;
       }
     },
     reposWith(pr) {

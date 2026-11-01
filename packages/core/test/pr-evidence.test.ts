@@ -13,7 +13,17 @@ import {
   withSection,
 } from "../src/index.ts";
 
-const ALL = Object.keys(HUD_PAGE_PATHS);
+const ALL = [
+  ...Object.keys(HUD_PAGE_PATHS),
+  "readiness",
+  "hotspots",
+  "setup_repos",
+  "setup_loops",
+  "setup_accounts",
+  "setup_roles",
+  "setup_sources",
+  "setup_access",
+];
 
 describe("prEvidenceAffectedPages", () => {
   it("maps changed paths to pages; whole app on hud.css", () => {
@@ -21,7 +31,22 @@ describe("prEvidenceAffectedPages", () => {
     expect(
       prEvidenceAffectedPages(["apps/web/src/pages/MapPage.tsx", "apps/web/src/comms/older.ts"]),
     ).toEqual(["map", "comms"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual(["audit"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual([
+      "audit",
+      "readiness",
+      "hotspots",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaReadiness.tsx"])).toEqual(["readiness"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["hotspots"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"])).toEqual([
+      "setup",
+      "setup_repos",
+      "setup_loops",
+      "setup_accounts",
+      "setup_roles",
+      "setup_sources",
+      "setup_access",
+    ]);
     expect(prEvidenceAffectedPages(["apps/web/src/hud.css"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/src/shell/Header.tsx"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/src/components/Markdown.tsx"])).toEqual(ALL);

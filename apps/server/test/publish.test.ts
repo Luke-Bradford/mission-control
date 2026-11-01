@@ -1200,12 +1200,11 @@ describe("setEvidenceSection", () => {
     "#7 — Fix\n\n## What changed\n\nDid it.\n\nCloses #7.\n\nOpened by GUIDO-1 (Mission Control).\n";
   let posted: string | null;
 
-  /** gh answers: the body read, the open-PR check, then the edit. */
+  /** gh answers: one fresh body/open-PR read, then the edit. */
   const answer = (body: string, editCode = 0) => {
     posted = null;
     ghAnswers = [
-      () => ({ code: 0, stdout: JSON.stringify({ body }) }),
-      () => ({ code: 0, stdout: VIEW_OK }),
+      () => ({ code: 0, stdout: JSON.stringify({ body, headRefName: BRANCH, state: "OPEN" }) }),
       (args) => {
         const file = args.find((a) => a.startsWith("--body-file="))?.slice("--body-file=".length);
         if (file !== undefined) posted = readFileSync(file, "utf8");

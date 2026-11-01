@@ -9,8 +9,20 @@ export const EVIDENCE_SCHEMES = ["light", "dark"] as const;
 export type EvidenceScheme = (typeof EVIDENCE_SCHEMES)[number];
 /** The viewport of every evidence screenshot. */
 export const EVIDENCE_VIEWPORT = { width: 1600, height: 1000 } as const;
-export type EvidencePage = keyof typeof HUD_PAGE_PATHS;
-export const EVIDENCE_PAGES = Object.keys(HUD_PAGE_PATHS) as EvidencePage[];
+/** Audit has three independent views; a shot of its default tab cannot prove the others. */
+export const EVIDENCE_PAGE_PATHS = {
+  ...HUD_PAGE_PATHS,
+  readiness: "/audit?evidence-tab=readiness",
+  hotspots: "/audit?evidence-tab=hotspots",
+  setup_repos: "/setup/repos",
+  setup_loops: "/setup/loops",
+  setup_accounts: "/setup/accounts",
+  setup_roles: "/setup/roles",
+  setup_sources: "/setup/sources",
+  setup_access: "/setup/access",
+} as const;
+export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
+export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
 export const EVIDENCE_KINDS = ["before", "after", "diff"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
@@ -57,6 +69,7 @@ const PAGE_DIRS: Record<string, EvidencePage> = {
   comms: "comms",
   telemetry: "telemetry",
   setup: "setup",
+  qa: "readiness",
 };
 
 /** The page a file in `apps/web` affects, or null when it affects the whole app. */
@@ -67,6 +80,8 @@ function pageOf(path: string): EvidencePage | null {
   if (dir === "pages") {
     const stem = (rest.split("/")[1] ?? "").replace(/\.[^.]+$/, "").toLowerCase();
     const key = stem.replace(/page$/, "");
+    if (key === "qareadiness") return "readiness";
+    if (key === "qahotspots") return "hotspots";
     return key in HUD_PAGE_PATHS ? (key as EvidencePage) : null;
   }
   return null;
@@ -84,6 +99,11 @@ export function prEvidenceAffectedPages(paths: readonly string[]): EvidencePage[
     const page = pageOf(path);
     if (page === null) return [...EVIDENCE_PAGES];
     hit.add(page);
+    if (page === "audit") {
+      hit.add("readiness");
+      hit.add("hotspots");
+    }
+    if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
   }
   return EVIDENCE_PAGES.filter((p) => hit.has(p));
 }

@@ -80,6 +80,7 @@ interface BrowserRoute {
 export type HudColorScheme = "light" | "dark";
 
 interface HudPage {
+  click?(selector: string, options: { timeout: number }): Promise<void>;
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
     selector: string,
@@ -328,6 +329,20 @@ export async function renderHudWithPlaywright(
     // go, the requests to settle, and the placeholder to still be gone once they have.
     await wait(PAGE_MAIN, "attached");
     await wait(PAGE_LOADING, "detached");
+    // Evidence captures visit each Audit tab on both old and new commits. Only these fixed
+    // local view selectors may be clicked; requests still cross the GET-only boundary.
+    const tab = new URL(url).searchParams.get("evidence-tab");
+    if (new URL(url).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
+      const label = tab === "readiness" ? "PR readiness" : "Hotspots";
+      if (!page.click) throw new Error("HUD screenshot cannot select the Audit view.");
+      await page.click(`[aria-label="QA view"] button:text-is("${label}")`, {
+        timeout: remaining(),
+      });
+      await wait(
+        `[aria-label="QA view"] button[aria-pressed="true"]:text-is("${label}")`,
+        "attached",
+      );
+    }
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
     await wait(PAGE_LOADING, "detached");
@@ -370,6 +385,7 @@ export interface HudHelperJob {
 }
 
 export interface HudHelperOptions {
+  signal?: AbortSignal;
   /** The helper entry point; tests substitute a stand-in. */
   helperPath?: string;
   executablePath?: string;
@@ -401,6 +417,7 @@ export function renderHudInHelper(
   guard: HudRenderGuard,
   options: HudHelperOptions = {},
 ): Promise<Buffer> {
+  options.signal?.throwIfAborted();
   const deadlineMs = options.deadlineMs ?? HUD_RENDER_DEADLINE_MS;
   const graceMs = options.graceMs ?? HUD_RENDER_CLOSE_MS + 2_000;
   const env: Record<string, string> = {};
@@ -420,6 +437,7 @@ export function renderHudInHelper(
       if (done) return;
       done = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
       killGroup(child);
       settle();
     };
@@ -427,6 +445,13 @@ export function renderHudInHelper(
       () => finish(() => reject(new Error(`HUD screenshot timed out after ${deadlineMs} ms.`))),
       deadlineMs + graceMs,
     );
+    const abort = () =>
+      finish(() => reject(options.signal?.reason ?? new Error("HUD screenshot cancelled.")));
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
     child.on("message", (reply: HudHelperReply) => {
       if (reply?.ok === true && typeof reply.png === "string") {
         const png = Buffer.from(reply.png, "base64");

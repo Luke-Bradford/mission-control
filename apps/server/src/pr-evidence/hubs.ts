@@ -1,4 +1,6 @@
 /** Starts a hub that serves one commit's HUD from a copy of the database, for screenshots. */
+
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,6 +24,48 @@ export interface EvidenceHubOptions {
 
 const SHA = /^[0-9a-f]{40}$/;
 const HOST = "127.0.0.1";
+
+/** An owned build process group: cancelling pnpm also cancels its Vite/Node children. */
+export async function runEvidenceCommand(
+  command: string,
+  args: string[],
+  cwd?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const child = spawn(command, args, {
+    cwd,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  const kill = (sig: NodeJS.Signals) => {
+    try {
+      if (child.pid) process.kill(-child.pid, sig);
+    } catch {}
+  };
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  const abort = () => {
+    kill("SIGTERM");
+    killTimer = setTimeout(() => kill("SIGKILL"), 1000);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(abort, 15 * 60_000);
+  try {
+    if (signal?.aborted) abort();
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    signal?.throwIfAborted();
+    if (code !== 0) throw new Error(`evidence ${command} did not finish successfully`);
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    clearTimeout(timeout);
+    if (killTimer) clearTimeout(killTimer);
+    kill("SIGKILL");
+  }
+}
 
 /** Returns `startSide` for the capture: one worktree, one hub, torn down by `stop`. */
 export function evidenceSideStarter(

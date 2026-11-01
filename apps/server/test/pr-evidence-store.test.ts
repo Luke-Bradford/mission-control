@@ -115,4 +115,16 @@ describe("stageReviewEvidence", () => {
     expect(await stageReviewEvidence(store, "mc", 5, sha("a"), root)).toBeUndefined();
     expect(await stageReviewEvidence(undefined, "mc", 5, sha("a"), root)).toBeUndefined();
   });
+
+  it("refuses a missing image and never publishes a partial staged directory", async () => {
+    const root = tmp();
+    const store = prEvidenceStore(join(root, "evidence"));
+    store.save(manifest(sha("a"), 1), [
+      { name: "board-light-before.png", png: Buffer.from("before") },
+    ]);
+    await expect(stageReviewEvidence(store, "mc", 5, sha("a"), root)).rejects.toThrow(
+      "image is missing",
+    );
+    expect(existsSync(join(root, ".mc-review/evidence"))).toBe(false);
+  });
 });
