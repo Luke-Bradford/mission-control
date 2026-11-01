@@ -9,6 +9,7 @@ import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
   EDIT_UNCONFIRMED_TEXT,
+  type FlightDecision,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
@@ -44,13 +45,18 @@ export interface PowerHelpers {
     texts: readonly { label: string; text: string }[],
     known: readonly string[],
   ) => Promise<string | null>;
+  record: (
+    at: number,
+    d: Pick<FlightDecision, "kind" | "about" | "decision" | "basis"> &
+      Partial<Pick<FlightDecision, "seatId" | "targetRunId" | "ref" | "questionId">>,
+  ) => unknown;
   superTool: (
     name: McTool["name"],
     description: string,
     schema: z.ZodType<{ basis: string }>,
     kind: FlightDecisionKind,
     act: (args: never, repo: CcConfig["repos"][number], ctx: McToolContext) => Promise<Result>,
-    options?: { engine?: boolean },
+    options?: { engine?: boolean; records?: boolean },
   ) => McTool;
 }
 

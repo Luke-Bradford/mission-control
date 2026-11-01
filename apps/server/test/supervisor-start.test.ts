@@ -2475,10 +2475,11 @@ describe("repo guidance at launch", () => {
     const allowedAt = argv.indexOf("--allowedTools");
     const deniedAt = argv.indexOf("--disallowedTools");
     const promptAt = argv.indexOf("--append-system-prompt-file");
+    // FLIGHT's full profile (#1214) names no tools and denies none
     return {
-      tools: argv[argv.indexOf("--tools") + 1],
-      allowed: argv.slice(allowedAt + 1, deniedAt),
-      denied: argv.slice(deniedAt + 1, promptAt),
+      tools: argv.includes("--tools") ? argv[argv.indexOf("--tools") + 1] : null,
+      allowed: argv.slice(allowedAt + 1, deniedAt === -1 ? promptAt : deniedAt),
+      denied: deniedAt === -1 ? [] : argv.slice(deniedAt + 1, promptAt),
     };
   };
   const launches = () => recorded().filter((line) => Array.isArray(line.argv));
@@ -2578,6 +2579,38 @@ describe("repo guidance at launch", () => {
       expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
         "# Mission Control work guidance (advice, not rules)",
       );
+  });
+
+  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const argv = launches()[0]?.argv as string[];
+    // --restricted removes Bash and WebFetch unless --tools names them
+    const tools = (argv[argv.indexOf("--tools") + 1] ?? "").split(",");
+    expect(tools).toEqual(expect.arrayContaining(["Bash", "WebFetch"]));
+    expect(argv).not.toContain("--disallowedTools");
+    expect(argv).toContain("--allowedTools");
+    // sandboxed, with the hub's data folder (the operator token) denied to read and write
+    const sandbox = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox;
+    expect(sandbox.enabled).toBe(true);
+    expect(sandbox.filesystem.denyRead).toContain(realpathSync(dirname(dbPath)));
+    expect(sandbox.filesystem.denyWrite).toContain(realpathSync(dirname(dbPath)));
+  });
+
+  it("lets FLIGHT's git use the operator's config and credentials, with hooks and fsmonitor still off", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const env = launches()[0]?.env as Record<string, string>;
+    expect(env.GIT_CONFIG_GLOBAL).toBeUndefined();
+    expect(env.GIT_CONFIG_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_ATTR_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+    expect(env.GIT_CONFIG_KEY_1).toBe("core.hooksPath");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("/dev/null");
   });
 });
 

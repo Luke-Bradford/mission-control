@@ -26,6 +26,37 @@ export type CrewEffort = string;
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
 export type CrewMode = (typeof CREW_MODES)[number];
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
+export const CREW_PROFILES = ["standard", "flight-full"] as const;
+export type CrewProfile = (typeof CREW_PROFILES)[number];
+/** The built-in tools FLIGHT's full profile allows, unscoped: shell, files, the web and subagents. */
+export const FLIGHT_FULL_BUILTINS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "TodoWrite",
+  "Bash",
+  "Skill",
+  "WebFetch",
+  "WebSearch",
+  "Task",
+] as const;
+/**
+ * The hosts FLIGHT's sandboxed shell reaches (`git` and `gh` against GitHub). The hub's loopback
+ * address is not here, so FLIGHT's shell cannot call the HUD's token route; `mc operator` is its way in.
+ */
+export const FLIGHT_FULL_DOMAINS = [
+  "github.com",
+  "api.github.com",
+  "*.github.com",
+  "*.githubusercontent.com",
+] as const;
+/** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
+export const crewProfileOf = (role: string, loop: string): CrewProfile =>
+  role === "FLIGHT" && loop === "watch" ? "flight-full" : "standard";
 /** The modes a seat's config may name; every other mode comes from the role. */
 export const CONFIG_SEAT_MODES = ["scratch"] as const;
 export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
@@ -87,6 +118,9 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.releaseHold,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
+  MC_TOOL_NAMES.operator,
+  MC_TOOL_NAMES.ghWrite,
+  MC_TOOL_NAMES.crewTidy,
 ];
 
 /**
@@ -907,6 +941,8 @@ export interface CrewSandboxInput {
   allowRead?: string[];
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
+  /** The hub's own checkout: FLIGHT's full profile may not write it (the hub runs that code). */
+  hubRoot?: string;
 }
 
 /** Credential files and folders (relative to home) no seat's Bash may read. */
@@ -1086,7 +1122,57 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
  * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
-export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
+export function crewSandboxSettings(
+  i: CrewSandboxInput,
+  mode: CrewMode,
+  hook: CrewHook,
+  profile: CrewProfile = "standard",
+): string {
+  if (profile === "flight-full") {
+    // The one structural barrier of FLIGHT's full access: its shell cannot read or write the hub's
+    // data folder (the operator token, the DB, every transcript) and reaches no host but GitHub.
+    // Everything else is open: home and temp are writable, and nothing else is denied by name.
+    if (!i.dataDir.startsWith("/") || !i.home.startsWith("/"))
+      throw new Error("crew sandbox: dataDir and home must be absolute");
+    if (i.hubRoot === undefined || !i.hubRoot.startsWith("/"))
+      throw new Error("crew sandbox: the full profile needs the hub's absolute checkout");
+    return JSON.stringify({
+      hooks: guardHooks(hook),
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        autoAllowBashIfSandboxed: false,
+        network: { allowedDomains: [...FLIGHT_FULL_DOMAINS] },
+        filesystem: {
+          allowWrite: [
+            i.home,
+            "/tmp",
+            "/private/tmp",
+            ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
+          ],
+          // its own temp folder sits inside the denied data folder, as a seat's does
+          allowRead: i.tempRoot === undefined ? [] : [i.tempRoot],
+          // the hub's data folder, its own checkout (with node_modules: the hub runs that code, holding
+          // the operator token, on its next start) and the launchd job that starts it
+          // and the git, npm and pnpm config in home, which the hub's own unsandboxed git and pnpm read
+          // (Update's fetch, pull, install and build): a url.insteadOf with an ext:: command, or a
+          // script-shell, would run as the hub. FLIGHT reads these; it never writes them.
+          denyWrite: [
+            i.dataDir,
+            i.hubRoot,
+            `${i.home}/Library/LaunchAgents`,
+            `${i.home}/.gitconfig`,
+            `${i.home}/.config/git`,
+            `${i.home}/.npmrc`,
+            `${i.home}/.config/pnpm`,
+            `${i.home}/Library/Preferences/pnpm`,
+          ],
+          denyRead: [...new Set([i.dataDir, `${i.home}/.config/mission-control`])],
+        },
+      },
+    });
+  }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
   const tempDenies = i.tempRoot === undefined ? [] : [...TEMP_DENY_GLOBS];
@@ -1145,6 +1231,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
 export interface CrewCliInput {
   model: string;
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile; all other seats stay standard. */
+  profile?: CrewProfile;
   /** Absolute path of the role brief, `roles/<CALL>.md`. */
   rolePromptFile: string;
   sessionId: string;
@@ -1255,7 +1343,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
       : [t],
   );
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
-  return [
+  const profile = i.profile ?? "standard";
+  const args = [
     "-p",
     "--input-format",
     "stream-json",
@@ -1268,22 +1357,52 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS,
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
-    "--tools",
-    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
     "--settings",
-    crewSandboxSettings(i.sandbox, i.mode, i.hook),
+    crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
     "--mcp-config",
     i.mcpConfigFile,
-    "--allowedTools",
-    ...allowed,
-    "--disallowedTools",
-    ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
     "--append-system-prompt-file",
     i.rolePromptFile,
     i.resume ? "--resume" : "--session-id",
     i.sessionId,
   ];
+  if (profile === "flight-full") {
+    // `--restricted` (kept for every seat) removes Bash and WebFetch, and confines the file tools to the
+    // working directories, unless `--tools` names them and `--add-dir` adds the folder (claude --help).
+    // So FLIGHT names its whole set, and its file tools reach the crew clone; never home or the data folder.
+    const clone = i.sandbox.gitCommonDir.endsWith("/.git")
+      ? i.sandbox.gitCommonDir.slice(0, -"/.git".length)
+      : null;
+    args.splice(args.indexOf("--settings"), 0, "--tools", FLIGHT_FULL_BUILTINS.join(","));
+    if (clone !== null) args.splice(args.indexOf("--settings"), 0, "--add-dir", clone);
+    // every built-in tool, unscoped, and FLIGHT's mc tools; nothing is denied by name
+    args.splice(
+      args.indexOf("--append-system-prompt-file"),
+      0,
+      "--allowedTools",
+      ...FLIGHT_FULL_BUILTINS,
+      ...allowed.filter((t) => t.startsWith("mcp__")),
+    );
+    return args;
+  }
+  const settingsAt = args.indexOf("--settings");
+  args.splice(
+    settingsAt,
+    0,
+    "--tools",
+    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
+  );
+  const promptAt = args.indexOf("--append-system-prompt-file");
+  args.splice(
+    promptAt,
+    0,
+    "--allowedTools",
+    ...allowed,
+    "--disallowedTools",
+    ...DENIED_TOOLS,
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
+  );
+  return args;
 }
 
 /**

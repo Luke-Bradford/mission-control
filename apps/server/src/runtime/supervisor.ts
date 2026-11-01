@@ -57,6 +57,7 @@ import {
   conflictText,
   crewCliArgs,
   crewMcpConfig,
+  crewProfileOf,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   doneWhenItems,
@@ -1279,7 +1280,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
-  function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
+  function crewEnv(seatId: string, tmp: string, fullGit = false): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
@@ -1292,7 +1293,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = sharedPnpmStoreDir(crew?.worktrees ?? "");
     Object.assign(env, crewPythonEnv(tmp, seatId));
-    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
+    // FLIGHT's full profile pushes as the operator does: their git config and credential helper
+    // apply (the seats' GIT_CONFIG_GLOBAL=/dev/null would leave `git push` with no credentials).
+    // Repo hooks and the filesystem monitor stay off.
+    const git: NodeJS.ProcessEnv = { ...CREW_GIT_ENV };
+    if (fullGit) {
+      delete git.GIT_CONFIG_GLOBAL;
+      delete git.GIT_CONFIG_NOSYSTEM;
+      delete git.GIT_ATTR_NOSYSTEM;
+    }
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...git };
   }
 
   /**
@@ -1656,6 +1666,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
+        hubRoot: existsSync(deps.hubRoot) ? realpathSync(deps.hubRoot) : deps.hubRoot,
         pnpmStoreDir: pnpmStore,
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
@@ -1789,6 +1800,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           effort: info.seat.effort,
           maxBudgetUsd: run.profile?.profile.budgetUsd,
           mode: def.mode,
+          profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
           runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(
             (tool) => !def.mcTools.includes(tool),
@@ -1817,7 +1829,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: [...(deps.commandArgs ?? []), ...args],
           cwd,
           transcriptPath: run.transcriptPath,
-          env: crewEnv(info.seat.id, tmpPath),
+          env: crewEnv(
+            info.seat.id,
+            tmpPath,
+            crewProfileOf(info.seat.role, def.loop) === "flight-full",
+          ),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
           dir: crewKeeperDir(deps.dbPath, run.id),
