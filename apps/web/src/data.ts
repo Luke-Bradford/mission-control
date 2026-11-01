@@ -424,6 +424,7 @@ class Hub {
         e.listeners.size === 0 &&
         e.settledListeners.size === 0 &&
         !e.inflight &&
+        !e.queued &&
         !e.again &&
         !e.fullAgain,
     );
@@ -477,13 +478,16 @@ class Hub {
   ): () => void {
     const e = this.entry(path, topic);
     e.settledListeners.add(fn);
-    return () => e.settledListeners.delete(fn);
+    return () => {
+      e.settledListeners.delete(fn);
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
+    };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
-    this.pruneGraphs();
+    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -495,7 +499,7 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
-      this.pruneGraphs();
+      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
