@@ -24,6 +24,14 @@ const card = (pr: ReturnType<typeof prView>, checkPill: Parameters<typeof Card>[
     />,
   );
 
+it("a Board card shows its acceptance gate once, and omits it when unset", () => {
+  const view = card(prView({ uat: { sha: "a".repeat(40), since: 1 } }), null);
+  expect(screen.getAllByText("Waiting for your acceptance")).toHaveLength(1);
+  view.unmount();
+  card(prView(), null);
+  expect(screen.queryByText("Waiting for your acceptance")).toBeNull();
+});
+
 it("an open PR with a review state shows its words, not the GitHub state", () => {
   card(prView({ review: "requested" }), {
     label: "RETRO-1 checking · 12 min",

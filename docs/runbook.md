@@ -1060,7 +1060,7 @@ your acceptance on <head>" with the label or path that matched. It shows in Need
 card and on the PR chip. If the diff cannot be read, the PR waits too. Look at the work, then:
 
 ```sh
-curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept"}'
+curl -s -X POST localhost:7420/api/prs/<repo id>/<pr number>/uat -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"accept","sha":"<full reviewed head sha>"}'
 ```
 
 `accept` lets the engine merge on its next pass through the usual gates (hard-rule clearance, holds,

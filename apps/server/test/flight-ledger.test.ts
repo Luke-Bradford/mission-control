@@ -644,6 +644,7 @@ describe("retrospective measures", () => {
           "/board",
           "/map",
           "/comms",
+          "/qa",
           "/telemetry",
           "/audit",
           "/setup",

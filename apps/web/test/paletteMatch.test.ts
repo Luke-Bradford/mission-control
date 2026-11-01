@@ -88,8 +88,8 @@ describe("buildEntries", () => {
   const entries = buildEntries(sources as never);
   const find = (id: string) => entries.find((e) => e.id === id);
 
-  it("lists the nine pages, open tickets, open PRs and threads, and seats", () => {
-    expect(entries.filter((e) => e.group === "Page")).toHaveLength(9);
+  it("lists the ten pages, open tickets, open PRs and threads, and seats", () => {
+    expect(entries.filter((e) => e.group === "Page")).toHaveLength(10);
     expect(find("ticket:shop-app#3349")).toBeTruthy();
     expect(find("ticket:shop-app#12")).toBeUndefined();
     expect(find("pr:shop-app#77")).toBeTruthy();

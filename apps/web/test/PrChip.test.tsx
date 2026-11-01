@@ -17,6 +17,12 @@ const pr: RunPr = {
 };
 
 describe("PrChip", () => {
+  it("shows acceptance only while an open PR has its UAT gate", () => {
+    const view = render(<PrChip pr={{ ...pr, uat: { sha: "a".repeat(40) } }} />);
+    expect(screen.getByText("Waiting for your acceptance")).toBeTruthy();
+    view.rerender(<PrChip pr={pr} />);
+    expect(screen.queryByText("Waiting for your acceptance")).toBeNull();
+  });
   it("links to the running preview supplied by the PR payload", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(

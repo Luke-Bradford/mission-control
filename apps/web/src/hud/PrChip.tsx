@@ -147,7 +147,11 @@ export function PrChip({
         url={pr.url}
         to={ticket ? ticketPath(ticket.repoId, ticket.number) : undefined}
       />
-      {showState && pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
+      {showState && pr.state === "open" && pr.uat ? (
+        <Pill tone="warn">Waiting for your acceptance</Pill>
+      ) : showState && pill ? (
+        <Pill tone={pill.tone}>{pill.label}</Pill>
+      ) : null}
       <PreviewAction
         key={`${pr.repoId}:${pr.number}`}
         number={pr.number}

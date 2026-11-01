@@ -314,6 +314,7 @@ export function runPrs(run: RunView, repoPrs: readonly PullRequestView[] | undef
         url: p.url,
         state: p.state,
         ticket: p.ticket,
+        ...(p.uat ? { uat: p.uat } : {}),
       }),
     );
   return [...run.prs, ...extra];

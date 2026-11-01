@@ -468,6 +468,7 @@ export type PullRequestSummary = Pick<
   | "updatedAt"
   | "mergedAt"
   | "check"
+  | "uat"
 >;
 
 /** A stored pull request's number and title: what a PR link shows. */
@@ -477,6 +478,8 @@ export interface PrTitle {
 }
 
 export interface PullRequestView {
+  /** The live acceptance gate for this head; supplied by the API, never trusted from GitHub. */
+  uat?: { sha: string; since: number | null };
   repoId: RepoId;
   number: number;
   title: string;

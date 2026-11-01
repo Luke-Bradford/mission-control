@@ -27,6 +27,7 @@ export const HUD_PAGE_PATHS = {
   agent: "/agent",
   map: "/map",
   comms: "/comms",
+  qa: "/qa",
   telemetry: "/telemetry",
   audit: "/audit",
   setup: "/setup",

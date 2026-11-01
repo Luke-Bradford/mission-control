@@ -682,3 +682,10 @@ button.map-timeline-tick {
   align-items: center;
   gap: var(--sp-1);
 }
+
+/* QA deep links select every changed path while preserving the crew's change colours. */
+.map-treemap-tile[data-pr-selected="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 2;
+}
