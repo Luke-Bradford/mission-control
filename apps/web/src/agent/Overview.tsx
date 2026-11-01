@@ -2,7 +2,7 @@ import type { AgentDetailView } from "@mc/core";
 import type { MouseEvent } from "react";
 import { useNow } from "../clock.ts";
 import { callSign, modelLine, seatAreaText } from "../crew.ts";
-import { cost, dur, firstLine, kTokens } from "../fmt.ts";
+import { cost, dur, firstLine, kTokens, percent } from "../fmt.ts";
 import { useRoleLabel } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { PromptCostBar } from "../hud/PromptCost.tsx";
@@ -146,10 +146,7 @@ export function AgentStats({ view }: { view: AgentDetailView }) {
         <span>Mean {cost(view.cost.meanPerReportedTurnUsd)} per reported turn</span>
         <span>API equivalent · {view.cost.turns ?? DASH} turns</span>
       </Stat>
-      <Stat
-        label="Context now"
-        value={context.percent === null ? DASH : `${Math.round(context.percent)}%`}
-      >
+      <Stat label="Context now" value={context.percent === null ? DASH : percent(context.percent)}>
         <span>
           {context.window === null ? "Window not recorded" : `of ${kTokens(context.window)} tokens`}
         </span>
