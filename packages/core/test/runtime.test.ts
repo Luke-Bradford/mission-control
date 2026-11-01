@@ -346,6 +346,7 @@ describe("the allowlist in phase 2b", () => {
     expect(CREW_CLI_ENV).toEqual({
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
     });
   });
