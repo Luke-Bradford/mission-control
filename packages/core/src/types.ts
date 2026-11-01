@@ -2,6 +2,7 @@ import type { Owner, Stage } from "./board.ts";
 import type { CrewPause } from "./crew-pause.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
+import type { RunHandoff } from "./handoff.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
@@ -329,6 +330,7 @@ export type RunSummary = Omit<Run, "noReport"> & {
 
 /** `GET /api/agents/:id/runs` row: the run with its PRs joined and its ticket resolved. */
 export type RunView = Omit<RunSummary, "prs" | "ticket"> & {
+  handoff?: RunHandoff;
   prs: RunPr[];
   usage?: RunUsage;
   /** The run's own ticket, else the first of its PRs' tickets (see runTicket). */
@@ -373,6 +375,7 @@ export interface Escalation {
 }
 
 export interface BoardItem {
+  handoff?: Pick<RunHandoff, "runId" | "fromSeat" | "at" | "acceptedBy">;
   author?: string | null;
   repoId: RepoId;
   issueNumber: number;

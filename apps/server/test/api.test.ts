@@ -110,6 +110,7 @@ import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
+import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -1475,6 +1476,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
+  ["GET", "/api/runs/guido-1/handoff"],
   ["GET", "/api/runs/guido-1/attempts"],
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
@@ -2661,6 +2663,29 @@ describe("local access", () => {
 });
 
 describe("agents", () => {
+  it("serves durable outgoing and received handoffs, and rejects unknown runs", async () => {
+    const old = run({
+      id: "handoff-old",
+      ticket: "shop-app#7",
+      branch: "feature/7-work",
+      endedAt: NOW,
+    });
+    store.upsertRun(old);
+    const h = recordRunHandoff(store, old, null);
+    expect(h).not.toBeNull();
+    expect((await get(`/api/runs/${old.id}/handoff`)).json()).toMatchObject({
+      runId: old.id,
+      ticket: "shop-app#7",
+    });
+    store.upsertRun(run({ id: "handoff-next", ticket: "shop-app#7" }));
+    expect(store.claimHandoff(old.id, "claim")).toBe(true);
+    expect(store.acceptHandoff(old.id, "claim", "guido-1", "handoff-next")).toBe(true);
+    expect((await get("/api/runs/handoff-next/handoff")).json()).toMatchObject({
+      runId: old.id,
+      acceptedBy: "guido-1",
+    });
+    expect((await get("/api/runs/unknown/handoff")).statusCode).toBe(404);
+  });
   it("runs honours ?limit and validates it as an integer 1..500", async () => {
     for (let i = 1; i <= 3; i++) store.upsertRun(run({ id: `r${i}`, seq: i, startedAt: NOW - i }));
     const two = await get("/api/agents/shop-app-ta/runs?limit=2");

@@ -447,6 +447,7 @@ describe("startWatch", () => {
       "mcp__mc__read_ticket",
       "mcp__mc__answer_question",
       "mcp__mc__start_seat",
+      "mcp__mc__reassign_ticket",
       "mcp__mc__message_seat",
       "mcp__mc__comms_pin",
       "mcp__mc__flight_state",
@@ -1358,7 +1359,8 @@ describe("a run set aside in review", () => {
     expect(ended(seen)).toEqual([
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
     ]);
-    await until(() => expect(existsSync(wt())).toBe(false));
+    expect(existsSync(wt())).toBe(true);
+    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(before);
     expect(starts()).toHaveLength(1);
   });
@@ -1627,7 +1629,7 @@ describe("a run set aside in review", () => {
     expect(store.run(runId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
   });
 
-  it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {
+  it("endRunByEngine ends an unfinished aside run, preserves its worktree and leaves the seat row", async () => {
     const { sup, runId, seen } = await aside(false);
     const other = await sup.startRun("guido-1", 43);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
@@ -1638,14 +1640,21 @@ describe("a run set aside in review", () => {
     expect(ended(seen).filter((e) => e.runId === runId)).toEqual([
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "engine" },
     ]);
-    expect(existsSync(wt())).toBe(false);
+    expect(existsSync(wt())).toBe(true);
+    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(row);
     expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
     expect(sup.seatFacts("guido-1")).not.toBeNull();
   });
 
-  it("endRunByEngine leaves a note when an aside run's worktree will not go", async () => {
+  it("endRunByEngine leaves a note when a completed aside run's worktree will not go", async () => {
     const { sup, runId } = await aside(false);
+    store.setRunLoop(runId, {
+      ...store.run(runId)?.loop,
+      ...NEW_LOOP,
+      phase: "done",
+      aside: { worktree: wt(), wake: false },
+    });
     prep.failRemove = true;
     await sup.endRunByEngine(runId);
     expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });

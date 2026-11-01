@@ -289,6 +289,46 @@ async function syncCheckout() {
 }
 
 describe("prepareCheckout", () => {
+  it("adopts another ended author's managed worktree without losing tracked or untracked work", async () => {
+    const old = await prepareCheckout(input());
+    writeFileSync(join(old.path, "README.md"), "unfinished tracked edit\n");
+    writeFileSync(join(old.path, "new-file.txt"), "unfinished new file\n");
+    const adopted = await prepareCheckout({
+      ...input(),
+      seatId: "guido-2",
+      handoff: { branch: old.branch, worktree: old.path },
+    });
+    expect(adopted.path).toBe(old.path);
+    expect(adopted.branch).toBe(old.branch);
+    expect(adopted.created).toBe(false);
+    expect(readFileSync(join(adopted.path, "README.md"), "utf8")).toBe("unfinished tracked edit\n");
+    expect(readFileSync(join(adopted.path, "new-file.txt"), "utf8")).toBe("unfinished new file\n");
+    expect(adopted.leftoverChanges).toEqual(
+      expect.arrayContaining([" M README.md", "?? new-file.txt"]),
+    );
+  });
+
+  it("refuses a handoff outside the managed root and never recreates a missing source branch", async () => {
+    const old = await prepareCheckout(input());
+    await expect(
+      prepareCheckout({
+        ...input(),
+        seatId: "guido-2",
+        worktreesRoot: join(dir, "other-root"),
+        handoff: { branch: old.branch, worktree: old.path },
+      }),
+    ).rejects.toThrow();
+    expect(readFileSync(join(old.path, "README.md"), "utf8")).toBeTruthy();
+    await expect(
+      prepareCheckout({
+        ...input(),
+        seatId: "guido-2",
+        handoff: { branch: "feature/42-deleted", worktree: null },
+      }),
+    ).rejects.toThrow("handoff branch is missing");
+    expect(hasBranch("feature/42-deleted")).toBe(false);
+  });
+
   it.each([false, true])("refuses helper config on reuse=%s", async (reuse) => {
     if (reuse) await prepareCheckout(input());
     git(clone, "config", "diff.x.textconv", "sentinel-helper");

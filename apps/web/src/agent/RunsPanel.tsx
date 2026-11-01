@@ -160,6 +160,20 @@ export const RunRow = memo(function RunRow({
       <RunTimes run={run} tz={tz} onRender={onTimeRender} />
       <span className="num right">{tokens}</span>
       <span className="num right">{cost(run.costUsd)}</span>
+      {run.handoff && (
+        <a
+          className="run-handoff-link xs"
+          href={`/agent/${encodeURIComponent(row.id)}?handoff=${encodeURIComponent(run.handoff.runId)}`}
+          onClick={(e) =>
+            followLink(
+              e,
+              `/agent/${encodeURIComponent(row.id)}?handoff=${encodeURIComponent(run.handoff?.runId ?? run.id)}`,
+            )
+          }
+        >
+          Handoff
+        </a>
+      )}
       {run.loop && (
         <a
           className="xs"
