@@ -537,7 +537,7 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.run(runId)?.noReport).toBeDefined();
     });
 
-    it("ends the run ok, endedBy engine, leaves the seat idle and removes the worktree", async () => {
+    it("ends the run ok, endedBy engine, leaves the seat idle and preserves unfinished work", async () => {
       const { sup, seen, runId } = await idleRun();
       const wt = join(root, "mc-crew", "guido-1-42");
       writeFileSync(join(wt, "wip.txt"), "wip\n");
@@ -552,7 +552,8 @@ describe("supervisor events (Plan 7a)", () => {
         reason: null,
         runId: null,
       });
-      expect(existsSync(wt)).toBe(false);
+      expect(readFileSync(join(wt, "wip.txt"), "utf8")).toBe("wip\n");
+      expect(store.openHandoff("mc", "mc#42")).toMatchObject({ runId, worktree: wt });
       // the branch keeps the run's commits
       expect(git(clone, "branch", "--list", BRANCH)).toContain(BRANCH);
       // the seat can start again
@@ -601,8 +602,9 @@ describe("supervisor events (Plan 7a)", () => {
       expect(ended(seen).map((e) => e.endedBy)).toEqual(["operator"]);
     });
 
-    it("leaves a blocked note when the worktree cannot be removed, and still ends the run", async () => {
+    it("leaves a blocked note when a completed run's worktree cannot be removed", async () => {
       const { sup, seen, runId, log } = await idleRun();
+      store.setRunLoop(runId, { ...NEW_LOOP, phase: "done", prNumber: 7 });
       prep.failRemove = true;
       await sup.endRunByEngine(runId);
       expect(ended(seen)).toHaveLength(1);
@@ -632,7 +634,8 @@ describe("supervisor events (Plan 7a)", () => {
       ]);
       expect(seatState("guido-1")).toBe("idle");
       expect(store.seatSession("guido-1")?.runId).toBeNull();
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(false);
+      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
       await sup.stopAll();
       release();
     });

@@ -905,10 +905,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     at: number,
     status: Run["status"],
     by: NonNullable<Run["endedBy"]>,
+    removedAside = false,
   ): void {
     store.setRunEnded(runId, at, status, by);
     const run = store.run(runId);
-    if (!run || !findSeat(run.agentId)) return;
+    if (!run || (!findSeat(run.agentId) && !removedAside)) return;
     const row = store.seatSession(run.agentId);
     const path =
       run.loop?.aside?.worktree ??
@@ -916,6 +917,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       (row?.runId === runId ? row.worktree : null);
     handoffWorktrees.delete(runId);
     const h = recordRunHandoff(store, run, path);
+    if (h) {
+      bus.emit("agents");
+      bus.emit("boards");
+    }
     if (h?.gitState !== "pending" || handoffJobs.has(runId)) return;
     const info = findSeat(run.agentId);
     if (!info) return;
@@ -3091,6 +3096,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (handoff && !readOnly && !planner && !store.claimHandoff(handoff.runId, handoffClaim))
         throw new SupervisorError(409, "another seat is taking this ticket's handoff");
+      if (handoff && !readOnly && !planner) {
+        const source = live.get(handoff.fromSeat);
+        if (source?.run.id === handoff.runId && source.session.alive)
+          throw new SupervisorError(
+            409,
+            "the previous author is still stopping; retry after it exits",
+          );
+        if (!(await endAndRemoveKeeper(handoff.fromSeat, handoff.runId)))
+          throw new SupervisorError(
+            409,
+            "the previous author's CLI could not be stopped; its worktree was preserved",
+          );
+      }
       if (handoff?.gitState === "pending") {
         await enrichHandoff(store, handoff, info.session.checkout, crew?.worktrees ?? "");
         handoff = store.handoff(handoff.runId);
@@ -4663,6 +4681,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!mayAct()) return false;
       const run = store.run(runId);
       if (!run || run.endedAt !== null || !run.loop?.aside) return false;
+      if (config.loops.some((loop) => loop.id === run.agentId)) return false;
       if (starting.has(run.agentId) || live.has(run.agentId)) return false;
       if (
         store
@@ -4670,7 +4689,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.aside)
       )
         return false;
-      recordEnded(run.id, now(), "ok", "operator");
+      recordEnded(run.id, now(), "ok", "operator", true);
       removeRunFiles(run.id);
       transcripts.delete(run.transcriptPath);
       digests.delete(run.id);

@@ -153,6 +153,7 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
+import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -1766,6 +1767,19 @@ describe("start_seat", () => {
     ).toBe(true);
     expect(startCalls).toEqual([]);
     expect(store.run("live")?.endedAt).toBeNull();
+  });
+  it("reassigns a removed author only when it has a durable crew handoff", async () => {
+    const old = run("removed", "removed-seat", {
+      ticket: "mc#7",
+      branch: "feature/7-old",
+      endedAt: NOW - 1000,
+    });
+    store.upsertRun(old);
+    const args = { issue: 7, seat: "guido-1", reason: "Continue after the seat was removed" };
+    expect((await call("reassign_ticket", args)).isError).toBe(true);
+    recordRunHandoff(store, old, null);
+    expect((await call("reassign_ticket", args)).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
   it.each(["In progress", "In review"])(
     "continues the preserved author's open PR from %s",

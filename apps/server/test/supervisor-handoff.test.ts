@@ -64,6 +64,50 @@ it("hands a stopped author's dirty worktree and recorded context to another seat
   expect(userLines().at(-1)).toContain("Handoff from guido-1");
 });
 
+it("preserves a removed crew author's aside and lets another configured seat adopt it", async () => {
+  const { sup, cfg } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const aside = await sup.setAside(first.runId);
+  if (!aside) throw new Error("missing aside");
+  writeFileSync(join(aside.worktree, "preserved.txt"), "removed seat's work");
+  store.setRunLoop(first.runId, { ...NEW_LOOP, aside: { ...aside, wake: false } });
+  const session = cfg.crew?.sessions[0];
+  if (!session) throw new Error("missing session");
+  session.seats = session.seats.filter((s) => s.id !== "guido-1");
+  expect(sup.endRemovedAside?.(first.runId)).toBe(true);
+  expect(store.openHandoff("mc", "mc#42")?.runId).toBe(first.runId);
+  const next = await sup.startRun("guido-2", 42);
+  expect(store.seatSession("guido-2")?.worktree).toBe(aside.worktree);
+  expect(readFileSync(join(aside.worktree, "preserved.txt"), "utf8")).toBe("removed seat's work");
+  expect(store.receivedHandoff(next.runId)?.fromSeat).toBe("guido-1");
+});
+
+it("refuses takeover until an engine-ended author's held close has actually stopped its CLI", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  let release!: () => void;
+  prep.closeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ending = sup.endRunByEngine(first.runId);
+  try {
+    await until(() => expect(prep.closing).toBeGreaterThan(0));
+    expect(store.run(first.runId)?.endedAt).not.toBeNull();
+    await expect(sup.startRun("guido-2", 42)).rejects.toMatchObject({ status: 409 });
+    expect(store.openHandoff("mc", "mc#42")?.acceptedRunId).toBeNull();
+  } finally {
+    release();
+    prep.closeGate = null;
+  }
+  await ending;
+  const next = await sup.startRun("guido-2", 42);
+  expect(store.receivedHandoff(next.runId)?.runId).toBe(first.runId);
+});
+
 it("keeps unfinished work when the engine ends an active or set-aside author", async () => {
   const { sup } = make({ extraSeat });
   sup.start();

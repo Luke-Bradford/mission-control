@@ -1464,7 +1464,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           r.branch !== null &&
           r.reviewId == null &&
           r.loop?.phase !== "done" &&
-          seatCfg(r.agentId) !== undefined,
+          (seatCfg(r.agentId) !== undefined || store.handoff(r.id) !== null),
       )
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
     if (!source?.branch) return fail(`${ref} has no unfinished author to hand off`);

@@ -174,6 +174,14 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
       prep.sessions.push(session);
       return new Proxy(session, {
         get(target, key) {
+          if (key === "close")
+            return async () => {
+              if (prep.closeGate) {
+                prep.closing++;
+                await prep.closeGate;
+              }
+              return target.close();
+            };
           if (key === "send" && prep.failWrite) {
             return () => {
               throw new Error("session ended");
