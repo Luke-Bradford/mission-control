@@ -1,8 +1,16 @@
-import type { AttentionItem, Crew, CrewRow, LimitRow } from "@mc/core";
-import { useEffect } from "react";
+import type { AgentDetailView, AttentionItem, Crew } from "@mc/core";
+import { useEffect, useState } from "react";
 import { HandoffPanel } from "../agent/HandoffPanel.tsx";
-import { Header } from "../agent/Header.tsx";
-import { NeedBanner } from "../agent/NeedBanner.tsx";
+import {
+  AgentContext,
+  AgentDeliverables,
+  AgentIdentity,
+  AgentLoop,
+  AgentNextMove,
+  AgentRelated,
+  AgentStats,
+  AgentStory,
+} from "../agent/Overview.tsx";
 import { Picker } from "../agent/Picker.tsx";
 import { RunsPanel } from "../agent/RunsPanel.tsx";
 import { RunTracePanel } from "../agent/RunTrace.tsx";
@@ -10,7 +18,7 @@ import { SideTabs } from "../agent/SideTabs.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
@@ -24,9 +32,9 @@ import "../agent/agent.css";
  * else the first crew seat, else the first in view.
  */
 export function Agent({ id }: { id: string | null }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
-  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const tz = useTz();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
@@ -48,8 +56,10 @@ export function Agent({ id }: { id: string | null }) {
             inView[0])) ?? null);
   const shownId = listed?.id ?? null;
   // The list is summary rows; the page itself shows the seat in full (events, digest), one row.
-  const detail = useResource<CrewRow>(shownId !== null ? RESOURCES.crewDetail(shownId) : null);
-  const row = detail.data ?? null;
+  const detail = useResource<AgentDetailView>(
+    shownId !== null ? RESOURCES.agentDetail(shownId) : null,
+  );
+  const row = detail.data?.row ?? null;
 
   // The selection follows the agent on screen, so j/k step from it.
   useEffect(() => {
@@ -78,7 +88,7 @@ export function Agent({ id }: { id: string | null }) {
   else if (!row) missing = detail.error ? "Could not load this agent." : "Loading…";
 
   return (
-    <section id="page-agent">
+    <section id="page-agent" className="agent-v2">
       <h1 className="sr-only">Agents</h1>
       {handoffRun && <HandoffPanel runId={handoffRun} />}
       {traceRun && id !== null ? (
@@ -88,16 +98,46 @@ export function Agent({ id }: { id: string | null }) {
           <Picker rows={inView} items={items} current={shownId} />
           {row ? (
             <>
-              <NeedBanner row={row} items={items} />
-              <Header row={row} limits={limits} />
-              {!handoffRun && row.kind === "crew" && row.run && <HandoffPanel runId={row.run.id} />}
-              <div className="agrid">
-                <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-                <div className="side">
-                  <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
-                  <SideTabs key={`t:${row.id}`} row={row} />
+              {detail.error && (
+                <div className="pb s crit-t" role="status">
+                  Showing the last saved agent view. Could not refresh: {detail.error.message}{" "}
+                  <button
+                    type="button"
+                    className="sm"
+                    onClick={() => shownId && hub.refetch(RESOURCES.agentDetail(shownId).path)}
+                  >
+                    Retry agent
+                  </button>
                 </div>
-              </div>
+              )}
+              <AgentIdentity view={detail.data as AgentDetailView} />
+              <AgentNextMove view={detail.data as AgentDetailView} />
+              <AgentStats view={detail.data as AgentDetailView} />
+              <AgentLoop view={detail.data as AgentDetailView} />
+              {!handoffRun && row.kind === "crew" && row.run && <HandoffPanel runId={row.run.id} />}
+              {row && (
+                <div className="agent-v2-columns">
+                  <div className="agent-v2-left">
+                    <AgentStory view={detail.data as AgentDetailView} />
+                    <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+                  </div>
+                  <div className="agent-v2-right">
+                    <AgentDeliverables view={detail.data as AgentDetailView} />
+                    <AgentRelated view={detail.data as AgentDetailView} />
+                    <AgentContext view={detail.data as AgentDetailView} />
+                    <SideTabs key={`t:${row.id}`} row={row} />
+                  </div>
+                </div>
+              )}
+              {row.run && (
+                <details
+                  className="panel agent-v2-history"
+                  onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+                >
+                  <summary>Attempts and previous runs</summary>
+                  {historyOpen && <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />}
+                </details>
+              )}
             </>
           ) : (
             <p
@@ -106,6 +146,15 @@ export function Agent({ id }: { id: string | null }) {
               }
             >
               {missing}
+              {detail.error && shownId && (
+                <button
+                  type="button"
+                  className="sm"
+                  onClick={() => hub.refetch(RESOURCES.agentDetail(shownId).path)}
+                >
+                  Retry agent
+                </button>
+              )}
             </p>
           )}
         </>

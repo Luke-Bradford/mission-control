@@ -9,6 +9,7 @@ import { Agent } from "../src/pages/Agent.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
+import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, escalation, item, NOW, REPOS, run } from "./fixtures.ts";
 
@@ -166,7 +167,7 @@ describe("untrusted text renders literally", () => {
     stubFetch({
       "/api/config": CONFIG,
       "/api/crew?shape=summary": { rows: [agentRow], firstRunToday: null },
-      "/api/crew/shop-app-ta": agentRow,
+      "/api/agents/shop-app-ta": agentView(agentRow),
       "/api/attention": [],
       "/api/limits": [],
       "/api/agents/shop-app-ta/runs?limit=50": [run({ ticket: PAYLOAD })],
@@ -214,10 +215,12 @@ describe("untrusted text renders literally", () => {
     expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
     act(() =>
       within(container.querySelector("#sideP") as HTMLElement)
-        .getByRole("button", { name: "Files 1" })
+        .getByRole("button", { name: /^Files/ })
         .click(),
     );
-    expect(container.querySelector("#sideBody")?.textContent).toContain(PAYLOAD);
+    await waitFor(() =>
+      expect(container.querySelector("#sideBody")?.textContent).toContain(PAYLOAD),
+    );
     expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
     expect(container.querySelector("img, script")).toBeNull();
   });

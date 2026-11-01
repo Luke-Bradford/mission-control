@@ -1470,6 +1470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
   ["GET", "/api/crew/shop-app-ta"],
+  ["GET", "/api/agents/shop-app-ta"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
   ["GET", "/api/metrics"],
@@ -2624,6 +2625,7 @@ describe("local access", () => {
             .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
             .replace("/comms/tickets/%237", "/comms/tickets/:ref")
             .replace(/\/crew\/shop-app-ta$/, "/crew/:id")
+            .replace(/\/agents\/shop-app-ta$/, "/agents/:id")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
@@ -3213,6 +3215,18 @@ describe("pause control", () => {
 });
 
 describe("crew and attention", () => {
+  it("GET /api/agents/:id returns saved presentation facts without an eager full loop history", async () => {
+    store.upsertRun(run({ id: "agent-summary", startedAt: NOW - 60000, ticket: "shop-app#7" }));
+    store.setRunDoneWhen("agent-summary", ["Keep the ask visible"]);
+    const response = await get("/api/agents/shop-app-ta");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      row: { id: "shop-app-ta" },
+      story: { original: [{ line: 1, text: "Keep the ask visible" }] },
+    });
+    expect(response.json()).not.toHaveProperty("loop");
+    expect((await get("/api/agents/missing")).statusCode).toBe(404);
+  });
   it("GET /api/crew lists every loop in config order with firstRunToday", async () => {
     store.upsertRun(run({ id: "a", startedAt: NOW - 30 * 60e3, ticket: "shop-app#7" }));
     const c = (await get("/api/crew")).json() as Crew;
