@@ -581,6 +581,28 @@ const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
 describe("Comms API", () => {
+  it("keeps ended runs and old crew traffic behind explicit history, including an empty current view", async () => {
+    store.upsertRun(
+      run({ id: "old-crew", agentId: "alpha", startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR }),
+    );
+    store.upsertRun(run({ id: "live-crew", agentId: "beta", startedAt: NOW - HOUR }));
+    const old = commsRow("alpha", "crew", "Ended run handoff", NOW - 90 * 60_000);
+    commsRow("beta", "crew", "Live crew update", NOW - 10 * 60_000);
+    commsRow("CAPCOM", "crew", "Old operator update", NOW - 25 * HOUR);
+    await withCommsApp(async (app) => {
+      const recent = (await app.inject({ method: "GET", url: "/api/comms/crew" })).json();
+      expect(recent.messages.map((m: { text: string }) => m.text)).toEqual(["Live crew update"]);
+      expect(recent.hasEarlier).toBe(true);
+      const history = (
+        await app.inject({ method: "GET", url: "/api/comms/crew?history=1" })
+      ).json();
+      expect(history.messages.some((m: { id: string }) => m.id === old.id)).toBe(true);
+      expect(history.messages).toHaveLength(3);
+      expect(
+        (await app.inject({ method: "GET", url: "/api/comms/crew?history=bad" })).statusCode,
+      ).toBe(400);
+    });
+  });
   const commsConfig = (): CcConfig => ({
     ...config,
     crew: {

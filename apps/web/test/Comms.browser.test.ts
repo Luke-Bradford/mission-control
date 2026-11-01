@@ -40,6 +40,11 @@ const api = {
     hasMore: true,
     unread: 0,
   },
+  "/api/comms/crew?history=1": {
+    messages: Array.from({ length: 50 }, (_, i) => message(i + 10)),
+    hasMore: true,
+    unread: 0,
+  },
   "/api/comms/flight": { messages: [] },
   "/api/comms/mentions": { mentions: [] },
   "/api/comms/pins": { messages: [] },
@@ -52,7 +57,8 @@ describeRendered("Comms with older messages to load, rendered", () => {
     async (width) => {
       mkdirSync(SHOTS, { recursive: true });
       const page = await renderAt({ page: "test/commsBrowser.html", width, height: 1000, api });
-      const button = await page.box(".comms-older button");
+      await page.click(".comms-older button");
+      const button = await page.box("#convo .comms-older button");
       const first = await page.box(".comms-bubble");
       expect(button.width).toBeGreaterThan(0);
       expect(button.y + button.height).toBeLessThanOrEqual(first.y + 1);

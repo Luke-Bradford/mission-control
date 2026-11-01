@@ -1182,6 +1182,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "turn-start":
+        if (l.resumedAt !== null && !runGone(l.run.id, l.info.seat.id))
+          store.addLoopEvent(
+            `${l.run.id}:resume-confirmed:${l.resumedAt}`,
+            l.run.id,
+            "Session resumed",
+            now(),
+          );
         l.inTurn = true;
         store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);

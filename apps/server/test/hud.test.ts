@@ -650,7 +650,7 @@ describe("attention items", () => {
       url: null,
       escalationId: null,
       ticket: null,
-      owner: "operator",
+      owner: "loop",
       acked: false,
     });
     expect(items[1]).toEqual({
@@ -664,7 +664,7 @@ describe("attention items", () => {
       url: null,
       escalationId: null,
       ticket: null,
-      owner: "operator",
+      owner: "loop",
       acked: false,
     });
     // The first loop on the escalation's repo; none for a repo without a loop.
@@ -877,7 +877,8 @@ describe("attentionItems: PRs waiting on you", () => {
   };
   const prItems = () => attentionItems(config, store, NOW).filter((i) => i.kind === "pr");
 
-  it("gives a newly eligible draft a full triage wait", () => {
+  it("gives a newly eligible crew PR a full triage wait", () => {
+    config.loops = [];
     config.crew = {
       worktrees: dir,
       maxSeats: 1,
@@ -902,7 +903,7 @@ describe("attentionItems: PRs waiting on you", () => {
       worktree: null,
       updatedAt: NOW,
     });
-    seed([pr({ updatedAt: NOW - HOUR })]);
+    seed([pr({ isDraft: false, updatedAt: NOW - HOUR })]);
     expect(prItems()[0]).toMatchObject({ owner: "flight", flightTriage: "waiting" });
     const late = attentionItems(config, store, NOW + FLIGHT_TRIAGE_WAIT_MS);
     // missed: still FLIGHT's, counted by the one not-triaging item (#758)
@@ -933,15 +934,15 @@ describe("attentionItems: PRs waiting on you", () => {
       {
         key: `pr:shop-app#7:${NOW - 9 * DAY}`,
         kind: "pr",
-        agentId: null,
+        agentId: "shop-app-ta",
         repoId: "shop-app",
-        text: "PR #7 · You: decide on the draft",
+        text: "PR #7 · shop-app-ta: decide on the draft",
         tool: null,
         at: NOW - 9 * DAY,
         url: "https://github.com/o/shop-app/pull/7",
         escalationId: null,
         ticket: "shop-app#42",
-        owner: "operator",
+        owner: "loop",
         acked: false,
       },
     ]);
@@ -952,7 +953,10 @@ describe("attentionItems: PRs waiting on you", () => {
       pr({ isDraft: false, review: "approved" }),
       pr({ number: 8, isDraft: false, updatedAt: NOW - 2 * HOUR }),
     ]);
-    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: merge", "PR #8 · You: review"]);
+    expect(prItems().map((i) => i.text)).toEqual([
+      "PR #7 · shop-app-ta: merge",
+      "PR #8 · shop-app-ta: review",
+    ]);
   });
 
   it("not while an agent is running on the ticket, nor when recent, closed or off-board", () => {
@@ -977,7 +981,7 @@ describe("attentionItems: PRs waiting on you", () => {
     store.upsertRun(run({ ticket: "shop-app#42", status: "ok", endedAt: null }));
     expect(prItems()).toEqual([]);
     store.upsertRun(run({ ticket: "shop-app#42", status: "ok", endedAt: NOW - MIN }));
-    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
+    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · shop-app-ta: decide on the draft"]);
   });
 
   it("a PR's item clears once its ticket is closed on the board", () => {
@@ -987,9 +991,9 @@ describe("attentionItems: PRs waiting on you", () => {
     expect(prItems()).toEqual([]);
   });
 
-  it("a PR on a ticket with no run is the operator's as before", () => {
+  it("an observed-loop PR with no run stays with the loop", () => {
     seed([pr({ updatedAt: NOW - 2 * HOUR })]);
-    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
+    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · shop-app-ta: decide on the draft"]);
   });
 
   it("a changed PR is a new key, and an ack of the old one does not carry", () => {
@@ -2241,18 +2245,12 @@ describe("the engine's notes in Needs you", () => {
   it("shows each kind with its note's text, and drops it when the note clears", () => {
     note("blocked:r1:0", "blocked", NOW - 4 * MIN);
     note("review:r1:abc", "review", NOW - 3 * MIN);
-    note("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag", NOW - 2 * MIN);
+    note("flag:r1:diagnostic", "flag", NOW - 2 * MIN);
     note("ratelimit:r1", "ratelimit", NOW - MIN);
     expect(noteItems().map((i) => [i.key, i.kind, i.text, i.agentId, i.repoId])).toEqual([
       ["note:blocked:r1:0", "blocked", "text of blocked:r1:0", "guido-1", "shop-app"],
       ["note:review:r1:abc", "review", "text of review:r1:abc", "guido-1", "shop-app"],
-      [
-        "note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af",
-        "flag",
-        "text of flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af",
-        "guido-1",
-        "shop-app",
-      ],
+      ["note:flag:r1:diagnostic", "flag", "text of flag:r1:diagnostic", "guido-1", "shop-app"],
       ["note:ratelimit:r1", "ratelimit", "text of ratelimit:r1", "guido-1", "shop-app"],
     ]);
     expect(ATTENTION_LABEL.ratelimit).toBe("Rate-limited");
@@ -3184,7 +3182,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
     store.replaceBoard("shop-app", [
-      boardItem({ issueNumber: 909, state: "done", status: "Done" }),
+      boardItem({ issueNumber: 909, state: "done", status: "Done", updatedAt: current }),
     ]);
     const afterDone = all(current);
     expect(afterDone.some((item) => item.key === key)).toBe(false);
@@ -3206,7 +3204,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
     store.replaceBoard("shop-app", [
-      boardItem({ issueNumber: 909, state: "done", status: "Done" }),
+      boardItem({ issueNumber: 909, state: "done", status: "Done", updatedAt: current }),
     ]);
     const afterDone = all(current);
     expect(afterDone.some((item) => item.key === key)).toBe(false);

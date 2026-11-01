@@ -190,11 +190,13 @@ function MessagePane({
   flightId,
   sent = 0,
   older,
+  emptyText,
 }: {
   messages: CommsMessage[];
   lookupMessages?: CommsMessage[];
   /** Older messages the route has not sent: a "Load older" control above the first message. */
   older?: OlderMessages;
+  emptyText?: string | null;
   jumpId: string | null;
   onJumped: () => void;
   onOpenMessage: OpenMessage;
@@ -266,7 +268,9 @@ function MessagePane({
             {older.error}
           </p>
         )}
-        {messages.length === 0 ? <p className="pb note">No messages yet.</p> : null}
+        {messages.length === 0 && emptyText !== null ? (
+          <p className="pb note">{emptyText ?? "No messages yet."}</p>
+        ) : null}
         {messages.map((message) => {
           const quote = message.replyTo ? byId.get(message.replyTo) : undefined;
           return (
@@ -588,9 +592,24 @@ function ModernConversation({
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
-  const crew = useResource<CommsMessagesResponse>(
-    view.kind === "crew" ? RESOURCES.commsCrew : null,
-  );
+  const [crewEarlier, setCrewEarlier] = useState(false);
+  useEffect(() => {
+    if (view.kind !== "crew") setCrewEarlier(false);
+  }, [view.kind]);
+  const crewRef = crewEarlier
+    ? { ...RESOURCES.commsCrew, path: `${RESOURCES.commsCrew.path}?history=1` }
+    : RESOURCES.commsCrew;
+  const crew = useResource<CommsMessagesResponse>(view.kind === "crew" ? crewRef : null);
+  useEffect(() => {
+    if (
+      view.kind === "crew" &&
+      jumpId &&
+      !crewEarlier &&
+      crew.data &&
+      !crew.data.messages.some((m) => m.id === jumpId)
+    )
+      setCrewEarlier(true);
+  }, [view.kind, jumpId, crewEarlier, crew.data]);
   const flight = useResource<CommsMessagesResponse>(
     view.kind === "flight" ? RESOURCES.commsFlight : null,
   );
@@ -620,7 +639,7 @@ function ModernConversation({
   // The route this view pages, and the newest page it sent.
   const pageRef =
     view.kind === "crew"
-      ? RESOURCES.commsCrew
+      ? crewRef
       : view.kind === "flight"
         ? RESOURCES.commsFlight
         : view.kind === "contact"
@@ -639,10 +658,11 @@ function ModernConversation({
             ? undefined
             : agent.data;
   const field = view.kind === "inbox" ? "inbox" : "messages";
+  const currentCrew = view.kind === "crew" && !crewEarlier;
   const olderMessages = useOlderMessages(
-    pageRef?.path ?? null,
+    currentCrew ? null : (pageRef?.path ?? null),
     page?.[field] ?? NO_MESSAGES,
-    (field === "inbox" ? page?.inboxHasMore : page?.hasMore) ?? false,
+    !currentCrew && ((field === "inbox" ? page?.inboxHasMore : page?.hasMore) ?? false),
     field,
   );
   const messages =
@@ -738,7 +758,37 @@ function ModernConversation({
           ))}
         </div>
       )}
+      {view.kind === "crew" && (crewEarlier || crew.data?.hasEarlier || page?.hasMore) && (
+        <div className="comms-older">
+          <button type="button" onClick={() => setCrewEarlier((shown) => !shown)}>
+            {crewEarlier ? "Current crew" : "Earlier"}
+          </button>
+          <span className="s muted">
+            {crewEarlier ? "All crew history" : "Live runs · last 24h"}
+          </span>
+        </div>
+      )}
+      {view.kind === "crew" && crew.loading && !crew.data && (
+        <p role="status" className="pb note">
+          {crewEarlier ? "Loading earlier messages…" : "Loading current crew messages…"}
+        </p>
+      )}
+      {view.kind === "crew" && crew.error && (
+        <div role="alert" className="pb crit-t s">
+          {crew.data
+            ? "Stale messages: the latest refresh failed."
+            : crewEarlier
+              ? "Could not load earlier messages."
+              : "Could not load current crew messages."}
+          <button type="button" onClick={() => hub.refetch(crewRef.path)}>
+            Retry messages
+          </button>
+        </div>
+      )}
       <MessagePane
+        emptyText={
+          view.kind === "crew" && !crew.data && (crew.loading || crew.error) ? null : undefined
+        }
         messages={messages}
         lookupMessages={lookupMessages}
         jumpId={jumpId}

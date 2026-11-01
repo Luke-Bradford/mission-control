@@ -27,6 +27,7 @@ import {
   modelLine,
   type NeedPart,
   needLine,
+  needOwnerLabel,
   needsLamp,
   SET_ASIDE_LABEL,
   seatItems,
@@ -311,7 +312,7 @@ function LoopsStrip({
         const to = agentPath(row.id);
         // A loop waiting on the operator says so in words and takes the warn colour.
         const tone = asks > 0 ? "warn" : status.tone;
-        const state = asks > 0 ? "needs you" : status.label;
+        const state = asks > 0 ? needOwnerLabel(row, items) : status.label;
         return (
           <a
             key={row.id}
