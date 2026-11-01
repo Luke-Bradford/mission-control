@@ -1007,6 +1007,20 @@ ${modelless("flight-2", "FLIGHT")}
       expect(e.message).toContain("shares its git repository with the hub's checkout");
     });
 
+    it("loads a preview from the hub repository while still refusing a preview from the crew clone", () => {
+      const { root, repo, linked: hubPreview } = repoWithWorktree();
+      const crewClone = join(root, "crew-clone");
+      git(root, "clone", "-q", repo, crewClone);
+      const crewPreview = join(root, "crew-preview");
+      git(crewClone, "worktree", "add", "-q", "-b", "preview", crewPreview);
+      const text = crewText({ checkout: crewClone });
+      expect(parseConfig(text, "t", { hubRoot: hubPreview }).crew?.sessions[0]?.checkout).toBe(
+        crewClone,
+      );
+      const error = errorOf(() => parseConfig(text, "t", { hubRoot: crewPreview }));
+      expect(error.message).toContain("shares its git repository with the hub's checkout");
+    });
+
     it("accepts a separate clone, and skips a loop worktree or hub that is not a git repo", () => {
       const { root, repo } = repoWithWorktree();
       const clone = join(root, "clone");

@@ -123,6 +123,8 @@ export async function main(): Promise<void> {
     throw e;
   }
   const preview = isPreview(port, process.env);
+  // Preview hubs must share the hub's repository, not the isolated crew clone.
+  const hubRoot = findHubRoot();
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
@@ -134,8 +136,12 @@ export async function main(): Promise<void> {
   const previewRoot = join(dirname(dbPath), "previews");
   if (!preview) {
     await rm(previewRoot, { recursive: true, force: true });
+    const previewSources = new Set([
+      ...(hubRoot === null ? [] : [hubRoot]),
+      ...(config.crew?.sessions ?? []).map(({ checkout }) => checkout),
+    ]);
     await Promise.all(
-      (config.crew?.sessions ?? []).map(({ checkout }) =>
+      [...previewSources].map((checkout) =>
         runPreviewCommand("git", ["-C", checkout, "worktree", "prune"]).catch(() => {}),
       ),
     );
@@ -159,7 +165,9 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, branch: _branch, checkout, port: previewPort, token, signal }) => {
+        start: async ({ pr, port: previewPort, token, signal }) => {
+          if (hubRoot === null) throw new Error("the hub checkout is unavailable for previews");
+          const checkout = hubRoot;
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
           const worktree = join(root, "worktree");
@@ -312,8 +320,6 @@ export async function main(): Promise<void> {
       }, 15_000).unref();
     }
   }
-  // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
-  const hubRoot = findHubRoot();
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
