@@ -36,14 +36,19 @@ const api = {
   "/api/comms/metrics": { p95BySeat: [], bySeat: [] },
 };
 describeRendered("Comms role labels", () => {
-  it.each([1280, 1600, 1920])(
-    "keeps both RETRO names readable at %i in light and dark",
-    async (width) => {
+  it.each([
+    { width: 1280, height: 1000 },
+    { width: 1600, height: 1000 },
+    { width: 1920, height: 1000 },
+    { width: 1600, height: 700 },
+  ])(
+    "keeps both RETRO names readable at $width × $height in light and dark",
+    async ({ width, height }) => {
       for (const theme of ["light", "dark"] as const) {
         const page = await renderAt({
           page: "test/commsBrowser.html",
           width,
-          height: 1000,
+          height,
           colorScheme: theme,
           api,
         });
@@ -116,7 +121,9 @@ describeRendered("Comms role labels", () => {
         const shots = process.env.MC_MAP_PERFORMANCE_SHOTS;
         if (shots) {
           mkdirSync(shots, { recursive: true });
-          await page.screenshot(join(shots, `comms-labels-${width}-${theme}.png`));
+          await page.screenshot(
+            join(shots, `comms-labels-${width}${height === 700 ? "x700" : ""}-${theme}.png`),
+          );
         }
         await page.close();
       }
