@@ -71,6 +71,31 @@ describeRendered("FLIGHT PR flow panel", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+  it.each(["light", "dark"] as const)(
+    "keeps production repo and four-digit ticket refs readable in %s",
+    async (theme) => {
+      const f = prFlowFixture();
+      const repo = f.repos[0];
+      if (!repo) throw new Error("fixture missing");
+      repo.repoId = "mission-control";
+      repo.rows = repo.rows.map((r, i) => ({
+        ...r,
+        pr: 1311 + i,
+        ticket: `mission-control#${1198 + i}`,
+      }));
+      const page = await renderAt({
+        page: "test/prFlowBrowser.html",
+        width: 1280,
+        height: 1000,
+        colorScheme: theme,
+        api: { ...api(), "/api/prs/flow": f },
+      });
+      await page.boxes(".pr-flow-table tbody tr");
+      expect(await page.unclipped(".pr-flow-table td")).not.toContain(false);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it(
     "keeps 50 long rows scrollable and the last row reachable",
     async () => {
