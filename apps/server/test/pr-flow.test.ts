@@ -434,6 +434,21 @@ describe("dependencies and immutable flow metrics", () => {
     for (const stage of week?.stageTimes ?? [])
       expect(stage).toMatchObject({ p50Ms: M, p90Ms: 2 * M });
   });
+  it("keeps an author that ended before PR creation on both cold and warm reads", () => {
+    merged(8, T - DAY, M);
+    store.upsertRun(run("author", { endedAt: T + M }));
+    store.upsertPullRequests("mc", [pr(7, { createdAt: T + 2 * M })], T + 2 * M);
+    const cold = flow(T + 3 * M).rows[0];
+    const warm = flow(T + 3 * M + 1).rows[0];
+    expect(cold).toMatchObject({
+      owner: "nobody",
+      ownerSince: T + M,
+      lastAction: "run ended",
+      lastActor: "guido",
+    });
+    expect(warm).toEqual(cold);
+  });
+
   it("keeps live owners fresh, includes new merges immediately, and expires metrics at window boundaries", () => {
     merged(7, T, M);
     expect(flow(T + 8 * M).metrics[0]?.merged).toBe(1);

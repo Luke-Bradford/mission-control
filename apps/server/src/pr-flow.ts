@@ -226,15 +226,13 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
     previous && previous.key === key && now >= previous.at && now < previous.until
       ? previous.metrics
       : null;
-  const runs = store
-    .runsActiveSince(
-      Math.min(
-        now,
-        ...prs.filter((p) => p.state === "open").map((p) => p.createdAt),
-        ...(cached ? [] : merged.map((p) => p.createdAt)),
-      ),
-    )
-    .filter((r) => r.repoId === repoId && r.reviewId == null);
+  // Complete bindings are independent of metric reuse: an author can finish before the PR opens.
+  const runs = store.prFlowRuns(
+    repoId,
+    cached
+      ? prs.filter((p) => p.state === "open")
+      : [...prs.filter((p) => p.state === "open"), ...merged],
+  );
   const events = runs.flatMap((r) => store.loopEventsOfRun(r.id));
   const board = store.board(repoId);
   const holds = store.activeHolds().filter((h) => h.ref.startsWith(`${repoId}#`));
