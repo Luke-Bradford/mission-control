@@ -180,6 +180,7 @@ describe("path helpers", () => {
       agent: "/agent",
       map: "/map",
       comms: "/comms",
+      qa: "/qa",
       telemetry: "/telemetry",
       audit: "/audit",
       setup: "/setup",

@@ -6,6 +6,15 @@ import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
 
 const GAP = LiveMap.REFETCH_GAP_MS;
+it("a QA deep link selects every PR file, including one absent from main's tree", async () => {
+  const snapshot = structuredClone(mapSnapshotFixture);
+  const files = ["src/main.ts", "new/pr-only.ts"];
+  const view = render(<CrewMapView snapshot={snapshot} focusedFiles={files} focusedPr="7" />);
+  expect(view.container.querySelectorAll('[data-pr-selected="true"]')).toHaveLength(2);
+  expect(screen.getByText("PR #7 · 2 selected files")).toBeTruthy();
+  const selected = screen.getByRole("complementary", { name: "Selection detail" });
+  expect(within(selected).getByRole("heading", { name: "src/main.ts" })).toBeTruthy();
+});
 // these exercise ordering and resync; the throttle has its own test below
 beforeEach(() => {
   LiveMap.REFETCH_GAP_MS = 0;

@@ -3582,6 +3582,14 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The queue needs only open PRs, without decoding historical checks and bodies. */
+  openPullRequests(repoId: RepoId): PullRequestView[] {
+    const rows = this.statement(
+      "SELECT * FROM pull_requests WHERE repo_id = ? AND state = 'open' ORDER BY created_at, number",
+    ).all(repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
   /** The repo's open PRs and those updated at or after `since` (all of them when null), newest number first. */
   pullRequestsSince(repoId: RepoId, since: number | null): PullRequestView[] {
     const rows =

@@ -1,5 +1,5 @@
 import type { ProfileStep, ReviewDepth } from "./profiles.ts";
-import type { ReviewVerdict } from "./review.ts";
+import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
@@ -744,6 +744,14 @@ export interface PrUatRound {
 
 /** What the operator needs to accept one PR: its comms, rework story and how to try the branch. */
 export interface PrUatView {
+  /** The immutable PR head these details describe. */
+  sha?: string | null;
+  qaSummary?: string | null;
+  files?: string[];
+  tests?: ReportedTest[];
+  testsAdded?: { file: string; failedOnBase: boolean }[];
+  screenshots?: ReviewShotView[];
+  flightId?: string | null;
   repoId: string;
   number: number;
   /** The newest comms that name the PR or its ticket, newest first. */

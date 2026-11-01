@@ -331,8 +331,18 @@ export async function renderHudWithPlaywright(
     await wait(PAGE_LOADING, "detached");
     // Evidence captures visit each Audit tab on both old and new commits. Only these fixed
     // local view selectors may be clicked; requests still cross the GET-only boundary.
-    const tab = new URL(url).searchParams.get("evidence-tab");
-    if (new URL(url).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
+    let tab = new URL(url).searchParams.get("evidence-tab");
+    await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
+    // Older main commits kept QA inside Audit; photograph that equivalent baseline rather
+    // than the Overview redirect when the standalone route has not been built yet.
+    if (new URL(url).pathname === "/qa" && new URL(page.url()).pathname !== "/qa") {
+      await page.goto(guard.page("/audit"), { waitUntil: "load", timeout: remaining() });
+      await wait(HUD_READY, "attached");
+      await wait(PAGE_MAIN, "attached");
+      await wait(PAGE_LOADING, "detached");
+      tab = "readiness";
+    }
+    if (new URL(page.url()).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
       const label = tab === "readiness" ? "PR readiness" : "Hotspots";
       if (!page.click) throw new Error("HUD screenshot cannot select the Audit view.");
       await page.click(`[aria-label="QA view"] button:text-is("${label}")`, {

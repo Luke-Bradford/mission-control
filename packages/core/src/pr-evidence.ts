@@ -69,7 +69,7 @@ const PAGE_DIRS: Record<string, EvidencePage> = {
   comms: "comms",
   telemetry: "telemetry",
   setup: "setup",
-  qa: "readiness",
+  qa: "qa",
 };
 
 /** The page a file in `apps/web` affects, or null when it affects the whole app. */
@@ -80,7 +80,7 @@ function pageOf(path: string): EvidencePage | null {
   if (dir === "pages") {
     const stem = (rest.split("/")[1] ?? "").replace(/\.[^.]+$/, "").toLowerCase();
     const key = stem.replace(/page$/, "");
-    if (key === "qareadiness") return "readiness";
+    if (key === "qareadiness" || key === "qa-readiness") return "qa";
     if (key === "qahotspots") return "hotspots";
     return key in HUD_PAGE_PATHS ? (key as EvidencePage) : null;
   }

@@ -24,6 +24,8 @@ export const COMMS_INBOX_PROMPT_MAX = 8_000;
 export const COMMS_INBOX_PROMPT_ROWS = 40;
 
 export interface CommsServiceDeps {
+  /** A PR-scoped thread resolved and validated by the operator API. */
+  ticket?: string;
   store: Store;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
@@ -64,12 +66,14 @@ export async function sendComms(
   if (!members.has(from)) throw new Error("Unknown Comms sender.");
   await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
+  let replyTicket: string | null | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
     if (from !== COMMS_CAPCOM && !canReadComms(deps.store, from, original))
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
+    if (input.ref === undefined || input.ref === original.ref) replyTicket = original.ticket;
   }
   crew = deps.crew();
   members = new Set([...crew, COMMS_CAPCOM]);
@@ -90,7 +94,7 @@ export async function sendComms(
         at: now,
         from,
         to: input.to,
-        ticket: input.ref ?? null,
+        ticket: deps.ticket ?? replyTicket ?? input.ref ?? null,
         text: input.text,
         label: input.label,
         ref: input.ref,

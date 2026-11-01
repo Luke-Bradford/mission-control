@@ -283,7 +283,7 @@ import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { prUat } from "./pr-uat.ts";
+import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -562,6 +562,7 @@ const MergeHoldBody = z.discriminatedUnion("action", [
 const UatBody = z
   .strictObject({
     action: z.enum(["accept", "send_back"]),
+    sha: z.string().regex(/^[0-9a-f]{40}$/i),
     note: z.string().max(COMMS_MESSAGE_MAX).optional(),
   })
   .superRefine((b, ctx) => {
@@ -1547,6 +1548,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .filter((agent) => agent.kind === "crew")
           .map((agent) => agent.id);
       const commsSendBody = z.strictObject({
+        repoId: z.string().optional(),
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
         label: z.enum(COMMS_LABELS).optional(),
@@ -1560,6 +1562,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.post("/comms", async (req, reply) => {
         const body = commsSendBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        let prThread: string | undefined;
+        if (body.data.repoId !== undefined) {
+          const number = /^PR ([1-9]\d*)$/.exec(body.data.ref ?? "")?.[1];
+          const repo = config.repos.find((r) => r.id === body.data.repoId);
+          if (!repo || !number || !store.pullRequest(repo.id, Number(number)))
+            return reply.code(400).send({ error: "unknown PR thread" });
+          prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
+        }
         try {
           const message = await sendComms(
             {
@@ -1568,6 +1578,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              ...(prThread === undefined ? {} : { ticket: prThread }),
               notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
             COMMS_CAPCOM,
@@ -2306,6 +2317,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: apps/web/src/pages/QaReadiness.tsx (the acceptance queue, with no per-PR detail reads)
+      api.get("/qa/queue", () => ({
+        prs: config.repos.flatMap((repo) => {
+          const acceptance = prAcceptanceFor(store, repo.id);
+          const check = reviewCheckFor(store, repo.id, now());
+          return store
+            .openPullRequests(repo.id)
+            .map((pr) => ({ ...prSummaryRow(pr, check(pr)), ...acceptance(pr) }));
+        }),
+        flightId: flightSeat(config)?.seat.id ?? null,
+      }));
+
       // Reader: docs/runbook.md#qa-board-data (a PR's Comms, rework rounds and try-it commands, for the QA readiness card)
       api.get<{ Params: { repoId: string; number: string } }>(
         "/qa/uat/:repoId/:number",
@@ -2324,6 +2347,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number)?.url ?? null) : null,
             singleRepo: config.repos.length === 1,
             repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+            flightId: flightSeat(config)?.seat.id ?? null,
           });
         },
       );
@@ -2921,11 +2945,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
         const checkOf = reviewCheckFor(store, repo.id, now());
+        const acceptance = prAcceptanceFor(store, repo.id);
         if (shape === "summary")
-          return prs.map((pr) => ({ ...prSummaryRow(pr, checkOf(pr)), ...prPreview(pr) }));
+          return prs.map((pr) => ({
+            ...prSummaryRow(pr, checkOf(pr)),
+            ...prPreview(pr),
+            ...acceptance(pr),
+          }));
         return detail === "1"
-          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), ...prPreview(pr) }))
-          : prs.map((pr) => ({ ...prSummary(pr, checkOf(pr)), ...prPreview(pr) }));
+          ? prs.map((pr) => ({ ...pr, check: checkOf(pr), ...prPreview(pr), ...acceptance(pr) }))
+          : prs.map((pr) => ({
+              ...prSummary(pr, checkOf(pr)),
+              ...prPreview(pr),
+              ...acceptance(pr),
+            }));
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's number and title, for a link)
       api.get<{ Params: { repoId: string }; Querystring: { numbers?: unknown } }>(
@@ -2956,7 +2989,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
-          return { ...pr, ...prPreviewFor(repo)(pr) };
+          return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
+        },
+      );
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/repos/:repoId/prs/:number/files",
+        (req, reply) => {
+          const pr = /^[1-9]\d*$/.test(req.params.number)
+            ? store.pullRequest(req.params.repoId, Number(req.params.number))
+            : null;
+          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
+            return reply.code(404).send({ error: "unknown pull request" });
+          return {
+            repoId: pr.repoId,
+            number: pr.number,
+            sha: pr.headSha,
+            files: store.prFilePaths(pr.repoId, pr.number),
+          };
         },
       );
 
@@ -4294,6 +4346,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           if (run === undefined || !run.loop?.uat)
             return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (body.data.sha !== run.loop.uat.sha)
+            return reply
+              .code(409)
+              .send({ error: "the PR head changed; reload its evidence before deciding" });
           if (!crewGate(run.agentId, reply)) return reply;
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.uat === undefined || deps.engine.status().on !== true) {
@@ -4312,7 +4368,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const result = await deps.engine.uat(
             run.id,
             body.data.action,
-            run.loop.uat.sha,
+            body.data.sha,
             body.data.note,
           );
           if (!result.lifted) {

@@ -209,6 +209,7 @@ export function branchOnlyFiles(
 }
 
 type TileProps = {
+  focused: boolean;
   path: string;
   x: number;
   y: number;
@@ -246,6 +247,8 @@ const Tile = memo(function Tile(t: TileProps) {
       data-strong={t.strong || undefined}
       data-play-current={t.playCurrent || undefined}
       data-conflict={t.conflict || undefined}
+      data-pr-selected={t.focused || undefined}
+      aria-pressed={t.focused}
       style={
         {
           ...style({ x: t.x, y: t.y, width: t.width, height: t.height }),
@@ -278,6 +281,7 @@ export const MapTreemap = memo(function MapTreemap({
   marks = noMarks,
   currentMark = null,
   markSeat = null,
+  focusedFiles = [],
 }: {
   snapshot: MapSnapshot;
   visual: Record<string, ChangeVisual>;
@@ -290,8 +294,10 @@ export const MapTreemap = memo(function MapTreemap({
   marks?: Map<string, number>;
   currentMark?: string | null;
   markSeat?: string | null;
+  focusedFiles?: readonly string[];
 }) {
   const [ref, size] = useSize();
+  const focused = useMemo(() => new Set(focusedFiles), [focusedFiles]);
   const files = useMemo(() => [...snapshot.tree, ...extraFiles], [snapshot.tree, extraFiles]);
   const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
   // the branches a conflicting file is changed on, for the tile's description
@@ -360,6 +366,7 @@ export const MapTreemap = memo(function MapTreemap({
             lines={changed.length ? `+${added} −${removed}` : ""}
             note={description}
             conflict={conflict}
+            focused={focused.has(tile.path)}
             intensity={strength(first)}
             intensity2={second ? strength(second) : strength(first)}
             colour={first ? colour(first.seat) : "var(--void-line)"}

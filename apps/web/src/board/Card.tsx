@@ -43,7 +43,10 @@ function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec |
   const review = pr.state === "open" ? (checkPill ?? null) : null;
   const showState = review !== null || pr.state !== "open" || pr.isDraft || pr.review !== null;
   const ci = pr.ci === null ? null : CI_PILL[pr.ci];
-  const state = review ?? prPill(pr);
+  const state =
+    pr.state === "open" && pr.uat
+      ? { tone: "warn" as const, label: "Waiting for your acceptance" }
+      : (review ?? prPill(pr));
   const checks = checksText(pr.checks);
   return (
     <>
@@ -56,7 +59,9 @@ function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec |
       />
       {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
       {checks && <span className="xs muted">{checks}</span>}
-      {showState && <Pill tone={state.tone}>{state.label}</Pill>}
+      {(showState || (pr.state === "open" && pr.uat)) && (
+        <Pill tone={state.tone}>{state.label}</Pill>
+      )}
     </>
   );
 }

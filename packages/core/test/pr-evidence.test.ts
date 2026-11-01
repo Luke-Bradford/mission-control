@@ -36,7 +36,7 @@ describe("prEvidenceAffectedPages", () => {
       "readiness",
       "hotspots",
     ]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaReadiness.tsx"])).toEqual(["readiness"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaReadiness.tsx"])).toEqual(["qa"]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["hotspots"]);
     expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"])).toEqual([
       "setup",

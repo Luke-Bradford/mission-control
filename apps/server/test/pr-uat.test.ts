@@ -135,6 +135,37 @@ function review(
 const get = async (path: string) => app.inject({ method: "GET", url: path });
 
 describe("GET /api/qa/uat/:repoId/:number", () => {
+  it("serves only open PRs in the queue with UAT entry time bound to the current head", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [pr("shop-app", 70), { ...pr("shop-app", 71), state: "closed" }],
+      NOW,
+    );
+    store.upsertRun(
+      run("waiting", {
+        endedAt: null,
+        loop: {
+          ...NEW_LOOP,
+          epoch: 1,
+          phase: "parked",
+          prNumber: 70,
+          parked: { kind: UAT_PARK, reason: "accept", ended: false },
+          uat: { sha: "sha3", from: "review", accepted: false },
+        },
+      }),
+    );
+    store.addLoopEvent("waiting:1:parked:uat:sha3", "waiting", "waiting", NOW - 60000);
+    const body = (await get("/api/qa/queue")).json();
+    expect(body.prs.find((p: PullRequestView) => p.number === 70)?.uat).toEqual({
+      sha: "sha3",
+      since: NOW - 60000,
+    });
+    expect(body.prs.some((p: PullRequestView) => p.number === 71)).toBe(false);
+    store.upsertPullRequests("shop-app", [{ ...pr("shop-app", 70), headSha: "new-head" }], NOW + 1);
+    expect(
+      (await get("/api/qa/queue")).json().prs.find((p: PullRequestView) => p.number === 70)?.uat,
+    ).toBeUndefined();
+  });
   beforeEach(() => {
     store.upsertRun(run("dev-2"));
     store.upsertPullRequests("shop-app", [pr("shop-app", 30)], NOW);

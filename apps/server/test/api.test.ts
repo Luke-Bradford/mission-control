@@ -8938,10 +8938,10 @@ describe("operator token", () => {
     });
 
     it("needs the operator token", async () => {
-      expect((await post({}, { action: "accept" })).statusCode).toBe(401);
-      expect((await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept" })).statusCode).toBe(
-        401,
-      );
+      expect((await post({}, { action: "accept", sha: SHA })).statusCode).toBe(401);
+      expect(
+        (await post({ [OPERATOR_HEADER]: "wrong" }, { action: "accept", sha: SHA })).statusCode,
+      ).toBe(401);
       expect(calls).toEqual([]);
     });
 
@@ -8960,8 +8960,8 @@ describe("operator token", () => {
     });
 
     it("records a verdict for the waiting head and names a refusal", async () => {
-      expect((await post(key, { action: "accept" })).statusCode).toBe(200);
-      const refused = await post(key, { action: "send_back", note: "unreadable" });
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(200);
+      const refused = await post(key, { action: "send_back", sha: SHA, note: "unreadable" });
       expect(refused.statusCode).toBe(409);
       expect(refused.json().error).toContain("head moved");
       expect(calls).toEqual([
@@ -8970,10 +8970,18 @@ describe("operator token", () => {
       ]);
     });
 
+    it("refuses a stale displayed head before calling the engine", async () => {
+      const result = await post(key, { action: "accept", sha: "b".repeat(40) });
+      expect(result.statusCode).toBe(409);
+      expect(result.json().error).toContain("head changed");
+      expect(calls).toEqual([]);
+      expect((await post(key, { action: "accept" })).statusCode).toBe(400);
+    });
+
     it("answers 404 for a PR that is not waiting and 409 when loop writes are off", async () => {
-      expect((await post(key, { action: "accept" }, "13")).statusCode).toBe(404);
+      expect((await post(key, { action: "accept", sha: SHA }, "13")).statusCode).toBe(404);
       noWrites = true;
-      expect((await post(key, { action: "accept" })).statusCode).toBe(409);
+      expect((await post(key, { action: "accept", sha: SHA })).statusCode).toBe(409);
       expect(calls).toEqual([]);
     });
 
