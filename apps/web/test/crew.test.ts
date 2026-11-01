@@ -393,6 +393,19 @@ describe("contextPct", () => {
 });
 
 describe("needLine", () => {
+  it("names a loop-owned decision without offering an operator answer", () => {
+    const row = crewRow({ id: "studio" });
+    const item = fixtureItem({
+      key: "owned",
+      kind: "decision",
+      agentId: row.id,
+      ticket: row.ticket,
+      owner: "loop",
+    });
+    expect(needLine(row, [item], NOW)).toEqual([
+      { text: "Decision for studio", action: "open", key: "owned" },
+    ]);
+  });
   const row = crewRow({ id: "a" });
   // Items here are about the row's current run unless a test says otherwise.
   const item = (over: Partial<AttentionItem> = {}) => fixtureItem({ ticket: row.ticket, ...over });

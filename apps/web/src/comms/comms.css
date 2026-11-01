@@ -905,6 +905,8 @@
 .comms-older {
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 @media (min-width: 1600px) {

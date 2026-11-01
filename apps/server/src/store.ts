@@ -5100,6 +5100,25 @@ export class Store {
     return this.commsMessageByNumber(n);
   }
 
+  /** Fixed delivery target, otherwise the sender's run that was open when it wrote the line. */
+  commsRun(id: string, inferSender = true): Run | null {
+    const number = commsMessageNumber(id);
+    if (number === null) return null;
+    const source = this.statement("SELECT target_run_id, from_id, at FROM comms WHERE id = ?").get(
+      number,
+    ) as Row | undefined;
+    if (!source) return null;
+    if (source.target_run_id !== null) return this.run(source.target_run_id as string);
+    if (!inferSender) return null;
+    const row = this.statement(`SELECT * FROM runs WHERE agent_id = ? AND started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC, seq DESC, id DESC LIMIT 1`).get(
+      source.from_id as string,
+      source.at as number,
+      source.at as number,
+    ) as Row | undefined;
+    return row ? toRun(row) : null;
+  }
+
   private commsMessageByNumber(id: number): CommsRow | null {
     const row = this.db.prepare("SELECT * FROM comms WHERE id = ?").get(id) as Row | undefined;
     return row === undefined ? null : this.commsRow(row);
@@ -5299,8 +5318,9 @@ export class Store {
     scope: CommsReadScope,
     limit: number,
     before?: string,
+    recentSince?: number,
   ): { rows: CommsRow[]; hasMore: boolean } {
-    const { where, args } = this.commsScopeWhere(scope);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
     const rows = (
       this.db
@@ -5315,8 +5335,12 @@ export class Store {
     return { rows: rows.slice(0, limit).reverse(), hasMore };
   }
   /** How many messages a scope holds, and how many of them come after the read cursor. */
-  commsCounts(scope: CommsReadScope, cursor: string | null): { count: number; unread: number } {
-    const { where, args } = this.commsScopeWhere(scope);
+  commsCounts(
+    scope: CommsReadScope,
+    cursor: string | null,
+    recentSince?: number,
+  ): { count: number; unread: number } {
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
     const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
     const r = this.db
       .prepare(
@@ -5324,6 +5348,20 @@ export class Store {
       )
       .get(offset, ...args) as { count: number; unread: number };
     return { count: r.count, unread: r.unread };
+  }
+  private commsRecentScopeWhere(scope: CommsReadScope, since?: number) {
+    const base = this.commsScopeWhere(scope);
+    if (since === undefined) return base;
+    return {
+      where: `(${base.where}) AND at >= ? AND (
+        (target_run_id IS NOT NULL AND EXISTS (SELECT 1 FROM runs r WHERE r.id = comms.target_run_id AND r.ended_at IS NULL))
+        OR (target_run_id IS NULL AND (NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = comms.from_id)
+        OR (SELECT r.ended_at IS NULL FROM runs r WHERE r.agent_id = comms.from_id AND
+          r.started_at <= comms.at AND (r.ended_at IS NULL OR r.ended_at >= comms.at)
+          ORDER BY r.started_at DESC, r.seq DESC, r.id DESC LIMIT 1) = 1))
+      )`,
+      args: [...base.args, since],
+    };
   }
   /** Everyone `id` has exchanged messages with, in first-contact order. */
   commsContactIds(id: string): string[] {

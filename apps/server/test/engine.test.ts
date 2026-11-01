@@ -1073,6 +1073,7 @@ describe("report to a draft PR", () => {
     });
     const firstFlag = hardRulesFlagKey(RUN, h.touches);
     expect(noteKeys()).toContain(firstFlag);
+    expect(loopTexts()).toContain(`${REPO}#7 touches hard-rule files: .github/ci.yml`);
 
     report("A second commit", SHA_B);
     await h.engine.reconcileRun(RUN);

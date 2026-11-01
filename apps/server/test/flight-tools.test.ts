@@ -5069,9 +5069,21 @@ describe("brief_item", () => {
     },
   );
 
+  it("refuses briefing hard-rule information as a decision without deleting its engine marker", async () => {
+    const noteKey = "flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
+    raise(noteKey, { kind: "flag" });
+    const key = `note:${noteKey}`;
+    for (const owner of ["flight", "operator"] as const)
+      expect(await call("brief_item", B({ key, for: owner }))).toEqual(
+        refused(`Not briefed: ${key} is not an item in the operator's Needs-you list.`),
+      );
+    expect(store.notes().some((n) => n.key === noteKey)).toBe(true);
+    expect(store.briefs().has(key)).toBe(false);
+  });
+
   it.each([
     ["hub-update-held", "blocked"],
-    ["flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag"],
+    ["flag:r1:diagnostic", "flag"],
     ["flag:r1:floor:abc", "flag"],
     ["ratelimit:r1", "ratelimit"],
   ])("requires passing up %s with a brief", async (noteKey, kind) => {
