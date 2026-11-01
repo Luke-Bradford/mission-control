@@ -77,7 +77,8 @@ const BEFORE_REVIEW: readonly HudColumn[] = [
 /**
  * Moves each ticket's card to follow its closing PRs, falling back to the PR's branch-first ticket.
  * All hubs follow PRs for every lane: there is one hub per repo today.
- * An open, ready PR puts an earlier card In review; a merged closing PR puts it Done. A branch-only match needs the issue itself closed. PRs all closed
+ * An open, ready PR puts an earlier card In review; a merged closing PR puts it Done.
+ * A branch-only match needs the issue itself closed. PRs all closed
  * unmerged send an In review card back to Ready. Live runs belong to the engine; planner cards
  * stay put. A successful move to a column happens once per PR, leaving later hand moves alone.
  * Each attempt is a `board_moves` row under `pr:<repo>#<number>`; failures wait five minutes.
@@ -131,7 +132,9 @@ export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean
     // the evidence that a merged contribution completes its parent.
     const completed = item.closed
       ? (merged ?? prs[0])
-      : prs.find((p) => p.state === "merged" && p.closingIssues?.includes(item.issueNumber));
+      : open
+        ? undefined
+        : prs.find((p) => p.state === "merged" && p.closingIssues?.includes(item.issueNumber));
     let target: MoveColumn | FlightMoveColumn | null = null;
     const by = completed ?? open ?? merged ?? prs[0];
     if (completed) {
