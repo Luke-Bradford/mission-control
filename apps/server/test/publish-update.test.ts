@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import {
   createPublisher,
+  gitIdentity,
   MC_MERGE_AUTHOR,
   MERGE_BRANCH_MOVED,
   prDiffKey,
@@ -220,8 +221,9 @@ describe("updateBranch (real git)", () => {
       tip,
       mainSha,
     ]);
-    expect(git(worktree, "log", "-1", "--format=%an|%cn|%s")).toBe(
-      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|Merge main into ${BRANCH}`,
+    // the clone's user.email wins over the hub's fallback
+    expect(git(worktree, "log", "-1", "--format=%an|%cn|%ae|%s")).toBe(
+      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|t@example.com|Merge main into ${BRANCH}`,
     );
     expect(store.branchCommits("mc", BRANCH).has(sha)).toBe(true);
     expect(readFileSync(join(worktree, "docs/c.md"), "utf8")).toBe("doc\nmore\n");
@@ -417,14 +419,7 @@ describe("a merged branch (real git)", () => {
 
   /** Commits as the hub does, so only the part under test differs from a real hub merge. */
   const asHub = (cwd: string, ...args: string[]): void => {
-    execFileSync("git", args, {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-      },
-    });
+    execFileSync("git", args, { cwd, env: { ...process.env, ...gitIdentity(MC_MERGE_AUTHOR) } });
   };
   const keptAfter = async (): Promise<void> => {
     git(worktree, "push", "-q", "origin", BRANCH);
@@ -469,14 +464,7 @@ describe("a merged branch (real git)", () => {
         "-m",
         `Merge main into ${BRANCH}`,
       ],
-      {
-        cwd: worktree,
-        env: {
-          ...process.env,
-          GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-          GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-        },
-      },
+      { cwd: worktree, env: { ...process.env, ...gitIdentity(MC_MERGE_AUTHOR) } },
     )
       .toString()
       .trim();

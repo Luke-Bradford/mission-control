@@ -526,12 +526,18 @@ describe("needLine", () => {
 describe("the review seat's doing line", () => {
   const reviewing = { prNumber: 12, sha: "abc1234ffff", ref: "mc#7" };
 
-  it("an idle reviewing seat says which PR", () => {
-    const row = { ...crewRow({ hudState: "idle" }), reviewing };
-    expect(doingLine(row, NOW, TZ)).toBe("Reviewing PR #12 (abc1234) · mc#7");
+  it("an idle reviewing seat says it is checking, for how long, which PR and ticket", () => {
+    const base = seatRow({
+      id: "retro-1",
+      hudState: "idle",
+      run: { ...(crewRow().run as NonNullable<CrewRow["run"]>), startedAt: NOW - 12 * MIN },
+    });
+    const row = { ...base, reviewing };
+    expect(doingLine(row, NOW, TZ)).toBe("RETRO-1 checking · 12 min · PR #12 · mc#7");
     expect(doingLine({ ...row, reviewing: { ...reviewing, ref: null } }, NOW, TZ)).toBe(
-      "Reviewing PR #12 (abc1234)",
+      "RETRO-1 checking · 12 min · PR #12",
     );
+    expect(doingLine(row, NOW, TZ)).not.toMatch(/Idle/);
   });
 
   it("an idle seat with reviewing null keeps its idle line", () => {

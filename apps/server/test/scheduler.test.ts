@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BACKFILL_COLLECTOR,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   type CrewRow,
   ENGINE_TICK_MS,
   FLIGHT_LOOPS_SETTING,
@@ -18,7 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { holdItem, holds } from "../src/attention-holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
-import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
+import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
 import {
@@ -55,6 +56,7 @@ import {
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
+import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -166,6 +168,27 @@ const row = (collector: string) => store.status().find((s) => s.collector === co
 
 /** Sends the topics queued in the current coalescing window (needs fake timers). */
 const flushEmits = () => vi.advanceTimersByTime(EMIT_COALESCE_MS);
+
+/** A run of the ta loop, to make a crew row change. */
+const taRun = (seq: number): Run => ({
+  id: `ta-${seq}`,
+  agentId: "shop-app-ta",
+  repoId: "shop-app",
+  seq,
+  startedAt: NOW,
+  endedAt: null,
+  status: "running",
+  sessionId: null,
+  model: null,
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "/x/y.log",
+  prs: [],
+  summary: null,
+  reviewId: null,
+});
 
 describe("scheduler", () => {
   it("runs transcript maintenance with default retention", async () => {
@@ -776,6 +799,173 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
         });
 
+        it("builds no crew view across loop ticks and agents events while no browser is connected", async () => {
+          vi.useFakeTimers();
+          const timelines = vi.spyOn(views, "runEventsIndex");
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          s.start();
+          await vi.advanceTimersByTimeAsync(3000);
+          const before = crewCalls();
+          for (let i = 0; i < 4; i++) {
+            states["seat-guido"] = i % 2 === 0 ? "running" : "idle";
+            at = NOW + 15_000 * (i + 1);
+            await s.tick("ta");
+            await s.tick("studio");
+            bus.emit("agents");
+            await vi.advanceTimersByTimeAsync(1500);
+          }
+          expect(crewCalls()).toBe(before);
+          expect(timelines).not.toHaveBeenCalled();
+          expect(store.agentEvents(0)).toEqual([]);
+          await s.stop();
+        });
+
+        it("records state changes from the summary crew while no browser is connected and a run is open", async () => {
+          store.upsertRun({
+            id: "open",
+            agentId: "seat-guido",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: "shop-app#1",
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/y.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          states["seat-guido"] = "running";
+          at = NOW + 15_000;
+          await s.tick("ta");
+          states["seat-guido"] = "idle";
+          at = NOW + 30_000;
+          await s.tick("ta");
+          expect(store.agentEvents(0).length).toBeGreaterThan(0);
+          const calls = vi.mocked(hud.crew).mock.calls.slice(before);
+          expect(calls.length).toBeGreaterThan(0);
+          expect(calls.every((call) => call[5] === true)).toBe(true);
+        });
+
+        it("records a loop's error while no browser is connected and no run is open", async () => {
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          expect(store.agentEvents(0)).toEqual([]);
+          const quietCalls = vi.mocked(hud.crew).mock.calls.length;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(quietCalls);
+          store.setStatus(collectorName("ta-loop", "shop-app-ta"), false, "boom");
+          states["shop-app-ta"] = "error";
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(store.agentEvents(0).filter((e) => e.to === "error")).toHaveLength(1);
+        });
+
+        describe("a blocked loop or a removed agent's old event, with no browser", () => {
+          const quietCalls = async (seed?: () => void) => {
+            seed?.();
+            const s = createScheduler({
+              config,
+              store,
+              bus,
+              now: () => at,
+              collectors: stubs(),
+              hasViewClients: () => false,
+            });
+            states["shop-app-ta"] = "blocked";
+            await s.tick("ta");
+            await s.tick("ta");
+            const quiet = crewCalls();
+            for (let i = 1; i <= 4; i++) {
+              at = NOW + 15_000 * i;
+              await s.tick(i % 2 ? "ta" : "studio");
+            }
+            expect(crewCalls()).toBe(quiet);
+          };
+
+          it("builds no crew view on later ticks for a blocked loop", async () => {
+            await quietCalls();
+          });
+
+          it("builds no crew view on later ticks for an agent no longer in config", async () => {
+            await quietCalls(() =>
+              store.addAgentEvent({
+                agentId: "gone-loop",
+                at: 1,
+                from: "idle",
+                to: "error",
+                text: "x",
+              }),
+            );
+          });
+        });
+
+        it("records a loop's ended run turning blocked while no browser is connected", async () => {
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          store.upsertRun({
+            id: "short",
+            agentId: "shop-app-ta",
+            repoId: "shop-app",
+            seq: 9,
+            startedAt: NOW + 1000,
+            endedAt: NOW + 5000,
+            status: "blocked",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: null,
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/z.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          states["shop-app-ta"] = "blocked";
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(store.agentEvents(0).filter((e) => e.to === "blocked")).toHaveLength(1);
+        });
+
         it("ignores topics other than agents", async () => {
           const s = await started();
           const before = crewCalls();
@@ -849,8 +1039,10 @@ describe("scheduler", () => {
   it("emits attention whenever it emits agents or escalations, and not otherwise", async () => {
     vi.useFakeTimers();
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+    let seq = 0;
     for (const job of ["ta", "studio", "github"] as const) {
       topics.length = 0;
+      store.upsertRun(taRun(++seq)); // each job finds the crew changed
       await s.tick(job);
       flushEmits();
       expect(topics, job).toContain("agents");
@@ -878,10 +1070,77 @@ describe("scheduler", () => {
       expect(topics.filter((t) => t === "agents")).toHaveLength(1);
       expect(topics.filter((t) => t === "attention")).toHaveLength(1);
       expect(topics.filter((t) => t === "health")).toHaveLength(1);
-      // the next window starts afresh
-      await s.tick("ta");
+      // the next window starts afresh; this tick changes a run, so agents goes out again
+      const ta = vi.fn<Collectors["ta"]>(async () => {
+        store.upsertRun(taRun(2));
+      });
+      const s2 = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs({ ta }),
+      });
+      await s2.tick("ta");
       flushEmits();
       expect(topics.filter((t) => t === "agents")).toHaveLength(2);
+    });
+
+    it("an unchanged ta tick emits nothing; a changed one emits agents and attention once", async () => {
+      vi.useFakeTimers();
+      const ta = vi.fn<Collectors["ta"]>(async () => undefined);
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs({ ta }) });
+      await s.tick("ta");
+      flushEmits();
+      topics.length = 0;
+      await s.tick("ta");
+      flushEmits();
+      expect(topics).toEqual([]);
+      ta.mockImplementation(async () => {
+        store.upsertRun(taRun(1));
+      });
+      await s.tick("ta");
+      flushEmits();
+      expect(topics.filter((t) => t === "agents")).toHaveLength(1);
+      expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+    });
+
+    it("a Needs-you item that turns due with no crew row changing still sends attention", async () => {
+      vi.useFakeTimers();
+      const T = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 3_600_000;
+      let at = T;
+      const s = createScheduler({ config, store, bus, now: () => at, collectors: stubs() });
+      store.addComms({
+        at: T - 14 * 60_000,
+        from: "alpha",
+        to: "beta",
+        label: "question",
+        text: "which way?",
+        ticket: null,
+        mentions: [],
+      });
+      await s.tick("ta");
+      flushEmits();
+      topics.length = 0;
+      at = T + 2 * 60_000;
+      await s.tick("ta");
+      flushEmits();
+      expect(topics).toContain("attention");
+      expect(topics.filter((t) => t === "attention")).toHaveLength(1);
+      expect(topics).not.toContain("agents");
+    });
+
+    it("an unchanged GitHub poll emits limits but not agents or health", async () => {
+      vi.useFakeTimers();
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+      await s.tick("github");
+      flushEmits();
+      topics.length = 0;
+      await s.tick("github");
+      flushEmits();
+      expect(topics).toContain("limits");
+      expect(topics).not.toContain("agents");
+      expect(topics).not.toContain("health");
     });
 
     it("a GitHub poll that changed no row emits no boards or escalations; one that did, does", async () => {
@@ -1008,12 +1267,12 @@ describe("scheduler", () => {
         lockState: () => lock,
       });
       await s.tick("machine");
-      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test");
+      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test", true);
 
       lock = hud.NO_LOCK;
       const prev = s.machine();
       await s.tick("machine");
-      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
+      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null, true);
     });
 
     it("runs every 10 s, keeps the latest sample in memory and emits machine", async () => {
@@ -1079,6 +1338,91 @@ describe("scheduler", () => {
       await s.tick("machine");
 
       expect(c.machine).toHaveBeenCalledOnce();
+      // os values only: nothing waits at the guard, so no vm_stat, sysctl, memory_pressure or ps
+      expect(vi.mocked(c.machine).mock.calls[0]?.[4]).toBe(false);
+    });
+
+    it("spawns the machine commands for a browser, a start at the guard, or a held guard", async () => {
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const spawnFor = async (over: Partial<Parameters<typeof createScheduler>[0]>) => {
+        const c = stubs();
+        const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c, ...over });
+        await s.tick("machine");
+        return vi.mocked(c.machine).mock.calls[0]?.[4];
+      };
+      expect(await spawnFor({ hasViewClients: () => true, startPending: () => false })).toBe(true);
+      expect(await spawnFor({ hasViewClients: () => false, startPending: () => true })).toBe(true);
+      expect(await spawnFor({ hasViewClients: () => false, startPending: () => false })).toBe(
+        false,
+      );
+      // the default pending check reads the store: a queued ticket is a start at the guard
+      expect(await spawnFor({ hasViewClients: () => false })).toBe(false);
+      // a Ready card on a repo with a crew session is a start about to reach the guard
+      const card = {
+        repoId: "shop-app",
+        issueNumber: 7,
+        title: "t",
+        status: "Ready",
+        state: "planned",
+        labels: [],
+        priority: null,
+        updatedAt: NOW,
+        url: "u",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: 1,
+        itemId: null,
+        projectId: null,
+      } as Parameters<typeof store.replaceBoard>[1][number];
+      store.replaceBoard("shop-app", [card]);
+      expect(await spawnFor({ hasViewClients: () => false })).toBe(true);
+      store.replaceBoard("shop-app", []);
+      store.replaceQueue("seat-a", [{ repoId: "shop-app", issue: 1 }]);
+      expect(await spawnFor({ hasViewClients: () => false })).toBe(true);
+    });
+
+    it("stores the first spawned reading at once when spawning resumes inside a stored minute", async () => {
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let pending = false;
+      const c = stubs({
+        machine: vi.fn(async (_p, _prev, at, _cmd, spawn) => ({
+          sample: machineSample({ at, swapUsedBytes: spawn ? 777 : null }),
+          cpus: [],
+          errors: [],
+        })),
+      });
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: c,
+        hasViewClients: () => false,
+        startPending: () => pending,
+      });
+      await s.tick("machine");
+      expect(store.machineSamples(0).map((m) => m.swapUsedBytes)).toEqual([null]);
+      pending = true;
+      t += 10_000;
+      await s.tick("machine");
+      expect(store.machineSamples(0).map((m) => m.swapUsedBytes)).toEqual([null, 777]);
     });
 
     it("writes the first sample of each minute to the store, not every tick", async () => {

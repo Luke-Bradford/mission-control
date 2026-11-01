@@ -368,7 +368,7 @@ a decision, and refuses a run that is not a developer's own:
   failure; a failure sends the author the failing output, and the ruling goes to the operator if the
   author rules on that commit again.
 - `sync_main` has the engine merge main into the run's branch now (a `merge` repo only; the run in CI
-  or review, or parked on a conflict; at most 6 an hour). The commit is the hub's own, made by the same
+  or review, or parked on a conflict or a stuck push; at most 6 an hour). The commit is the hub's own, made by the same
   path as the engine's merge of main into a conflicting branch, never FLIGHT's or the seat's.
 - `end_run` ends a parked or stalled run, on its seat or set aside in review. It refuses a run with
   uncommitted work (or a worktree it cannot read), and is capped at 4 an hour.

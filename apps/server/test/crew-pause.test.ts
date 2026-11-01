@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   messageUnpausedSeat,
   pauseAwareSupervisor,
+  readCrewPause,
   reviewPausedMs,
   startUnpausedRun,
   writeCrewPause,
@@ -101,4 +102,28 @@ it("persists review pause time through edits and restart, including pauses betwe
   writeCrewPause(store, { ...pause, at: 400 }, 400, [review]);
   writeCrewPause(store, null, 500, [review]);
   expect(reviewPausedMs(store, review, 600)).toBe(300);
+});
+
+it("FLIGHT's write never clears or replaces a pause another actor set, and logs the refusal", () => {
+  const op = { seats: "all" as const, reason: "freeze", at: 100, by: "operator" };
+  writeCrewPause(store, op, 100);
+  expect(writeCrewPause(store, null, 200, [], "FLIGHT")).toBe(false);
+  expect(
+    writeCrewPause(
+      store,
+      { seats: ["guido-2"], reason: "mine", at: 200, by: "FLIGHT" },
+      200,
+      [],
+      "FLIGHT",
+    ),
+  ).toBe(false);
+  expect(readCrewPause(store)).toEqual(op);
+  expect(store.hubEvents(0).map((e) => e.text)).toContain(
+    "Crew pause kept: FLIGHT cannot replace the pause operator set (freeze)",
+  );
+  // a seat let out is the same record, still the operator's
+  expect(
+    writeCrewPause(store, { ...op, except: ["guido-2"], liftedBy: "FLIGHT" }, 300, [], "FLIGHT"),
+  ).toBe(true);
+  expect(readCrewPause(store)).toMatchObject({ by: "operator", except: ["guido-2"] });
 });

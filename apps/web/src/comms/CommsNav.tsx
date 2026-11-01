@@ -30,10 +30,10 @@ export function AgentNavRow({
   mentions: number;
   onNavigate: (path: string) => void;
 }) {
-  const data = useResource<CommsAgentResponse>(RESOURCES.commsAgent(row.id)).data;
-  const messages = data?.messages ?? [];
-  const since = Date.now() - 24 * 60 * 60 * 1000;
-  const recent = messages.filter((message) => message.at !== null && message.at >= since).length;
+  const data = useResource<CommsAgentResponse>(RESOURCES.commsNav(row.id)).data;
+  // The nav row reads counts, not messages: what its contact conversations hold (the crew
+  // channel is not among them).
+  const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
   const unread = data?.unread ?? 0;
   const direct = data?.directUnread ?? 0;
   const active = "agentId" in view && view.agentId === row.id;
@@ -51,10 +51,10 @@ export function AgentNavRow({
       </span>
       <span className="comms-nav-counts">
         <small
-          className={recent === 0 ? "zero" : undefined}
-          title={`${plural(recent, "message")} in 24h`}
+          className={total === 0 ? "zero" : undefined}
+          title={`${plural(total, "message")} with its contacts`}
         >
-          {recent}
+          {total}
         </small>
         <CountBadges unread={unread} mentions={mentions} direct={direct} />
       </span>

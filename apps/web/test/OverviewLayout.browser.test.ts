@@ -59,7 +59,7 @@ const api = {
   },
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
-  "/api/crew": { rows: [...seats, ...loops], firstRunToday: null },
+  "/api/crew?shape=summary": { rows: [...seats, ...loops], firstRunToday: null },
   "/api/attention": [],
   "/api/machine": { latest: null, warning: null },
   "/api/limits": limits,

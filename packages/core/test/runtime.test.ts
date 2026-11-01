@@ -47,6 +47,7 @@ import {
   pathInArea,
   protectedFileRules,
   READONLY_TOOLS,
+  SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
   SEAT_STATES,
   SKILL_FILE_MAX,
@@ -188,6 +189,13 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
+  it("passes a per-run dollar cap when one is supplied", () => {
+    const a = crewCliArgs({ ...base, maxBudgetUsd: 12.5 });
+    expect(count(a, "--max-budget-usd")).toBe(1);
+    expect(a[a.indexOf("--max-budget-usd") + 1]).toBe("12.5");
+    expect(crewCliArgs(base)).not.toContain("--max-budget-usd");
+  });
+
   it("resumes with --resume instead of --session-id", () => {
     const a = crewCliArgs({ ...base, resume: true });
     expect(a[a.indexOf("--resume") + 1]).toBe(base.sessionId);
@@ -231,6 +239,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).not.toContain("mcp__mc__draft_pr");
     expect(allowed).toContain("mcp__mc__report_evidence");
     expect(allowed).toContain("mcp__mc__ask_flight");
+    expect(allowed).toContain("mcp__mc__call_flight");
   });
 
   it("a read-only seat may ask FLIGHT and send Comms, with no git writes", () => {
@@ -240,6 +249,7 @@ describe("the allowlist in phase 2b", () => {
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_flight",
+      "mcp__mc__call_flight",
       "mcp__mc__report_evidence",
       "mcp__mc__comms_read",
       "mcp__mc__comms_inbox",
@@ -266,6 +276,7 @@ describe("the allowlist in phase 2b", () => {
     expect(MC_TOOLS).toEqual({
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
+      prBody: "mcp__mc__pr_body",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -278,6 +289,8 @@ describe("the allowlist in phase 2b", () => {
       releaseHold: "mcp__mc__release_hold",
       screenshotHud: "mcp__mc__screenshot_hud",
       askFlight: "mcp__mc__ask_flight",
+      callFlight: "mcp__mc__call_flight",
+      waitOn: "mcp__mc__wait_on",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
@@ -295,6 +308,7 @@ describe("the allowlist in phase 2b", () => {
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
       endRun: "mcp__mc__end_run",
+      resumeSeat: "mcp__mc__resume_seat",
       acceptRuling: "mcp__mc__accept_ruling",
       mergePr: "mcp__mc__merge_pr",
       settlePark: "mcp__mc__settle_park",
@@ -612,6 +626,7 @@ describe("crew constants", () => {
         loop: "watch",
         tools: [
           "log_decision",
+          "wait_on",
           "read_ticket",
           "answer_question",
           "start_seat",
@@ -621,6 +636,7 @@ describe("crew constants", () => {
           "screenshot_hud",
           "promote",
           "end_run",
+          "resume_seat",
           "accept_ruling",
           "merge_pr",
           "settle_park",
@@ -714,6 +730,8 @@ describe("mc tool grants", () => {
     expect(MC_TOOL_GRANTS["read-only"].base).toContain("ask_flight");
     // a scratch review answers with report_findings alone
     expect(MC_TOOL_GRANTS.scratch.base).not.toContain("ask_flight");
+    // every seat but FLIGHT may call it
+    for (const mode of Object.values(MC_TOOL_GRANTS)) expect(mode.base).toContain("call_flight");
     expect(Object.values(MC_TOOL_NAMES)).not.toContain("ask_operator");
     for (const g of Object.values(MC_TOOL_GRANTS)) {
       expect([...g.base, ...g.grantable] as string[]).not.toContain("ask_operator");
@@ -733,6 +751,7 @@ describe("mc tool grants", () => {
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
       "log_decision",
+      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",
@@ -742,6 +761,7 @@ describe("mc tool grants", () => {
       "screenshot_hud",
       "promote",
       "end_run",
+      "resume_seat",
       "accept_ruling",
       "merge_pr",
       "settle_park",
@@ -838,6 +858,7 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",
@@ -863,6 +884,80 @@ describe("scratch mode", () => {
   });
 });
 
+describe("crew sandbox home-folder reads (#487)", () => {
+  const sandbox = {
+    ...base.sandbox,
+    toolchainDirs: ["/opt/node/22", "/opt/pnpm"],
+    allowRead: ["/home/you/.config/pip"],
+  };
+  const fsOf = (s: CrewCliInput["sandbox"], mode: "writer" | "read-only" | "scratch") =>
+    JSON.parse(crewSandboxSettings(s, mode, base.hook)).sandbox.filesystem;
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "denies the home folder and re-allows exactly the listed paths for a %s seat",
+    (mode) => {
+      const f = fsOf({ ...sandbox, tempRoot: "/tmp/mc-runs/own" }, mode);
+      expect(f.denyRead).toContain("/home/you");
+      expect(f.allowRead).toEqual([
+        "/tmp/mc-runs/own",
+        base.sandbox.pnpmStoreDir,
+        "/mc/wt/guido-1",
+        "/mc/clone/.git",
+        "/mc/clone/.git/worktrees/guido-1",
+        "/opt/node/22",
+        "/opt/pnpm",
+        "/home/you/.gitconfig",
+        "/home/you/.config/git/config",
+        "/home/you/.config/git/ignore",
+        "/home/you/.config/git/attributes",
+        "/home/you/.config/pip",
+      ]);
+    },
+  );
+
+  it("keeps every credential and the data dir denied, and re-allows none of them", () => {
+    const f = fsOf(sandbox, "writer");
+    for (const d of SANDBOX_DENY_READ_HOME) expect(f.denyRead).toContain(`/home/you/${d}`);
+    expect(f.denyRead).toContain(base.sandbox.dataDir);
+    for (const allowed of f.allowRead as string[])
+      for (const denied of f.denyRead as string[])
+        if (denied !== "/home/you")
+          expect(denied === allowed || denied.startsWith(`${allowed}/`)).toBe(false);
+  });
+
+  it("refuses a re-allow that holds a credential folder or the data dir", () => {
+    for (const parent of ["/home/you/.config", "/home/you/.ssh", "/home/you/.local/share"]) {
+      expect(() => fsOf({ ...sandbox, allowRead: [parent] }, "writer")).toThrow(/holds denied/);
+    }
+  });
+
+  it("refuses a re-allow inside the data dir or a denied path", () => {
+    const inside = `${base.sandbox.dataDir}/crew`;
+    expect(() => fsOf({ ...sandbox, allowRead: [inside] }, "writer")).toThrow(/denied/);
+    expect(() => fsOf({ ...sandbox, toolchainDirs: [inside] }, "writer")).toThrow(/denied/);
+    expect(() =>
+      fsOf({ ...sandbox, denyRead: ["/home/you/work"], allowRead: ["/home/you/work/x"] }, "writer"),
+    ).toThrow(/inside denied/);
+  });
+
+  it("refuses a re-allow over or inside the shared temp folders", () => {
+    const tempRoot = "/tmp/mc-runs/own";
+    for (const p of ["/tmp", "/tmp/mc-runs", "/tmp/mc-runs/other", "/tmp/claude-501"]) {
+      expect(() => fsOf({ ...sandbox, tempRoot, allowRead: [p] }, "writer")).toThrow(/denied/);
+    }
+  });
+
+  it("refuses a re-allow of the whole home folder, or of a parent of it", () => {
+    expect(() => fsOf({ ...sandbox, toolchainDirs: ["/home/you"] }, "writer")).toThrow(/home/);
+    expect(() => fsOf({ ...sandbox, allowRead: ["/home"] }, "writer")).toThrow(/home/);
+  });
+
+  it("refuses a relative re-allow", () => {
+    expect(() => fsOf({ ...sandbox, allowRead: ["pip"] }, "writer")).toThrow(/absolute/);
+    expect(() => fsOf({ ...sandbox, toolchainDirs: ["bin"] }, "writer")).toThrow(/absolute/);
+  });
+});
+
 describe("crew sandbox and scoped edits", () => {
   it("denies the shared temp parent and sibling runs, allowing only the seat's own root", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
@@ -875,7 +970,7 @@ describe("crew sandbox and scoped edits", () => {
         expect(
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
-        expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
+        expect(f.allowRead.slice(0, 2)).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
         expect(f.denyRead).not.toContain("/tmp");
         expect(f.denyRead).not.toContain("/private/tmp");
       }
@@ -910,7 +1005,7 @@ describe("crew sandbox and scoped edits", () => {
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
-      expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
+      expect(f.allowRead.slice(0, 2)).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
       expect(f.denyWrite).toContain(`${"/tmp/mc-runs/seat-test"}/tool-output`);
@@ -1012,10 +1107,14 @@ describe("crew sandbox and scoped edits", () => {
       const entry = (matcher: string) => [
         { matcher, hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
       ];
+      const stopCommand = base.hook.command.replace(/ \|\| exit 2$/, " || true");
+      expect(stopCommand).not.toBe(base.hook.command);
       expect(j.hooks).toEqual({
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
+        // exit 2 from a Stop blocks the stop: its command ends `|| true`, not `|| exit 2`
+        Stop: [{ hooks: [{ type: "command", command: stopCommand, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
@@ -1037,6 +1136,8 @@ describe("crew sandbox and scoped edits", () => {
       expect(
         JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox.filesystem.denyRead,
       ).toEqual([
+        // the whole home folder first (#487): re-allows come in allowRead
+        "/home/you",
         "/home/you/.ssh",
         "/home/you/.config/gh",
         "/home/you/.config/mission-control",

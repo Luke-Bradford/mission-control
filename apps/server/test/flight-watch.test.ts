@@ -7,38 +7,50 @@ import {
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
   carriedFrom,
+  FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_HANDOVER_ASK,
+  FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_NO_WORK_MS,
+  FLIGHT_LEFT_HEAD,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MERGE_STALL_MS,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
   FLIGHT_RUN_TOOLS_SETTING,
+  FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_STARTS_PER_HOUR,
+  FLIGHT_TICK_MS,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightLedgerEntry,
   type FlightSeatState,
   type FlightState,
   type FlightWake,
+  FOR_THE_CONTROLLER,
   flightDownText,
   flightStartFailedText,
   GITHUB_RATE_SETTING,
+  handoverKey,
   NEW_LOOP,
   type PullRequestView,
+  RULING_PARK,
   type Run,
   type SeatSessionRow,
+  STUCK_PARK,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,17 +61,21 @@ import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
+  flightWaits,
   markFlightSignalsShown,
   observeFlightChecks,
   observeFlightMain,
+  recordFlightWait,
+  recordSeatCall,
 } from "../src/flight/signals.ts";
 import {
   deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
-  flightStartCap,
   flightState,
   flightView,
+  flightWakeHistory,
+  markItemsShown,
   markPrsShown,
   ownReply,
   pending,
@@ -114,7 +130,12 @@ let nowMs: number;
 let watch: FlightWatch;
 let emitted: string[];
 let startCalls: { seatId: string; first: string | undefined }[];
-let sendCalls: { runId: string; key: string; text: string }[];
+let sendCalls: {
+  runId: string;
+  key: string;
+  text: string;
+  cost?: { wake: number; pieces: readonly { section: string; bytes: number }[] };
+}[];
 let endCalls: string[];
 let statusCalls: number;
 let startFails: string | null;
@@ -168,6 +189,21 @@ const liveCrew = () => {
   live("inco-1", "r-inco");
   facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
 };
+/** Only FLIGHT is running between turns: no developer seat holds a run, so the crew is idle. */
+const flightOnly = () => {
+  live("flight-1", "r-flight");
+  facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+};
+/** The developer seats' runs end: only FLIGHT may be live, so the pace is the idle one. */
+const idleCrew = () => {
+  for (const [seatId, runId] of [
+    ["guido-1", "r-guido"],
+    ["inco-1", "r-inco"],
+  ] as const) {
+    store.upsertRun(run(runId, seatId, { endedAt: nowMs, status: "ok" }));
+    store.setSeatSession(row(seatId, null));
+  }
+};
 const ask = (agentId = "guido-1", runId = "r-guido", at = nowMs) =>
   store.addQuestion({ agentId, runId, text: "Which lane?", at });
 const notesOpen = () => store.notes().filter((n) => n.key === FLIGHT_NOTE_KEY);
@@ -205,8 +241,8 @@ const makeWatch = () => {
         if (alive === false) alive = true;
         return { runId };
       },
-      send: async (runId, key, text): Promise<SendResult> => {
-        sendCalls.push({ runId, key, text });
+      send: async (runId, key, text, cost): Promise<SendResult> => {
+        sendCalls.push({ runId, key, text, cost });
         if (sendFails) return "busy";
         const ok = store.claimLine(key, {
           runId,
@@ -379,6 +415,7 @@ describe("FLIGHT's PR list", () => {
 
   it("a wake that failed to send still lists the merged PR at the next one", async () => {
     liveCrew();
+    ask();
     store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
     sendFails = true;
     await watch.check();
@@ -391,8 +428,22 @@ describe("FLIGHT's PR list", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
+  it("sends a due wake with the wake's number and its digest and lessons pieces", async () => {
+    liveCrew();
+    ask();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const call = sendCalls[0];
+    expect(call?.cost?.wake).toBe(1);
+    expect(call?.cost?.pieces.map((p) => p.section)).toEqual(["lessons", "digest"]);
+    const digest = JSON.stringify(JSON.parse(call?.text.split("\n").at(-1) ?? ""));
+    expect(call?.cost?.pieces.reduce((n, p) => n + p.bytes, 0)).toBe(Buffer.byteLength(digest));
+  });
+
   it("does not wake again when a merged PR leaves the list after its wake", async () => {
     liveCrew();
+    ask();
     store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
@@ -687,6 +738,7 @@ describe("FLIGHT's flow queues", () => {
 
     expect(result.reviewQueue).toEqual({
       queued: 0,
+      waitMin: 0,
       running: 0,
       seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
     });
@@ -761,6 +813,7 @@ describe("FLIGHT's flow queues", () => {
 
     expect(result.reviewQueue).toEqual({
       queued: 5,
+      waitMin: 0,
       running: 0,
       seats: [
         { seat: "retro-1", queued: 3, running: 0, idle: true },
@@ -947,8 +1000,8 @@ describe("FLIGHT's holds", () => {
     store.upsertPullRequests("mc", [stored(7)], T0);
     hold();
     await watch.check();
-    expect(sendCalls[0]?.text).not.toContain("to release");
-    sendCalls = [];
+    // an open PR moving through the pipeline wakes nothing; the hold's release is the wake
+    expect(sendCalls).toEqual([]);
     // updatedAt is over an hour old, so the PR is not listed and only the hold can cause the wake
     store.upsertPullRequests(
       "mc",
@@ -966,7 +1019,7 @@ describe("FLIGHT's holds", () => {
   });
 
   it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
-    liveCrew();
+    flightOnly();
     store.upsertPullRequests("mc", [stored(7)], T0);
     hold();
     store.upsertPullRequests(
@@ -1224,9 +1277,13 @@ describe("FLIGHT's brief in the digest", () => {
       liveCrew();
       ask();
       await watch.check();
+      // the unanswered question goes stale at 10 minutes, and that wakes FLIGHT for itself
+      nowMs += 11 * MIN;
+      await watch.check();
+      expect(status()?.wokeOn).toEqual(["signals (1)"]);
       nowMs += FLIGHT_REWAKE_MS + MIN;
       await watch.check();
-      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls).toHaveLength(3);
       expect(status()?.wokeOn).toEqual(["reminder"]);
     });
 
@@ -1247,6 +1304,7 @@ describe("FLIGHT's brief in the digest", () => {
       await watch.check();
       expect(status()?.nextWakeAt).toBe(woke + FLIGHT_REWAKE_MS);
       store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+      idleCrew();
       await watch.check();
       expect(status()).toMatchObject({ lastWakeAt: woke, nextWakeAt: null });
     });
@@ -1259,7 +1317,7 @@ describe("FLIGHT's brief in the digest", () => {
           upsert: [
             {
               id: "recheck",
-              dueAt: nowMs + 30 * MIN,
+              dueAt: nowMs + 10 * MIN,
               kind: "PR recheck",
               target: "mc#1",
               label: "Re-check",
@@ -1271,7 +1329,7 @@ describe("FLIGHT's brief in the digest", () => {
       );
       ask();
       await watch.check();
-      expect(status()?.nextWakeAt).toBe(nowMs + 30 * MIN);
+      expect(status()?.nextWakeAt).toBe(nowMs + 10 * MIN);
       expect(flightView(config, store, nowMs, () => false).wake?.nextWakeAt).toBeNull();
     });
   });
@@ -1327,7 +1385,7 @@ describe("FLIGHT's brief in the digest", () => {
     expect(sentWake().prs).toEqual({ entries: [], unchanged: 1, removed: [] });
     expect(sentWake().seats).toEqual({ entries: [], unchanged: 3, removed: [] });
     expect(sentWake().brief).toBeUndefined();
-    expect(sentWake().facts.prs).toHaveLength(1);
+    expect(sentWake().facts.q).toHaveLength(1);
     expect(sentWake().questions).toHaveLength(1);
   });
 
@@ -1483,7 +1541,7 @@ describe("the FLIGHT watcher", () => {
     expect(digest.facts.q).toEqual([]);
   });
 
-  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free or counted", () => {
+  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free", () => {
     const cfg = structuredClone(config);
     const seats = cfg.crew?.sessions[0]?.seats ?? [];
     const byId = (id: string) => {
@@ -1493,11 +1551,8 @@ describe("the FLIGHT watcher", () => {
     };
     byId("flight-1").retiring = true;
     expect(flightSeat(cfg)).toBeNull();
-    // two build seats count; a retiring one does not
     delete byId("flight-1").retiring;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR * 2);
     byId("inco-1").retiring = true;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR);
     const state = flightState({ config: cfg, store, busy: [], now: T0 });
     expect(state.seats.map((s) => s.id)).toEqual(["guido-1", "retro-1"]);
     // a second watch seat takes over while the first retires
@@ -1980,7 +2035,7 @@ describe("the FLIGHT watcher", () => {
   });
 
   it("wakes for due plans once, retains overdue labels and retries pending work hourly after restart", async () => {
-    liveCrew();
+    flightOnly();
     store.setFlightPlans(
       "s1",
       {
@@ -2064,6 +2119,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
+    liveCrew();
+    ask();
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    const state = flightState({ config, store, busy: [], now: nowMs });
+    expect(JSON.parse(wakeFacts(state)).breaker).toEqual(["a loop"]);
+    // lifted, the waiting question wakes it
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
   it("wakes on a new Needs-you item, once", async () => {
     liveCrew();
     raiseBlocked();
@@ -2085,16 +2154,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls[1]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 2 items to brief`)).toBe(true);
   });
 
-  it("an unbriefed item re-wakes hourly", async () => {
-    liveCrew();
+  it("an unbriefed item re-wakes hourly when no run is live", async () => {
+    flightOnly();
     raiseBlocked();
     await watch.check();
-    nowMs = T0 + 59 * MIN;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    nowMs = T0 + 61 * MIN;
+    // it goes stale after 10 minutes, which wakes FLIGHT once for itself
+    nowMs = T0 + 11 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+    nowMs = T0 + 70 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    nowMs = T0 + 72 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(3);
   });
 
   it("a question that goes away and comes back wakes again", async () => {
@@ -2170,24 +2243,28 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
-  it("re-wakes hourly while something waits, and not otherwise", async () => {
+  it("re-wakes hourly while something waits, and not otherwise, even with a run live", async () => {
     liveCrew();
     ask();
     await watch.check();
-    nowMs = T0 + 59 * MIN;
+    nowMs = T0 + 11 * MIN;
     await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    nowMs = T0 + 61 * MIN;
+    // the question went stale at 10 minutes: that is its own wake
+    expect(sendCalls).toHaveLength(2);
+    nowMs = T0 + 70 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
-    expect(sendCalls[1]?.key.endsWith(":2")).toBe(true);
+    nowMs = T0 + 72 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(3);
+    expect(sendCalls[2]?.key.endsWith(":3")).toBe(true);
 
     store.answerQuestions("guido-1", nowMs);
-    nowMs = T0 + 130 * MIN;
-    await watch.check();
     nowMs = T0 + 200 * MIN;
     await watch.check();
-    expect(sendCalls).toHaveLength(2);
+    nowMs = T0 + 300 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(3);
   });
 
   it("a rotation requested before a fresh start needs no second session", async () => {
@@ -2217,6 +2294,118 @@ describe("the FLIGHT watcher", () => {
     expect(notesOpen()).toEqual([]);
     await watch.check();
     expect(notesOpen()).toHaveLength(1);
+  });
+
+  describe("a handover at FLIGHT_CONTEXT_ROTATE_TOKENS of context", () => {
+    /** A digest whose last assistant turn reports this much context. */
+    const context = (tokens: number, runId = "r-flight") => {
+      const line = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(nowMs).toISOString(),
+        message: {
+          id: "m1",
+          content: [{ type: "text", text: "working" }],
+          usage: {
+            input_tokens: 1000,
+            cache_read_input_tokens: tokens - 11_000,
+            cache_creation_input_tokens: 10_000,
+            output_tokens: 50,
+          },
+        },
+      });
+      store.setDigest(runId, foldTranscript(null, [line], nowMs).digest);
+    };
+    const idle = () =>
+      listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+
+    it("sends one handover wake just past the limit, then rotates once that turn ends", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+      expect(endCalls).toEqual([]);
+
+      // its turn is running, then it ends
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      nowMs += MIN;
+      idle();
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+      expect(endCalls).toEqual(["r-flight"]);
+      await watch.check();
+      expect(startCalls).toHaveLength(1);
+    });
+
+    it("does nothing at the limit or under it", async () => {
+      liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS);
+      await watch.check();
+      await watch.check();
+      expect(sendCalls).toEqual([]);
+      expect(endCalls).toEqual([]);
+    });
+
+    it("rotates at once when the handover for this run was already sent", async () => {
+      liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      store.claimLine(handoverKey("r-flight"), {
+        runId: "r-flight",
+        seatId: "flight-1",
+        origin: "engine",
+        text: FLIGHT_HANDOVER_ASK,
+        at: T0,
+      });
+      await watch.check();
+      // the repeat is refused as a duplicate, and the run is rotated
+      expect(sendCalls).toHaveLength(1);
+      expect(endCalls).toEqual(["r-flight"]);
+    });
+
+    it("gives the next session's start brief the handover and where to read", async () => {
+      liveCrew();
+      store.putFlightMemory({
+        repoId: "mc",
+        topic: FLIGHT_HANDOVER_TOPIC,
+        kind: "crew",
+        body: "Mid-way through #77; promised the operator a PR by noon.",
+        source: "flight handover",
+        author: "flight",
+        updatedAt: T0,
+      });
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      store.claimLine(handoverKey("r-flight"), {
+        runId: "r-flight",
+        seatId: "flight-1",
+        origin: "engine",
+        text: FLIGHT_HANDOVER_ASK,
+        at: T0,
+      });
+      await watch.check();
+      await watch.check();
+      expect(startCalls).toHaveLength(1);
+      const first = startCalls[0]?.first ?? "";
+      expect(first).toContain("Mid-way through #77; promised the operator a PR by noon.");
+      expect(first).toContain("flight_state");
+      expect(first).toContain("tracked items, plans, memory");
+    });
+
+    it("tells the FLIGHT page the context and when the session is renewed", () => {
+      liveCrew();
+      expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
+        tokens: null,
+        rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+        text: null,
+      });
+      context(301_000);
+      expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
+        tokens: 301_000,
+        rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+        text: "context 301K · fresh session at 300K",
+      });
+    });
   });
 
   it("rotates after 40 wakes, and the next start is not counted", async () => {
@@ -2416,7 +2605,7 @@ describe("wakeSummary", () => {
     items: [],
     holds: [],
     recent: [],
-    limits: { startsLeft: 4, messagesLeft: 30 },
+    breaker: { tripped: false, reason: null },
     brief: [],
     headlineAgeMin: null,
     headline: "",
@@ -2500,14 +2689,38 @@ describe("wakeSummary", () => {
       ).toBe(true);
     });
 
+    it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {
+      const stuck = state({ seats: [s({ parked: { kind: STUCK_PARK, reason: "x" } })] });
+      expect(pending(stuck)).toBe(false);
+      expect(wakeFacts(stuck)).toBe(wakeFacts(state({ seats: [s({})] })));
+    });
+
     it("is true for a stopped build seat even with no ticket, and the summary counts it", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
       expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
-      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).not.toBe(
+      // a PR merging is a routine step: in the digest, not a wake fact
+      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).toBe(
+        wakeFacts(state({ prs: [pr] })),
+      );
+      expect(wakeFacts(state({ prs: [{ ...pr, awaitingFlight: "sha" }] }))).not.toBe(
         wakeFacts(state({ prs: [pr] })),
       );
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
+    });
+
+    it("raises the idle-reviewers fact only once a queued review has waited 10 minutes", () => {
+      const queue = (queued: number, waitMin: number) =>
+        state({
+          reviewQueue: {
+            queued,
+            running: 0,
+            waitMin,
+            seats: [{ seat: "retro-1", queued, running: 0, idle: true }],
+          },
+        });
+      expect(wakeFacts(queue(1, 9))).toBe(wakeFacts(queue(0, 0)));
+      expect(wakeFacts(queue(1, 10))).not.toBe(wakeFacts(queue(0, 0)));
     });
 
     it("ignores a free seat next to tickets that are not ready, until one is", () => {
@@ -2649,6 +2862,88 @@ describe("ops signals", () => {
       store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 - FLIGHT_IDLE_MS });
       store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
       store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
+    },
+    old_park() {
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
+      store.setRunLoop("r-park", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "push", reason: "push stuck", ended: false },
+      });
+      store.setSeatSession(row("guido-1", "r-park", "parked"));
+      store.addLoopEvent("park-old", "r-park", "parked: push stuck", T0 - 16 * MIN);
+    },
+    push_unseen() {
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.upsertRun(run("r-unseen", "guido-1", { ticket: "mc#176" }));
+      store.setRunLoop("r-unseen", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+      });
+      store.setSeatSession(row("guido-1", "r-unseen", "parked"));
+      store.addLoopEvent("park-unseen", "r-unseen", "parked: PR has no head", T0 - 31 * MIN);
+    },
+    merge_stalled() {
+      store.upsertRun(run("r-ready", "guido-1", { ticket: "mc#176" }));
+      store.setRunLoop("r-ready", { ...NEW_LOOP, prNumber: 7 });
+      store.setSeatSession(row("guido-1", "r-ready"));
+      store.upsertPullRequests("mc", [stored(7, { ticket: "mc#176", isDraft: false })], T0);
+      store.raiseNote({
+        key: "ready:r-ready",
+        kind: "ready",
+        runId: "r-ready",
+        seatId: "guido-1",
+        repoId: "mc",
+        text: "mc#176 is ready to merge",
+        at: T0 - 11 * MIN,
+      });
+    },
+    item_stale() {
+      store.raiseNote({
+        key: "blocked:r1:0",
+        kind: "blocked",
+        runId: null,
+        seatId: "guido-1",
+        repoId: "mc",
+        text: "mc#7 parked",
+        at: T0 - 11 * MIN,
+      });
+    },
+    run_no_pr() {
+      store.upsertRun(
+        run("r-nopr", "guido-1", {
+          ticket: "mc#176",
+          endedAt: T0 - MIN,
+          endedBy: "exit",
+          status: "failed",
+        }),
+      );
+    },
+    controller_unanswered() {
+      store.addFlightDecision({
+        at: T0 - 16 * MIN,
+        kind: "note",
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about: `${FOR_THE_CONTROLLER} approve the budget change`,
+        decision: "asked",
+        basis: "b",
+      });
+    },
+    wait_over() {
+      recordFlightWait(store, "mc#9", { on: "PR 7 merging", until: T0 - MIN, at: T0 - 30 * MIN });
+    },
+    seat_call() {
+      recordSeatCall(store, "mc", {
+        seat: "guido-1",
+        reason: "blocked on a change outside my area",
+        ref: "mc#7",
+        at: T0,
+      });
     },
     github_budget() {
       store.setSetting(
@@ -3010,9 +3305,9 @@ describe("ops signals", () => {
     store.replaceBoard("mc", [
       triageCard({ status: "Ready", blockedBy: [{ ref: "mc#1", closed: false }] }),
     ]);
-    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    expect(signalState().signals.filter((s) => s.kind === "idle_seat" && !s.told)).toEqual([]);
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
-    expect(signalState().signals[0]?.kind).toBe("idle_seat");
+    expect(signalState().signals.map((s) => s.kind)).toContain("idle_seat");
   });
 
   it("does not count a previous run's last turn as time idle after the seat is freed", () => {
@@ -3081,7 +3376,7 @@ describe("triage and quiet wakes", () => {
     signalState();
   });
   it("wakes once for a new Backlog ticket with Ready empty, also across restart", async () => {
-    liveCrew();
+    flightOnly();
     store.replaceBoard("mc", [triageCard()]);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
@@ -3114,6 +3409,57 @@ describe("triage and quiet wakes", () => {
     expect(next.triage.map((t) => t.cause).sort()).toEqual(["dependency", "plan"]);
     markFlightSignalsShown(store, next, nowMs);
     expect(signalState().triage).toEqual([]);
+  });
+
+  it("wakes FLIGHT once when a chain of waiting tickets has stood still for 30 minutes", async () => {
+    liveCrew();
+    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
+    const mid = triageCard({
+      issueNumber: 2,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [1], prs: [] },
+    });
+    const top = triageCard({
+      issueNumber: 3,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [2], prs: [] },
+    });
+    store.replaceBoard("mc", [root, mid, top]);
+    const stalled = () => signalState().signals.filter((x) => x.kind === "chain_stalled");
+    expect(stalled()).toEqual([]);
+    nowMs += 29 * MIN;
+    expect(stalled()).toEqual([]);
+    nowMs += MIN;
+    const found = stalled();
+    // one signal for the whole chain, not one for each ticket in it
+    expect(found.map((x) => x.key)).toEqual(["mc#3>mc#2>mc#1"]);
+    expect(found[0]?.evidence).toContain("30 min");
+    markFlightSignalsShown(store, signalState(), nowMs);
+    expect(stalled().filter((x) => !x.told)).toEqual([]);
+  });
+
+  it("drops a stalled chain that ended before FLIGHT was told", () => {
+    liveCrew();
+    const waiting = triageCard({
+      issueNumber: 2,
+      status: "Blocked",
+      state: "blocked",
+      after: { issues: [1], prs: [] },
+    });
+    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
+    store.replaceBoard("mc", [root, waiting]);
+    signalState();
+    nowMs += 31 * MIN;
+    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toHaveLength(1);
+    store.replaceBoard("mc", [{ ...root, status: "Done", state: "done", closed: true }, waiting]);
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { ticket: "mc#1", closingIssues: [1], state: "merged", mergedAt: nowMs })],
+      nowMs,
+    );
+    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toEqual([]);
   });
 
   it("keeps the stored PR list and wake facts stable on a phase-only move and metadata timestamp change", () => {
@@ -3536,6 +3882,64 @@ describe("ops review regressions", () => {
     },
   );
 
+  it.each([
+    ["superseded", false],
+    ["engine", true],
+    ["exit", true],
+  ] as const)(
+    "a running review's run ended by %s without a report: signal is %s",
+    (endedBy, raised) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      }) as number;
+      store.setReviewState(reviewId, ["queued"], "running", { at: T0, runId: "review-run" });
+      const r = run("review-run", "retro-1", { reviewId, endedAt: T0, status: "ok", endedBy });
+      store.upsertRun(r);
+      store.setRunEnded(r.id, T0, "ok", endedBy);
+      recordNoReport(store, r, "review", { code: 0, signal: null, lastStderr: "" }, null, T0);
+      const signals = signalState().signals;
+      if (raised)
+        expect(signals).toContainEqual(expect.objectContaining({ key: "report:review-run" }));
+      else expect(signals).toEqual([]);
+    },
+  );
+
+  it("raises a hub_error for a blocking review that holds no finding text", () => {
+    live("guido-1", "r-guido");
+    const reviewId = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "head1234",
+      epoch: 1,
+      attempt: 1,
+      round: 2,
+      at: T0,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "reported", { at: T0 });
+    expect(signalState().signals).toEqual([]);
+    const raw = store as unknown as {
+      db: { prepare(sql: string): { run(...a: number[]): unknown } };
+    };
+    raw.db.prepare("UPDATE reviews SET blocking = 1 WHERE id = ?").run(reviewId);
+    expect(signalState().signals).toContainEqual(
+      expect.objectContaining({
+        kind: "hub_error",
+        key: `findings:r-guido:${reviewId}`,
+        evidence: expect.stringContaining("no finding text is stored"),
+      }),
+    );
+  });
+
   it("keeps watch errors stable across updates and restart, and keys a new error after recovery", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
@@ -3636,7 +4040,7 @@ describe("ops review regressions", () => {
 
 describe("daily retrospective wakes", () => {
   it("retries failed preparation at most once an hour without restarting", async () => {
-    liveCrew();
+    flightOnly();
     nowMs = Date.parse("2026-10-24T02:00:00Z");
     const prepare = vi
       .spyOn(retrospective, "prepareRetrospective")
@@ -3713,7 +4117,7 @@ describe("daily retrospective wakes", () => {
     ["2026-10-24T01:59:00Z", "2026-10-24T02:00:00Z", "2026-10-24"],
     ["2026-10-25T02:59:00Z", "2026-10-25T03:00:00Z", "2026-10-25"],
   ])("wakes at local 03:00 (%s), once across a durable restart", async (before, at, day) => {
-    liveCrew();
+    flightOnly();
     nowMs = Date.parse(before);
     await watch.check();
     expect(sendCalls).toHaveLength(0);
@@ -3762,5 +4166,848 @@ describe("daily retrospective wakes", () => {
     await watch.check();
     expect(startCalls[0]?.first).toContain('"retrospective":');
     expect(flightState({ config, store, busy: [], now: nowMs }).retrospective).toBeUndefined();
+  });
+});
+
+describe("every wake ends with each reason handled", () => {
+  const flightIdle = () =>
+    listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+  const leftNotes = () => store.notes().filter((n) => n.key === FLIGHT_LEFT_NOTE_KEY);
+  /** A wake on one open question, then FLIGHT's turn ends. */
+  const wokeOnAQuestion = async () => {
+    liveCrew();
+    watch.start();
+    const id = ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    return id;
+  };
+  const decide = (over: Partial<Parameters<Store["addFlightDecision"]>[0]>) =>
+    store.addFlightDecision({
+      at: nowMs,
+      kind: "answer",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+      ...over,
+    });
+
+  it("re-wakes once with 'You left these' when a reason gets no decision", async () => {
+    await wokeOnAQuestion();
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const line = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(line).toContain(`${FLIGHT_LEFT_HEAD} q 1`);
+    // one re-wake only: the same silence again does not send a third
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("holds a question that arrived with the re-wake to its own first miss", async () => {
+    const q1 = await wokeOnAQuestion();
+    ask("inco-1", "r-inco", nowMs);
+    await watch.check();
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain(FLIGHT_LEFT_HEAD);
+    flightIdle();
+    decide({ questionId: q1 });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    // the new question was missed once: it is re-woken for, not sent to the operator
+    expect(leftNotes()).toEqual([]);
+    expect(sendCalls.at(-1)?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} q 2`);
+  });
+
+  it("keeps the operator item while the reason it lists is still undecided", async () => {
+    await wokeOnAQuestion();
+    const q2 = ask("inco-1", "r-inco", nowMs);
+    await watch.check();
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    expect(leftNotes()[0]?.text).toContain("q 1");
+    // the re-wake for the second question ends clean, but question 1 is still open
+    flightIdle();
+    decide({ questionId: q2 });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    expect(leftNotes()).toHaveLength(1);
+    // once question 1 is answered the item clears
+    store.answerQuestions("guido-1", nowMs);
+    await watch.check();
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("raises one operator item when the second wake leaves them again, and none before", async () => {
+    await wokeOnAQuestion();
+    await watch.check();
+    expect(leftNotes()).toEqual([]);
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    await watch.check();
+    expect(leftNotes()).toHaveLength(1);
+    expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
+    expect(leftNotes()[0]?.text).toContain("q 1");
+    // the operator sees it as itself, not as an item FLIGHT triages
+    const item = attentionItems(config, store, nowMs).find((i) =>
+      i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
+    );
+    expect(item).toMatchObject({ owner: "operator" });
+    expect(item?.flightTriage).toBeUndefined();
+  });
+
+  it("clears the item once a later wake's reasons are all handled", async () => {
+    await wokeOnAQuestion();
+    await watch.check();
+    flightIdle();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(leftNotes()).toHaveLength(1);
+    // FLIGHT answers the question later; the next audit of a fresh wake finds nothing left
+    store.answerQuestions("guido-1", nowMs);
+    ask("guido-1", "r-guido", nowMs);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    flightIdle();
+    decide({ questionId: store.openQuestions()[0]?.id ?? 0 });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("counts a decision that names the reason's target as handling it", async () => {
+    const id = await wokeOnAQuestion();
+    decide({ kind: "brief", about: `ask:${id}: briefed for the operator`, decision: "passed up" });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("counts a wait on the target as handling it", async () => {
+    const id = await wokeOnAQuestion();
+    decide({
+      kind: "wait",
+      about: `ask:${id}: waiting on the lane decision`,
+      decision: "waiting until later",
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("counts a reason settled in the state (the question answered) as handled", async () => {
+    await wokeOnAQuestion();
+    store.answerQuestions("guido-1", nowMs);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("does not audit while FLIGHT's turn is still running", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    // no idle event: the turn that followed the wake has not ended
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a decision for one signal's target leaves another of the same kind unhandled", async () => {
+    liveCrew();
+    watch.start();
+    for (const seatId of ["guido-1", "guido-2"])
+      recordSeatCall(store, "mc", { seat: seatId, reason: "stuck", ref: null, at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    flightIdle();
+    // names the kind and one seat only
+    decide({ kind: "note", seatId: "guido-1", about: "seat_call from guido-1", decision: "on it" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const line = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(line).toContain("guido-2");
+    expect(line).not.toContain("guido-1");
+  });
+
+  it("a brief or wait that names the ticket or PR handles a stalled merge", async () => {
+    liveCrew();
+    watch.start();
+    store.setRunLoop("r-guido", { ...NEW_LOOP, prNumber: 7 });
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-guido", { ...NEW_LOOP, prNumber: 7 });
+    store.upsertPullRequests("mc", [stored(7, { ticket: "mc#176", isDraft: false })], T0);
+    store.raiseNote({
+      key: "ready:r-guido",
+      kind: "ready",
+      runId: "r-guido",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#176 is ready to merge",
+      at: nowMs - 11 * MIN,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("PR #7");
+    flightIdle();
+    decide({
+      kind: "brief",
+      ref: "mc#176",
+      about: "PR #7 stalled",
+      decision: "briefed the operator",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("a brief on an item's ticket handles both the item and its stale signal", async () => {
+    liveCrew();
+    watch.start();
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#176" }));
+    store.raiseNote({
+      key: "blocked:r-guido:0",
+      kind: "blocked",
+      runId: "r-guido",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#176 blocked on the operator",
+      at: nowMs - 11 * MIN,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("item_stale");
+    flightIdle();
+    decide({
+      kind: "brief",
+      ref: "mc#176",
+      about: "mc#176 is blocked on the operator",
+      decision: "briefed the operator",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("a decision with an item's kind in it does not settle every stale item of that kind", async () => {
+    liveCrew();
+    watch.start();
+    for (const r of ["r1", "r2"])
+      store.raiseNote({
+        key: `blocked:${r}:0`,
+        kind: "blocked",
+        runId: null,
+        seatId: "guido-1",
+        repoId: "mc",
+        text: `mc#7 parked (${r})`,
+        at: nowMs - 11 * MIN,
+      });
+    await watch.check();
+    flightIdle();
+    decide({ kind: "note", about: "r1 blocked handled", decision: "on it" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const line = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(line).toContain("r2");
+    expect(line).not.toContain("r1");
+  });
+
+  it("a decision about something else leaves the reason unhandled", async () => {
+    await wokeOnAQuestion();
+    decide({ kind: "note", about: "mc#999 something else", decision: "noted" });
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+});
+
+describe("the pace of FLIGHT's re-wake", () => {
+  it("does not speed up while a run is live: nothing pending means no re-wake", async () => {
+    live("guido-1", "r-guido");
+    noFlight();
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    for (const later of [16 * MIN, FLIGHT_REWAKE_MS + MIN, 3 * FLIGHT_REWAKE_MS]) {
+      nowMs = T0 + later;
+      await watch.check();
+    }
+    expect(sendCalls).toHaveLength(0);
+  });
+});
+
+describe("a seat's call to FLIGHT", () => {
+  it("wakes FLIGHT within one tick with the seat's reason", async () => {
+    liveCrew();
+    watch.start();
+    await vi.advanceTimersByTimeAsync(0);
+    sendCalls = [];
+    recordSeatCall(store, "mc", {
+      seat: "guido-1",
+      reason: "blocked on a change in apps/web",
+      ref: "mc#7",
+      at: nowMs,
+    });
+    bus.emit("attention");
+    nowMs += FLIGHT_DEBOUNCE_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS);
+    expect(FLIGHT_DEBOUNCE_MS).toBeLessThanOrEqual(FLIGHT_TICK_MS);
+    expect(sendCalls).toHaveLength(1);
+    const text = sendCalls[0]?.text ?? "";
+    expect(text.split("\n")[0]).toContain("woke on: signals (1)");
+    expect(text).toContain("guido-1 calls FLIGHT about mc#7: blocked on a change in apps/web");
+  });
+
+  it("is told once, and a call FLIGHT never decides on is left to the audit", async () => {
+    liveCrew();
+    watch.start();
+    recordSeatCall(store, "mc", {
+      seat: "guido-1",
+      reason: "need a ruling",
+      ref: "mc#7",
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} signals`);
+  });
+});
+
+describe("the sweep's new checks hold back until their time", () => {
+  beforeEach(() => {
+    store.setSeatSession({ ...row("guido-1", null), updatedAt: nowMs });
+    flightOnly();
+  });
+  const kinds = () =>
+    flightState({ config, store, busy: [], now: nowMs }).signals.map((s) => s.kind);
+
+  it("an idle seat with startable work counts after 10 minutes, not before", () => {
+    store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 - 9 * MIN });
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
+    expect(kinds()).not.toContain("idle_seat");
+    nowMs += MIN;
+    expect(kinds()).toContain("idle_seat");
+  });
+
+  describe("an idle seat with nothing startable in Ready", () => {
+    // a laned hub: the lane:work card is another lane's, so nothing is startable here
+    const laned = {
+      ...config,
+      crew: { ...(config.crew as NonNullable<typeof config.crew>), lane: "home" as const },
+    };
+    const idleNoWork = () =>
+      flightState({ config: laned, store, busy: [], now: nowMs }).signals.filter((s) =>
+        s.key.startsWith("inco-1:"),
+      );
+    beforeEach(() => {
+      // Ready holds only a ticket of another lane: the seat's queue stays empty
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: T0 - FLIGHT_IDLE_NO_WORK_MS });
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:work"] })]);
+      store.replaceQueue("inco-1", []);
+    });
+
+    it("wakes FLIGHT once, naming the seat and its area", () => {
+      const found = idleNoWork().filter((s) => s.kind === "idle_no_work");
+      expect(found).toHaveLength(1);
+      expect(found[0]?.evidence).toContain("inco-1");
+      expect(found[0]?.evidence).toContain("apps/web/**");
+    });
+
+    it("is not raised when Ready holds a startable ticket of the hub's lane (draft repo, no queue)", () => {
+      store.replaceBoard("mc", [triageCard({ status: "Ready", labels: ["lane:home"] })]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised before 5 minutes idle", () => {
+      nowMs -= MIN;
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("is not raised while the seat has startable work queued", () => {
+      store.replaceQueue("inco-1", [{ repoId: "mc", issue: 176 }]);
+      expect(idleNoWork().map((s) => s.kind)).not.toContain("idle_no_work");
+    });
+
+    it("raises nothing new in the same hour, then again after it", () => {
+      const first = flightState({ config: laned, store, busy: [], now: nowMs });
+      markFlightSignalsShown(store, first, nowMs);
+      // the seat starts and finishes work: a new idle episode within the hour
+      nowMs += 20 * MIN;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toEqual([]);
+      nowMs += FLIGHT_HOUR_MS;
+      store.setSeatSession({ ...row("inco-1", null), updatedAt: nowMs - FLIGHT_IDLE_NO_WORK_MS });
+      expect(idleNoWork().filter((s) => s.kind === "idle_no_work" && !s.told)).toHaveLength(1);
+    });
+  });
+
+  it("a park counts after 15 minutes, not before", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-park", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: "push", reason: "push stuck", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-park", "parked"));
+    store.addLoopEvent("p", "r-park", "parked: push stuck", T0 - 14 * MIN);
+    expect(kinds()).not.toContain("old_park");
+    nowMs += 2 * MIN;
+    expect(kinds()).toContain("old_park");
+  });
+
+  it("a push the PR does not show is the engine's for 30 minutes, then a wake reason", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-park", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-park", "parked"));
+    store.addLoopEvent("p", "r-park", "parked: PR has no head", T0 - 29 * MIN);
+    expect(kinds()).not.toContain("old_park");
+    expect(kinds()).not.toContain("push_unseen");
+    nowMs += 2 * MIN;
+    expect(kinds().filter((k) => k === "push_unseen")).toHaveLength(1);
+    expect(kinds()).not.toContain("old_park");
+  });
+
+  it("a controller request counts after 15 minutes, and an answer from CAPCOM ends it", () => {
+    store.addFlightDecision({
+      at: T0 - 14 * MIN,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: `${FOR_THE_CONTROLLER} approve it`,
+      decision: "asked",
+      basis: "b",
+    });
+    expect(kinds()).not.toContain("controller_unanswered");
+    nowMs += 2 * MIN;
+    expect(kinds()).toContain("controller_unanswered");
+    // once told, it stays only while the request is unanswered
+    markFlightSignalsShown(store, flightState({ config, store, busy: [], now: nowMs }), nowMs);
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "approved",
+    });
+    expect(kinds()).not.toContain("controller_unanswered");
+  });
+
+  it("an ended run with no PR counts; one with a PR, or a missing report already told, does not", () => {
+    store.upsertRun(
+      run("r-nopr", "guido-1", {
+        ticket: "mc#176",
+        endedAt: T0,
+        endedBy: "exit",
+        status: "failed",
+      }),
+    );
+    expect(kinds()).toContain("run_no_pr");
+    store.upsertPullRequests("mc", [stored(7, { ticket: "mc#176" })], T0);
+    expect(kinds()).not.toContain("run_no_pr");
+  });
+
+  it("a wait counts as over once its time passes", () => {
+    recordFlightWait(store, "mc#9", { on: "PR 7", until: T0 + 5 * MIN, at: T0 });
+    expect(kinds()).not.toContain("wait_over");
+    nowMs += 6 * MIN;
+    expect(kinds()).toContain("wait_over");
+  });
+});
+
+describe("routine pipeline steps stay in the digest (#1239)", () => {
+  /** A tick past the minimum gap, so a wake that is due is not held back. */
+  const tick = async () => {
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    vi.setSystemTime(nowMs);
+    await watch.check();
+  };
+  const holdPr = (over: Partial<PullRequestView> = {}) => {
+    store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-pr", { ...NEW_LOOP, prNumber: 7 });
+    store.setSeatSession(row("guido-1", "r-pr"));
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { ticket: "mc#176", isDraft: false, ...over })],
+      nowMs,
+    );
+  };
+
+  it("a PR going pending, green, review queued, merged wakes FLIGHT never", async () => {
+    flightOnly();
+    holdPr({ ci: "pending" });
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    const before = wakeFacts(flightState({ config, store, busy: [], now: nowMs }));
+    holdPr({ ci: "passing" });
+    await tick();
+    store.requestReview({
+      authorRunId: "r-pr",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "sha7",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: nowMs,
+    });
+    await tick();
+    holdPr({ ci: "passing", review: "approved" });
+    await tick();
+    holdPr({ ci: "passing", state: "merged", mergedAt: nowMs });
+    await tick();
+    expect(sendCalls).toEqual([]);
+    expect(startCalls).toEqual([]);
+    expect(wakeFacts(flightState({ config, store, busy: [], now: nowMs }))).toBe(before);
+    // still in the digest FLIGHT reads
+    expect(listed().map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+  });
+
+  it("a ready PR with a queued merge wakes nothing until the stall rule fires, then once", async () => {
+    flightOnly();
+    holdPr({ ci: "passing" });
+    store.raiseNote({
+      key: "ready:r-pr",
+      kind: "ready",
+      runId: "r-pr",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#176 is ready to merge",
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += FLIGHT_MERGE_STALL_MS - MIN;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const head = sendCalls[0]?.text.split("\n")[0] ?? "";
+    expect(head).toContain("signals");
+    const digest = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "{}");
+    expect(JSON.stringify(digest.signals.entries)).toContain("PR #7");
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a park the engine clears alone is no wake; a ruling park is", async () => {
+    flightOnly();
+    holdPr();
+    store.setRunLoop("r-pr", {
+      ...NEW_LOOP,
+      prNumber: 7,
+      phase: "parked",
+      parked: { kind: "push", reason: "push stuck", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-pr", "parked"));
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    store.setRunLoop("r-pr", {
+      ...NEW_LOOP,
+      prNumber: 7,
+      phase: "parked",
+      parked: { kind: RULING_PARK, reason: "needs a ruling", ended: false },
+    });
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a question wakes FLIGHT within one tick", async () => {
+    liveCrew();
+    await watch.check();
+    ask();
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("q (1)");
+  });
+
+  it("an item for FLIGHT wakes it within one tick", async () => {
+    liveCrew();
+    await watch.check();
+    store.raiseNote({
+      key: "blocked:r1:0",
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#7 parked",
+      at: nowMs,
+    });
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("items");
+  });
+
+  it("a failed run wakes FLIGHT within one tick", async () => {
+    liveCrew();
+    await watch.check();
+    store.upsertRun(
+      run("r-nopr", "guido-1", {
+        ticket: "mc#176",
+        endedAt: nowMs,
+        endedBy: "exit",
+        status: "failed",
+      }),
+    );
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("signals");
+  });
+
+  it("a free seat with startable work wakes FLIGHT within one tick", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("the hour re-wake fires for a fact left unhandled, not for a digest change", async () => {
+    liveCrew();
+    holdPr({ ci: "pending" });
+    await watch.check();
+    holdPr({ ci: "passing" });
+    nowMs += FLIGHT_REWAKE_MS + MIN;
+    await tick();
+    expect(sendCalls).toEqual([]);
+    ask();
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_REWAKE_MS;
+    await tick();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a merged PR that woke nothing rides in the next wake, even an hour later", async () => {
+    flightOnly();
+    await watch.check();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: nowMs })], nowMs);
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += 61 * MIN;
+    vi.setSystemTime(nowMs);
+    ask();
+    await watch.check();
+    const last = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(last.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+  });
+
+  it("idle review seats with a review queued for 10 minutes wake FLIGHT once", async () => {
+    flightOnly();
+    await watch.check();
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "sha7",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += FLIGHT_IDLE_MS - MIN;
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    nowMs += 2 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("reviews");
+  });
+
+  it("stores each wake's reasons on the run, and counts them per hour by reason", async () => {
+    liveCrew();
+    await watch.check();
+    ask();
+    await tick();
+    expect(store.flightWakes(0)).toEqual([
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"] },
+    ]);
+    const view = flightView(config, store, nowMs + MIN);
+    expect(view.wakeHistory?.byReason).toEqual([
+      { reason: "items", n: 1 },
+      { reason: "q", n: 1 },
+    ]);
+    const hours = view.wakeHistory?.perHour ?? [];
+    expect(hours).toHaveLength(24);
+    expect(hours.at(-1)).toEqual({ at: expect.any(Number), n: 1, byReason: { q: 1, items: 1 } });
+  });
+});
+
+describe("what wakes FLIGHT for a free seat or an item", () => {
+  const areas = { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] };
+  const card = (n: number, labels: string[]): BoardItem => ({
+    repoId: "mc",
+    issueNumber: n,
+    title: `Ticket ${n}`,
+    status: "Ready",
+    state: "planned",
+    labels,
+    priority: null,
+    updatedAt: T0,
+    url: "u",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: null,
+    closed: false,
+    prioritySource: null,
+    createdAt: T0 - n,
+    itemId: `I${n}`,
+    projectId: "P1",
+  });
+  const facts = (over: { areas?: Record<string, string[]>; now?: number } = {}) =>
+    JSON.parse(
+      wakeFacts(flightState({ config, store, busy: [], now: over.now ?? T0, areas: over.areas })),
+    ) as Record<string, unknown[]>;
+
+  it("names a free seat only when a Ready ticket is in its area", () => {
+    store.replaceBoard("mc", [card(1, ["area:server"])]);
+    const f = facts({ areas });
+    expect(f.free).toEqual(["guido-1"]);
+    expect(f.t).toEqual(["mc#1"]);
+  });
+
+  it("names no seat when no Ready ticket matches a free seat, and keeps the old reading without rules", () => {
+    store.replaceBoard("mc", [card(1, ["area:server", "area:web"])]);
+    expect(facts({ areas }).free).toEqual([]);
+    expect(facts({ areas }).t).toEqual([]);
+    expect(facts().free).toEqual(["guido-1", "inco-1"]);
+  });
+
+  it("leaves a seat or a ticket FLIGHT waits on out of the facts until the wait is due", () => {
+    store.replaceBoard("mc", [card(1, ["area:web"])]);
+    expect(facts({ areas }).free).toEqual(["guido-1", "inco-1"]);
+    recordFlightWait(store, "inco-1", { on: "a web P0", until: T0 + 30 * MIN, at: T0 });
+    expect(facts({ areas }).free).toEqual(["guido-1"]);
+    recordFlightWait(store, "mc#1", { on: "PR 7", until: T0 + 30 * MIN, at: T0 });
+    expect(facts({ areas })).toMatchObject({ free: [], t: [] });
+    expect(facts({ areas, now: T0 + 31 * MIN })).toMatchObject({
+      free: ["guido-1", "inco-1"],
+      t: ["mc#1"],
+    });
+  });
+
+  it("does not name a ticket another login holds", () => {
+    store.replaceBoard("mc", [{ ...card(1, ["area:server"]), assignees: ["someone-else"] }]);
+    expect(facts({ areas }).free).toEqual([]);
+  });
+
+  it("lists an item as new until FLIGHT has been shown it", () => {
+    liveCrew();
+    ask();
+    const read = () => flightState({ config, store, busy: [], now: T0 });
+    const first = read();
+    expect(first.items).toHaveLength(1);
+    expect(first.wake?.fresh).toEqual(first.items.map((x) => x.key));
+    expect(JSON.parse(wakeFacts(first)).items).toHaveLength(1);
+    markItemsShown(store, first);
+    const second = read();
+    expect(second.items).toHaveLength(1);
+    expect(second.wake?.fresh).toEqual([]);
+    expect(JSON.parse(wakeFacts(second)).items).toEqual([]);
+    expect(wakeFacts(second)).toBe(deliveredFacts(first));
+  });
+
+  it("lists a seen item again when its text changes, and forgets it once it is gone", () => {
+    liveCrew();
+    ask();
+    const read = () => flightState({ config, store, busy: [], now: T0 });
+    const state = read();
+    markItemsShown(store, {
+      ...state,
+      items: state.items.map((x) => ({ ...x, text: "Which repo?" })),
+    });
+    expect(read().wake?.fresh).toHaveLength(1);
+    markItemsShown(store, { ...state, items: [] });
+    markItemsShown(store, read());
+    expect(read().wake?.fresh).toEqual([]);
+  });
+
+  it("counts the wakes that led to no decision within four minutes", () => {
+    store.addFlightWake("r-flight", T0, ["items"]);
+    store.addFlightWake("r-flight", T0 + 10 * MIN, ["free"]);
+    store.addFlightWake("r-flight", T0 + 20 * MIN, ["q"]);
+    store.addFlightDecision({
+      at: T0 + 2 * MIN,
+      kind: "answer",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+    });
+    store.addFlightDecision({
+      at: T0 + 20 * MIN + 5 * MIN,
+      kind: "answer",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+    });
+    expect(flightWakeHistory(store, T0 + 30 * MIN)).toMatchObject({ total: 3, idle: 2 });
+  });
+
+  it("clears a wait whose PR has merged instead of raising wait_over", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + MIN, at: T0 });
+    const read = (now: number) => flightState({ config, store, busy: [], now });
+    expect(read(T0 + 2 * MIN).signals.map((x) => x.kind)).toContain("wait_over");
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    const after = read(T0 + 2 * MIN);
+    expect(after.signals.map((x) => x.kind)).not.toContain("wait_over");
+    expect(Object.keys(flightWaits(store))).not.toContain("mc#7");
+  });
+
+  it("keeps a wait on a PR that is still open, and clears one on a seat no longer parked", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    recordFlightWait(store, "mc#7", { on: "PR 7", until: T0 + 30 * MIN, at: T0 });
+    recordFlightWait(store, "note:blocked:guido-1:x", {
+      on: "a park",
+      until: T0 + 30 * MIN,
+      at: T0,
+    });
+    flightState({ config, store, busy: [], now: T0 + MIN });
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
   });
 });

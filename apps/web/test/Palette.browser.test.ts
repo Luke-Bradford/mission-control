@@ -5,11 +5,11 @@ import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./bro
 
 const api = {
   "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
-  "/api/crew": { rows: [], firstRunToday: null },
+  "/api/crew?shape=summary": { rows: [], firstRunToday: null },
   "/api/config": { loops: [], crew: { sessions: [] } },
   "/api/attention": [],
   "/api/boards/shop-app": [],
-  "/api/repos/shop-app/prs": [],
+  "/api/repos/shop-app/prs?shape=summary": [],
 };
 
 const { renderAt } = browserSession();

@@ -559,6 +559,13 @@ describe("supervisor events (Plan 7a)", () => {
       await sup.startRun("guido-1", 42);
     });
 
+    it("ends the run endedBy superseded, with no missing report, when the engine says so", async () => {
+      const { sup, runId } = await idleRun();
+      await sup.endRunByEngine(runId, "superseded");
+      expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "superseded" });
+      expect(store.run(runId)?.noReport ?? null).toBeNull();
+    });
+
     it("is a no-op, with no event, for a run that has ended or does not exist", async () => {
       const { sup, seen, runId } = await idleRun();
       await sup.endRunByEngine(runId);
@@ -679,6 +686,32 @@ describe("supervisor events (Plan 7a)", () => {
       );
       expect(inbox).toHaveBeenCalledWith("guido-1", runId);
       expect(store.commsInboxRead("guido-1", waiting.id)).toBe(true);
+    });
+
+    it("puts a message waiting at a resume ahead of the hub's resume line", async () => {
+      const inbox = vi.fn((seatId: string, runId: string) =>
+        commsInboxContext(store, seatId, runId),
+      );
+      const { sup, runId } = await idleRun({ inbox });
+      store.addComms({
+        at: Date.now(),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: null,
+        text: "stop building, push and report",
+        targetRunId: runId,
+      });
+
+      expect(await sup.send(runId, `resume:${runId}:1`, "Carry on with #1")).toBe("sent");
+      await until(() =>
+        expect(
+          userLines().some(
+            (line) =>
+              line.startsWith("Comms inbox") &&
+              line.indexOf("stop building, push and report") < line.indexOf("Carry on with #1"),
+          ),
+        ).toBe(true),
+      );
     });
 
     it("answers busy while the seat is in a turn, even before the CLI's turn-start", async () => {

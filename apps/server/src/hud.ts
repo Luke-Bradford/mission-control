@@ -34,9 +34,11 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
@@ -68,6 +70,7 @@ import {
   REVIEW_ROUNDS,
   type ReviewRow,
   type ReviewState,
+  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
   type SeatSessionRow,
@@ -79,6 +82,7 @@ import {
   strayText,
   type TestLockState,
   type TokenUsage,
+  UAT_PARK,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention } from "./attention-holds.ts";
@@ -99,8 +103,10 @@ import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
+import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
+import { reviewCheckFor } from "./review-check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -173,6 +179,36 @@ function readStop(store: Store, loopId: string): DriverStop | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What turns a row's state with no run behind it: each loop's collector status and note, pause
+ * flag, driver stop and newest run, the escalations, and each crew seat's session. Two equal signals mean no
+ * such input changed between them. Reads what `loopViews` reads.
+ */
+export function stateInputs(config: CcConfig, store: Store): string {
+  const status = new Map(store.status().map((s) => [s.collector, s]));
+  const agents = configuredAgents(config);
+  const seats = store.seatSessions(agents.filter((a) => a.kind === "crew").map((a) => a.id));
+  return JSON.stringify([
+    agents.map((agent) => {
+      if (agent.kind === "crew") {
+        const s = seats.get(agent.id);
+        return [s?.state, s?.reason, s?.runId, s?.updatedAt, s?.errorSince];
+      }
+      const loop = agent.loop;
+      return [
+        status.get(collectorName(loop.kind, loop.id))?.ok,
+        status.get(collectorName(loop.kind, loop.id))?.error,
+        status.get(noteCollectorName(loop.kind, loop.id))?.error,
+        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
+        // a late line can turn the newest ended run blocked
+        store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
+      ];
+    }),
+    store.escalations().map((e) => [e.repoId, e.source, e.id]),
+  ]);
 }
 
 function loopViews(
@@ -274,6 +310,7 @@ function reviewOf(
   repoId: string,
   branch: string | null,
   inFlight: ReviewRow[],
+  now: number,
   prs?: readonly PullRequestView[],
 ): CrewRow["review"] {
   if (branch === null) return null;
@@ -287,7 +324,13 @@ function reviewOf(
       ? open.review
       : "open";
   const reviewing = inFlight.findLast((r) => r.repoId === repoId && r.prNumber === open.number);
-  return { prNumber: open.number, state, reviewing: reviewing?.seatId ?? null };
+  const check = reviewCheckFor(store, repoId, now, inFlight)(open);
+  return {
+    prNumber: open.number,
+    state,
+    reviewing: reviewing?.seatId ?? null,
+    ...(check === null ? {} : { check }),
+  };
 }
 
 /** A writer seat's queued tickets in order, without the one it holds; [] for any other row. */
@@ -369,6 +412,16 @@ export function runWait(
     if (cur === null || REVIEW_PENDING.includes(cur.state)) return "retro";
   }
   return null;
+}
+
+/** What a rework due on a seat that is on another ticket reads: null when nothing holds it up. */
+function reworkWaitText(store: Store, run: Run): string | null {
+  const holder = store.seatSession(run.agentId)?.runId ?? null;
+  if (holder === null || holder === run.id) return null;
+  const held = store.run(holder);
+  if (held === null || held.endedAt !== null || held.ticket === null) return null;
+  const issue = held.ticket.slice(held.ticket.lastIndexOf("#"));
+  return `rework waiting on ${seatCallSign(run.agentId)} (behind ${issue})`;
 }
 
 /** The current step's try and its limit, else null. */
@@ -538,25 +591,27 @@ function buildCrew(
   const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
-  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null =>
-    run.loop
-      ? {
-          phase: run.loop.phase,
-          text: loopText(ticket, run.loop),
-          prNumber: run.loop.prNumber,
-          parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
-          tries: runTries(store, run, run.loop),
-          wait: runWait(config, store, run, run.loop, lock),
-          ...(run.profile
-            ? {
-                profile: run.profile.profile.name,
-                step: profileStep(run.profile.profile, run.loop.phase),
-                steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
-                planned: store.planLanded(run),
-              }
-            : {}),
-        }
-      : null;
+  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null => {
+    if (!run.loop) return null;
+    const wait = runWait(config, store, run, run.loop, lock);
+    return {
+      phase: run.loop.phase,
+      text: loopText(ticket, run.loop),
+      prNumber: run.loop.prNumber,
+      parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+      tries: runTries(store, run, run.loop),
+      wait,
+      ...(wait === "seat" ? { waitText: reworkWaitText(store, run) } : {}),
+      ...(run.profile
+        ? {
+            profile: run.profile.profile.name,
+            step: profileStep(run.profile.profile, run.loop.phase),
+            steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
+            planned: store.planLanded(run),
+          }
+        : {}),
+    };
+  };
   const eventIndex = summary ? null : runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
@@ -628,7 +683,11 @@ function buildCrew(
         sessionId: view.sessionId,
         cli:
           agent.kind === "crew"
-            ? { version: cliVersionOnce(), effort: agent.seat.effort ?? null }
+            ? {
+                version: cliVersionOnce(),
+                effort: agent.seat.effort ?? null,
+                budgetUsd: latest?.profile?.profile.budgetUsd ?? null,
+              }
             : { version: null, effort: null },
         review:
           agent.kind === "crew"
@@ -637,6 +696,7 @@ function buildCrew(
                 agent.repoId,
                 latest?.branch ?? null,
                 reviewsInFlight,
+                now,
                 pullRequests.get(agent.repoId),
               )
             : null,
@@ -701,7 +761,7 @@ function buildCrew(
             : null,
         prs,
         summary: latest?.summary ?? null,
-        digest: digest ? (({ toolStarts: _, ...rest }) => rest)(digest) : null,
+        digest: digest ? (({ toolStarts: _, attemptUsage: __, ...rest }) => rest)(digest) : null,
         contextWindow,
         lastOutputAt: view.lastOutputAt,
       };
@@ -744,6 +804,8 @@ interface FlightTriage {
   liveSince: number;
   /** An "off" FLIGHT within FLIGHT_OFF_GRACE_MS: when the item will show, else null. */
   showsAt: number | null;
+  /** The runaway breaker is tripped: FLIGHT stands down but the item shows only if items wait. */
+  breaker?: boolean;
 }
 
 /**
@@ -754,10 +816,13 @@ interface FlightTriage {
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-  return park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK;
+  return (
+    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
+  );
 }
 
 /**
@@ -815,9 +880,33 @@ function flightLiveSince(store: Store, flightId: string, run: Run): number {
 }
 
 function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage | null {
+  const triage = flightTriageNow(config, store, now);
+  if (triage === null) return null;
+  // items raised while the breaker held FLIGHT back get a fresh window after the lift
+  return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
+}
+
+function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
   const found = flightSeat(config);
   if (found === null) return null;
   const flightId = found.seat.id;
+  // FLIGHT's writes are stopped until the operator lifts the breaker, so it triages nothing:
+  // items reach the operator at once
+  const tripped = runawayTrip(store);
+  if (tripped !== null) {
+    return {
+      flightId,
+      repoId: found.session.repoId,
+      triaging: false,
+      live: false,
+      cause: "down",
+      detail: RUNAWAY_TRIAGE_DETAIL,
+      since: tripped.at,
+      liveSince: 0,
+      showsAt: null,
+      breaker: true,
+    };
+  }
   const live = flightLive(config, store);
   const notes = store.notes().filter((n) => n.dismissedAt === null);
   const note =
@@ -934,7 +1023,8 @@ export function attentionItems(
   hubLogin: string | null = null,
   includeHeld = false,
 ): AttentionItem[] {
-  const given = rows ?? crew(config, store, now, lock).rows;
+  // no caller's rows: the summary crew, since attention never reads the event timelines
+  const given = rows ?? crew(config, store, now, lock, undefined, true).rows;
   const origin = rowOrigins.get(given);
   return memoised(
     store,
@@ -1053,10 +1143,19 @@ function buildAttentionItems(
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
+    // A paused, parked or stopped loop asks nobody: its open escalations stay on its card until
+    // it runs again.
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === e.repoId);
+    const loopIdle =
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped");
     items.push({
-      // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
+      // a needs-you label asks the operator whatever the kind, unless its loop is paused, parked or
+      // stopped; a [loop-blocked] title is always the loop's
       owner:
-        e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
+        !loopIdle && (e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind))
+          ? OWNER_OPERATOR
+          : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -1122,6 +1221,13 @@ function buildAttentionItems(
   );
   for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
+    // a paused, parked or stopped loop's PRs wait on nobody: they stay on its card
+    const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === repo.id);
+    if (
+      loopRow !== undefined &&
+      (loopRow.paused || loopRow.hudState === "parked" || loopRow.hudState === "stopped")
+    )
+      continue;
     // a ticket the board has seen closed clears its PR's item
     const onBoard = new Set(
       store
@@ -1232,6 +1338,8 @@ function buildAttentionItems(
         : missed(item, triageDueAt);
     }
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
+    // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
+    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
@@ -1300,6 +1408,8 @@ function withNotTriaging(
           (!triage.triaging && i.flightTriage === "waiting")),
     )
     .sort((a, b) => a.at - b.at);
+  // a tripped breaker is the flag's business: the item adds nothing unless something waits
+  if (triage.breaker === true && members.length === 0) return items;
   const cause: FlightNotTriagingCause | null =
     triage.cause ?? (triage.triaging && members.length > 0 ? "late" : null);
   if (cause === null) return items;

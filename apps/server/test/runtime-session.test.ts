@@ -174,6 +174,7 @@ describe("startSession against the fake CLI", () => {
     expect(events.find((e) => e.kind === "tool-result")).toEqual({
       kind: "tool-result",
       toolUseId: "toolu_1",
+      bytes: expect.any(Number),
     });
     // As the real CLI: the tool call is closed, then the interrupt is marked.
     const users = parsed()
@@ -181,6 +182,9 @@ describe("startSession against the fake CLI", () => {
       .map((l) => l.message.content[0]);
     expect(users[0].type).toBe("tool_result");
     expect(users[0].content).toContain("doesn't want to proceed");
+    expect(events.find((e) => e.kind === "tool-result")).toMatchObject({
+      bytes: Buffer.byteLength(users[0].content, "utf8"),
+    });
     expect(users[1]).toEqual({ type: "text", text: "[Request interrupted by user for tool use]" });
     expect(parsed().at(-1)).toMatchObject({ subtype: "error_during_execution", is_error: true });
     // The next line starts a normal turn.
@@ -198,7 +202,8 @@ describe("startSession against the fake CLI", () => {
     await until((e) => e.kind === "turn-start");
     s.send("cue: the call ends");
     const ended = await until((e) => e.kind === "tool-result");
-    expect(ended).toEqual({ kind: "tool-result", toolUseId: "toolu_g" });
+    // the fake CLI's result is the two bytes "ok"
+    expect(ended).toEqual({ kind: "tool-result", toolUseId: "toolu_g", bytes: 2 });
     expect(events.some(isResult)).toBe(false);
     s.send("cue: the turn ends");
     await until(isResult);

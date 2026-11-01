@@ -70,6 +70,7 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "rerun_ci",
   "edit_card",
   "dismiss_item",
+  MC_TOOL_NAMES.resumeSeat,
   MC_TOOL_NAMES.ghRead,
   MC_TOOL_NAMES.closeTicket,
   MC_TOOL_NAMES.addControllerCheck,
@@ -136,9 +137,20 @@ export const GUARD_CHECK_PATH = "/api/guard/check";
 /** `POST /api/guard/check`'s body limit; the hook checks its body against it before posting. */
 export const GUARD_BODY_LIMIT = 64 * 1024;
 
-/** The hook events the guard route takes (spike: PermissionDenied never fires). */
-export const GUARD_HOOK_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure"] as const;
+/**
+ * The hook events the guard route takes (spike: PermissionDenied never fires). `Stop` fires when
+ * the seat ends a turn; it carries no tool.
+ */
+export const GUARD_HOOK_EVENTS = [
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Stop",
+] as const;
 export type GuardHookEvent = (typeof GUARD_HOOK_EVENTS)[number];
+
+/** How many times in a row a Stop is blocked while the run's report is missing and items are open. */
+export const STOP_BLOCK_TRIES = 3;
 
 /** The hook's "no objection" answer: the CLI's own rules still apply after it. */
 export const GUARD_ALLOW_OUTPUT = "{}";
@@ -152,6 +164,32 @@ export function guardDenyOutput(reason: string): string {
       permissionDecisionReason: reason,
     },
   });
+}
+
+/** The Stop block form the CLI honours (exit 0): the seat carries on, and sees `<reason>`. */
+export function guardStopOutput(reason: string): string {
+  return JSON.stringify({ decision: "block", reason });
+}
+
+/** The most items a blocked Stop names; the rest are counted (the hook refuses a long reason). */
+const STOP_REASON_ITEMS = 12;
+const STOP_REASON_ITEM_CHARS = 120;
+
+/** The reason a blocked Stop gives: the items still open, as the seat's own checklist has them. */
+export function stopBlockReason(open: readonly string[]): string {
+  const shown = open
+    .slice(0, STOP_REASON_ITEMS)
+    .map(
+      (t) =>
+        `- ${t.length > STOP_REASON_ITEM_CHARS ? `${t.slice(0, STOP_REASON_ITEM_CHARS)}…` : t}`,
+    );
+  const more = open.length - STOP_REASON_ITEMS;
+  return [
+    "You have not reported, and these checklist items are still open:",
+    ...shown,
+    ...(more > 0 ? [`- and ${more} more`] : []),
+    "Finish them, then report. If one cannot be done, say why in the report.",
+  ].join("\n");
 }
 
 /** The hook's answer whenever it cannot get a verdict it recognises (with exit 2). */

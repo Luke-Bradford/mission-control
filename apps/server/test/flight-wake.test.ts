@@ -13,6 +13,7 @@ import {
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
+  FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
@@ -22,7 +23,13 @@ import {
   wakeLine,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { flightWake, wakeFacts } from "../src/flight/state.ts";
+import {
+  deliveredFacts,
+  flightWake,
+  nextWakeAt,
+  wakeFacts,
+  wakeReasons,
+} from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
@@ -105,7 +112,7 @@ const busyBoard = (): FlightState => ({
   questions: [{ id: 1, seat: "guido-0", ticket: "mc#40", text: "Which lane?", ageMin: 0 }],
   items: [],
   holds: [],
-  limits: { startsLeft: 10, messagesLeft: 30 },
+  breaker: { tripped: false, reason: null },
 });
 
 describe("wake deltas", () => {
@@ -603,5 +610,103 @@ describe("memory in wake deltas", () => {
     expect(next.digest.memory.titles.lesson.entries[0]?.topic).toBe(
       notes[FLIGHT_MEMORY_TITLES_MAX]?.topic,
     );
+  });
+});
+
+describe("the re-wake interval", () => {
+  const waiting = (): FlightState => ({
+    ...busyBoard(),
+    questions: [{ id: 1, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
+  });
+  const T = 1_000_000_000;
+
+  it("is an hour from the last wake while something waits", () => {
+    expect(nextWakeAt(waiting(), T, T)).toBe(T + FLIGHT_REWAKE_MS);
+    expect(FLIGHT_REWAKE_MS).toBe(60 * 60_000);
+  });
+
+  it("schedules nothing with nothing waiting", () => {
+    const quiet = { ...busyBoard(), questions: [], tickets: [], prs: [], seats: [] };
+    expect(nextWakeAt(quiet, T, T)).toBeNull();
+  });
+});
+
+describe("wake reasons", () => {
+  it("lists what is new against the last facts, with the targets a decision would name", () => {
+    const before = wakeFacts({ ...busyBoard(), questions: [] });
+    const after = wakeFacts({
+      ...busyBoard(),
+      questions: [{ id: 7, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
+    });
+    expect(wakeReasons(before, after)).toEqual([
+      { id: "q:7", label: "q 7", targets: ["7", "ask:7"] },
+    ]);
+    expect(wakeReasons(after, after)).toEqual([]);
+  });
+});
+
+describe("wake facts that name a seat or tickets", () => {
+  const withFreeSeat = (): FlightState => {
+    const s = busyBoard();
+    const seat = s.seats[0];
+    if (!seat) throw new Error("missing seat");
+    seat.free = true;
+    return s;
+  };
+  const facts = (s: FlightState) => JSON.parse(wakeFacts(s)) as Record<string, unknown[]>;
+
+  it("names a free seat and the startable tickets when a Ready ticket is in its area", () => {
+    const s = { ...withFreeSeat(), wake: { fit: { "guido-0": ["mc#1"] }, fresh: [] } };
+    expect(facts(s).free).toEqual(["guido-0"]);
+    expect(facts(s).t).toEqual(["mc#1"]);
+  });
+
+  it("names neither when no Ready ticket is in the free seat's area", () => {
+    const s = { ...withFreeSeat(), wake: { fit: {}, fresh: [] } };
+    expect(facts(s).free).toEqual([]);
+    expect(facts(s).t).toEqual([]);
+  });
+
+  it("lists only the tickets a free seat could start", () => {
+    const s = withFreeSeat();
+    const other = s.seats[1];
+    if (!other) throw new Error("missing seat");
+    other.free = true;
+    s.wake = { fit: { "guido-0": ["mc#1"], "guido-1": ["mc#1", "mc#3"] }, fresh: [] };
+    expect(facts(s).t).toEqual(["mc#1", "mc#3"]);
+  });
+
+  it("keeps the older reading when the state carries no fit", () => {
+    expect(facts(withFreeSeat()).free).toEqual(["guido-0"]);
+  });
+
+  it("wakes on an item only while FLIGHT has not seen it", () => {
+    const s = busyBoard();
+    s.items = [
+      {
+        key: "note:a",
+        kind: "message",
+        ticket: null,
+        text: "one",
+        ageMin: 1,
+        triageRemainingMs: 0,
+      },
+      {
+        key: "note:b",
+        kind: "message",
+        ticket: null,
+        text: "two",
+        ageMin: 1,
+        triageRemainingMs: 0,
+      },
+    ];
+    expect(facts(s).items).toEqual(["note:a", "note:b"]);
+    expect(facts({ ...s, wake: { fit: {}, fresh: ["note:b"] } }).items).toEqual(["note:b"]);
+    expect(facts({ ...s, wake: { fit: {}, fresh: [] } }).items).toEqual([]);
+  });
+
+  it("clears fresh items from the delivered baseline", () => {
+    const s = { ...busyBoard(), wake: { fit: {}, fresh: ["note:b"] } };
+    expect(JSON.parse(deliveredFacts(s)).items).toEqual([]);
   });
 });

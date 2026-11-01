@@ -1,6 +1,8 @@
-import { prPill, type RunPr } from "@mc/core";
+import { type PullRequestView, prPill, type RunPr, reviewCheckPill } from "@mc/core";
+import { useNow } from "../clock.ts";
+import { ticketPath } from "../router.ts";
 import { Pill } from "./Pill.tsx";
-import { RepoRef } from "./RepoRef.tsx";
+import { parseTicket, RepoRef } from "./RepoRef.tsx";
 import "./PrChip.css";
 
 /**
@@ -8,8 +10,52 @@ import "./PrChip.css";
  * https://github.com URL can be made), its title on hover, and a pill once it is merged or
  * closed, and a "held" pill while FLIGHT or the controller holds its merge. `bare` leaves the repo chip out, for a page that shows one repo.
  */
-export function PrChip({ pr, bare }: { pr: RunPr; bare?: boolean }) {
-  const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
+/** A running branch preview, added to Board and Agent PR payloads by the server. */
+export interface PrPreview {
+  pr: number;
+  branch: string;
+  port: number;
+  url: string;
+  startedAt: number;
+}
+
+function previewUrl(preview: PrPreview | null | undefined): string | null {
+  if (!preview) return null;
+  try {
+    const url = new URL(preview.url);
+    return url.protocol === "http:" || url.protocol === "https:" ? preview.url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A PR published by a run, with its GitHub reference and any live branch preview. The preview
+ * arrives with the Board or Agent PR row; this component never lists previews itself.
+ */
+export function PrChip({
+  pr,
+  bare,
+  preview: initialPreview,
+  showState = true,
+}: {
+  pr: RunPr | PullRequestView;
+  bare?: boolean;
+  preview?: PrPreview | null;
+  /** The Board owns its full PR status line, so it supplies this as false. */
+  showState?: boolean;
+}) {
+  const now = useNow();
+  const check = "check" in pr && pr.state === "open" ? pr.check : null;
+  const pill =
+    pr.state === "merged" || pr.state === "closed"
+      ? prPill({ state: pr.state })
+      : check
+        ? reviewCheckPill(check, now)
+        : null;
+  const hold = "hold" in pr ? pr.hold : undefined;
+  const url = previewUrl(initialPreview);
+  const ticket = pr.ticket ? parseTicket(pr.ticket) : null;
   return (
     <span className="rpr">
       <RepoRef
@@ -19,10 +65,23 @@ export function PrChip({ pr, bare }: { pr: RunPr; bare?: boolean }) {
         bare={bare}
         title={pr.title ?? undefined}
         url={pr.url}
+        to={ticket ? ticketPath(ticket.repoId, ticket.number) : undefined}
       />
-      {pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
-      {pr.hold && (
-        <Pill tone="warn" title={`merge held by ${pr.hold.by}: ${pr.hold.reason}`}>
+      {showState && pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
+      {initialPreview !== undefined &&
+        (url ? (
+          <a
+            className="pill ok preview-link"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open preview for PR #${pr.number}`}
+          >
+            Preview
+          </a>
+        ) : null)}
+      {hold && (
+        <Pill tone="warn" title={`merge held by ${hold.by}: ${hold.reason}`}>
           held
         </Pill>
       )}

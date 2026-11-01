@@ -4,8 +4,10 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
-import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
+import type { PromptWakeCost } from "./prompt-cost.ts";
+import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow.ts";
+import type { ReviewCheckState, ReviewStatus } from "./review.ts";
+import type { CrewMode, CrewRole, CrewVendor, LoopKind, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -104,10 +106,12 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
+  loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
   promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
-  endedBy?: "operator" | "engine" | "exit" | null;
+  endedBy?: "operator" | "engine" | "superseded" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
   noReport?: NoReport | null;
 }
@@ -139,9 +143,14 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
-  flightReruns?: Record<string, number>;
-  /** Fresh RETRO requests by FLIGHT, at most two per head. */
-  flightRereviews?: Record<string, number>;
+  /**
+   * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
+   * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
+   */
+  flightSecondReview?: Record<
+    string,
+    { epoch: number; firstReviewId: number; firstAccountId: string; reason: string }
+  >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
   phase: LoopPhase;
@@ -232,6 +241,11 @@ export interface RunLoop {
   pendingLine?: { key: string; text: string } | null;
   controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
   /**
+   * The operator's acceptance (UAT) hold, like `controllerCheck`: the sha the run parked on and the
+   * phase it left; `accepted` once the operator accepted that sha.
+   */
+  uat?: { sha: string; from: LoopPhase; accepted: boolean } | null;
+  /**
    * A hold on the run's merge by FLIGHT or the controller (CAPCOM): the engine does not merge
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
@@ -290,6 +304,8 @@ export interface RunLoopView {
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
+  /** What each prompt the run was sent took, by section, oldest first; empty before any was recorded. */
+  prompt?: PromptWakeCost[];
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
@@ -302,6 +318,8 @@ export interface RunPr {
   ticket: string | null;
   /** Set while FLIGHT or the controller holds this PR's merge: who holds it, and why. */
   hold?: { by: "FLIGHT" | "CAPCOM"; reason: string };
+  /** Set while the PR waits for the operator's acceptance (UAT): the head it waits on. */
+  uat?: { sha: string };
 }
 
 /** A run in a list; full assistant text stays on the individual run record. */
@@ -378,6 +396,13 @@ export interface BoardItem {
   subIssues: { done: number; total: number } | null;
   /** `ref` is `repo#number`; closed blockers are kept and flagged. */
   blockedBy: { ref: string; closed: boolean }[];
+  /**
+   * What the issue body says it waits on: issues on `Depends on` lines, PRs on `After PR` lines.
+   * Absent means none (a card stored before the field, or built by hand).
+   */
+  after?: { issues: number[]; prs: number[] };
+  /** What a `bug` card's body names (PRs, commits, files); absent when it names none. */
+  defectRefs?: DefectRefs;
   milestone: string | null;
   /** The project's single-select `Size` field; null when the project has none or the item has no value. */
   size: string | null;
@@ -408,6 +433,17 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
 
+/**
+ * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
+ * `previewable` is true only where `POST /api/previews` could start one now: the hub supports
+ * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
+ * null; the web offers "Start preview" when `previewable && preview === null`.
+ */
+export interface PullRequestPreviewFacts {
+  previewable: boolean;
+  preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
+}
+
 /** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
 export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
 
@@ -431,7 +467,14 @@ export type PullRequestSummary = Pick<
   | "createdAt"
   | "updatedAt"
   | "mergedAt"
+  | "check"
 >;
+
+/** A stored pull request's number and title: what a PR link shows. */
+export interface PrTitle {
+  number: number;
+  title: string;
+}
 
 export interface PullRequestView {
   repoId: RepoId;
@@ -439,6 +482,8 @@ export interface PullRequestView {
   title: string;
   url: string;
   branch: string;
+  /** The branch the PR merges into; another open PR's branch means it is stacked on that PR. Absent before it was read. */
+  base?: string | null;
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";
@@ -466,6 +511,12 @@ export interface PullRequestView {
   additions?: number | null;
   deletions?: number | null;
   changedFiles?: number | null;
+  /** The diff's first files as GitHub reads them; set by the poll, never served from the store. */
+  files?: PrFileInput[];
+  /** Bugs recorded against this PR as escaped defects; absent when none. */
+  escapedDefects?: { issueNumber: number; via: DefectVia; filedAt: number }[];
+  /** The open PR's review state, set by the API; absent or null without a live review. */
+  check?: ReviewCheckState | null;
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -884,6 +935,8 @@ export interface CrewLoop {
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
+  /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
+  waitText?: string | null;
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */
@@ -941,14 +994,16 @@ export interface CrewRow {
   model: string | null;
   /** Crew: the config session id; null for a loop. */
   sessionId: string | null;
-  /** Crew: the `claude --version` read at the server and the seat's configured effort; null for a loop. */
-  cli: { version: string | null; effort: string | null };
+  /** Crew: the `claude --version` read at the server, configured effort, and current run's dollar cap; null for a loop. */
+  cli: { version: string | null; effort: string | null; budgetUsd?: number | null };
   /** The open PR on the latest run's branch (in the seat's repo), else null. */
   review: {
     prNumber: number;
     state: "draft" | "open" | "changes" | "approved";
     /** The review seat reviewing this PR now (queued, starting or running), else null. */
     reviewing?: AgentId | null;
+    /** The PR's review state; absent on older servers. */
+    check?: ReviewCheckState | null;
   } | null;
   /** A scratch seat's live review, else null. */
   reviewing?: { prNumber: number; sha: string; ref: string | null } | null;
@@ -1253,6 +1308,8 @@ export interface SeatSessionRow {
   lastTurnEndedAt?: number | null;
   /** When the seat's current (or most recent) turn started. */
   lastTurnStartedAt?: number | null;
+  /** Turns in a row that ended with no new commit. Absent on a row not read. */
+  quietTurns?: number;
 }
 
 /** A crew session's context window, from its `get_context_usage` control request. */

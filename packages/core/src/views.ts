@@ -23,6 +23,7 @@ export interface ConfigProfile {
   nodes?: ProfileStep[];
   trigger?: string;
   budget?: number | null;
+  budgetUsd?: number | null;
   orchestrationOnly?: boolean;
   planRequired: boolean;
   reviewer: { role: string; depth: ReviewDepth };
@@ -573,4 +574,174 @@ export interface QaFindingsView {
 /** `GET /api/qa/milestones`. */
 export interface MilestonesView {
   milestones: RepoGoal[];
+}
+
+/** A `## Done when` bullet of a ticket's body and whether its box is ticked. */
+export interface DoneWhenItem {
+  text: string;
+  checked: boolean;
+}
+
+/** One run on a ticket, as the page lists it. */
+export interface TicketRunView {
+  id: string;
+  seat: AgentId;
+  status: RunStatus;
+  /** The loop phase the run last reached; null for a run no loop drives. */
+  phase: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  tokens: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  costUsd: number | null;
+}
+
+/** A finding of one review round, with how a later round ended it. */
+export interface TicketFindingView {
+  pos: number;
+  severity: string;
+  file: string;
+  line: number;
+  summary: string;
+  scenario: string;
+  fix: string;
+  state: "open" | "logged";
+  resolution: string | null;
+  resolvedInReviewId: number | null;
+}
+
+/** One review round of a PR. */
+export interface TicketReviewRound {
+  reviewId: number;
+  round: number;
+  sha: string;
+  state: string;
+  verdict: ReviewVerdict | null;
+  summary: string | null;
+  blocking: number;
+  minor: number;
+  at: number;
+  findings: TicketFindingView[];
+}
+
+/** One PR of a ticket with its review rounds and the checks of each head it has had. */
+export interface TicketPrView {
+  number: number;
+  title: string;
+  url: string;
+  branch: string;
+  state: "open" | "closed" | "merged";
+  isDraft: boolean;
+  headSha: string | null;
+  createdAt: number;
+  mergedAt: number | null;
+  rounds: TicketReviewRound[];
+  /** Each head's latest attempt of every check, newest head first. */
+  ci: {
+    sha: string;
+    at: number;
+    checks: { name: string; conclusion: string; state: CiRunView["state"]; url: string | null }[];
+  }[];
+}
+
+/** One entry of the ticket's timeline; `key` is stable and orders entries that share a time. */
+export type TicketEvent = { key: string; at: number } & (
+  | { kind: "run"; runId: string; seat: AgentId; status: RunStatus; phase: string | null }
+  | {
+      kind: "review";
+      prNumber: number;
+      reviewId: number;
+      round: number;
+      state: string;
+      blocking: number;
+      minor: number;
+    }
+  | { kind: "ci"; prNumber: number; sha: string; passing: number; failing: number; pending: number }
+  | {
+      kind: "decision";
+      id: number;
+      decisionKind: string;
+      about: string;
+      decision: string;
+      basis: string;
+    }
+  | { kind: "comms"; id: string; from: string; to: string; label: string | null; text: string }
+);
+
+/** `GET /api/tickets/:repoId/:number`: everything Mission Control knows about one ticket. */
+export interface TicketHistory {
+  repoId: RepoId;
+  number: number;
+  /** The GitHub issue URL. */
+  url: string;
+  title: string;
+  state: "open" | "closed";
+  status: string | null;
+  priority: string | null;
+  size: string | null;
+  labels: string[];
+  /** The body's `## Outcome` section; null when the body has none or GitHub was unreachable. */
+  outcome: string | null;
+  doneWhen: DoneWhenItem[];
+  /** The body as written, cut by the collector; null when GitHub was unreachable. */
+  body: string | null;
+  bodyTruncated: boolean;
+  /** Why the body is missing; null when GitHub answered. */
+  githubError: string | null;
+  runs: TicketRunView[];
+  prs: TicketPrView[];
+  /** Newest first; one page. */
+  timeline: TicketEvent[];
+  /** Pass as `before` for the next page; null on the last. */
+  nextBefore: string | null;
+}
+
+/** One comms message on a PR's readiness card. */
+export interface PrUatComms {
+  id: string;
+  at: number;
+  from: string;
+  to: string;
+  label: string | null;
+  text: string;
+}
+
+/** A blocking finding as one line: `file:line summary`. */
+export interface PrUatFinding {
+  severity: string;
+  file: string;
+  line: number;
+  summary: string;
+}
+
+/**
+ * One review round that ran on the PR. `result`: `clean` (nothing blocking), `resolved` (every
+ * blocking finding has a resolution) or `open` (at least one blocking finding has none).
+ */
+export interface PrUatRound {
+  round: number;
+  reviewId: number;
+  at: number;
+  sha: string;
+  blocking: PrUatFinding[];
+  /** The author seat's newest message between this round and the next, if any. */
+  reply: { at: number; from: string; text: string } | null;
+  /** The first commit the branch got between this round and the next, if any. */
+  fixSha: string | null;
+  result: "clean" | "resolved" | "open";
+}
+
+/** What the operator needs to accept one PR: its comms, rework story and how to try the branch. */
+export interface PrUatView {
+  repoId: string;
+  number: number;
+  /** The newest comms that name the PR or its ticket, newest first. */
+  comms: PrUatComms[];
+  /** Review rounds, newest first. */
+  rounds: PrUatRound[];
+  tryIt: { branch: string; commands: string[]; previewUrl: string | null };
+  /**
+   * Whether the PR waits for the operator's acceptance, since when (the park's time) and the note
+   * the operator last sent it back with; null where there is none.
+   */
+  uat: { waiting: boolean; since: number | null; note: string | null };
 }

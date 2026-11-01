@@ -234,6 +234,15 @@
   align-content: start;
 }
 
+/* a grid item sizes to its column, so a wide table or drawing scrolls in its own panel */
+.sgrid > * {
+  min-width: 0;
+}
+
+.sgrid td.wrap {
+  overflow-wrap: anywhere;
+}
+
 .sgrid > .wide {
   grid-column: 1 / -1;
 }
@@ -306,7 +315,10 @@
 }
 
 .repo-card-title {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-4);
   width: 100%;
   text-align: left;
   padding: var(--sp-2) var(--sp-2);
@@ -314,8 +326,12 @@
   background: var(--panel);
 }
 
-.repo-card-title span {
-  float: right;
+.repo-card-title b {
+  min-width: 160px;
+}
+
+.repo-card-title .repo-card-toggle {
+  margin-left: auto;
   font-size: var(--fs-title);
   line-height: var(--lh-title);
 }
@@ -872,4 +888,10 @@
 /* long paths and URLs in the update log wrap instead of scrolling sideways */
 .update-log-text {
   overflow-wrap: anywhere;
+}
+
+.setup-repos {
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
 }

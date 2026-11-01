@@ -74,7 +74,7 @@ it("links run chips to the specific run and preserves chips without a run", asyn
       { ...event, text: "With run", runId: "run/one" },
       { ...event, at: event.at - 1, text: "Without run" },
     ],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/config": CONFIG,
     "/api/attention": [],
   });
@@ -103,7 +103,7 @@ it("shows only the call sign in the log's agent column, with the role in its too
         runId: null,
       },
     ],
-    "/api/crew": { rows: [seatRow({ id: "backend-1", role: "BACKEND", index: 1 })] },
+    "/api/crew?shape=summary": { rows: [seatRow({ id: "backend-1", role: "BACKEND", index: 1 })] },
     "/api/config": {
       ...CONFIG,
       crew: { ...CONFIG.crew, roles: [{ ...role, name: "BACKEND", here: "Backend developer" }] },

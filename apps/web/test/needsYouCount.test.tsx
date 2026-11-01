@@ -100,7 +100,7 @@ function stub() {
     "/api/config": CONFIG,
     "/api/repos": REPOS,
     // a seat in each session: sa-ta (s-shop) runs #6, so a session on site-builder hides #6's card
-    "/api/crew": {
+    "/api/crew?shape=summary": {
       rows: [
         crewRow({ id: "sb-ta", repoId: "site-builder", sessionId: "s-site", ticket: null }),
         crewRow({ id: "sa-ta", repoId: "shop-app", sessionId: "s-shop", ticket: "shop-app#6" }),
@@ -110,7 +110,7 @@ function stub() {
     "/api/overview": OVERVIEW,
     "/api/overview?session=s-site": OVERVIEW,
     "/api/flight": { seat: SEAT, decisions: [] },
-    "/api/agents/flight-1/stream": {
+    "/api/agents/flight-1/stream?limit=20": {
       runId: "f-1",
       events: [],
       truncated: false,
@@ -122,8 +122,8 @@ function stub() {
       boardItem({ issueNumber: 6, title: "Ticket 6", status: "In Progress", state: "in progress" }),
     ],
     "/api/boards/site-builder": [ticket("site-builder", 2)],
-    "/api/repos/shop-app/prs?linked=1": [],
-    "/api/repos/site-builder/prs?linked=1": [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": [],
+    "/api/repos/site-builder/prs?linked=1&shape=summary": [],
     "/api/notifications": { open: [], handledToday: [] },
     "/api/flight/summary": flightSummary({ session: null }),
     "/api/flight/brief": { session: null, sections: [] },

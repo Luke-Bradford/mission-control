@@ -47,7 +47,7 @@ function stub(extra: Record<string, unknown> = {}) {
   return stubFetch({
     "/api/config": config,
     "/api/repos": REPOS,
-    "/api/crew": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/crew/status": { enabled: true, note: null },
     "/api/attention": [],
     "/api/settings/away": DEFAULT_AWAY,
@@ -62,8 +62,8 @@ function stub(extra: Record<string, unknown> = {}) {
       }),
     ),
     "/api/boards/site-builder": [],
-    "/api/repos/shop-app/prs?linked=1": [],
-    "/api/repos/site-builder/prs?linked=1": [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": [],
+    "/api/repos/site-builder/prs?linked=1&shape=summary": [],
     ...extra,
   });
 }
@@ -84,7 +84,7 @@ describe("HUD chrome", () => {
   ])("filters %s by the crew session rather than its shared repo", async (_, page, selector) => {
     const loop = crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app" });
     stub({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           ...rows,
           loop,
@@ -232,7 +232,9 @@ describe("HUD chrome", () => {
   });
 
   it("includes sessions from crew rows without duplicating configured sessions", async () => {
-    stub({ "/api/crew": { rows: [...rows, seatRow({ id: "fao-1", sessionId: "gamma" })] } });
+    stub({
+      "/api/crew?shape=summary": { rows: [...rows, seatRow({ id: "fao-1", sessionId: "gamma" })] },
+    });
     render(<Header page="overview" />);
     await waitFor(() =>
       expect(
@@ -245,7 +247,7 @@ describe("HUD chrome", () => {
 
   it("keeps unassigned and Done cards across repos under a session filter, within the chosen lane", async () => {
     stub({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           ...rows,
           seatRow({
@@ -349,7 +351,7 @@ describe("HUD chrome", () => {
         },
         decisions: [],
       },
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           ...rows,
           seatRow({ id: "flight-1", hudState: "blocked", note: "Checking <b>the lock</b>" }),

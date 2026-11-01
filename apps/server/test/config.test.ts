@@ -419,6 +419,7 @@ describe("crew", () => {
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
+    allowRead?: string[];
     budget?: string;
     maxOpen?: string;
     lane?: string;
@@ -437,6 +438,7 @@ crew:
   worktrees: ${opts.worktrees ?? "~/code/mc-crew/worktrees"}
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
+  ${opts.allowRead === undefined ? "" : `allow_read: ${JSON.stringify(opts.allowRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
@@ -1262,6 +1264,41 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     expect(fails(t).path).toBe("crew.sessions[0].checkout");
   });
 
+  describe("allow_read", () => {
+    it("loads with ~ expanded, and defaults to none", () => {
+      expect(load(crewText({})).crew?.allowRead).toEqual([]);
+      const c = load(crewText({ allowRead: ["~/.config/pip", "/opt/tools"] })).crew;
+      expect(c?.allowRead).toEqual([join(homedir(), ".config/pip"), "/opt/tools"]);
+    });
+
+    it("refuses a relative path, the home folder, a parent of it, or a credential folder", () => {
+      const bad = (p: string) => fails(crewText({ allowRead: [p] }));
+      expect(bad("pip").message).toBe("crew.allow_read: pip is not an absolute path");
+      for (const p of [homedir(), dirname(homedir())]) {
+        expect(bad(p).path).toBe("crew.allow_read");
+        expect(bad(p).message).toContain("home folder");
+      }
+      for (const p of ["~/.ssh", "~/.ssh/keys", "~/.config/git/credentials", "~/.config"]) {
+        expect(bad(p.replace("~", homedir())).message).toContain("credential folder");
+      }
+    });
+  });
+
+  it("refuses allow_read over or inside the data dir or a deny_read entry", () => {
+    const share = join(homedir(), ".local/share");
+    for (const p of [share, join(share, "mission-control/crew")]) {
+      expect(fails(crewText({ allowRead: [p] })).message).toContain("denied folder");
+    }
+    const e = fails(crewText({ allowRead: ["~/Work/cfg"], denyRead: ["~/Work"] }));
+    expect(e.path).toBe("crew.allow_read");
+  });
+
+  it("refuses allow_read over or inside the temp folders", () => {
+    for (const p of ["/tmp", "/private/tmp", "/private/tmp/m501/key"]) {
+      expect(fails(crewText({ allowRead: [p] })).path).toBe("crew.allow_read");
+    }
+  });
+
   describe("deny_read", () => {
     const holds = (p: string) => `crew.deny_read: ${p} holds the crew's own folders`;
 
@@ -1415,6 +1452,17 @@ describe("guard config", () => {
     ]);
   });
 
+  it("loads run_command into runCommand, leaves it unset without the key and refuses an empty one", () => {
+    const withRun = text.replace(
+      FULL_SUITE_BLOCK,
+      `${FULL_SUITE_BLOCK}\n    run_command: pnpm dev`,
+    );
+    expect(parse(withRun).repos[2]?.runCommand).toBe("pnpm dev");
+    expect(parse(text).repos[2]?.runCommand).toBeUndefined();
+    const empty = text.replace(FULL_SUITE_BLOCK, `${FULL_SUITE_BLOCK}\n    run_command: ""`);
+    expect(() => parse(empty)).toThrow();
+  });
+
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
     "refuses full_suite entry %j that crew seats may not run",
     (cmd) => {
@@ -1498,6 +1546,7 @@ describe("repo rules in user config", () => {
       hardRulesSet: true,
       hardRulesBy: "controller",
       alwaysAsk: ["deps"],
+      uat: { labels: [], paths: [] },
       checks: [],
       userSet: [
         "templates",

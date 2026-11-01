@@ -1,5 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["@cloudflare/workers-types", "node"], "lib": ["ES2023"] },
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types", "node"],
+    "lib": ["ES2023"],
+    "tsBuildInfoFile": "node_modules/.cache/tsc/tsbuildinfo"
+  },
   "include": ["src"]
 }

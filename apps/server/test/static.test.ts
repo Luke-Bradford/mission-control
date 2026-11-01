@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brotliDecompressSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -46,6 +47,21 @@ const get = (url: string, headers: Record<string, string> = {}) =>
   app.inject({ method: "GET", url, headers });
 
 describe("serving the built web app", () => {
+  it("compresses a large hashed script for a client that accepts brotli, and leaves a font alone", async () => {
+    const script = `console.log("${"x".repeat(20_000)}")`;
+    writeFileSync(join(webRoot, "assets", "big-abc123.js"), script);
+    writeFileSync(join(webRoot, "assets", "font-abc123.woff2"), Buffer.alloc(20_000, 7));
+    for (let i = 0; i < 2; i++) {
+      const r = await get("/assets/big-abc123.js", { "accept-encoding": "br" });
+      expect(r.headers["content-encoding"]).toBe("br");
+      expect(String(r.headers.vary)).toContain("accept-encoding");
+      expect(brotliDecompressSync(r.rawPayload).toString()).toBe(script);
+    }
+    const font = await get("/assets/font-abc123.woff2", { "accept-encoding": "br" });
+    expect(font.headers["content-encoding"]).toBeUndefined();
+    expect(font.rawPayload).toHaveLength(20_000);
+  });
+
   it("serves index.html at / without a session, with a CSP and no caching", async () => {
     const r = await get("/");
     expect(r.statusCode).toBe(200);

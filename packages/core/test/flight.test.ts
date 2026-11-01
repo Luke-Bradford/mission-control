@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type FlightState,
+  flightContextText,
   flightTurnShort,
   flightTurnText,
   PLAN_SIZES,
@@ -40,6 +41,11 @@ describe("flight turn texts", () => {
   it("words the turn", () => {
     expect(flightTurnText(23, 41)).toBe("turn 23 of 41, then a fresh session");
     expect(flightTurnShort(23, 41)).toBe("turn 23 of 41");
+  });
+
+  it("words the context", () => {
+    expect(flightContextText(142_300, 150_000)).toBe("context 142K · fresh session at 150K");
+    expect(flightContextText(null, 150_000)).toBeNull();
   });
 });
 

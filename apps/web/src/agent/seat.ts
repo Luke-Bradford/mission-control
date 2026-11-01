@@ -7,14 +7,14 @@ import { ACTIONS, hub, RESOURCES } from "../data.ts";
 export const seatError = (e: unknown): string =>
   e instanceof ApiError ? e.message : "server unreachable";
 
-const done = (): void => hub.refetch(RESOURCES.crew.path);
+const done = (id?: string): void => hub.refetchCrew(id);
 
 /** Stop the seat's current turn. */
 export async function interruptSeat(row: Pick<CrewRow, "id">): Promise<void> {
   try {
     await apiPost(ACTIONS.seatInterrupt(row.id), {});
   } finally {
-    done();
+    done(row.id);
   }
 }
 
@@ -23,7 +23,7 @@ export async function endSeat(row: Pick<CrewRow, "id">, hold = false): Promise<v
   try {
     await apiPost(ACTIONS.seatEnd(row.id), hold ? { hold: true } : {});
   } finally {
-    done();
+    done(row.id);
   }
 }
 
@@ -45,7 +45,7 @@ export async function messageSeat(
   try {
     await apiPost(ACTIONS.seatMessage(row.id), interrupt ? { text, interrupt } : { text });
   } finally {
-    done();
+    done(row.id);
   }
 }
 
