@@ -1430,7 +1430,7 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
 - **Review previews and screenshots.** When a PR changes web files (paths under the repo's
   `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
   the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
-  copy of the live data with loop writes off. It is built in the background when the review run
+  copy of the live data with loop writes off. The preview is pinned to the reviewed commit; an operator preview is reused only for that same head. Browser requests are GET-only, and queued calls recheck the running review and preview instance before returning results. It is built in the background when the review run
   starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
   every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
   when the run ends (a preview the operator started for that PR is used and left running). If the

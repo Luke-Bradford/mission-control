@@ -2994,6 +2994,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             pr: match.pr.number,
             branch: match.pr.branch,
             checkout: match.checkout,
+            ...(match.pr.headSha === null ? {} : { sha: match.pr.headSha }),
           });
         } catch (e) {
           if (e instanceof PreviewHubError)

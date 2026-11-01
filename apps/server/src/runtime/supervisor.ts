@@ -3676,6 +3676,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               repoId: info.repo.id,
               pr: review.prNumber,
               branch: author.branch ?? "",
+              sha: review.sha,
             });
       const touches = author.loop?.touches;
       const evidence = store.evidenceNotes(author.id);

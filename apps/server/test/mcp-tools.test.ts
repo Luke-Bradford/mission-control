@@ -5891,13 +5891,19 @@ describe("preview_browser", () => {
   const ORIGIN = "http://127.0.0.1:7431";
   const png = Buffer.from("PNG");
   let reviewId: number;
+  let previewIdentity: string;
   let browse: ReturnType<typeof vi.fn>;
   let cfg: CcConfig;
   const call = (args: unknown, origin: string | null = ORIGIN) => {
     const ts = make({
       config: cfg,
       previewBrowser: {
-        ready: async () => ({ origin, note: origin === null ? "the preview did not start" : null }),
+        ready: async () => ({
+          origin,
+          identity: origin === null ? null : previewIdentity,
+          note: origin === null ? "the preview did not start" : null,
+        }),
+        identity: () => (origin === null ? null : previewIdentity),
         browse: browse as never,
         saveShot: () => "a".repeat(32),
       },
@@ -5905,6 +5911,7 @@ describe("preview_browser", () => {
     return tool(MC_TOOL_NAMES.previewBrowser, ts).call(ctx, args);
   };
   beforeEach(() => {
+    previewIdentity = "instance:1";
     cfg = config();
     const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === ctx.seatId);
     if (!seat) throw new Error("no review seat");
@@ -5950,6 +5957,47 @@ describe("preview_browser", () => {
     ]);
   });
 
+  it("does not run queued work or save results after the run ends", async () => {
+    let finish: (() => void) | undefined;
+    browse.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ url: ORIGIN, report: [], shots: [{ label: "late", png }] });
+        }),
+    );
+    const first = call({ path: "/" });
+    await vi.waitFor(() => expect(browse).toHaveBeenCalledTimes(1));
+    const second = call({ path: "/" });
+    const run = store.run(ctx.runId);
+    if (!run || !finish) throw new Error("missing pending browser run");
+    store.upsertRun({ ...run, endedAt: NOW, status: "ok" });
+    finish();
+    const results = await Promise.all([first, second]);
+    expect(results.every((result) => result.isError)).toBe(true);
+    expect(browse).toHaveBeenCalledTimes(1);
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("discards screenshots when the review reports during a browse", async () => {
+    browse.mockImplementationOnce(async () => {
+      store.setReviewState(reviewId, ["running"], "reported", { at: NOW });
+      return { url: ORIGIN, report: [], shots: [{ label: "late", png }] };
+    });
+    expect((await call({ path: "/" })).isError).toBe(true);
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
+  it("discards screenshots when the preview instance changes on the same port", async () => {
+    browse.mockImplementationOnce(async () => {
+      previewIdentity = "instance:2";
+      return { url: ORIGIN, report: [], shots: [{ label: "late", png }] };
+    });
+    const result = await call({ path: "/" });
+    expect(result.isError).toBe(true);
+    expect(result.image).toBeUndefined();
+    expect(store.reviewShots(reviewId)).toEqual([]);
+  });
+
   it("refuses any other host before a browser starts", async () => {
     for (const path of [
       "http://evil.example/",
@@ -5974,6 +6022,7 @@ describe("preview_browser", () => {
         config: cfg,
         previewBrowser: {
           ready: () => new Promise(() => {}),
+          identity: () => previewIdentity,
           browse: browse as never,
           saveShot: () => "a".repeat(32),
         },

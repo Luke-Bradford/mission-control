@@ -14,7 +14,7 @@ describe("previewRequest", () => {
 
   it("accepts requests to the preview's origin only", () => {
     expect(guard("GET", `${ORIGIN}/needs-you`)).toBe(true);
-    expect(guard("POST", `${ORIGIN}/api/anything`)).toBe(true);
+    expect(guard("POST", `${ORIGIN}/api/anything`)).toBe(false);
     for (const url of [
       "http://127.0.0.1:7432/",
       "https://127.0.0.1:7431/",

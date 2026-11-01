@@ -272,7 +272,10 @@ export interface McToolsDeps {
   /** RETRO's browser on a review's preview; absent: `preview_browser` says there is none. */
   previewBrowser?: {
     /** Waits for this review run's preview to start; `origin` is null when there is none to use. */
-    ready(runId: string): Promise<{ origin: string | null; note: string | null }>;
+    ready(
+      runId: string,
+    ): Promise<{ origin: string | null; note: string | null; identity: string | null }>;
+    identity(runId: string): string | null;
     /** Runs the job in a browser that reaches only the guard's origin. */
     browse(job: PreviewJob, guard: PreviewGuard): Promise<PreviewResult>;
     /** Stores a PNG; the id it can be read back by. */
@@ -1664,15 +1667,29 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function previewBrowser(ctx: McToolContext, args: unknown): Promise<McToolResult> {
     const parsed = PreviewBrowserArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const live = liveRun(ctx);
-    if (live === null) return ENDED;
-    const review = live.run.reviewId == null ? null : store.review(live.run.reviewId);
-    if (review === null || review.runId !== live.run.id || review.state !== "running")
-      return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+    const currentReview = () => {
+      const live = liveRun(ctx);
+      const review = live?.run.reviewId == null ? null : store.review(live.run.reviewId);
+      return live && review?.runId === live.run.id && review.state === "running" ? review : null;
+    };
+    if (currentReview() === null) return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+    const job: PreviewJob = parsed.data;
+    const shotCount = job.steps.filter((step) => "screenshot" in step).length;
+    if (shotCount > PREVIEW_SHOTS_MAX)
+      return {
+        text: `At most ${PREVIEW_SHOTS_MAX} screenshots a call; this one asks for ${shotCount}.`,
+        isError: true,
+      };
     const browser = deps.previewBrowser;
-    let preview: Awaited<ReturnType<NonNullable<typeof browser>["ready"]>> | "building" | null =
-      null;
-    if (browser !== undefined) {
+    if (!browser)
+      return {
+        text: "No preview for this review: it is not a web PR. Say in your summary that the live-data check was not run.",
+        isError: true,
+      };
+    return queued(previewQueue, ctx.runId, async (): Promise<McToolResult> => {
+      const review = currentReview();
+      if (review === null) return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+      let preview: Awaited<ReturnType<typeof browser.ready>> | "building";
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         preview = await Promise.race([
@@ -1684,38 +1701,44 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       } finally {
         clearTimeout(timer);
       }
-    }
-    if (preview === "building")
-      return {
-        text: "The preview is still building. Call mc preview_browser again in a minute; a build can take up to 5 minutes.",
-        isError: true,
-      };
-    const origin = preview?.origin ?? null;
-    if (browser === undefined || origin === null)
-      return {
-        text: `No preview for this review: ${preview?.note ?? "it is not a web PR"}. Say in your summary that the live-data check was not run.`,
-        isError: true,
-      };
-    const job: PreviewJob = parsed.data;
-    const shotCount = job.steps.filter((step) => "screenshot" in step).length;
-    if (shotCount > PREVIEW_SHOTS_MAX)
-      return {
-        text: `At most ${PREVIEW_SHOTS_MAX} screenshots a call; this one asks for ${shotCount}.`,
-        isError: true,
-      };
-    const guard = previewRequest(origin);
-    try {
-      guard.page(job.path);
-    } catch (e) {
-      return { text: e instanceof Error ? e.message : "Refused.", isError: true };
-    }
-    return queued(previewQueue, ctx.runId, async (): Promise<McToolResult> => {
+      if (preview === "building")
+        return {
+          text: "The preview is still building. Call mc preview_browser again in a minute; a build can take up to 5 minutes.",
+          isError: true,
+        };
+      if (preview.origin === null || preview.identity === null)
+        return {
+          text: `No preview for this review: ${preview.note ?? "it is not a web PR"}. Say in your summary that the live-data check was not run.`,
+          isError: true,
+        };
+      const identity = preview.identity;
+      const current = () =>
+        currentReview()?.id === review.id && browser.identity(ctx.runId) === identity;
+      if (!current())
+        return {
+          text: "The review or its preview changed. Call mc preview_browser again if the review is still running.",
+          isError: true,
+        };
+      const guard = previewRequest(preview.origin);
+      try {
+        guard.page(job.path);
+      } catch (error) {
+        return { text: error instanceof Error ? error.message : "Refused.", isError: true };
+      }
       let result: PreviewResult;
       try {
         result = await browser.browse(job, guard);
-      } catch (e) {
-        return { text: e instanceof Error ? e.message : "Preview browser failed.", isError: true };
+      } catch (error) {
+        return {
+          text: error instanceof Error ? error.message : "Preview browser failed.",
+          isError: true,
+        };
       }
+      if (!current())
+        return {
+          text: "The review or its preview ended before the browser finished; screenshots were not saved.",
+          isError: true,
+        };
       const saved: string[] = [];
       for (const shot of result.shots) {
         try {

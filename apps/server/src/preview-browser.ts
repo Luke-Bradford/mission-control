@@ -64,7 +64,7 @@ export interface PreviewGuard {
   page(path: string): string;
 }
 
-/** The only requests the browser may make: any method, to the preview's origin, minus the operator's token. */
+/** The only requests the browser may make: GET only, to the preview's origin, minus the operator's token. */
 export function previewRequest(previewOrigin: string): PreviewGuard {
   const origin = new URL(previewOrigin).origin;
   const guard = ((method: string, url: string): boolean => {
@@ -72,7 +72,7 @@ export function previewRequest(previewOrigin: string): PreviewGuard {
       const target = new URL(url);
       return (
         target.origin === origin &&
-        method.length > 0 &&
+        method === "GET" &&
         target.pathname !== OPERATOR_BOOTSTRAP_PATH &&
         target.pathname !== STREAM_PATH
       );

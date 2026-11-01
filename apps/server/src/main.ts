@@ -167,7 +167,7 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, port: previewPort, token, signal }) => {
+        start: async ({ pr, sha, port: previewPort, token, signal }) => {
           if (hubRoot === null) throw new Error("the hub checkout is unavailable for previews");
           const checkout = hubRoot;
           const root = join(previewRoot, String(pr));
@@ -193,7 +193,7 @@ export async function main(): Promise<void> {
             );
             await runPreviewCommand(
               "git",
-              ["-C", checkout, "worktree", "add", "-f", "--detach", worktree, previewRef],
+              ["-C", checkout, "worktree", "add", "-f", "--detach", worktree, sha ?? previewRef],
               undefined,
               signal,
             );
@@ -459,6 +459,7 @@ export async function main(): Promise<void> {
       : {
           previewBrowser: {
             ready: (runId) => reviewPreviews.ready(runId),
+            identity: (runId) => reviewPreviews.identity(runId),
             browse: (job, guard) => previewBrowserInHelper(job, guard),
             saveShot: (png) => reviewShots.save(png),
           },

@@ -668,7 +668,8 @@ describe("startReview", () => {
     const closed: string[] = [];
     const reviewPreviews = {
       origin: () => null,
-      ready: async () => ({ origin: null, note: null }),
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
       open: async (input: unknown) => {
         opened.push(input);
         return true;
@@ -681,7 +682,7 @@ describe("startReview", () => {
     sup.start();
     const { runId } = await sup.startReview("retro", r.reviewId);
     await until(() => expect(userLines()).toHaveLength(1));
-    expect(opened).toEqual([{ runId, repoId: "mc", pr: 9, branch: BRANCH }]);
+    expect(opened).toEqual([{ runId, repoId: "mc", pr: 9, branch: BRANCH, sha: r.sha }]);
     const brief = userLines()[0] as string;
     expect(brief).toContain("- Preview: this PR changes web files");
     expect(brief).toContain("mc preview_browser");
@@ -714,7 +715,8 @@ describe("startReview", () => {
     const r = reviewOfPush();
     const reviewPreviews = {
       origin: () => null,
-      ready: async () => ({ origin: null, note: null }),
+      identity: () => null,
+      ready: async () => ({ origin: null, note: null, identity: null }),
       open: async () => false,
       close: async () => {},
     };
