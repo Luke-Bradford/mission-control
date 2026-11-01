@@ -18,11 +18,16 @@ const SECRETS: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
   /github_pat_[A-Za-z0-9_]{20,}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
+  /npm_[A-Za-z0-9]{36,}/g,
   /sk-ant-[A-Za-z0-9_-]{20,}/g,
   /sk-[A-Za-z0-9]{20,}/g,
   /xox[abposr]-[A-Za-z0-9-]{10,}/g,
   /AKIA[0-9A-Z]{16}/g,
 ];
+/** Userinfo ends at the authority's last @; encoded delimiters stay within the credential. */
+const URL_USERINFO = /(https?:\/\/)[^\s/?#]*@/gi;
+/** A slice can cut before the @. Drop that incomplete authority before it can become visible. */
+const URL_AUTHORITY_TAIL = /(https?:\/\/)[^\s/?#]*$/i;
 const JWT_START = "eyJ";
 const isB64Url = (c: number): boolean =>
   (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 45;
@@ -102,6 +107,8 @@ export function cleanText(s: string, max = STREAM_TEXT_MAX, marker = "…"): str
   const sliced = s.length > max + SLICE_SLACK;
   let out = sliced ? s.slice(0, max + SLICE_SLACK) : s;
   out = out.replace(ESCAPES, "").replace(CONTROLS, "");
+  if (sliced) out = out.replace(URL_AUTHORITY_TAIL, "$1***");
+  out = out.replace(URL_USERINFO, "$1***@");
   for (const re of SECRETS) out = out.replace(re, REDACTED);
   out = redactJwts(out);
   out = out.replace(AUTH_WORD, `$1 ${REDACTED}`);
