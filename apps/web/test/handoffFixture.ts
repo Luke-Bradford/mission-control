@@ -1,0 +1,20 @@
+import type { RunHandoff } from "@mc/core";
+export const handoffFixture: RunHandoff = {
+  runId: "old",
+  repoId: "mission-control",
+  ticket: "mission-control#997",
+  fromSeat: "guido-cx",
+  at: 1,
+  goal: "Preserve an unfinished ticket",
+  done: ["Saved parser changes"],
+  left: ["Verify the blank input case"],
+  next: "Run the remaining checks",
+  branch: "feature/997-ticket-handoff",
+  worktree: "/private/crew/guido-cx",
+  gitStatus: [" M apps/parser.ts", "?? apps/parser.test.ts"],
+  gitState: "ready",
+  findings: ["Important: blank input crashes"],
+  messages: [{ from: "flight", at: 1, text: "Keep the existing branch" }],
+  acceptedBy: "guido-1",
+  acceptedRunId: "new",
+};

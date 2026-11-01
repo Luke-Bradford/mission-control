@@ -1,0 +1,54 @@
+.agent-handoff {
+  flex: none;
+  min-width: 0;
+}
+.agent-handoff > summary {
+  min-height: 32px;
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+.agent-handoff > summary span {
+  margin-left: var(--sp-3);
+  color: var(--muted);
+}
+.handoff-body {
+  padding: var(--sp-3);
+  max-height: 300px;
+  overflow: auto;
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+.handoff-body p {
+  margin: 0 0 var(--sp-2);
+}
+.handoff-body h3 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-s);
+}
+.handoff-body ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+.handoff-body dl {
+  margin: var(--sp-2) 0;
+}
+.handoff-body dl > div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+.handoff-body dd {
+  margin: 0;
+}
+.handoff-body code {
+  white-space: pre-wrap;
+}
+.run-handoff-link {
+  grid-column: 2 / -1;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+}
