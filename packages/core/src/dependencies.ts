@@ -1,3 +1,7 @@
+import type { DependencyWait } from "./dependencies-model.ts";
+
+export type { DependencyWait } from "./dependencies-model.ts";
+
 /**
  * What a ticket waits on, read one way for every gate: GitHub's blocked-by links, the `Depends on`
  * and `After PR` lines of its body, and a PR based on another open PR's branch. Pure: the server
@@ -7,14 +11,6 @@
 import { statusOutOfDate } from "./hud.ts";
 import { dependsOn } from "./repo-rules.ts";
 import type { BoardItem, PullRequestView } from "./types.ts";
-
-/** The issue a wait names (`repo#number`) or the PR (`PR number`), and how it reads in a refusal. */
-export interface DependencyWait {
-  ref: string;
-  text: string;
-  /** The hub never read this PR: it gates a start, but its ending is not a release. */
-  unread?: true;
-}
 
 /** What the body names: the shape the board card stores as `after`. */
 export interface BodyDependencies {

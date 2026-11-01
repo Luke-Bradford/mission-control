@@ -1,4 +1,5 @@
-import { type AttentionOwner, OWNER_OPERATOR } from "./hud.ts";
+import { OWNER_OPERATOR } from "./hud.ts";
+import type { AttentionOwner } from "./hud-model.ts";
 import type { AttentionItem } from "./types.ts";
 
 /** The owner of an item from a hub that predates `owner`: the operator's. */

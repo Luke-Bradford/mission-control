@@ -1,17 +1,22 @@
+import type { CrewMode, LoopKind } from "./runtime-model.ts";
+
+export {
+  CODEX_SHELL,
+  CREW_MODES,
+  type CrewMode,
+  type CrewRole,
+  type CrewVendor,
+  LOOP_KINDS,
+  type LoopKind,
+  SEAT_STATES,
+  type SeatState,
+} from "./runtime-model.ts";
+
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
 import { TOOL_OUTPUT_DIR } from "./tool-trim.ts";
 import type { AgentId } from "./types.ts";
-
-// What a crew process is started with: the CLI's tool allowlist (in `-p` mode anything not allowed
-// is denied, spike 2026-10-20), the guard hook before every tool call, and the OS
-// sandbox around every Bash, with `autoAllowBashIfSandboxed` off so the sandbox never widens the
-// allowlist. The sandbox writes no git state: commits, pushes and PRs are the mc tools', made by
-// the hub in its own clone.
-
-/** A seat's role: a call sign, built in (`BUILTIN_ROLES`) or defined in config (`crew.roles`). */
-export type CrewRole = string;
 /** What a role's name looks like: 2–16 capital letters or digits, starting with a letter. */
 export const ROLE_NAME = /^[A-Z][A-Z0-9]{1,15}$/;
 /** A role's prompt file, relative to the hub checkout. */
@@ -22,20 +27,9 @@ export const ROLE_PROMPT_DIR = "roles";
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
 /** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
 export type CrewEffort = string;
-
-/** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
-export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
-export type CrewMode = (typeof CREW_MODES)[number];
 /** The modes a seat's config may name; every other mode comes from the role. */
 export const CONFIG_SEAT_MODES = ["scratch"] as const;
 export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
-
-/**
- * What a role's loop does with its seat: builds tickets, reviews PRs, plans tickets, runs the crew
- * (`watch`, started with no ticket) or nothing.
- */
-export const LOOP_KINDS = ["build", "review", "plan", "watch", "none"] as const;
-export type LoopKind = (typeof LOOP_KINDS)[number];
 /** The loops each mode may have. */
 export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   writer: ["build"],
@@ -886,9 +880,6 @@ export const CREW_FILES_NOTE = "Files for crew seats arrive with the mailbox (ph
 /** A crew seat's call sign, in every message, refusal and commit: its id upper-cased. */
 export const seatCallSign = (seatId: string): string => seatId.toUpperCase();
 
-export const SEAT_STATES = ["idle", "starting", "running", "parked", "stopped", "error"] as const;
-export type SeatState = (typeof SEAT_STATES)[number];
-
 export interface CrewSandboxInput {
   /** The seat's working directory (its worktree). */
   cwd: string;
@@ -972,8 +963,6 @@ export const SANDBOX_ALLOW_READ_HOME = [
 
 export const CODEX_MIN_VERSION = "0.154.0";
 export const CODEX_COMMAND = "codex";
-/** The shell the Codex process environment and command approvals must name. */
-export const CODEX_SHELL = "/bin/zsh";
 export const CODEX_SEAT_PROFILE = "mc_seat";
 export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
 /** Apply at thread start/resume too: the run config alone does not exclude project docs. */
@@ -1405,6 +1394,3 @@ export type SessionCheckoutOutcome =
   | "retained-unpushed"
   | "retained-unproven"
   | "removal-failed-partway";
-
-/** The process protocol recorded with a crew run. */
-export type CrewVendor = "claude" | "codex";

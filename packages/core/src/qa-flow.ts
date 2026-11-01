@@ -1,3 +1,7 @@
+import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow-model.ts";
+
+export type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow-model.ts";
+
 import { type MetricDef, percentile } from "./metrics.ts";
 
 /** Fewer rounds than this is anecdote: a ratio is still reported, marked `enough: false`. */
@@ -64,13 +68,6 @@ export const QA_FLOW_METRICS = {
 } as const satisfies Readonly<Record<string, MetricDef>>;
 export type QaFlowMetricId = keyof typeof QA_FLOW_METRICS;
 
-/** What a bug ticket's body names. */
-export interface DefectRefs {
-  prs: number[];
-  shas: string[];
-  paths: string[];
-}
-
 const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -92,8 +89,6 @@ export function parseDefectRefs(body: string, repo?: string): DefectRefs {
   const paths = [...body.matchAll(/(?<![\w./:-])[\w.@-]+(?:\/[\w.@-]+)+\.\w+/g)].map((m) => m[0]);
   return { prs: uniq(prs), shas: uniq(shas), paths: uniq(paths) };
 }
-
-export type DefectVia = "pr" | "commit" | "file";
 
 /** A merged pull request as the escaped-defect link sees it. */
 export interface MergedPrFacts {
@@ -214,11 +209,6 @@ export function reworkRatios(
 
 const TEST_PATH = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[^/]+$/;
 export const isTestPath = (path: string): boolean => TEST_PATH.test(path);
-
-export interface PrFileInput {
-  path: string;
-  changeType: string;
-}
 
 /** Test files a diff added and changed; a deleted test is neither. */
 export function testsTouched(files: readonly PrFileInput[]): { added: number; changed: number } {
