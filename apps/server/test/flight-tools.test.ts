@@ -2824,6 +2824,37 @@ describe("flight_state", () => {
     expect(seats.find((x) => x.id === "guido-1")?.stop).toBeNull();
   });
 
+  it("does not call a paused or stopped review seat idle", async () => {
+    const queuedReview = () =>
+      store.requestReview({
+        authorRunId: "r-guido",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: NOW,
+      });
+    const reviewer = async () =>
+      ((await state()) as {
+        reviewQueue: { seats: { seat: string; queued: number; idle: boolean }[] };
+      }).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
+
+    expect(queuedReview()).not.toBeNull();
+    writeCrewPause(
+      store,
+      { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
+      NOW,
+    );
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
+
+    writeCrewPause(store, null, NOW);
+    store.setSeatSession({ ...row("retro-1", ""), runId: null, state: "stopped" });
+    expect(await reviewer()).toMatchObject({ queued: 1, idle: false });
+  });
+
   it("lists a run set aside in review, with its park, and the seat's run ids", async () => {
     store.upsertRun(
       run("r-aside", "guido-1", {
