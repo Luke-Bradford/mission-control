@@ -473,11 +473,16 @@ export function SideTabs({ row }: { row: CrewRow }) {
   const side = new URLSearchParams(useSearch()).get("side");
   const requested =
     side && ["plan", "queue", "subs", "files", "prompt"].includes(side) ? (side as Tab) : null;
-  const [tab, setTab] = useState<Tab>(requested ?? "plan");
+  const hasSubagents = (row.digest?.subagents.length ?? 0) > 0;
+  const [tab, setTab] = useState<Tab>(
+    requested === "subs" && !hasSubagents ? "plan" : (requested ?? "plan"),
+  );
   useEffect(() => {
-    if (requested && (requested !== "subs" || (row.digest?.subagents.length ?? 0) > 0))
-      setTab(requested);
-  }, [requested, row.digest?.subagents.length]);
+    if (requested) setTab(requested === "subs" && !hasSubagents ? "plan" : requested);
+  }, [requested, hasSubagents]);
+  useEffect(() => {
+    if (tab === "subs" && !hasSubagents) setTab("plan");
+  }, [tab, hasSubagents]);
   const files = useResource<ChangedFiles>(tab === "files" ? RESOURCES.files(row.id) : null);
   const nFiles = files.data?.note === READONLY_FILES_NOTE ? undefined : files.data?.files.length;
   const stream = useResource<AgentStream>(

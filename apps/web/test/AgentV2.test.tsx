@@ -1,5 +1,5 @@
 import type { AgentDetailView } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
@@ -169,4 +169,18 @@ it("refreshes the Agent response after Interrupt without an SSE message", async 
   });
   fireEvent.click(await screen.findByRole("button", { name: "Interrupt" }));
   expect(await screen.findByText(/Interrupted by you/)).toBeTruthy();
+});
+
+it("falls back to Plan for a link to an empty Subagents tab", async () => {
+  window.history.replaceState(null, "", "/agent/guido-1?side=subs");
+  setup();
+  const side = await screen.findByRole("region", {
+    name: "Plan, queue, subagents, files and context",
+  });
+  await waitFor(() =>
+    expect(within(side).getByRole("button", { name: /^Plan/ }).getAttribute("aria-pressed")).toBe(
+      "true",
+    ),
+  );
+  expect(within(side).queryByRole("button", { name: /Subagents/ })).toBeNull();
 });
