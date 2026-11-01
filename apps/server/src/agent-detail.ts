@@ -247,7 +247,9 @@ export function agentDetail({
             : at < 0
               ? "unknown"
               : "todo";
-        const finished = attempts.filter((attempt) => attempt.endedAt !== null);
+        const finished = attempts.filter(
+          (attempt) => attempt.endedAt !== null || run?.endedAt != null,
+        );
         return {
           id: `${index}:${step.name}`,
           label: step.name,
@@ -273,11 +275,16 @@ export function agentDetail({
                 : null,
           durationMs: finished.length
             ? finished.reduce(
-                (n, attempt) => n + Math.max(0, (attempt.endedAt as number) - attempt.startedAt),
+                (n, attempt) =>
+                  n +
+                  Math.max(
+                    0,
+                    (attempt.endedAt ?? run?.endedAt ?? attempt.startedAt) - attempt.startedAt,
+                  ),
                 0,
               )
             : null,
-          since: current ? (last?.startedAt ?? row.stateSince) : null,
+          since: current && run?.endedAt === null && last?.endedAt === null ? last.startedAt : null,
           reason: current ? safe(last?.reason ?? reason) : null,
         };
       })

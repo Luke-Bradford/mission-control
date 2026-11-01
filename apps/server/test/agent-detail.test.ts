@@ -118,7 +118,8 @@ it("shows every configured step, review tries/cap and the actual held phase", ()
     state: "held",
     tries: 3,
     limit: 3,
-    since: NOW - 300_000,
+    since: null,
+    durationMs: 200_000,
   });
   expect(detail.steps[0]?.state).toBe("done");
 });
@@ -426,4 +427,33 @@ it("carries an approved review across the recorded main merge and keeps a waiver
     reviewWaivedSha: "head",
   });
   expect(view(row).health.blocking).toBeNull();
+});
+
+it("freezes an ended parked run's attempt age at its recorded end", () => {
+  const row = seatRow({ loop: { phase: "parked", text: "Held", prNumber: 7, parked: "Review" } });
+  const run = save(row);
+  store.upsertRun({ ...run, endedAt: NOW, status: "ok" });
+  const loop: RunLoopView = {
+    runId: run.id,
+    loop: { ...NEW_LOOP, phase: "parked" },
+    events: [],
+    tries: [
+      {
+        step: "review",
+        fix: false,
+        n: 1,
+        startedAt: NOW - 60000,
+        endedAt: null,
+        outcome: "parked",
+        reason: "Held",
+      },
+    ],
+    round: 1,
+    budget: null,
+    review: null,
+  };
+  expect(view(row, loop).steps.find((s) => s.label === "Review")).toMatchObject({
+    since: null,
+    durationMs: 60000,
+  });
 });
