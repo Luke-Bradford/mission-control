@@ -1138,6 +1138,15 @@ const seatRow = (r: Row): SeatSessionRow => ({
   cliSessionId: r.cli_session_id as string | null,
   state: r.state as SeatState,
   reason: r.reason as string | null,
+  ...(r.stop_by === null || r.stop_by === undefined
+    ? {}
+    : {
+        stop: {
+          by: r.stop_by as string,
+          reason: r.stop_reason as string | null,
+          at: r.stop_at as number,
+        },
+      }),
   worktree: r.worktree as string | null,
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
@@ -1465,6 +1474,9 @@ export class Store {
     // Turns in a row that ended with no new commit; the resume line reads it.
     this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
+    this.addColumn("seat_sessions", "stop_by", "TEXT");
+    this.addColumn("seat_sessions", "stop_reason", "TEXT");
+    this.addColumn("seat_sessions", "stop_at", "INTEGER");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
@@ -6042,11 +6054,14 @@ export class Store {
   setSeatSession(row: SeatSessionRow): void {
     this.db
       .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor, stop_by, stop_reason, stop_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
            cli_session_id = excluded.cli_session_id, state = excluded.state, vendor = excluded.vendor,
            reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
+           stop_by = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_by ELSE NULL END,
+           stop_reason = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_reason ELSE NULL END,
+           stop_at = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_at ELSE NULL END,
            error_since = CASE WHEN excluded.state != 'error' THEN NULL
              WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
              ELSE excluded.updated_at END,
@@ -6062,6 +6077,9 @@ export class Store {
         row.updatedAt,
         row.state === "error" ? row.updatedAt : null,
         row.vendor ?? "claude",
+        row.stop?.by ?? null,
+        row.stop?.reason ?? null,
+        row.stop?.at ?? null,
       );
   }
 

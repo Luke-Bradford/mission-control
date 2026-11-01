@@ -591,6 +591,7 @@ const ControllerCheckBody = z
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
 const EndBody = z.strictObject({
   hold: z.boolean().optional(),
+  reason: z.string().trim().min(1).max(500).optional(),
   watch: z
     .strictObject({
       id: z.string().min(1).max(100),
@@ -3955,6 +3956,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
         }
         await sup.endRun(id, { hold: b.hold });
+        const stopped = store.seatSession(id);
+        if (stopped?.state === "stopped")
+          store.setSeatSession({
+            ...stopped,
+            stop: { by: config.operator.id, reason: b.reason ?? null, at: now() },
+          });
         return { ok: true };
       });
       api.get<{ Params: { id: string } }>(

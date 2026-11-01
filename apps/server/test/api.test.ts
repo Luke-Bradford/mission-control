@@ -6429,6 +6429,25 @@ describe("crew routes", () => {
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
   });
 
+  it("records the operator stop and its optional reason", async () => {
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: null,
+      cliSessionId: null,
+      state: "stopped",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const r = await post5("end", { hold: true, reason: "Wait for CI" });
+    expect(r.statusCode).toBe(200);
+    expect(store.seatSession("guido-1")?.stop).toEqual({
+      by: "operator",
+      reason: "Wait for CI",
+      at: NOW,
+    });
+  });
+
   it("ends a set-aside run by id, and refuses an unknown run, a bad body and a supervisor refusal", async () => {
     store.upsertRun(run({ id: "r-aside", agentId: "guido-1" }));
     const seen: string[] = [];

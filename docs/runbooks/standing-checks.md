@@ -26,7 +26,7 @@ FLIGHT works through these checks each wake. Its role prompt (`roles/FLIGHT.md`)
 | Check | When | Action | Today | Moves to |
 |---|---|---|---|---|
 | A seat that crashed | its run crashed, was interrupted or ended in error, for 2 min | restart it once; on a second failure, find the cause | FLIGHT; controller (`seat-down`) | #1182 has the hub resume it |
-| A stopped or paused seat with work | stopped or in a crew pause for 30 min with tickets queued | brief the operator with a recommendation; start it only on the operator's word | FLIGHT; controller (`seat-down`) | #1204 |
+| A stopped or paused seat with work | stopped or in a crew pause for 30 min with tickets queued | read who, why and when; verify any recorded resume condition, otherwise brief the operator once with a recommendation | FLIGHT; controller (`seat-down`) | #1204 |
 | Every developer seat idle | none working for 10 min while tickets are queued | find the cause (pause, park, dependency, machine guard) and clear it | FLIGHT; controller (`idle`) | #1053 |
 
 ## Hub and repo
