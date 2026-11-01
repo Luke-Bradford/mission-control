@@ -365,7 +365,9 @@ describe("crew", () => {
     store.setDigest("r1", digest({ contextWindow: 200_000 }));
     store.setDigest("r2", digest({ contextWindow: null }));
     store.setDigest("r3", digest({ contextWindow: null }));
+    const readDigests = vi.spyOn(store, "digests");
     const row = rowOf("shop-app-ta");
+    expect(readDigests).toHaveBeenLastCalledWith(["r3"]);
     expect(row?.digest?.contextWindow).toBeNull();
     expect(row?.contextWindow).toBe(200_000);
   });

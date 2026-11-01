@@ -13,6 +13,7 @@ import type {
   LoopKind,
   MachineSample,
   Profile,
+  PullRequestView,
   ReviewFinding,
   ReviewRequest,
   Run,
@@ -29,6 +30,7 @@ import {
   NEW_LOOP,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pendingRunApproval } from "../src/attention-subjects.ts";
 import {
   ACK_ABSENT_MS,
   type AgentEvent,
@@ -4269,4 +4271,65 @@ describe("check runs", () => {
       at: 1,
     });
   });
+});
+
+it("keeps an out-of-window held run without disturbing the newest-first order", () => {
+  for (let n = 0; n < 5; n++)
+    store.upsertRun(run({ id: `r${n}`, agentId: "a", seq: n, startedAt: n }));
+  const grouped = store.runsForAgents(["a", "missing"], 1, ["r0", "r0"]);
+  expect(grouped.get("a")?.map((r) => r.id)).toEqual(["r4", "r0"]);
+  expect(grouped.get("missing")).toEqual([]);
+});
+it("projects historical context windows without inventing missing measurements", () => {
+  store.setDigest("zero", digest({ contextWindow: 0 }));
+  store.setDigest("unknown", digest({ contextWindow: null }));
+  store.setDigest("known", digest({ contextWindow: 200000 }));
+  expect(store.digestContextWindows(["zero", "unknown", "known", "absent"])).toEqual(
+    new Map([
+      ["zero", 0],
+      ["known", 200000],
+    ]),
+  );
+});
+it("looks up canonical and closingIssues-only ticket links within their repository", () => {
+  const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({
+    repoId: "repo",
+    number,
+    title: "PR",
+    url: "u",
+    branch: `feature/${number}`,
+    ticket: null,
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: null,
+    createdAt: 1,
+    updatedAt: 1,
+    mergedAt: null,
+    headSha: "head",
+    mergeable: null,
+    ...patch,
+  });
+  store.upsertPullRequests(
+    "repo",
+    [
+      pr(1, { ticket: "repo#42" }),
+      pr(2, { closingIssues: [42] }),
+      pr(3, { ticket: "repo#42", closingIssues: [42] }),
+      pr(4, { ticket: "repo#7", closingIssues: [7] }),
+    ],
+    1,
+  );
+  store.upsertPullRequests(
+    "other",
+    [pr(5, { repoId: "other", ticket: "other#42", closingIssues: [42] })],
+    1,
+  );
+  expect(store.pullRequestsClosingTicket("repo", 42).map((pr) => pr.number)).toEqual([3, 2, 1]);
+  expect(store.pullRequestsClosingTicket("repo", 8)).toEqual([]);
+});
+it("tolerates a legacy loop without a PR number when checking saved approval holds", () => {
+  const r = run({ loop: { ...NEW_LOOP } });
+  if (r.loop) delete (r.loop as Partial<typeof r.loop>).prNumber;
+  expect(pendingRunApproval(store, r)).toBe(false);
 });

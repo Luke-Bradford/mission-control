@@ -24,6 +24,16 @@ export function mapSeats(
   flightId: string | null = null,
 ): Pick<MapSnapshot, "seats" | "findings"> {
   const findings: MapSnapshot["findings"] = [];
+  // A run and every set-aside branch ask the same repo questions. Decode its stored PRs once.
+  const prsByRepo = new Map<string, ReturnType<Store["pullRequests"]>>();
+  const prsFor = (repoId: string) => {
+    let prs = prsByRepo.get(repoId);
+    if (!prs) {
+      prs = store.pullRequests(repoId);
+      prsByRepo.set(repoId, prs);
+    }
+    return prs;
+  };
   const seats = rows.map((row): MapSeat => {
     const session = store.seatSession(row.id);
     const run = row.run ? store.run(row.run.id) : null;
@@ -47,7 +57,7 @@ export function mapSeats(
       if (
         branch &&
         (work.some((w) => w.branch === branch) ||
-          store.pullRequests(row.repoId).some((p) => p.branch === branch && p.state === "merged"))
+          prsFor(row.repoId).some((p) => p.branch === branch && p.state === "merged"))
       )
         continue;
       // a run with no branch yet still shows its edit churn; it just names no branch
@@ -96,9 +106,7 @@ export function mapSeats(
     const scope = ring.scope(scopeId);
     const latestTests = scope.tests;
     const waiting = lock.waiting.find((w) => w.seatId === row.id);
-    const pr = store
-      .pullRequests(row.repoId)
-      .find((p) => leadBranch !== null && p.branch === leadBranch);
+    const pr = prsFor(row.repoId).find((p) => leadBranch !== null && p.branch === leadBranch);
     const reviews =
       ticket === null
         ? []
