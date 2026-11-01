@@ -109,6 +109,8 @@ function apiFor(scenario: Scenario) {
 }
 
 const base = {
+  "/api/operator/bootstrap": { token: "fixture-token" },
+  "/api/prs/flow": { generatedAt: NOW, repos: [] },
   "/api/config": CONFIG,
   "/api/repos": REPOS,
   "/api/metrics": METRICS_VIEW,
