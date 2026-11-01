@@ -830,6 +830,11 @@ export async function main(): Promise<void> {
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
+  let stopEvidenceSweep: (() => void) | undefined;
+  app.addHook("onClose", async () => {
+    stopEvidenceSweep?.();
+    await prEvidence?.stop();
+  });
 
   const shutdown = onSignal({
     drain: () => mcpCalls.drain(),
@@ -896,12 +901,11 @@ export async function main(): Promise<void> {
       const retry = setInterval(() => void sweep.tick(), 60_000);
       retry.unref();
       void sweep.tick();
-      app.addHook("onClose", async () => {
+      stopEvidenceSweep = () => {
         sweep.stop();
         clearInterval(retry);
         unsubscribe();
-        await prEvidence.stop();
-      });
+      };
     }
   }
   // Branch tidying writes to GitHub, so it runs wherever the engine does.
