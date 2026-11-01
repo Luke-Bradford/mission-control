@@ -16,6 +16,7 @@ export * from "./hud-paths.ts";
 export * from "./loop.ts";
 export * from "./map.ts";
 export * from "./map-fixture.ts";
+export * from "./map-wire.ts";
 export * from "./mcp.ts";
 export * from "./metrics.ts";
 export * from "./needs-you.ts";

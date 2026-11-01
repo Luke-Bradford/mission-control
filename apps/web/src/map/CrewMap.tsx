@@ -1,11 +1,11 @@
 import type { Crew, MapSeat, MapSnapshot } from "@mc/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { conflictSummary } from "../lenses/lenses.tsx";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
 import { type ChangeVisual, changesVisuals, windowVisuals } from "./changes.ts";
+import { useMapTime } from "./clock.ts";
 import { LiveMap } from "./live.ts";
 import { branchOnlyFiles, MapTreemap } from "./MapTreemap.tsx";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
@@ -121,6 +121,7 @@ function errorText(error: Error): string {
   return /reconnect|retry/i.test(sentence) ? `${sentence}…` : `${sentence}. Retrying every 5 s.`;
 }
 
+const NO_SEATS: MapSeat[] = [];
 const noNames: Record<string, string> = {};
 const noWork: Record<string, SeatWork> = {};
 const noIndices: Record<string, number> = {};
@@ -152,7 +153,7 @@ export function CrewMapView({
     const first = focusKey.split("\n")[0];
     setSelection(first ? { kind: "node", path: first } : null);
   }, [focusKey]);
-  const now = useNow();
+  const now = useMapTime(snapshot.seats);
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
       work[seat.seat] ?? { ticket: seat.ticket, title: seat.title, pr: null },
@@ -172,9 +173,15 @@ export function CrewMapView({
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
+  const workingKey = snapshot.seats
+    .filter((seat) => isWorking(seat, now))
+    .map((seat) => seat.seat)
+    .join("\n");
+  // Time changes membership only at a dock/expiry boundary; keep timeline inputs stable between them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workingKey captures time-dependent membership
   const workingSeats = useMemo(
     () => snapshot.seats.filter((seat) => isWorking(seat, now)),
-    [snapshot.seats, now],
+    [snapshot.seats, workingKey],
   );
   const timeline = useSessionTimeline(workingSeats, now);
   // What Changes draws: the working seats and their fresh paths only. The clock ticks every few
@@ -315,12 +322,7 @@ export function CrewMapView({
             </p>
             <aside className="map-detail" aria-label="Selection detail">
               {selectedSeat ? (
-                <SeatDetail
-                  {...named}
-                  seat={selectedSeat}
-                  now={now}
-                  work={seatWork(selectedSeat)}
-                />
+                <TickingSeatDetail {...named} seat={selectedSeat} work={seatWork(selectedSeat)} />
               ) : selectedPath !== null ? (
                 <>
                   <NodeDetail {...named} path={selectedPath} files={[selectedPath]} />
@@ -380,4 +382,9 @@ function KeySteps() {
       ))}
     </span>
   );
+}
+
+function TickingSeatDetail(props: Omit<Parameters<typeof SeatDetail>[0], "now">) {
+  const now = useMapTime(NO_SEATS, 5000);
+  return <SeatDetail {...props} now={now} />;
 }

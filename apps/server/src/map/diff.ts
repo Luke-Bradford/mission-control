@@ -13,6 +13,10 @@ const git: GitExec = (args) => {
 
 /** Cached per checkout; transcript activity invalidates even when HEAD and index stay still. */
 export class SeatDiff {
+  constructor(privateChanged?: () => void) {
+    this.changed = privateChanged;
+  }
+  private changed: (() => void) | undefined;
   private revision = "";
   private due = 0;
   private key: string | null = null;
@@ -82,19 +86,25 @@ export class SeatDiff {
       } catch {
         others = null; // unknown: no churn stands in for the diff
       }
+      const changed =
+        JSON.stringify([this.value, this.onBranch, this.others]) !==
+        JSON.stringify([value, branch && branch !== "HEAD" ? branch : null, others]);
       // Publish together: a reader between awaits must never see a diff without its untracked files.
       this.value = value;
       this.onBranch = branch && branch !== "HEAD" ? branch : null;
       this.others = others;
       this.key = key;
       this.count++;
+      if (changed) this.changed?.();
       if (this.revision === revision) this.due = 0;
     } catch {
+      const changed = this.value !== null || this.onBranch !== null || this.others !== null;
       // Unavailable bases, binary counts and filters must never become invented zeroes.
       this.value = null;
       this.onBranch = null;
       this.others = null;
       this.key = null;
+      if (changed) this.changed?.();
     }
   }
 }

@@ -729,7 +729,11 @@ function protectedGlobs(extra: readonly string[]): readonly string[] {
  * includes `a/b`), and a glob that names a folder covers everything in it (`apps` and `apps/**`
  * both cover `apps/x.ts`). Area globs hold no other syntax (the config loader refuses it).
  */
+const globPatterns = new Map<string, RegExp>();
 export function globMatches(glob: string, path: string, ignoreCase = false): boolean {
+  const key = JSON.stringify([glob, ignoreCase]);
+  const cached = globPatterns.get(key);
+  if (cached) return cached.test(path);
   let re = "";
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i] as string;
@@ -747,7 +751,10 @@ export function globMatches(glob: string, path: string, ignoreCase = false): boo
       re += c.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
     }
   }
-  return new RegExp(`^${re}(?:/.*)?$`, ignoreCase ? "si" : "s").test(path);
+  const compiled = new RegExp(`^${re}(?:/.*)?$`, ignoreCase ? "si" : "s");
+  if (globPatterns.size >= 512) globPatterns.delete(globPatterns.keys().next().value as string);
+  globPatterns.set(key, compiled);
+  return compiled.test(path);
 }
 
 /** Whether a writer with this area may change `path`: no area is the whole checkout. */
