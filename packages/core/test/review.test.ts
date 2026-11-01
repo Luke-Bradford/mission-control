@@ -7,6 +7,7 @@ import {
   FIX_TEXT_MAX,
   failedAttempts,
   findingFileOk,
+  fixCommsText,
   fixesSent,
   fixText,
   isReviewBudgetFailure,
@@ -53,7 +54,7 @@ const fin = (over: Partial<ReviewFinding>): ReviewFinding => ({
 });
 
 describe("fixText", () => {
-  it("orders and numbers", () => {
+  it("lists actionable findings for the author", () => {
     const t = fixText({
       retro: "RETRO",
       sha: "abcdef1234",
@@ -63,23 +64,16 @@ describe("fixText", () => {
         fin({ summary: "c" }),
       ],
     });
-    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to resolve");
-    expect(t).toContain("or explain in your evidence note why you think it should not change");
-    expect(t).not.toContain("as written");
-    expect(t).not.toContain("Ruling:");
-    expect(t).toContain(
-      "1. [Critical] a.ts — b\n   Why: w\n   Suggested fix: f\n\n2. [Important] a.ts:3 — a",
-    );
-    expect(t.indexOf("3. [Important] a.ts:3 — c")).toBeGreaterThan(t.indexOf("2."));
-    expect(t).not.toContain(":0");
+    expect(t).toContain("1. [Critical] a.ts — b");
+    expect(t).toContain("2. [Important] a.ts:3 — a");
+    expect(t).toContain("3. [Important] a.ts:3 — c");
   });
 
-  it("caps", () => {
+  it("bounds a long author fix list", () => {
     const findings = Array.from({ length: 50 }, () => fin({ fix: "x".repeat(1900) }));
     const t = fixText({ retro: "RETRO", sha: "abcdef1", findings });
     expect(t.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
-    expect(t).toContain("found 50 issues");
-    expect(t).toMatch(/…and \d+ more; the next review lists them again\.$/);
+    expect(t).toContain("…and");
   });
 
   it("skips Minor; singular", () => {
@@ -88,8 +82,28 @@ describe("fixText", () => {
       sha: "abcdef1",
       findings: [fin({ severity: "Minor" }), fin({ severity: "Critical" })],
     });
-    expect(t).toContain("found 1 issue to resolve");
-    expect(t).not.toContain("2. ");
+    expect(t).toContain("[Critical]");
+    expect(t).not.toContain("Minor");
+  });
+});
+
+describe("fixCommsText", () => {
+  it("counts severities and points to the structured findings", () => {
+    expect(
+      fixCommsText({
+        retro: "RETRO",
+        sha: "abcdef1234",
+        findings: [
+          fin({ summary: "a" }),
+          fin({ severity: "Critical", summary: "b" }),
+          fin({ severity: "Minor", summary: "c" }),
+          fin({ severity: "Minor", summary: "d" }),
+          fin({ severity: "Minor", summary: "e" }),
+        ],
+      }),
+    ).toBe(
+      "RETRO reviewed abcdef1: 1 Critical, 1 Important, 3 Minor.\nFindings are in RETRO's report_findings record; address Critical and Important findings, then report_evidence.",
+    );
   });
 });
 

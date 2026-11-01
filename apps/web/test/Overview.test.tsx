@@ -102,7 +102,7 @@ function stub(d: Data = {}) {
     "/api/overview": OVERVIEW,
     "/api/metrics": METRICS_VIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
-    "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
     "/api/machine": {
       latest: d.machine === undefined ? sample() : d.machine,
@@ -120,7 +120,7 @@ function stub(d: Data = {}) {
     "/api/config": d.config ?? CONFIG,
     "/api/test-lock": d.lock ?? { holder: null, waiting: [] },
     "/api/crew/status": d.crewStatus ?? { enabled: true, note: null },
-    "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": d.prs ?? [],
   });
 }
 
@@ -1057,7 +1057,7 @@ describe("Agents panel", () => {
       release = resolve;
     });
     vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-      if (input === "/api/repos/shop-app/prs?linked=1") await gate;
+      if (input === "/api/repos/shop-app/prs?linked=1&shape=summary") await gate;
       return f(input, init);
     });
     const { container } = render(<Overview />);
@@ -1075,7 +1075,7 @@ describe("Agents panel", () => {
 
   it("the repo's PRs are kept for a seat with an open review, whatever its state, and not for a note", async () => {
     const review = { prNumber: 77, state: "open" } as const;
-    const prsPath = "/api/repos/shop-app/prs?linked=1";
+    const prsPath = "/api/repos/shop-app/prs?linked=1&shape=summary";
     const fetched = async (rows: CrewRow[]) => {
       const f = stub({ rows });
       const { unmount } = render(<Overview />);
@@ -1239,16 +1239,21 @@ describe("Agents panel", () => {
     expect(link.contains(within(row).getByRole("button", { name: "Answer" }))).toBe(false);
   });
 
-  it("a ticket link inside a row goes to GitHub and does not also open the Agent page", async () => {
+  it("a ticket link inside a row opens the ticket page and does not also open the Agent page", async () => {
     stub({ rows: [crewRow({ id: "shop-app-ta" })] });
     const { container } = render(<Overview />);
     await screen.findByText("Quote cache");
     const link = await within(agentRows(container)[0] as HTMLElement).findByRole("link", {
       name: "shop-app #3349",
     });
-    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/3349");
+    expect(link.getAttribute("href")).toBe("/tickets/shop-app/3349");
+    expect(
+      within(agentRows(container)[0] as HTMLElement)
+        .getByRole("link", { name: "shop-app #3349 on GitHub" })
+        .getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/issues/3349");
     fireEvent.click(link);
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/tickets/shop-app/3349");
   });
 
   it("clicking a row or its link opens the Agent page; the session filter hides other repos", async () => {
@@ -1775,7 +1780,7 @@ describe("Account quota panel", () => {
 
   it("keeps the row — until the timezone has loaded", async () => {
     stubFetch({
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/limits": limits,
       "/api/limits/github": GITHUB_RATE,
       "/api/health": [],
@@ -2228,7 +2233,10 @@ describe("Activity panel", () => {
     const row = act_.querySelector(".arow") as HTMLElement;
     expect(row.querySelector(".txt")?.textContent?.endsWith(" · Cached quotes")).toBe(true);
     const chip = within(row).getByRole("link", { name: "shop-app PR #3240" });
-    expect(chip.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/3240");
+    expect(chip.getAttribute("href")).toBe("/tickets/shop-app/3349");
+    expect(
+      within(row).getByRole("link", { name: "shop-app PR #3240 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/pull/3240");
     expect(row.textContent).toContain("#3349");
     expect(row.textContent).toContain("Merged");
   });
@@ -2351,9 +2359,10 @@ describe("Activity panel", () => {
       for (const r of arows) {
         const links = within(r).getAllByRole("link", { name: "shop-app #3349" });
         expect(links).toHaveLength(1);
-        expect(links[0]?.getAttribute("href")).toBe(
-          "https://github.com/octo-org/shop-app/issues/3349",
-        );
+        expect(links[0]?.getAttribute("href")).toBe("/tickets/shop-app/3349");
+        expect(
+          within(r).getByRole("link", { name: "shop-app #3349 on GitHub" }).getAttribute("href"),
+        ).toBe("https://github.com/octo-org/shop-app/issues/3349");
       }
     });
 
@@ -2387,7 +2396,7 @@ describe("Activity panel", () => {
       ]);
     });
 
-    it("the ticket ref on a PR event links to the issue, not the PR's URL", async () => {
+    it("the ticket ref on a PR event opens the ticket, with the issue (not the PR's URL) on GitHub", async () => {
       const [row] = await show([
         {
           ...base,
@@ -2399,10 +2408,15 @@ describe("Activity panel", () => {
         },
       ]);
       const ticket = within(row as HTMLElement).getByRole("link", { name: "shop-app #3349" });
-      expect(ticket.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/3349");
+      expect(ticket.getAttribute("href")).toBe("/tickets/shop-app/3349");
+      expect(
+        within(row as HTMLElement)
+          .getByRole("link", { name: "shop-app #3349 on GitHub" })
+          .getAttribute("href"),
+      ).toBe("https://github.com/octo-org/shop-app/issues/3349");
     });
 
-    it("before the config loads, a ref is text, never the PR's URL", async () => {
+    it("before the config loads, a ref opens the ticket page and never links the PR's URL", async () => {
       stub({
         rows,
         config: () => ({ status: 503, body: { error: "loading" } }),
@@ -2420,7 +2434,8 @@ describe("Activity panel", () => {
       const { container } = render(<Overview />);
       const act_ = container.querySelector("#actP") as HTMLElement;
       await within(act_).findByText(/Quote cache/);
-      expect(within(act_).queryByRole("link")).toBeNull();
+      const links = within(act_).getAllByRole("link");
+      expect(links.map((a) => a.getAttribute("href"))).toEqual(["/tickets/shop-app/3349"]);
     });
 
     it("an agent-less PR row does not say the repo twice", async () => {
@@ -2477,7 +2492,9 @@ describe("Activity panel", () => {
       expect(mc.textContent, part).toContain(part);
     }
     expect(mc.querySelector(".g")?.textContent).toBe("›");
-    expect(within(mc).getByRole("link").getAttribute("href")).toMatch(/\/issues\/3349$/);
+    expect(within(mc).getByRole("link", { name: "shop-app #3349" }).getAttribute("href")).toBe(
+      "/tickets/shop-app/3349",
+    );
     for (const part of ["guido-1", "→", "You"]) expect(you.textContent, part).toContain(part);
     expect(you.querySelector(".mention")?.textContent).toBe(TAG);
     expect(act_.textContent).toContain("what agents said to each other");

@@ -18,10 +18,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  alreadyOnOriginText,
+  CALL_FLIGHT_SELF,
+  CALLED_FLIGHT,
+  type CheckDrop,
+  COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
@@ -42,6 +48,7 @@ import {
   FINDINGS_FAIL_NEEDS_BLOCKING,
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
+  FLIGHT_SIGNALS_SETTING,
   findingFileText,
   fixKey,
   MC_BAD_ARGS,
@@ -58,6 +65,9 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_EMPTY,
+  MC_PR_BODY_NO_PR,
+  MC_PR_BODY_REFUSED,
   MC_PR_UNCLOSED,
   MC_PUSH_CHECKS,
   MC_PUSH_FAILED,
@@ -72,6 +82,7 @@ import {
   MC_TOOL_GRANTS,
   MC_TOOL_NAMES,
   MC_TOOLS,
+  MINOR_HEADING,
   NEW_LOOP,
   originMovedText,
   PROFILE_PAIR_TEXT,
@@ -83,10 +94,13 @@ import {
   planUnknownProfileText,
   planUnsafePathsText,
   planWrittenText,
+  prEditedText,
   prNamedRefText,
   prNotifyText,
+  prNotRunsText,
   prSecretText,
   pushChecksText,
+  pushPrDoneText,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -106,7 +120,14 @@ import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
+import {
+  createMcTools,
+  type McToolsDeps,
+  openDraftPr,
+  pushRun,
+  seatWroteBody,
+} from "../src/mcp/tools.ts";
+import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
@@ -330,7 +351,9 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
+      [MC_TOOL_NAMES.prBody, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
+      ["call_flight", ["writer", "read-only", "scratch"]],
       ["report_evidence", ["writer", "read-only"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
@@ -343,7 +366,9 @@ describe("the mc tools", () => {
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.prBody,
       MC_TOOLS.askFlight,
+      MC_TOOLS.callFlight,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
@@ -371,6 +396,7 @@ describe("the mc tools", () => {
         startRun: vi.fn(),
         endRun: vi.fn(),
         endAsideRun: vi.fn(),
+        resumeRun: vi.fn(),
         interrupt: vi.fn(),
       },
       rules: vi.fn(),
@@ -572,6 +598,39 @@ describe("commit", () => {
       ["docs/c.md", "outside"],
       ["web/b.ts", "other-area"],
     ]);
+  });
+
+  it("commits a protected file and one outside the area when this run holds a grant for them", async () => {
+    setRunPathGrants(store, RUN, ["package.json", "README.md"]);
+    write("package.json", '{"x":1}\n');
+    write("README.md", "hi2\n");
+    const r = await commit("chore: root files");
+    expect(r.isError).toBeUndefined();
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").split("\n").sort()).toEqual([
+      "",
+      "README.md",
+      "package.json",
+    ]);
+  });
+
+  it("keeps refusing the rest while a grant is held: another file, a nested package.json", async () => {
+    setRunPathGrants(store, RUN, ["package.json"]);
+    write("package.json", '{"x":1}\n');
+    write("docs/c.md", "c2\n");
+    write("apps/package.json", "{}\n");
+    const r = await commit("feat: x");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("docs/c.md is outside your area");
+    expect(r.text).toContain("apps/package.json is protected");
+    expect(r.text).not.toContain("Not committed: package.json");
+  });
+
+  it("refuses the same file to a run that holds no grant, though the seat's other run had one", async () => {
+    setRunPathGrants(store, "guido-1:20261019T100000Z", ["package.json"]);
+    write("package.json", '{"x":1}\n');
+    const r = await commit("chore: root");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("package.json is protected");
   });
 
   it("refuses one protected file, inside the area or nested, as it", async () => {
@@ -1034,7 +1093,13 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "flight-1", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
     expect(emitted).toContain("agents");
   });
@@ -1042,8 +1107,24 @@ describe("ask_flight", () => {
   it("with no FLIGHT seat, mirrors it to CAPCOM: nobody else can answer it", async () => {
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "CAPCOM",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
+  });
+
+  it("keeps a long question in its record and sends FLIGHT a short pointer", async () => {
+    tools = make({ config: withFlight() });
+    const question = "x".repeat(2000);
+    await ask({ question });
+    expect(store.openQuestions()[0]?.text).toBe(question);
+    const comms = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(comms).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(comms).not.toBe(question);
   });
 
   it("refuses FLIGHT itself, recording nothing: FLIGHT briefs the operator instead", async () => {
@@ -1086,6 +1167,40 @@ describe("ask_flight", () => {
     ).toBeUndefined();
   });
 
+  it("counts FLIGHT's comms toward the runaway breaker and refuses them while it is tripped", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const line = { to: "CAPCOM", text: "Same line" };
+    for (let i = 0; i < 5; i++)
+      expect((await tool("comms_send").call(flight, line)).isError).toBeUndefined();
+    expect(await tool("comms_send").call(flight, line)).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's comms are not FLIGHT's writes
+    expect((await tool("comms_send").call(CTX, line)).isError).toBeUndefined();
+  });
+
+  it("stops and counts FLIGHT's comms_react like its comms_send", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const flight = { seatId: "flight-1", runId: "flight-1:1" };
+    const id = (await tool("comms_send").call(CTX, { to: "flight-1", text: "ping" })).text.replace(
+      /^Sent (.*)\.$/,
+      "$1",
+    );
+    const react = (c = flight) => tool("comms_react").call(c, { id, reaction: "seen" });
+    // five identical reactions trip the breaker; the sixth is refused and writes nothing
+    for (let i = 0; i < 5; i++) expect((await react()).isError).toBeUndefined();
+    expect(await react()).toMatchObject({
+      isError: true,
+      text: expect.stringContaining("runaway breaker"),
+    });
+    // a developer seat's reactions are not FLIGHT's writes
+    expect((await react(CTX)).isError).toBeUndefined();
+  });
+
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
     await ask({ question: "one?" });
     liveSeat("retro", "retro:1");
@@ -1113,6 +1228,69 @@ describe("ask_flight", () => {
       expect(r.text).toMatch(/^Invalid arguments: /);
     }
     expect(store.openQuestions()).toEqual([]);
+  });
+});
+
+describe("call_flight", () => {
+  const call = (args: unknown, ctx: McToolContext = CTX) => tool("call_flight").call(ctx, args);
+  const calls = () => JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals;
+
+  it("keeps the call as a wake reason for FLIGHT, with the seat's reason and its ticket", async () => {
+    tools = make({ config: withFlight() });
+    expect(await call({ reason: "I need a change in apps/web, outside my area" })).toEqual({
+      text: CALLED_FLIGHT,
+    });
+    expect(Object.values(calls())).toEqual([
+      expect.objectContaining({
+        kind: "seat_call",
+        key: `guido-1:${NOW}`,
+        toldAt: null,
+        evidence: "guido-1 calls FLIGHT about mc#42: I need a change in apps/web, outside my area",
+      }),
+    ]);
+    expect(emitted).toContain("attention");
+  });
+
+  it("takes the ref the seat gives, and counts the same call twice as one", async () => {
+    tools = make({ config: withFlight() });
+    await call({ reason: "I dispute the finding", ref: "mc#77" });
+    await call({ reason: "I dispute the finding", ref: "mc#77" });
+    expect(Object.values(calls())).toHaveLength(1);
+    expect(JSON.stringify(calls())).toContain("about mc#77");
+  });
+
+  it("is offered to every seat but FLIGHT, a review's scratch seat included, and refuses FLIGHT itself", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const t = tool("call_flight");
+    expect(t.offeredTo?.("flight-1")).toBe(false);
+    for (const seat of ["guido-1", "retro"]) expect(t.offeredTo?.(seat)).toBe(true);
+    expect(await call({ reason: "x" }, { seatId: "flight-1", runId: "flight-1:1" })).toEqual({
+      text: CALL_FLIGHT_SELF,
+      isError: true,
+    });
+    expect(calls() ?? {}).toEqual({});
+  });
+
+  it("counts a repeat as a new call once the first has been told, and as one until then", async () => {
+    tools = make({ config: withFlight() });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    expect(Object.values(calls())).toHaveLength(1);
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    for (const x of Object.values(saved.signals) as { toldAt: number | null }[]) x.toldAt = NOW;
+    store.setSetting(`${FLIGHT_SIGNALS_SETTING}:mc`, JSON.stringify(saved));
+    tools = make({ config: withFlight(), now: () => NOW + 30 * 60_000 });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    const kept = Object.values(calls()) as { toldAt: number | null }[];
+    expect(kept).toHaveLength(2);
+    expect(kept.filter((x) => x.toldAt === null)).toHaveLength(1);
+  });
+
+  it("refuses an empty reason", async () => {
+    tools = make({ config: withFlight() });
+    expect((await call({ reason: "" })).isError).toBe(true);
+    expect(calls() ?? {}).toEqual({});
   });
 });
 
@@ -1191,7 +1369,9 @@ describe("through /mcp", () => {
         "comms_react",
         "commit",
         "sync_main",
+        "pr_body",
         "ask_flight",
+        "call_flight",
         "report_evidence",
       ]);
       expect(
@@ -1208,6 +1388,7 @@ describe("through /mcp", () => {
         "comms_send",
         "comms_react",
         "ask_flight",
+        "call_flight",
         "report_evidence",
       ]);
       write("apps/a.ts", "a2\n");
@@ -1303,6 +1484,14 @@ describe("Comms seat tools", () => {
     tool("comms_inbox", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("refuses a long message and directs the seat to its structured report", async () => {
+    expect(await send({ to: "crew", text: "x".repeat(COMMS_MESSAGE_MAX + 1) })).toEqual({
+      text: "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+  });
 
   it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
     store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
@@ -2237,6 +2426,61 @@ describe("push and draft_pr", () => {
       expect(remoteTip("main")).toBe(git(clone, "rev-parse", "main").trim());
     });
 
+    it("refuses a push to a branch whose PR merged or closed, naming the PR, and sends nothing", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      for (const [state, word] of [
+        ["MERGED", "merged"],
+        ["CLOSED", "closed"],
+      ] as const) {
+        ghState({ "pr view": { stdout: `${JSON.stringify({ state })}\n` } });
+        const text = pushPrDoneText(BRANCH, 727, word);
+        expect(await push()).toEqual({ text, isError: true });
+        expect(text).toContain("PR #727");
+        expect(remoteTip()).toBeNull();
+        expect(store.runPush(RUN)).toBeNull();
+      }
+    });
+
+    it("refuses a push when the run has no PR yet but the branch's last PR merged", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: null });
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 727,
+            headSha: "a",
+            title: "x",
+            url: "https://github.com/o/mc/pull/727",
+            branch: BRANCH,
+            ticket: "mc#42",
+            state: "merged",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - 86_400_000,
+            updatedAt: NOW - 3_600_000,
+            mergedAt: NOW - 3_600_000,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      expect(await push()).toEqual({ text: pushPrDoneText(BRANCH, 727, "merged"), isError: true });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("pushes while the run's PR is open, and refuses when gh cannot say", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 727 });
+      ghState({ "pr view": { code: 1, stderr: "HTTP 502\n" } });
+      expect(await push()).toEqual({ text: MC_PUSH_FAILED, isError: true });
+      ghState({ "pr view": { stdout: `${JSON.stringify({ state: "OPEN" })}\n` } });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+    });
+
     it("gives every slow step the slow timeout and runs in the clone's queue", async () => {
       await commitOk("apps/a.ts", "a2\n");
       const seen: [string, number | undefined][] = [];
@@ -2366,6 +2610,7 @@ describe("push and draft_pr", () => {
             exitCode: number | null;
             at: number;
           } | null;
+          dropped?: CheckDrop | null;
         }[],
       ) => ({
         text: pushChecksText(head, found),
@@ -2388,6 +2633,33 @@ describe("push and draft_pr", () => {
         expect(r.text).toContain(MC_PUSH_CHECKS);
         expect(r.text).toContain(`not run: ${TYPES}`);
         expect(remoteTip()).toBeNull();
+      });
+
+      it.each([
+        ["not-plain", "chains the check with a pipe"],
+        ["dirty-start", "uncommitted or untracked files in the tree"],
+        ["dirty-end", "left uncommitted or untracked files"],
+        ["head-moved", "moved the head during the call"],
+        ["turn-ended", "the turn ended before the call reported its end"],
+        ["background", "went to the background"],
+        ["timeout", "Bash timeout"],
+        ["unreadable", "could not read the seat's clone"],
+      ] as const)("says why a %s call was not counted, in the refusal", async (reason, words) => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const drop = { reason, command: TYPES, head: sha, invoked: TYPES, at: NOW };
+        const r = await push(gated({ checkDrops: () => [drop] }));
+        expect(r).toEqual(refusal(sha, [{ command: TYPES, state: "missing", dropped: drop }]));
+        expect(r.text).toContain(words);
+        expect(r.text).not.toContain("nothing recorded");
+      });
+
+      it("says the hub saw no start when it has no reason for a missing check", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const r = await push(gated({ checkDrops: () => [] }));
+        expect(r.text).toContain(`nothing recorded on ${sha.slice(0, 7)}: the hub saw no start`);
+        expect(r.text).toContain("Bash timeout parameter set to 600000");
       });
 
       it("refuses a check that failed, naming it", async () => {
@@ -2887,6 +3159,57 @@ describe("push and draft_pr", () => {
       expect(store.runPush(second.runId)?.sha).toBe(mine);
     });
 
+    it("a pushed head that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      // recorded under an earlier run of the branch, so the run's own newest is still `own`
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+      expect((await push()).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+      expect(store.runPush(RUN)?.sha).toBe(merge);
+    });
+
+    it("a head already on origin that contains the run's newest commit becomes its newest commit", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "--no-ff", "-q", "-m", `Merge main into ${BRANCH}`, "origin/main");
+      const merge = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      git(wt, "push", "-q", "origin", `${merge}:refs/heads/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(merge));
+      expect(store.newestRunCommit(RUN)?.sha).toBe(merge);
+    });
+
+    it("a commit someone else put on origin is not recorded as the run's, even when it descends from the newest", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+      const foreign = operatorPushes("docs/operator.md");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--ff-only", `origin/${BRANCH}`);
+      expect((await push()).text).toBe(alreadyOnOriginText(foreign));
+      expect(store.branchCommits("mc", BRANCH).has(foreign)).toBe(false);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+    });
+
+    it("a pushed head that does not contain the run's newest commit leaves it as it was", async () => {
+      const own = await commitOk("apps/a.ts", "a2\n");
+      git(wt, "reset", "-q", "--hard", `${own}^`);
+      write("apps/b.ts", "b\n");
+      git(wt, "add", "-A");
+      git(wt, "commit", "-qm", "feat: b");
+      const other = head();
+      store.addRunCommit({ runId: "earlier", repoId: "mc", branch: BRANCH, sha: other, at: NOW });
+      expect((await push()).text).toBe(`Pushed ${other.slice(0, 7)} to ${BRANCH}.`);
+      expect(store.newestRunCommit(RUN)?.sha).toBe(own);
+    });
+
     it("a run that ended unpushed leaves its commits to the next run's push, which sends both", async () => {
       const first = await commitOk("apps/a.ts", "a2\n");
       const second = nextRun("guido-1:20261020T130000Z");
@@ -3169,6 +3492,76 @@ describe("push and draft_pr", () => {
       expect(await openDraftPr(pushDeps(), RUN, { title: "t", body: "b" })).toEqual({
         text: PR_URL,
       });
+    });
+  });
+
+  describe("pr_body", () => {
+    const MINORS = `${MINOR_HEADING}\n\nRETRO logged these.\n\n- \`a.ts:3\` — first\n`;
+    const view = (over: Record<string, unknown> = {}) => ({
+      "pr view": {
+        stdout: JSON.stringify({
+          headRefName: BRANCH,
+          state: "OPEN",
+          body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nCloses #42.\n`,
+          ...over,
+        }),
+      },
+    });
+    const edit = (body: string, t: McTool[] = ts()) => tool("pr_body", t).call(CTX, { body });
+    const edits = () => ghCalls().filter((c) => c.args[1] === "edit");
+
+    it("replaces the run's PR body and keeps the minor-findings section", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      expect(await edit("New text.")).toEqual({ text: prEditedText(12) });
+      expect(edits()).toHaveLength(1);
+      const body = edits()[0]?.body ?? "";
+      expect(body).toContain("New text.");
+      expect(body).not.toContain("old");
+      expect(body).toContain(MINORS.trimEnd());
+      expect(body).toContain("Closes #42.");
+      expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("#42 — T\n\nNew text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body.startsWith("New text.")).toBe(true);
+      expect(seatWroteBody(body, 42)).toBe(true);
+      // a body of the hub's own shape is not a seat's; #420 and a plain mention are
+      expect(seatWroteBody("#42 — T\n\n## What changed\n\nx", 42)).toBe(false);
+      expect(seatWroteBody("#420 is the follow-up.", 42)).toBe(true);
+      expect(seatWroteBody("#42 is the follow-up.", 42)).toBe(true);
+    });
+
+    it("refuses a body that is only the heading", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      expect(await edit("#42 — T\n")).toEqual({ text: MC_PR_BODY_EMPTY, isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a PR that is not the run's, and edits nothing", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      for (const over of [{ headRefName: "other" }, { state: "CLOSED" }]) {
+        ghState(view(over));
+        expect(await edit("New text.")).toEqual({ text: prNotRunsText(12), isError: true });
+      }
+      expect(edits()).toEqual([]);
+    });
+
+    it("refuses when the run has no PR yet", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: null });
+      expect(await edit("New text.")).toEqual({ text: MC_PR_BODY_NO_PR, isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a body that mentions someone", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      expect(await edit("ping @octocat")).toEqual({ text: MC_PR_BODY_REFUSED, isError: true });
+      expect(edits()).toEqual([]);
     });
   });
 
@@ -3675,6 +4068,84 @@ describe("report_evidence", () => {
     });
   });
 
+  describe("the ticket's Done-when lines", () => {
+    const LINES = ["Test: a report missing a Done-when entry is refused", "Audit shows rounds"];
+    const answer = (line: number, status: "met" | "not_met" = "met", evidence = "a test") => ({
+      line,
+      status,
+      evidence,
+    });
+    const reportWith = (doneWhen?: unknown) =>
+      tool("report_evidence", ev).call(CTX, {
+        note: "done",
+        ...(doneWhen === undefined ? {} : { doneWhen }),
+      });
+
+    beforeEach(async () => {
+      store.setRunDoneWhen(RUN, LINES);
+      await committed();
+    });
+
+    it("refuses a report that leaves a line unaddressed, quoting the line", async () => {
+      const r = await reportWith([answer(1)]);
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('2. "Audit shows rounds"');
+      expect(r.text).not.toContain("a report missing");
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("refuses a report with no doneWhen, quoting every line", async () => {
+      const r = await reportWith();
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain(`1. "${LINES[0]}"`);
+      expect(r.text).toContain(`2. "${LINES[1]}"`);
+    });
+
+    it("refuses a line the ticket does not have, and a line named twice", async () => {
+      expect((await reportWith([answer(1), answer(2), answer(3)])).isError).toBe(true);
+      expect((await reportWith([answer(1), answer(1), answer(2)])).isError).toBe(true);
+      expect(store.latestEvidence(RUN)).toBeNull();
+    });
+
+    it("records a report that addresses every line, met or not met", async () => {
+      expect(
+        await reportWith([answer(1, "met", "mcp-tools.test.ts"), answer(2, "not_met", "web")]),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([
+        { line: 1, text: LINES[0], status: "met", evidence: "mcp-tools.test.ts" },
+        { line: 2, text: LINES[1], status: "not_met", evidence: "web" },
+      ]);
+    });
+
+    it("a Ruling: note on a fresh commit still owes the table", async () => {
+      const r = await tool("report_evidence", ev).call(CTX, { note: "Ruling: all done" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain('1. "');
+    });
+
+    it("a Ruling: note on the sha CI failed, with no new commit, is recorded with no table", async () => {
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toEqual([]);
+    });
+
+    it("a Ruling: note with no new commit keeps the last table", async () => {
+      expect(await reportWith([answer(1), answer(2)])).toEqual({ text: EVIDENCE_RECORDED });
+      setLoop({ ciFailedSha: head() });
+      expect(
+        await tool("report_evidence", ev).call(CTX, { note: "Ruling: flaky, not mine" }),
+      ).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.latestEvidence(RUN)?.doneWhen).toHaveLength(2);
+    });
+
+    it("needs no doneWhen from a run whose ticket lines were not recorded", async () => {
+      store.setRunDoneWhen(RUN, []);
+      expect(await reportWith()).toEqual({ text: EVIDENCE_RECORDED });
+    });
+  });
+
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
   });
@@ -3995,6 +4466,7 @@ describe("report_evidence", () => {
       at: clock,
       tests: [],
       testsAdded: [],
+      doneWhen: [],
     });
     expect(told).toEqual([["guido-1", RUN]]);
     expect(emitted).toContain("agents");

@@ -56,6 +56,20 @@ async function checkSeatGitConfig(path: string): Promise<void> {
 export const CREW_GIT_SLOW_MS = 120_000;
 /** The author and committer of the merge commit the hub makes. */
 export const MC_MERGE_AUTHOR = "Mission Control";
+/**
+ * The email git falls back to when no git config sets `user.email`. Git reads the identity from
+ * `GIT_*_EMAIL`, then `user.email` in any config (local, global, system), then `EMAIL`, then the
+ * hostname; the clone's config wins in production, and a bare checkout (the tests, a fresh
+ * machine) gets this instead of a hostname guess or "Committer identity unknown". Only `GIT_*`
+ * variables are stripped from git's environment.
+ */
+export const MC_FALLBACK_EMAIL = "mission-control@localhost";
+/** The environment for a commit or merge the hub makes under `name`. */
+export const gitIdentity = (name: string): NodeJS.ProcessEnv => ({
+  GIT_AUTHOR_NAME: name,
+  GIT_COMMITTER_NAME: name,
+  EMAIL: MC_FALLBACK_EMAIL,
+});
 export const mainMergeArgs = (branch: string, mainSha: string): string[] => [
   "-c",
   "commit.gpgsign=false",
@@ -1400,10 +1414,7 @@ async function syncReused(
     if (status !== "") return { kind: "skipped", why: "dirty" };
     const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
     try {
-      await w(mainMergeArgs(branch, baseSha), {
-        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
-        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
-      });
+      await w(mainMergeArgs(branch, baseSha), gitIdentity(MC_MERGE_AUTHOR));
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code === 1) {
         const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
@@ -1906,12 +1917,13 @@ export async function writeReviewInputs(
   s: Scratch,
   sha: string,
   prevSha: string | null,
-): Promise<{ diffCut: boolean; since: boolean }> {
+): Promise<{ diffCut: boolean; since: boolean; changedSince: string[] | null }> {
   const common = await realpath(join(checkout, ".git")).catch((e) => {
     throw new CheckoutError("checkout", CHECKOUT_TEXT, { cause: e });
   });
   const pr = await diffText(checkout, common, s.mergeBase, sha);
   let since: { text: string; cut: boolean } | null = null;
+  let changedSince: string[] | null = null;
   if (
     prevSha !== null &&
     (await succeeds(
@@ -1919,11 +1931,19 @@ export async function writeReviewInputs(
     ))
   ) {
     since = await diffText(checkout, common, prevSha, sha);
+    // the files the author changed since that review, for tagging a late finding
+    const names = await crewGit(
+      checkout,
+      ["diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", prevSha, sha, "--"],
+      common,
+      { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS, maxBuffer: REVIEW_DIFF_MAX_BUFFER },
+    );
+    changedSince = names.split("\0").filter((n) => n !== "");
   }
   await mkdir(join(s.path, REVIEW_INPUT_DIR));
   await writeFile(join(s.path, REVIEW_DIFF_FILE), pr.text, { flag: "wx" });
   if (since !== null) await writeFile(join(s.path, REVIEW_SINCE_FILE), since.text, { flag: "wx" });
-  return { diffCut: pr.cut, since: since !== null };
+  return { diffCut: pr.cut, since: since !== null, changedSince };
 }
 
 const SESSION_OWNER_FILE = "mission-control-session.json";

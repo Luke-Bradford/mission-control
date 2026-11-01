@@ -32,3 +32,12 @@ export function pauseWithout(
   const rest = pause.seats.filter((id) => id !== seatId);
   return rest.length === 0 ? null : { ...pause, ...named, seats: rest };
 }
+
+/**
+ * Whether `next` is `prev` with only its seats edited (same reason, time and who set it), or the
+ * end of a pause that listed one seat, which is that seat let out.
+ */
+export function sameCrewPauseRecord(prev: CrewPause, next: CrewPause | null): boolean {
+  if (next === null) return prev.seats !== "all" && prev.seats.length === 1;
+  return next.by === prev.by && next.at === prev.at && next.reason === prev.reason;
+}

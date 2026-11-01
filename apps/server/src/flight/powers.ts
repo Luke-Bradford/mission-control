@@ -8,8 +8,7 @@
 import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
-  FLIGHT_HOUR_MS,
-  FLIGHT_PROMOTES_PER_HOUR,
+  EDIT_UNCONFIRMED_TEXT,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
@@ -171,7 +170,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         (a.body !== undefined && after.body !== a.body) ||
         (a.title !== undefined && after.title !== a.title)
       )
-        return fail("The edit could not be confirmed on GitHub; read the ticket.");
+        return fail(EDIT_UNCONFIRMED_TEXT);
       bus.emit("boards");
       return { text: `Edited ${ref}.` };
     },
@@ -221,14 +220,6 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         )
           return fail("A ticket carries exactly one area:* label.");
       }
-      if (
-        a.status !== undefined &&
-        store.countFlightDecisions({
-          kinds: ["promote", "reorder", "status"],
-          since: now() - FLIGHT_HOUR_MS,
-        }) >= FLIGHT_PROMOTES_PER_HOUR
-      )
-        return fail("You have moved the most tickets allowed in the last hour.");
       if (away()) return fail(AWAY_WRITES_REFUSED);
       const done: string[] = [];
       // a field that fails after others landed says which landed
@@ -251,7 +242,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           column: a.status,
         });
         if (!r.ok) return stop(r.reason);
-        // its own kind, counted with promote's moves against the hourly cap
+        // its own kind, not promote's
         store.addFlightDecision({
           at: now(),
           kind: "status",

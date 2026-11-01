@@ -2,7 +2,16 @@
  * What a run was about, as the API serves it: the PRs the run published joined to the stored PR
  * rows, and the run's ticket resolved through them (#26 A3).
  */
-import type { PullRequestView, RepoId, Run, RunPr, RunSummary, RunUsage, RunView } from "@mc/core";
+import {
+  type PullRequestView,
+  type RepoId,
+  type Run,
+  type RunPr,
+  type RunSummary,
+  type RunUsage,
+  type RunView,
+  UAT_PARK,
+} from "@mc/core";
 import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
 
@@ -47,6 +56,12 @@ export function runPrs(
       ticket: row?.ticket ?? null,
       ...(run.loop?.mergeHold && run.loop.prNumber === number
         ? { hold: { by: run.loop.mergeHold.by, reason: run.loop.mergeHold.reason } }
+        : {}),
+      ...(run.loop?.parked?.kind === UAT_PARK &&
+      run.loop.uat &&
+      !run.loop.uat.accepted &&
+      run.loop.prNumber === number
+        ? { uat: { sha: run.loop.uat.sha } }
         : {}),
     });
   }

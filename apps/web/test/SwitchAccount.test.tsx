@@ -101,7 +101,7 @@ it.each([
     expect.objectContaining({ body: JSON.stringify({ accountId: "nova" }) }),
   );
   expect(refresh.mock.calls.map(([p]) => p)).toEqual(
-    expect.arrayContaining(["/api/crew", "/api/config", "/api/accounts/status"]),
+    expect.arrayContaining(["/api/crew?shape=summary", "/api/config", "/api/accounts/status"]),
   );
 });
 

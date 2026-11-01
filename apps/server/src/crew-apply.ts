@@ -1,6 +1,12 @@
 import { statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import { type CrewChanges, type PendingSeatChange, type ReloadResult, seatDef } from "@mc/core";
+import {
+  type CrewChanges,
+  type LoopKind,
+  type PendingSeatChange,
+  type ReloadResult,
+  seatDef,
+} from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import {
   type CcConfig,
@@ -219,6 +225,7 @@ export function restartNeeded(applied: CcConfig, target: CcConfig): string[] {
   if (!isDeepStrictEqual(a.worktrees, b.worktrees)) out.push("crew.worktrees");
   if (!isDeepStrictEqual(a.node, b.node)) out.push("crew.node");
   if (!isDeepStrictEqual(a.denyRead, b.denyRead)) out.push("crew.deny_read");
+  if (!isDeepStrictEqual(a.allowRead, b.allowRead)) out.push("crew.allow_read");
   if (!isDeepStrictEqual(a.runTokenBudget, b.runTokenBudget)) out.push("crew.run_token_budget");
   if (!isDeepStrictEqual(lists(a), lists(b))) out.push("crew.sessions");
   return out;
@@ -275,6 +282,22 @@ export function createCrewReloader(deps: {
   let off: (() => void) | undefined;
   let removing = false;
   let settling = false;
+
+  /**
+   * Records the loop kind of each seat in `cfg` on its runs that lack one, before a reload or a
+   * session removal can retire the seat and leave Audit unable to tell what it ran.
+   */
+  const recordLoopKinds = (cfg: CcConfig): void => {
+    try {
+      const kinds = new Map<string, LoopKind>();
+      for (const session of cfg.crew?.sessions ?? []) {
+        for (const s of session.seats) kinds.set(s.id, seatDef(s).loop);
+      }
+      store.backfillRunLoopKinds(kinds);
+    } catch (e) {
+      log(`could not record seat loop kinds: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   const statFile = (): FileStat => {
     const s = statSync(configPath);
@@ -340,7 +363,8 @@ export function createCrewReloader(deps: {
         target.crew &&
         isDeepStrictEqual(config.loops, target.loops) &&
         config.crew.worktrees === target.crew.worktrees &&
-        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead)
+        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead) &&
+        isDeepStrictEqual(config.crew.allowRead, target.crew.allowRead)
       ) {
         for (const session of target.crew.sessions) {
           if (
@@ -462,6 +486,8 @@ export function createCrewReloader(deps: {
       setError(e instanceof ConfigError ? e.message : READ_FAILED);
       return { ...status(), applied: [] };
     }
+    // the applied config still lists the seats this load may remove
+    recordLoopKinds(config);
     target = loaded;
     setError(null);
     const applied = settle();
@@ -503,6 +529,7 @@ export function createCrewReloader(deps: {
       } catch {
         last = null;
       }
+      recordLoopKinds(config);
       settle();
       timer = setInterval(poll, CONFIG_POLL_MS);
       timer.unref();
@@ -529,6 +556,7 @@ export function createCrewReloader(deps: {
         const active = session.seats.filter((s) => !stopped(s.id)).length;
         if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
         // Removing it synchronously prevents any new supervisor start during the file write.
+        recordLoopKinds(config);
         removing = true;
         sessions.splice(index, 1);
         let saved = false;

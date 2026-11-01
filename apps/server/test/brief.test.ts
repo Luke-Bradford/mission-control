@@ -89,11 +89,21 @@ const input: BriefInput = {
 };
 
 const WRITER_CLOSE =
-  "Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make.";
+  "Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it and one doneWhen entry for each line of the ticket's ## Done when (met with its evidence, a test name, a file or a measurement; or not met with the reason). Mission Control refuses a report that leaves a line out. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make. Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes.";
 const READONLY_CLOSE =
-  "You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. Reply with your findings, starting with DONE.";
+  "You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes. Reply with your findings, starting with DONE.";
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
+
+describe("ticketBrief path grant", () => {
+  it("names the files FLIGHT approved beyond the area, and only when there are some", () => {
+    expect(ticketBrief(input)).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: [] })).not.toContain("FLIGHT also approved");
+    expect(ticketBrief({ ...input, granted: ["package.json", ".gitignore"] })).toContain(
+      "FLIGHT also approved this run to change package.json, .gitignore, and no other file outside it.",
+    );
+  });
+});
 
 describe("ticketBrief leftover changes", () => {
   it("omits the block for a fresh or clean worktree", () => {
@@ -321,7 +331,7 @@ describe("role briefs", () => {
   it("GUIDO and INCO commit only with mc commit and report; Mission Control pushes and opens the PR", () => {
     for (const role of ["GUIDO", "INCO"]) {
       expect(mayNot(role)).toBe(
-        "Commit only with the mc commit tool; git writes in Bash are refused. When the ticket's work is done and committed, report it with mc report_evidence: Mission Control pushes your branch, opens the draft PR and messages you if CI fails. Never comment on GitHub, label, or move board cards. You have no network access and no gh.",
+        "Commit only with the mc commit tool; git writes in Bash are refused. You have no network access and no gh, so GitHub comments, labels and board moves go through FLIGHT.",
       );
     }
   });
@@ -494,6 +504,14 @@ describe("reviewBrief", () => {
     expect(out).not.toContain("pnpm");
   });
 
+  it("a second review without recorded findings says so, with FLIGHT's reason", () => {
+    const out = reviewBrief({ ...review, second: { reason: "the guard is fine", findings: [] } });
+    expect(out).toContain("## A second, independent review");
+    expect(out).toContain("FLIGHT's reason: the guard is fine");
+    expect(out).toContain("(The first review's blocking findings are not recorded.)");
+    expect(reviewBrief(review)).not.toContain("second, independent");
+  });
+
   it("tells a scratch reviewer that a whole suite waits for the test lock", () => {
     const out = reviewBrief({ ...review, fullSuite: ["pnpm -s test"] });
     expect(out).toContain(
@@ -506,6 +524,21 @@ describe("reviewBrief", () => {
     expect(reviewBrief({ ...review, commands: [] })).toContain(
       "No repository review checks are configured, but you may use ordinary local inspection commands.",
     );
+  });
+
+  it("round 1 carries the author's Done-when table and says to judge it first", () => {
+    const t = reviewBrief({
+      ...review,
+      doneWhen: [
+        { line: 1, text: "Test: a stop does not race", status: "met", evidence: "stop.test.ts" },
+        { line: 2, text: "Docs name the stop", status: "not_met", evidence: "no docs page yet" },
+      ],
+    });
+    expect(t).toContain("## The author's Done-when table");
+    expect(t).toContain('1. "Test: a stop does not race" — met: stop.test.ts');
+    expect(t).toContain('2. "Docs name the stop" — not met: no docs page yet');
+    expect(t).toMatch(/first findings[^\n]*met[^\n]*evidence does not hold[^\n]*not met/);
+    expect(reviewBrief(review)).not.toContain("Done-when table");
   });
 
   it("round 1", () => {
@@ -527,6 +560,7 @@ describe("reviewBrief", () => {
         "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
         "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
         "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
+        "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
         "",
         "## Ticket o/mc#42",
         "",

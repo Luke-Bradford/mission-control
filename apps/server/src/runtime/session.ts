@@ -29,6 +29,7 @@ import {
 } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli-version.ts";
+import { toolResultBytes } from "../prompt-cost.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
 import { sleep, str } from "../util.ts";
 import {
@@ -320,7 +321,9 @@ function createDriver(i: {
       // a tool call has ended (the CLI echoes each tool_result as a user line)
       for (const c of ev.message.content) {
         const id = isObj(c) && c.type === "tool_result" ? str(c.tool_use_id) : null;
-        if (id !== null) emit({ kind: "tool-result", toolUseId: id });
+        if (id !== null) {
+          emit({ kind: "tool-result", toolUseId: id, bytes: toolResultBytes(c.content) });
+        }
       }
     } else if (ev.type === "result") {
       inTurn = false;

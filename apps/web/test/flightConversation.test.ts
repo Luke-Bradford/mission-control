@@ -106,6 +106,7 @@ describe("kindLabel", () => {
   it("labels known kinds and shows an unknown kind as written", () => {
     expect(kindLabel("promote")).toBe("Promoted");
     expect(kindLabel("start")).toBe("Started");
+    expect(kindLabel("pause")).toBe("Pause / resume");
     expect(kindLabel("later-kind")).toBe("later-kind");
   });
 });

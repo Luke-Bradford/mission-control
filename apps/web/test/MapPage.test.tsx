@@ -60,7 +60,7 @@ describe("Map page", () => {
     const fetch = stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": mapSnapshotFixture,
     });
     at("/map");
@@ -84,7 +84,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": mapSnapshotFixture,
     });
     at("/map#win=10,5");
@@ -96,7 +96,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [crewRow({ id: "second-dev", kind: "crew", repoId: "second", hudState: "running" })],
       },
       "/api/repos/second/map": { ...mapSnapshotFixture, repoId: "second" },
@@ -109,7 +109,7 @@ describe("Map page", () => {
     const fetch = stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": mapSnapshotFixture,
       "/api/repos/second/map": { ...mapSnapshotFixture, repoId: "second" },
     });
@@ -132,7 +132,7 @@ describe("Map page", () => {
     const fetch = stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
     });
     at("/map/observed");
     expect((await screen.findByRole("status")).textContent).toContain(
@@ -145,7 +145,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": { crew: null, loops: [] },
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
     });
     at("/map");
     expect((await screen.findByRole("status")).textContent).toContain(
@@ -161,7 +161,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": idle,
     });
     at("/map/sample");
@@ -174,7 +174,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": idle,
     });
     at("/map/sample");
@@ -203,7 +203,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": [{ id: "sample", github: "Luke-Bradford/mission-control" }],
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": live,
     });
     at("/map/sample");
@@ -222,7 +222,7 @@ describe("Map page", () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/repos/sample/map": () => ({
         status: 503,
         body: { error: "map snapshot unavailable" },

@@ -13,7 +13,7 @@ const api = {
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
-  "/api/crew": { rows: [], firstRunToday: null },
+  "/api/crew?shape=summary": { rows: [], firstRunToday: null },
   "/api/attention": [],
   "/api/machine": {
     latest: null,
@@ -35,7 +35,7 @@ const api = {
   "/api/config": CONFIG,
   "/api/test-lock": { holder: null, waiting: [] },
   "/api/crew/status": { enabled: true, note: null },
-  "/api/repos/shop-app/prs?linked=1": [],
+  "/api/repos/shop-app/prs?linked=1&shape=summary": [],
 };
 
 describeRendered("Overview transcript footprint in a browser", () => {

@@ -15,6 +15,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -299,6 +301,227 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
       // the probe ran: the CLI reached the model and the allowed writes landed
       expect(api.bashCalls(), output).toBe(1);
       expectFloor(before, targets);
+    },
+    120_000,
+  );
+});
+
+/** A hub stand-in on loopback: counts every request a probe makes to it. */
+async function listenOnLoopback(): Promise<{
+  port: number;
+  hits: () => number;
+  close: () => Promise<void>;
+}> {
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits += 1;
+    res.end("token");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    port,
+    hits: () => hits,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * curl the hub's bootstrap route with the forged header (#956). It prints `ran`, then the HTTP code
+ * and curl's exit code (`000rc=7`: no connection; `rc=126`/`127`: curl never started).
+ */
+const loopbackProbe = (port: number) =>
+  `echo ran; /usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/api/operator/bootstrap -H 'sec-fetch-site: same-origin'; echo "rc=$?"`;
+
+/**
+ * Run a process to its end and return what it printed. Never sync: the stand-in hub lives in this
+ * process, and a blocked event loop would leave its requests unanswered.
+ */
+function runToEnd(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env: NodeJS.ProcessEnv },
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (c) => {
+      output += c;
+    });
+    child.stderr.on("data", (c) => {
+      output += c;
+    });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.on("close", () => {
+      clearTimeout(timer);
+      resolve(output);
+    });
+  });
+}
+
+describe("the loopback probe itself", () => {
+  it("reaches the hub when run outside any sandbox", async () => {
+    const hub = await listenOnLoopback();
+    let output = "";
+    try {
+      output = await runToEnd(
+        "/bin/sh",
+        ["-c", loopbackProbe(hub.port)],
+        { env: process.env },
+        20_000,
+      );
+    } finally {
+      await hub.close();
+    }
+    expect(output, "the probe's output").toMatch(/^ran\n[1-5]\d\drc=0$/m);
+    expect(hub.hits(), "requests that reached the hub").toBe(1);
+  });
+});
+
+// The Codex seat's live sandbox state has network off too: the hub refuses a thread whose
+// thread/start does not report `sandbox.networkAccess:false` (apps/server/src/runtime/codex-session.ts),
+// and the spike's app-server turn saw `curl http://127.0.0.1:7420/` fail with exit 7
+// (docs/spikes/2026-10-24-codex-seat-confinement.md). This runs the probe through the seat's own
+// profile, whose `[permissions.<profile>.network] enabled = false` `codex sandbox -P` applies.
+describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopback (#956)", () => {
+  let l: Layout;
+  beforeEach(() => {
+    l = makeLayout();
+  });
+  afterEach(() => rmSync(l.root, { recursive: true, force: true }));
+
+  it.each(["writer", "read-only"] as const)(
+    "a %s seat's curl to 127.0.0.1 gets no connection",
+    async (mode) => {
+      const store = codexPnpmStoreDir(l.cwd);
+      const input: CrewSandboxInput = { ...l, denyRead: [], pnpmStoreDir: store };
+      const seatTmp = join(l.cwd, MC_TMP_DIR_NAME, "run");
+      const codexHome = join(l.root, "codex-home");
+      for (const path of [store, seatTmp, codexHome, join(l.cwd, CODEX_PROJECT_DIR)])
+        mkdirSync(path, { recursive: true });
+      writeFileSync(
+        join(codexHome, "config.toml"),
+        codexSeatConfig(input, mode, "http://127.0.0.1:1/mcp", seatTmp),
+      );
+      writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-fake" }));
+      const hub = await listenOnLoopback();
+      let output = "";
+      try {
+        output = await runToEnd(
+          codexCli as string,
+          [
+            "sandbox",
+            "-C",
+            l.cwd,
+            "-P",
+            CODEX_SEAT_PROFILE,
+            "--",
+            "/bin/sh",
+            "-c",
+            loopbackProbe(hub.port),
+          ],
+          {
+            cwd: l.cwd,
+            env: {
+              PATH: process.env.PATH,
+              HOME: l.home,
+              CODEX_HOME: codexHome,
+              [PNPM_STORE_ENV]: store,
+            },
+          },
+          60_000,
+        );
+      } finally {
+        await hub.close();
+      }
+      // the probe ran, curl started and could not connect, and nothing reached the hub
+      expect(output, "the probe's output").toMatch(/^ran$/m);
+      expect(output, "the probe's output").toContain("rc=7");
+      expect(hub.hits(), "requests that reached the hub").toBe(0);
+    },
+    90_000,
+  );
+});
+
+describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopback (#956)", () => {
+  let l: Layout;
+  let tempRoot: string;
+  let api: FakeAnthropic | null = null;
+  beforeEach(() => {
+    l = makeLayout();
+    const parent = crewSandboxTmp(process.getuid?.() ?? 0);
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    tempRoot = realpathSync(mkdtempSync(join(parent, "mc-loop-")));
+  });
+  afterEach(async () => {
+    await api?.close();
+    api = null;
+    rmSync(tempRoot, { recursive: true, force: true });
+    rmSync(l.root, { recursive: true, force: true });
+  });
+
+  it.each(["writer", "read-only"] as const)(
+    "a %s seat's curl to 127.0.0.1 gets no connection",
+    async (mode: Exclude<CrewMode, "scratch">) => {
+      const input: CrewSandboxInput = {
+        ...l,
+        tempRoot,
+        denyRead: [],
+        pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+      };
+      const store = crewPnpmStoreDir(tempRoot, "seat");
+      mkdirSync(store, { recursive: true });
+      const hub = await listenOnLoopback();
+      api = await startFakeAnthropic(loopbackProbe(hub.port));
+      const settings = crewSandboxSettings(input, mode, { command: "/usr/bin/true", timeoutS: 5 });
+      let output = "";
+      try {
+        output = await runToEnd(
+          claudeCli as string,
+          [
+            "-p",
+            "run the probe",
+            "--output-format",
+            "json",
+            "--model",
+            "claude-fake",
+            ...CREW_ISOLATION_FLAGS,
+            "--tools",
+            "Bash",
+            "--settings",
+            settings,
+            "--allowedTools",
+            "Bash",
+          ],
+          {
+            cwd: l.cwd,
+            env: {
+              PATH: process.env.PATH,
+              HOME: l.home,
+              TMPDIR: tempRoot,
+              CLAUDE_CODE_TMPDIR: tempRoot,
+              [PNPM_STORE_ENV]: store,
+              ANTHROPIC_BASE_URL: api.url,
+              ANTHROPIC_API_KEY: "sk-ant-fake",
+              CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+              ...CREW_CLI_ENV,
+              ...CREW_PNPM_ENV,
+              ...CREW_GIT_ENV,
+            },
+          },
+          90_000,
+        );
+      } finally {
+        await hub.close();
+      }
+      // the CLI reached the model and ran the probe in its sandbox: curl started, could not
+      // connect, and nothing reached the hub
+      expect(api.bashCalls(), output).toBe(1);
+      const result = api.toolResults().join("\n");
+      expect(result, "the probe's output").toMatch(/^ran$/m);
+      expect(result, "the probe's output").toContain("rc=7");
+      expect(hub.hits(), "requests that reached the hub").toBe(0);
     },
     120_000,
   );

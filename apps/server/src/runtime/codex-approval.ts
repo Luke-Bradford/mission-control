@@ -58,6 +58,8 @@ export function createCodexApprover(i: {
   runId: string;
   mode: CrewMode;
   area: readonly string[];
+  /** Files outside the area that FLIGHT approved for this run alone. */
+  granted?: readonly string[];
   cwd: string;
   lock: TestLock;
   record: (rule: GuardRule, text: string) => void;
@@ -140,7 +142,13 @@ export function createCodexApprover(i: {
     for (const event of events) {
       if (
         event.tool === "Edit" &&
-        !codexEditAllowed(event.input.file_path ?? "", i.cwd, i.area, repo.protectedFiles ?? [])
+        !codexEditAllowed(
+          event.input.file_path ?? "",
+          i.cwd,
+          i.area,
+          repo.protectedFiles ?? [],
+          i.granted,
+        )
       )
         return refuse("codex-allowlist");
     }

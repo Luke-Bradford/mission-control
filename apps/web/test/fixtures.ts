@@ -457,7 +457,7 @@ export const METRICS_VIEW: MetricsView = {
  */
 export const REGISTRY_ROUTES = {
   "/api/metrics": METRICS_VIEW,
-  "/api/crew": {
+  "/api/crew?shape=summary": {
     rows: [
       crewRow(),
       seatRow({ id: "guido-2", hudState: "blocked" }),

@@ -308,6 +308,139 @@ describe("the check recorder", () => {
   });
 });
 
+describe("why the recorder dropped a check call", () => {
+  const HEAD = "a".repeat(40);
+  const KEY = { runId: "r1", toolUseId: "t1" };
+  let rows: unknown[];
+  let state: CloneState | null;
+  let clock: number;
+  const recorder = () =>
+    createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => clock,
+    });
+  const reasons = (r: ReturnType<typeof recorder>) =>
+    r.drops("r1").map((d) => [d.reason, d.command, d.head]);
+
+  beforeEach(() => {
+    rows = [];
+    state = { head: HEAD, clean: true };
+    clock = 1_000;
+  });
+
+  it("records a passing call that ran past two minutes in the foreground", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    clock += 5 * 60_000;
+    await r.end(KEY, true);
+    expect(rows).toHaveLength(2);
+    expect(r.drops("r1")).toEqual([]);
+  });
+
+  it("says a check chained with a pipe, ||, ; or a line break was not counted", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} | tail`);
+    expect(r.drops("r1")).toEqual([
+      { reason: "not-plain", command: LINT, head: HEAD, invoked: `${LINT} | tail`, at: 1_000 },
+    ]);
+  });
+
+  it("says nothing for a call that runs no configured check", async () => {
+    const r = recorder();
+    await r.begin(KEY, "ls | tail");
+    expect(r.drops("r1")).toEqual([]);
+  });
+
+  it("says a check started on a dirty tree", async () => {
+    state = { head: HEAD, clean: false };
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    expect(reasons(r)).toEqual([
+      ["dirty-start", LINT, HEAD],
+      ["dirty-start", TYPES, HEAD],
+    ]);
+  });
+
+  it("says a check left the tree dirty", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    state = { head: HEAD, clean: false };
+    await r.end(KEY, true);
+    expect(reasons(r)).toEqual([["dirty-end", LINT, HEAD]]);
+    expect(rows).toEqual([]);
+  });
+
+  it("says the head moved during a check, keyed by the head it started on", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    state = { head: "b".repeat(40), clean: true };
+    await r.end(KEY, true);
+    expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+  });
+
+  it("says the turn ended before a check reported its end", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    r.dropRun("r1");
+    expect(reasons(r)).toEqual([
+      ["turn-ended", LINT, HEAD],
+      ["turn-ended", TYPES, HEAD],
+    ]);
+  });
+
+  it("says a check moved to the background", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT, [], { background: true });
+    await r.end(KEY, true);
+    expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
+    expect(rows).toEqual([]);
+  });
+
+  it("says a failed call with no exit code that ran to its Bash timeout was killed by it", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    clock += 120_000;
+    await r.end(KEY, false);
+    expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+    // the failure is recorded too; the note says why it has no exit code
+    expect(rows).toHaveLength(1);
+  });
+
+  it("uses the call's own Bash timeout, and says nothing of a fast failure", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT, [], { timeoutMs: 600_000 });
+    clock += 130_000;
+    await r.end(KEY, false);
+    expect(r.drops("r1")).toEqual([]);
+    await r.begin({ runId: "r1", toolUseId: "t2" }, LINT);
+    clock += 3_000;
+    await r.end({ runId: "r1", toolUseId: "t2" }, false);
+    expect(r.drops("r1")).toEqual([]);
+  });
+
+  it("says the clone could not be read", async () => {
+    state = null;
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    expect(reasons(r)).toEqual([["unreadable", LINT, null]]);
+  });
+
+  it("forgets a drop once the check passes on that head, and keeps runs apart", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    r.dropRun("r1");
+    expect(r.drops("r1")).toHaveLength(1);
+    await r.begin({ runId: "r1", toolUseId: "t2" }, LINT);
+    await r.end({ runId: "r1", toolUseId: "t2" }, true);
+    expect(r.drops("r1")).toEqual([]);
+    await r.begin({ runId: "r2", toolUseId: "t" }, `${LINT} | x`);
+    expect(r.drops("r1")).toEqual([]);
+    expect(r.drops("r2")).toHaveLength(1);
+  });
+});
+
 describe("cloneState", () => {
   let dir: string;
   let clone: string;

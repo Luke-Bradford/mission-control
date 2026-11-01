@@ -17,6 +17,53 @@ const pr: RunPr = {
 };
 
 describe("PrChip", () => {
+  it("links to the running preview supplied by the PR payload", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(
+      <PrChip
+        pr={pr}
+        preview={{
+          pr: 7,
+          branch: "feature/preview",
+          port: 5175,
+          url: "http://127.0.0.1:5175",
+          startedAt: 1,
+        }}
+      />,
+    );
+
+    const link = await screen.findByRole("link", { name: "Open preview for PR #7" });
+    expect(link.textContent).toBe("Preview");
+    expect(link.getAttribute("href")).toBe("http://127.0.0.1:5175");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("follows preview payload changes after it first mounts", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    const live = {
+      pr: 7,
+      branch: "feature/preview",
+      port: 5175,
+      url: "http://127.0.0.1:5175",
+      startedAt: 1,
+    };
+    const view = render(<PrChip pr={pr} />);
+
+    expect(await screen.findByRole("link", { name: "site-builder PR #7" })).toBeTruthy();
+    view.rerender(<PrChip pr={pr} preview={live} />);
+    expect(await screen.findByRole("link", { name: "Open preview for PR #7" })).toBeTruthy();
+
+    view.rerender(<PrChip pr={pr} preview={null} />);
+    expect(screen.queryByRole("link", { name: "Open preview for PR #7" })).toBeNull();
+  });
+
+  it("does not offer a preview when none is running", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<PrChip pr={pr} preview={null} />);
+
+    expect(screen.queryByRole("button", { name: "Start preview for PR #7" })).toBeNull();
+  });
+
   it("shows a warn held pill naming who holds the merge and why", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(<PrChip pr={{ ...pr, hold: { by: "CAPCOM", reason: "wait for the release" } }} />);
@@ -32,5 +79,22 @@ describe("PrChip", () => {
     await screen.findByRole("link");
     expect(container.querySelector(".pill")).toBeNull();
     expect(screen.queryByText("held")).toBeNull();
+  });
+
+  it("opens the PR's ticket page when it names a ticket, with GitHub as the second link", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<PrChip pr={{ ...pr, ticket: "site-builder#12" }} />);
+    const link = await screen.findByRole("link", { name: "site-builder PR #7" });
+    expect(link.getAttribute("href")).toBe("/tickets/site-builder/12");
+    expect(
+      screen.getByRole("link", { name: "site-builder PR #7 on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/octo-org/site-builder/pull/7");
+  });
+
+  it("links a PR with no ticket to GitHub alone", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<PrChip pr={pr} />);
+    const link = await screen.findByRole("link", { name: "site-builder PR #7" });
+    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/site-builder/pull/7");
   });
 });

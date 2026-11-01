@@ -7,6 +7,7 @@ import {
   GUARD_NOTE,
   GUARD_RULES,
   type GuardHitsView,
+  type GuardRule,
   type HealthRow,
   type LimitRow,
   LOCK_FREE_TEXT,
@@ -109,7 +110,7 @@ let fetchFn: ReturnType<typeof stubFetch>;
 function load(over: Record<string, unknown> = {}) {
   fetchFn = stubFetch({
     "/api/config": CFG,
-    "/api/crew": CREW,
+    "/api/crew?shape=summary": CREW,
     "/api/limits": LIMITS,
     "/api/health": HEALTH,
     "/api/repos": REPOS,
@@ -296,7 +297,7 @@ describe("Setup tabs", () => {
           sessions: [{ ...session, seats: [{ ...retro, mode: "scratch" }] }],
         },
       },
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ id: "retro-1", role: "RETRO", mode: "scratch", area: [] })],
         firstRunToday: null,
       },
@@ -312,7 +313,7 @@ describe("Setup tabs", () => {
   it("Sessions: a panel per crew session with seats, area or read-only, state, and folder owners", async () => {
     load({
       "/api/config": SESSIONS_CFG,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           crewRow(),
           seatRow({ hudState: "running" }),
@@ -375,7 +376,7 @@ describe("Setup tabs", () => {
   it("Sessions: each seat shows model · effort · CLI version", async () => {
     load({
       "/api/config": SESSIONS_CFG,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({ cli: { version: "2.1.302", effort: "high" } }),
           seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", area: [] }),
@@ -402,7 +403,7 @@ describe("Setup tabs", () => {
   it("Sessions: a repo with no observed loops has no loops panel; s/ names crew sessions only", async () => {
     load({
       "/api/config": { ...CREW_CONFIG, loops: [] },
-      "/api/crew": { rows: [seatRow()], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [seatRow()], firstRunToday: null },
       "/api/crew/sessions": sessionsOf([]),
     });
     at("sessions");
@@ -412,14 +413,14 @@ describe("Setup tabs", () => {
   });
 
   it("Sessions: says nothing about missing agents until the crew has loaded", async () => {
-    load({ "/api/crew": { rows: [], firstRunToday: null } });
+    load({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } });
     const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
     let release = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
     });
     fetchFn.mockImplementation(async (...a: unknown[]) => {
-      if (a[0] === "/api/crew") await gate;
+      if (a[0] === "/api/crew?shape=summary") await gate;
       return answer(...a);
     });
     at("sessions");
@@ -430,10 +431,10 @@ describe("Setup tabs", () => {
   });
 
   it("Sessions: says nothing about missing agents when the crew failed to load", async () => {
-    load({ "/api/crew": () => ({ status: 500, body: { error: "boom" } }) });
+    load({ "/api/crew?shape=summary": () => ({ status: 500, body: { error: "boom" } }) });
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(screen.queryByText("No agents yet.")).toBeNull();
   });
 
@@ -478,7 +479,7 @@ describe("Setup tabs", () => {
     load({ "/api/crew/status": { enabled: false, note: null } });
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(fetchFn).not.toHaveBeenCalledWith("/api/crew/status", expect.anything());
     expect(screen.queryByRole("status")).toBeNull();
     expect(document.getElementById("page-setup")?.textContent).not.toContain("Crew is off");
@@ -617,6 +618,24 @@ describe("Setup tabs", () => {
     expect(within(roles).getAllByRole("row")).toHaveLength(ROLES.length + 1);
     expect(roles.textContent).toContain("Flight Dynamics Officer");
     expect(roles.textContent).toContain("backend developer, test-first in its area");
+  });
+
+  it("Roles: the long Here, Rule and Runs freely cells wrap and carry the full text as a title", async () => {
+    load({ "/api/test-lock": FREE, "/api/guard/hits?days=7": NO_HITS });
+    at("roles");
+    const roles = within(await screen.findByRole("region", { name: "Roles" })).getByRole("table");
+    const here = within(roles).getByText(ROLES[0]?.here as string);
+    expect(here.classList.contains("wrap")).toBe(true);
+    expect(here.getAttribute("title")).toBe(ROLES[0]?.here);
+    const guard = within(screen.getByRole("region", { name: "Guard" })).getByText(
+      GUARD_RULES[Object.keys(GUARD_RULES)[0] as GuardRule],
+    );
+    expect(guard.classList.contains("wrap")).toBe(true);
+    expect(guard.getAttribute("title")).toBe(guard.textContent);
+    const lock = await screen.findByRole("region", { name: "Test lock" });
+    const free = within(lock).getAllByText(FREE_SUITE_HINT)[0] as HTMLElement;
+    expect(free.classList.contains("wrap")).toBe(true);
+    expect(free.getAttribute("title")).toBe(FREE_SUITE_HINT);
   });
 
   it("Roles: the guard lists each rule with its hits this week, and the note", async () => {
@@ -952,7 +971,7 @@ describe("Setup tabs", () => {
       const session = SESSIONS_CFG.crew?.sessions[0];
       if (!SESSIONS_CFG.crew || !session) throw new Error("no session");
       const p = await seats({
-        "/api/crew": {
+        "/api/crew?shape=summary": {
           rows: [
             seatRow({ hudState: "running" }),
             seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", hudState: "idle" }),
@@ -1030,7 +1049,7 @@ describe("Setup tabs", () => {
       "Sessions: shows a %s seat's short state and reason tooltip",
       async (_state, seat, label, reason) => {
         const p = await seats({
-          "/api/crew": { rows: [seat], firstRunToday: null },
+          "/api/crew?shape=summary": { rows: [seat], firstRunToday: null },
         });
         const t = within(p).getByRole("table", { name: "Seats of s/s1 in config.yaml" });
         const row = within(t).getByText(seat.id).closest("tr") as HTMLElement;
@@ -1437,6 +1456,13 @@ const PREVIEW: RepoPreview = {
   loops: [],
 };
 
+/** A repo card starts as one row; its title button opens it. */
+function expandCard(card: HTMLElement): HTMLElement {
+  const title = card.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  if (title?.getAttribute("aria-expanded") === "false") fireEvent.click(title);
+  return card;
+}
+
 describe("Setup › Repos & seats cards", () => {
   it("a crew repo card opens an Ownership table with area globs and hard-rule files", async () => {
     const value: MapSnapshot = structuredClone(mapSnapshotFixture);
@@ -1455,7 +1481,7 @@ describe("Setup › Repos & seats cards", () => {
       "/api/repos/shop-app/map": value,
     });
     at("repos");
-    const card = await screen.findByLabelText("shop-app");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
     const summary = within(card).getByText("Ownership · areas and hard-rule files");
     // nothing is read until the section is opened
     expect(fetchFn.mock.calls.some(([path]) => String(path).endsWith("/map"))).toBe(false);
@@ -1480,7 +1506,7 @@ describe("Setup › Repos & seats cards", () => {
       }),
     });
     at("repos");
-    const card = await screen.findByLabelText("shop-app");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
     const details = within(card)
       .getByText("Ownership · areas and hard-rule files")
       .closest("details") as HTMLDetailsElement;
@@ -1489,10 +1515,31 @@ describe("Setup › Repos & seats cards", () => {
     expect(await within(card).findByText(/Could not read the map for shop-app/)).toBeTruthy();
   });
 
+  it("shows each repo as one collapsed row of name, kind, account and seats, and opens it on demand", async () => {
+    load({ "/api/config": { ...CREW_CONFIG, loops: CFG.loops } });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    const title = card.querySelector("button[aria-expanded]") as HTMLButtonElement;
+    expect(title.getAttribute("aria-expanded")).toBe("false");
+    const seatCount = CREW_CONFIG.crew?.sessions[0]?.seats.length ?? 0;
+    expect(title.textContent).toContain("shop-app");
+    expect(title.textContent).toContain("Crew");
+    expect(title.textContent).toContain(`${seatCount} seat`);
+    expect(within(card).queryByRole("button", { name: "Save guidance" })).toBeNull();
+    const observed = await screen.findByLabelText("site-builder");
+    expect(observed.querySelector("button[aria-expanded]")?.textContent).toContain("Observed");
+    fireEvent.click(title);
+    expect(title.getAttribute("aria-expanded")).toBe("true");
+    const seats = within(card).getByRole("region", { name: /^Seats for/ });
+    const guidance = within(card).getByText("Work guidance · guidance, not rules");
+    // the seats table comes before the guidance form
+    expect(seats.compareDocumentPosition(guidance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows repo guidance as editable advice without a live board profile", async () => {
     load();
     at("repos");
-    const card = await screen.findByLabelText("shop-app");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
     expect(card.textContent).toContain("Observed");
     expect(card.textContent).toContain("Work guidance · guidance, not rules");
     expect(within(card).getByRole("button", { name: "Save guidance" })).toBeTruthy();
@@ -1502,7 +1549,7 @@ describe("Setup › Repos & seats cards", () => {
   it("saves account preference and multi-select guidance through the repo setup route", async () => {
     load({ "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }) });
     at("repos");
-    const card = await screen.findByLabelText("shop-app");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
     const priority = within(
       within(card).getByRole("group", { name: "Priority" }),
     ).getByPlaceholderText("+ add");
@@ -1693,7 +1740,7 @@ describe("Setup › Repos & seats cards", () => {
       "POST /api/repos/onboard": { backup: "c.bak" },
     });
     at("repos");
-    const card = await screen.findByLabelText("shop-app");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
     fireEvent.click(within(card).getByRole("button", { name: "Convert to crew repo" }));
     fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
     fireEvent.change(

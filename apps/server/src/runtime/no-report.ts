@@ -15,6 +15,21 @@ const REPORT_TOOLS = {
   plan: MC_TOOL_NAMES.reportPlan,
 } as const;
 
+/**
+ * Whether the run has given the report its loop asks for: evidence (a build, and a later round's
+ * counts only once the loop has taken the earlier one in), a verdict (a review) or the plan.
+ */
+export function runReported(store: Store, run: Run, loop: LoopKind): boolean {
+  const review = run.reviewId == null ? null : store.review(run.reviewId);
+  const fresh = store.run(run.id) ?? run;
+  const ev = store.latestEvidence(run.id);
+  return loop === "build"
+    ? ev !== null && !(fresh.loop?.phase === "working" && ev.id <= fresh.loop.reportedEvidenceId)
+    : loop === "review"
+      ? review?.runId === run.id && review.verdict !== null
+      : store.loopEventsOfRun(run.id).some((e) => e.key === `${run.id}:plan`);
+}
+
 /** Records an unreported exit, including one recovered from an exited keeper after a restart. */
 export function recordNoReport(
   store: Store,
@@ -25,17 +40,9 @@ export function recordNoReport(
   at: number,
 ): boolean {
   if (loop === "none" || loop === "watch") return false;
-  const review = run.reviewId == null ? null : store.review(run.reviewId);
   const fresh = store.run(run.id) ?? run;
   if (fresh.loop?.phase === "done") return false;
-  const ev = store.latestEvidence(run.id);
-  const reported =
-    loop === "build"
-      ? ev !== null && !(fresh.loop?.phase === "working" && ev.id <= fresh.loop.reportedEvidenceId)
-      : loop === "review"
-        ? review?.runId === run.id && review.verdict !== null
-        : store.loopEventsOfRun(run.id).some((e) => e.key === `${run.id}:plan`);
-  if (reported) return false;
+  if (runReported(store, run, loop)) return false;
   const record: NoReport = {
     code: exit.code,
     signal: exit.signal,

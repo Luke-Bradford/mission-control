@@ -47,6 +47,13 @@ export const repoRulesSchema = z.strictObject({
   hard_rules_by: z.enum(HARD_RULES_BY).optional(),
   tech_debt_issue: issueNumber.optional(),
   always_ask: z.array(nonEmpty).optional(),
+  // a PR waits for the operator's acceptance when its ticket has a label or its diff touches a path
+  uat: z
+    .strictObject({
+      labels: z.array(nonEmpty).optional(),
+      paths: z.array(labelGlob).optional(),
+    })
+    .optional(),
   // exact commands, matched whole against a seat's shell call: see check-runs.ts
   checks: z.array(checkCommand).optional(),
 });
@@ -67,6 +74,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     hardRulesBy: r.hard_rules_by ?? base.hardRulesBy,
     ...(r.tech_debt_issue === undefined ? {} : { techDebtIssue: r.tech_debt_issue }),
     alwaysAsk: r.always_ask ?? base.alwaysAsk,
+    uat: { labels: r.uat?.labels ?? base.uat.labels, paths: r.uat?.paths ?? base.uat.paths },
     checks: r.checks ?? base.checks,
   });
 }
@@ -104,6 +112,11 @@ export function overlayRepoBlock(
       ? {}
       : { techDebtIssue: base.techDebtIssue ?? block.tech_debt_issue }),
     alwaysAsk: union(base.alwaysAsk, block.always_ask ?? []),
+    // a repo block can only add UAT triggers, never drop the user config's
+    uat: {
+      labels: union(base.uat.labels, block.uat?.labels ?? []),
+      paths: union(base.uat.paths, block.uat?.paths ?? []),
+    },
     // a repo block can only add checks, never drop the user config's
     checks: union(base.checks, block.checks ?? []),
   });

@@ -12,11 +12,13 @@
  * its own once loaded, and its hard deadline, print the "unreachable" deny and exit 2. A failure to
  * load the module (node missing, an import that fails) exits 1 (127 for a missing node) before any
  * of this runs: the `|| exit 2` wrapper turns that into exit 2, which blocks the tool.
+ *
+ * A Stop is the exception: its failures print `{}` and exit 0, and its command ends `|| true`.
  */
 import { writeSync } from "node:fs";
 import { request } from "node:http";
 import { HOOK_DEADLINE_MS, HOOK_RETRY_ENV, HOOK_RETRY_MS } from "@mc/core";
-import { FAILED, type HookResult, hookMain } from "./hook.ts";
+import { FAILED, failureFor, type HookResult, hookMain } from "./hook.ts";
 
 /** The one stderr line on a failure; the CLI shows it (and the command line) to the model. */
 const FAILED_LINE = "mc-guard: no verdict from Mission Control\n";
@@ -91,13 +93,16 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-const fail = () => finish(FAILED);
+// what a failure answers: known once stdin is read (a Stop fails open, see `failureFor`)
+let failure: HookResult = FAILED;
+const fail = () => finish(failure);
 process.on("uncaughtException", fail);
 process.on("unhandledRejection", fail);
 // covers reading stdin too: a CLI that never closes it still gets a deny in time
 setTimeout(fail, HOOK_DEADLINE_MS);
 readStdin()
-  .then((stdin) =>
-    hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp, retryMs()),
-  )
+  .then((stdin) => {
+    failure = failureFor(stdin);
+    return hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp, retryMs());
+  })
   .then(finish, fail);

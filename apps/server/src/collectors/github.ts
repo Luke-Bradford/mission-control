@@ -3,14 +3,17 @@ import { promisify } from "node:util";
 import {
   BOARD_KEEP_DONE_MS,
   type BoardItem,
+  bodyDependencies,
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
   ciVerdict,
   controllerCheckOf,
+  type DefectRefs,
   type Escalation,
   type GithubRateLimit,
   githubCollector,
   inferTicket,
+  isBugLabelled,
   isObj,
   labelPriority,
   OWNER_FIELD,
@@ -19,7 +22,9 @@ import {
   PR_KEEP_MS,
   PR_MAX_PAGES,
   type PrCheck,
+  type PrFileInput,
   type PullRequestView,
+  parseDefectRefs,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
   type RepoGoal,
@@ -74,7 +79,7 @@ const ITEM_FIELDS = `
 /** What the board reads from an issue. */
 const ISSUE_FIELDS = `
               author { login }
-              number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
+              number title body url state updatedAt createdAt labels(first: 20) { nodes { name } }
               assignees(first: 10) { nodes { login } }
               repository { name owner { login } }
               parent { number repository { name } }
@@ -200,6 +205,9 @@ export async function fetchQueueCard(
 /** A longer issue body is cut here; the pane links to GitHub for the rest. */
 export const TICKET_BODY_MAX = 20_000;
 
+/** A PR's diff is read up to this many files; the QA board's tests-per-PR count is from them. */
+export const PR_FILES_MAX = 100;
+
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
@@ -207,8 +215,9 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
-        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable additions deletions changedFiles
+        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
+        files(first: ${PR_FILES_MAX}) { nodes { path changeType } }
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
@@ -525,6 +534,19 @@ function option<T extends string>(v: unknown, known: readonly T[]): T | null {
 
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
+/** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
+/** What a bug's body names, for the QA board's escaped defects; nothing for other cards. */
+function defectRefsOf(repo: string, labels: string[], body: unknown): { defectRefs?: DefectRefs } {
+  if (!isBugLabelled(labels)) return {};
+  const refs = parseDefectRefs(str(body, ""), repo);
+  return refs.prs.length + refs.shas.length + refs.paths.length > 0 ? { defectRefs: refs } : {};
+}
+
+function afterOf(body: unknown): { after?: NonNullable<BoardItem["after"]> } {
+  const after = bodyDependencies(str(body, ""));
+  return after.issues.length > 0 || after.prs.length > 0 ? { after } : {};
+}
+
 function blockers(v: unknown): BoardItem["blockedBy"] {
   const nodes = isObj(v) && Array.isArray(v.nodes) ? v.nodes : [];
   return nodes.flatMap((n) =>
@@ -739,6 +761,8 @@ function boardItem(
           }
         : null,
     blockedBy: blockers(c.blockedBy),
+    ...afterOf(c.body),
+    ...defectRefsOf(repo.github, labels, c.body),
     milestone:
       typeof path(c, "milestone", "title") === "string"
         ? str(path(c, "milestone", "title"), "")
@@ -1107,6 +1131,7 @@ function mapPr(
     title: str(n.title, ""),
     url: str(n.url, ""),
     branch,
+    ...(str(n.baseRefName, "") === "" ? {} : { base: str(n.baseRefName, "") }),
     // The loops name the ticket in the branch and almost never write "Closes #n".
     ticket:
       inferTicket(branch, repo.id) ?? (typeof first === "number" ? `${repo.id}#${first}` : null),
@@ -1127,6 +1152,20 @@ function mapPr(
     additions: typeof n.additions === "number" ? n.additions : null,
     deletions: typeof n.deletions === "number" ? n.deletions : null,
     changedFiles: typeof n.changedFiles === "number" ? n.changedFiles : null,
+    ...prFiles(n.files),
+  };
+}
+
+/** The diff's files; nothing when the response had none, so a partial read never clears them. */
+function prFiles(raw: unknown): { files?: PrFileInput[] } {
+  const nodes = path(raw, "nodes");
+  if (!Array.isArray(nodes)) return {};
+  return {
+    files: nodes.flatMap((f) =>
+      typeof path(f, "path") === "string"
+        ? [{ path: str(path(f, "path"), ""), changeType: str(path(f, "changeType"), "") }]
+        : [],
+    ),
   };
 }
 
@@ -1283,6 +1322,47 @@ export const EMPTY_BOARD_GRACE_MS = 15 * 60_000;
 /** Per store, when each repo's board reads started coming back empty over a board that had cards. */
 const emptyBoards = new WeakMap<Store, Map<string, number>>();
 
+/** Most PRs named on `After PR` lines that one poll reads one by one. */
+const NAMED_PRS_MAX = 20;
+
+/**
+ * Reads the PRs an open card's `After PR` line names that the PR pages left out (older than the
+ * sweep window, or past the newest page), so a named PR is never taken for absent while it is open.
+ * True when a stored row changed.
+ */
+async function readNamedPrs(
+  repo: CcConfig["repos"][number],
+  store: Store,
+  gql: Gql,
+  clock: () => number,
+): Promise<boolean> {
+  const have = new Set(store.pullRequests(repo.id).map((p) => p.number));
+  const missing = [
+    ...new Set(
+      store
+        .board(repo.id)
+        .filter((c) => !c.closed)
+        .flatMap((c) => c.after?.prs ?? []),
+    ),
+  ]
+    .filter((n) => !have.has(n))
+    .slice(0, NAMED_PRS_MAX);
+  if (missing.length === 0) return false;
+  const [owner = "", name = ""] = repo.github.split("/");
+  const readAt = clock();
+  const prs: PullRequestView[] = [];
+  for (const number of missing) {
+    const node = path(
+      await call(gql, PR_QUERY, { owner, name, number }),
+      "repository",
+      "pullRequest",
+    );
+    const pr = isObj(node) ? mapPr(repo, node) : null;
+    if (pr) prs.push(pr);
+  }
+  return store.upsertPullRequests(repo.id, prs, readAt);
+}
+
 /**
  * Read-only refresh of one repo's board and escalations. Each part replaces its rows only when it
  * fully succeeded; a failure keeps the previous rows, is recorded in collector status, and never throws.
@@ -1348,6 +1428,11 @@ export async function collectGithub(
     // Keep the rows, but say they are the last good read.
     store.markPullRequestsStale(repo.id);
     failures.push(`prs: ${errMsg(e)}`);
+  }
+  try {
+    if (await readNamedPrs(repo, store, gql, clock)) changes.boards = true;
+  } catch (e) {
+    failures.push(`named prs: ${errMsg(e)}`);
   }
   try {
     store.replaceMilestones(repo.id, await fetchMilestones(repo, gql));

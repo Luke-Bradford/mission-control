@@ -25,6 +25,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
+import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
@@ -332,6 +333,10 @@ export async function main(): Promise<void> {
     for (const note of notes) log(`engine: ${note}`);
     return rules;
   };
+  const flightAreas = async (repoId: RepoId) => {
+    const rules = await engineRules(repoId);
+    return rules instanceof RepoRulesError ? undefined : rules.areas;
+  };
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
@@ -402,6 +407,7 @@ export async function main(): Promise<void> {
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     profiles,
     checks: runChecks,
+    checkDrops: (runId) => checkRecorder.drops(runId),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
@@ -539,6 +545,7 @@ export async function main(): Promise<void> {
     },
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
+    areas: flightAreas,
     config,
     store,
     bus,
@@ -573,6 +580,7 @@ export async function main(): Promise<void> {
     enabled: engineOn,
     login: hubLogin,
     lockState: () => lock.state(),
+    areas: flightAreas,
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       pausedSeat(store, seatId) !== null ||
@@ -742,6 +750,29 @@ export async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  // Branch tidying writes to GitHub, so it runs wherever the engine does.
+  if (engineOn) {
+    const tidy = createBranchTidy({
+      config,
+      store,
+      gh,
+      dbPath,
+      inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+      log,
+    });
+    const quietly = (what: string, run: () => Promise<string[]>) => () => {
+      run().catch((e: unknown) => {
+        log(`branch tidy: ${what} failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    };
+    const everyTenMinutes = quietly("closed-PR pass and local prune", async () => [
+      ...(await tidy.closedPass()),
+      ...(await tidy.pruneLocal()),
+    ]);
+    setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
+    setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
+    setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
+  }
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

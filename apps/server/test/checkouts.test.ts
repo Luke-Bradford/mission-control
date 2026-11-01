@@ -37,6 +37,7 @@ import {
   type InstallRunner,
   installAfterSync,
   installEnv,
+  MC_FALLBACK_EMAIL,
   MC_MERGE_AUTHOR,
   prepareCheckout,
   prepareDetachedCheckout,
@@ -273,6 +274,8 @@ beforeEach(() => {
   git(dir, "clone", "-q", origin, clone);
 });
 afterEach(() => {
+  // a test that stubs HOME for git must not leave it pointing at a deleted directory
+  vi.unstubAllEnvs();
   if (savedGitPath !== undefined) {
     process.env.PATH = savedGitPath;
     savedGitPath = undefined;
@@ -582,6 +585,10 @@ describe("prepareCheckout", () => {
   });
 
   it("brings origin's tip into a reused worktree when asked", async () => {
+    // no global git config: the merge's email is the hub's fallback on every machine
+    const home = mkdtempSync(join(dir, "home-"));
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("XDG_CONFIG_HOME", home);
     const first = await prepareCheckout(input());
     const tip = commit(first.path, { "b.txt": "branch\n" });
     const main = commit(seed, { "m.txt": "main\n" });
@@ -593,8 +600,9 @@ describe("prepareCheckout", () => {
       before: tip,
     });
     expect(git(r.path, "log", "-1", "--format=%P")).toBe(`${tip} ${main}`);
-    expect(git(r.path, "log", "-1", "--format=%an|%cn")).toBe(
-      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}`,
+    // the fixture clone has no user.email either, so the merge carries the hub's fallback
+    expect(git(r.path, "log", "-1", "--format=%an|%cn|%ae|%ce")).toBe(
+      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}|${MC_FALLBACK_EMAIL}|${MC_FALLBACK_EMAIL}`,
     );
     expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
   });
@@ -1817,7 +1825,7 @@ describe("review scratch checkouts", () => {
       git(seed, "push", "-q", "origin", "main");
       const s = await prepareScratch(scratchInput(second));
       const r = await writeReviewInputs(clone, s, second, first);
-      expect(r).toEqual({ diffCut: false, since: true });
+      expect(r).toEqual({ diffCut: false, since: true, changedSince: ["b.txt"] });
       const all = read(REVIEW_DIFF_FILE);
       expect(all).toContain("+++ b/a.txt");
       expect(all).toContain("+++ b/b.txt");
@@ -1835,6 +1843,7 @@ describe("review scratch checkouts", () => {
         expect(await writeReviewInputs(clone, s, head, prev)).toEqual({
           diffCut: false,
           since: false,
+          changedSince: null,
         });
         expect(existsSync(join(scratchPath(), REVIEW_SINCE_FILE))).toBe(false);
       }

@@ -81,7 +81,7 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
 export function evidenceCanUnpark(
@@ -126,6 +126,8 @@ export const REFUSAL_TRIES = 3;
 export const CI_PENDING_MAX_MS = 30 * 60_000;
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
+/** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
+export const STUCK_PARK = "stuck";
 
 /** The engine reconciles every looped run this often. */
 export const ENGINE_TICK_MS = 60_000;
@@ -150,15 +152,28 @@ export const blockedNoteKey = (runId: string, epoch: number): string => `blocked
 /** Shared prefixes for CI activity events and parking reasons. */
 export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
 export const CI_FAILED_EVENT_PREFIX = "CI failed on ";
+export const CI_FLAKED_EVENT_PREFIX = "CI flaked on ";
 export const CI_RERUN_FAILED_EVENT_PREFIX = "CI failed again on the re-run of ";
 export const CI_PARK_FAILED_PREFIX = "CI failed ";
+
+/** The events and re-run state for a sha that CI now shows green; a re-run of that sha was a flake. */
+function ciPassed(loop: RunLoop, sha: string): { actions: LoopAction[]; rerun: RunLoop["rerun"] } {
+  const flaked = loop.rerun?.sha === sha;
+  const actions: LoopAction[] = [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${sha7(sha)}` }];
+  if (flaked)
+    actions.push({
+      kind: "event",
+      text: `${CI_FLAKED_EVENT_PREFIX}${sha7(sha)}: passed on re-run`,
+    });
+  return { actions, rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun };
+}
 
 /** Failure outcomes shared by Overview and the FLIGHT ledger. */
 export function isCiFailureEvent(text: string): boolean {
   return (
     !text.includes("no run could be re-run") &&
     (text.startsWith(CI_FAILED_EVENT_PREFIX) ||
-      text.startsWith("CI flaked on ") ||
+      text.startsWith(CI_FLAKED_EVENT_PREFIX) ||
       text.startsWith(CI_RERUN_FAILED_EVENT_PREFIX) ||
       text.startsWith(parkedEventText(CI_PARK_FAILED_PREFIX)))
   );
@@ -172,6 +187,17 @@ export const RULING_PARK = "ruling";
 export const CONTROLLER_CHECK_PARK = "controller-check";
 /** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
 export const MERGE_HOLD_PARK = "merge-hold";
+/** The park kind of a run that passed review and CI but waits for the operator's acceptance (UAT). */
+export const UAT_PARK = "uat";
+/** The park reason: the sha waiting and why the repo's `uat` rule matched. */
+export const uatParkText = (sha: string, why: string): string =>
+  `waiting for your acceptance on ${sha.slice(0, 7)} (${why})`;
+/** Why a plain resume or message cannot lift this park. */
+export const UAT_USE_ROUTE =
+  "this run waits for the operator's acceptance: POST /api/prs/:repo/:n/uat";
+/** The rework line for a PR the operator sent back at UAT; `note` is the operator's. */
+export const uatSendBackText = (sha: string, note: string): string =>
+  `The operator sent ${sha.slice(0, 7)} back at acceptance.\n\n${note}\n\nFix it, commit, and report again.`;
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
 /** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
@@ -383,6 +409,13 @@ export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
 export const conflictText = (files: readonly string[]): string =>
   `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** The line a PR that conflicts with main sends its seat, keyed so it goes once per pushed sha. */
+export const mergeMainKey = (runId: string, sha: string): string => `merge-main:${runId}:${sha}`;
+export const MERGE_MAIN_TEXT =
+  "Your PR conflicts with main. Call mc sync_main to merge main into your branch, resolve any conflicts it names, then call mc commit and mc report_evidence.";
+/** A Comms pointer to a conflict list delivered directly to the author seat. */
+export const conflictCommsText = (files: readonly string[]): string =>
+  `Merging main conflicted in ${files.length} files; the list was sent to the seat.`;
 /** The Activity rows for merging main into a run's branch. */
 export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
@@ -394,6 +427,17 @@ export const mainConflictText = (mainSha: string, n: number): string =>
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
   "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. There is no turn or time limit: work until it is done or truly blocked; if blocked, name the blocker. When the work is committed, call mc report_evidence.";
+/** What a resume says to a seat whose last QUIET_TURNS_BEFORE_PUSH turns each ended with no new commit. */
+export const RESUME_PUSH_TEXT =
+  "Push what you have and report: call mc report_evidence for {ref} now. Your last turns ended with no new commit. If you are blocked, name the blocker in the report.";
+export const QUIET_TURNS_BEFORE_PUSH = 2;
+/** The lines that resume a seat (a restart, a reset rate limit): a waiting message goes ahead of them. */
+export const isResumeLineKey = (key: string): boolean =>
+  key.startsWith("resume:") || key.startsWith("ratelimit:") || key.startsWith("rv-resume:");
+const resumeText = (seat: { quietTurns: number }, ref: string): string =>
+  fillLoopText(seat.quietTurns >= QUIET_TURNS_BEFORE_PUSH ? RESUME_PUSH_TEXT : RESUME_TEXT, {
+    ref,
+  });
 export const NUDGE_TEXT =
   "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
 export const NUDGE_TRIES = 3;
@@ -468,6 +512,9 @@ export const asideEventText = (call: string): string =>
 /** A run in CI leaves its seat once its PR is open and its turn has ended. */
 export const asideInCiEventText = (call: string): string =>
   `in CI; ${call} is free for its next ticket`;
+/** A run still being built leaves its seat for rework due on another of the seat's PRs. */
+export const asideForReworkEventText = (call: string): string =>
+  `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -576,6 +623,8 @@ export interface LoopSnapshot {
     inTurn: boolean;
     lastTurnEndedAt: number | null;
     resumedAt: number | null;
+    /** Turns in a row that ended with no new commit. */
+    quietTurns: number;
     rateLimitedUntil: number | null;
     openQuestion: boolean;
     /** The seat row holds this unended run. */
@@ -583,6 +632,8 @@ export interface LoopSnapshot {
   };
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
+  /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
+  reworkDue?: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
@@ -623,6 +674,9 @@ export interface LoopSnapshot {
   lastEngineLineAt: number | null;
   tokens: number;
   budget: number;
+  /** Claude's reported spend and its template cap; null when no dollar cap applies. */
+  costUsd?: number | null;
+  budgetUsd?: number | null;
   ended: { reason: string } | null;
   /** null or absent: no reviewer for this run's session (7a behaviour). */
   review?: LoopReviewFacts | null;
@@ -706,6 +760,16 @@ const park = (loop: RunLoop, kind: string, reason: string): Step => ({
 });
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
+
+/** The budget park's reason when the run has spent its template's dollar cap, else null. */
+const dollarCapReason = (s: LoopSnapshot): string | null =>
+  s.budgetUsd != null && s.costUsd != null && s.costUsd >= s.budgetUsd
+    ? `used $${s.costUsd.toFixed(2)} of a $${s.budgetUsd.toFixed(2)} budget`
+    : null;
+
+/** Whether a budget park's reason is the dollar cap's: Resume cannot lift it (the CLI keeps its cap). */
+export const isDollarCapReason = (reason: string): boolean =>
+  /^used \$[\d.]+ of a \$[\d.]+ budget$/.test(reason);
 
 const nudgePrefix = (s: LoopSnapshot): string =>
   `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
@@ -872,16 +936,95 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (s.ended !== null && !loop.parked?.ended) {
+    // the CLI stops itself at its cap: the end keeps the dollar figure the cap hit parked with
+    const capReason = dollarCapReason(s);
+    const parked =
+      loop.parked?.kind === "budget"
+        ? { ...loop.parked, ended: true }
+        : capReason !== null
+          ? { kind: "budget", reason: capReason, ended: true }
+          : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+    return {
+      loop: { ...loop, phase: "parked", parked },
+      actions:
+        capReason !== null && loop.parked?.kind !== "budget"
+          ? [{ kind: "event", text: parkedEventText(capReason) }]
+          : [],
+    };
+  }
+  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
+  // a conflict stop lifts the same way once the PR no longer conflicts
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === STUCK_PARK ||
+      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
     return {
       loop: {
         ...loop,
-        phase: "parked",
-        parked: { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true },
+        phase: "ci",
+        parked: null,
+        pushStartedAt: now,
+        pushFor: headCommit,
+        unparkedAt: now,
+        transient: 0,
+        lastRefusal: null,
       },
-      actions: [],
+      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
+    };
+  }
+  // a ruling on a red head is void once the seat's newer push shows green checks: back to review
+  if (
+    loop.phase === "parked" &&
+    (loop.parked?.kind === RULING_PARK || loop.parked?.kind === "review-ruling") &&
+    !loop.parked.ended &&
+    loop.ciFailedSha !== null &&
+    pr?.state === "open" &&
+    pr.ci === "passing" &&
+    pr.headSha !== null &&
+    pr.headSha !== loop.ciFailedSha &&
+    pushed?.sha === pr.headSha &&
+    headCommit === pr.headSha
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "review",
+        parked: null,
+        ciFails: 0,
+        transient: 0,
+        lastRefusal: null,
+        unparkedAt: now,
+      },
+      actions: [
+        {
+          kind: "event",
+          text: `CI green on ${sha7(pr.headSha)}; ruling on ${sha7(loop.ciFailedSha)} void`,
+        },
+      ],
     };
   }
   if (loop.phase === "parked") return unchanged(loop);
+  // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
+  // in review or working with it still recorded: a ruling park resumes straight into review, and
+  // the merge step and the ruling park both read ciFailedSha, so a stale one wedged the run.
+  if (
+    (loop.phase === "review" || loop.phase === "working") &&
+    loop.ciFailedSha !== null &&
+    pushed?.sha === loop.ciFailedSha &&
+    headCommit === pushed.sha &&
+    pr?.state === "open" &&
+    pr.headSha === pushed.sha &&
+    pr.ci === "passing"
+  ) {
+    const passed = ciPassed(loop, pushed.sha);
+    return { loop: { ...loop, ciFailedSha: null, rerun: passed.rerun }, actions: passed.actions };
+  }
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
   }
@@ -996,7 +1139,7 @@ function stateStep(s: LoopSnapshot): Step {
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(
           loop,
-          "stuck",
+          STUCK_PARK,
           `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
         );
       }
@@ -1010,20 +1153,31 @@ function stateStep(s: LoopSnapshot): Step {
       if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
         return unchanged(loop);
       }
-      return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
+      // already on the seat, is the operator's
+      const key = mergeMainKey(s.runId, pushed.sha);
+      if (loop.mainMerge || key in s.claimed) {
+        return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
+      }
+      return {
+        loop: { ...loop, phase: "working", pendingLine: { key, text: MERGE_MAIN_TEXT } },
+        actions: [
+          { kind: "event", text: `PR #${pr.number} conflicts with main; the seat merges it` },
+        ],
+      };
     }
     if (pr.ci === "passing") {
-      const flaked = loop.rerun?.sha === pushed.sha;
-      const actions: LoopAction[] = [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${short}` }];
-      if (flaked) actions.push({ kind: "event", text: `CI flaked on ${short}: passed on re-run` });
+      const passed = ciPassed(loop, pushed.sha);
       return {
         loop: {
           ...loop,
           phase: "review",
           ciFails: 0,
-          rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
+          // a pass makes any recorded failure stale: every reader compares it with the current head
+          ciFailedSha: null,
+          rerun: passed.rerun,
         },
-        actions,
+        actions: passed.actions,
       };
     }
     if (pr.ci === "failing") {
@@ -1077,6 +1231,9 @@ function stateStep(s: LoopSnapshot): Step {
     return unchanged(loop);
   }
 
+  // like the token park, after the report step: a cap passed on the last turn still pushes the PR
+  const capReason = loop.phase === "working" ? dollarCapReason(s) : null;
+  if (capReason !== null) return park(loop, "budget", capReason);
   if (loop.phase === "working" && s.tokens > s.budget + loop.budgetExtra) {
     // s.tokens is input + output tokens, as the engine supplies them (cache reads are not counted)
     return park(
@@ -1226,6 +1383,8 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.P !== null &&
     rv.cur !== null &&
     rv.blocked &&
+    // a blocking count with no stored text is never sent: the author would have nothing to fix
+    rv.R.findings.length > 0 &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
     fixesSent(s.claimed, s.runId, loop.epoch) + 1 < reviewRoundLimit(s, loop, rv.P)
   );
@@ -1233,12 +1392,24 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /** A FLIGHT rework grant permits exactly one more blocking RETRO outcome on that head. */
 function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
+  // FLIGHT's second review of this head always gets a fix round, whatever rework was granted before
+  if (loop.flightSecondReview?.[sha]?.epoch === loop.epoch)
+    return Math.max(2, s.limits?.rounds ?? REVIEW_ROUNDS);
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
-/** A park that waits on someone's call, not on the seat: the seat may be free while it stands. */
+/**
+ * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
+ * free while it stands. The run rejoins its seat's queue when the park is lifted.
+ */
 const isDecisionPark = (kind: string | undefined): boolean =>
-  kind === CONTROLLER_CHECK_PARK || kind === MERGE_HOLD_PARK;
+  kind === CONTROLLER_CHECK_PARK ||
+  kind === UAT_PARK ||
+  kind === MERGE_HOLD_PARK ||
+  kind === RULING_PARK ||
+  kind === "review" ||
+  kind === "review-ruling" ||
+  kind === "review-failed";
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
@@ -1257,11 +1428,32 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     !seat.openQuestion &&
     pushed !== null &&
     s.headCommit === pushed.sha &&
-    loop.ciFailedSha !== pushed.sha &&
+    // a ruling on the failure waits on FLIGHT or the operator, not on a fix
+    (loop.ciFailedSha !== pushed.sha || loop.parked?.kind === RULING_PARK) &&
     pr?.state === "open" &&
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
     !owesReport({ ...s, loop })
+  );
+}
+
+/**
+ * Whether the run being built leaves its seat at this turn end because rework is due on another of
+ * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
+ */
+function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat } = s;
+  return (
+    s.reworkDue === true &&
+    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
+    s.pushed === null &&
+    loop.phase === "working" &&
+    !loop.aside &&
+    s.ended === null &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn &&
+    !seat.openQuestion
   );
 }
 
@@ -1369,7 +1561,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
       ([k, at]) => k.startsWith(`ratelimit:${runId}:`) && at >= (seat.resumedAt ?? 0),
     );
     if (free(key) && !told) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 
@@ -1395,7 +1587,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
     const waiting =
       seat.rateLimitedUntil === null && lastTry !== null && s.now - lastTry < RATE_LIMIT_RETRY_MS;
     if (free(key) && !waiting) {
-      return { kind: "send", key, text: fillLoopText(RESUME_TEXT, { ref: ticket.ref }) };
+      return { kind: "send", key, text: resumeText(seat, ticket.ref) };
     }
   }
 
@@ -1494,7 +1686,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop)
+          : asideDue(s, loop) || displaceDue(s, loop)
             ? { kind: "set-aside" }
             : dueLine(s, loop);
     if (line !== null) actions.push(line);

@@ -15,7 +15,7 @@ afterEach(() => vi.useRealTimers());
 function stub(lanes: OverviewTimeline["lanes"] = [], rows: CrewRow[] = []) {
   return stubFetch({
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes },
-    "/api/crew": { rows },
+    "/api/crew?shape=summary": { rows },
   });
 }
 

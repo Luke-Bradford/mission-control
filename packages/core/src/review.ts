@@ -1,6 +1,8 @@
+import type { PillSpec } from "./hud.ts";
 import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop.ts";
 import type { ReviewDepth } from "./profiles.ts";
 import type { SeatState } from "./runtime.ts";
+import type { RunLoop } from "./types.ts";
 
 export const REVIEW_STATES = [
   "queued",
@@ -110,6 +112,11 @@ export interface ReviewFinding {
 export interface StoredFinding extends ReviewFinding {
   pos: number;
   state: "open" | "logged";
+  /**
+   * Set by the hub: a finding in round 2 or later on a file unchanged since the previous review,
+   * one an earlier round could have raised.
+   */
+  late?: boolean;
   /** How it ended: set when a later round reports, by RETRO's resolutions or by the engine. */
   resolution?: FindingResolutionOutcome;
   /** The later review that resolved it. */
@@ -222,6 +229,19 @@ export function fixText(i: {
   let kept = 0;
   while (kept < entries.length && build(kept + 1).length <= FIX_TEXT_MAX) kept++;
   return build(kept);
+}
+
+/** RETRO's Comms mirror of findings; the full fix list is delivered to the author seat. */
+export function fixCommsText(i: {
+  retro: string;
+  sha: string;
+  findings: readonly ReviewFinding[];
+}): string {
+  const counts = FINDING_SEVERITIES.flatMap((severity) => {
+    const n = i.findings.filter((f) => f.severity === severity).length;
+    return n === 0 ? [] : [`${n} ${severity}`];
+  });
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
 }
 
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";
@@ -572,3 +592,98 @@ export const minorIssueBody = (pr: number, findings: readonly string[]): string 
   `Minor findings from #${pr}.\n\n${findings.join("\n")}\n`;
 export const minorIssueFailedText = (pr: number, why: string): string =>
   `PR #${pr}: minor findings could not be filed in Backlog (${why}); collect them from the PR body.`;
+
+/**
+ * One open PR's review state, the same on the Board card, the PR chip, the Overview crew row and
+ * the Agent page. (`ReviewCheck` is a checklist item; this is the PR's state.)
+ */
+export type ReviewCheckState =
+  | { kind: "queued"; position: number }
+  | { kind: "checking"; seat: string; since: number }
+  | { kind: "sent" }
+  | { kind: "ready" }
+  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" | "hub" };
+
+/** What of the author run's loop decides whether a reviewed PR can merge. */
+export type ReviewCheckLoop = Pick<
+  RunLoop,
+  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "parked"
+>;
+
+/** Who holds a reviewed PR back from merging, or null when nothing does. */
+function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
+  if (loop === null) return null;
+  if (loop.controllerCheck && !loop.controllerCheck.pass) return { kind: "held", by: "operator" };
+  if (loop.uat && !loop.uat.accepted) return { kind: "held", by: "operator" };
+  if (loop.mergeHold) return { kind: "held", by: loop.mergeHold.by };
+  if (loop.awaitingFlight) return { kind: "held", by: "FLIGHT" };
+  if (loop.phase === "parked") return { kind: "held", by: "hub" };
+  return null;
+}
+
+/** The review row fields the state reads. */
+export type ReviewCheckRow = Pick<
+  ReviewRow,
+  "state" | "blocking" | "seatId" | "createdAt" | "startedAt"
+>;
+
+/**
+ * The PR's review state from its review rows (ordered by id; the newest that is not superseded
+ * counts), the reviews queued ahead of it and the author run's loop; null without a live review.
+ */
+export function reviewCheckOf(
+  rows: readonly ReviewCheckRow[],
+  queueAhead: number,
+  loop: ReviewCheckLoop | null,
+): ReviewCheckState | null {
+  const row = rows.findLast((r) => r.state !== "superseded");
+  if (row === undefined) return null;
+  switch (row.state) {
+    case "queued":
+      return { kind: "queued", position: queueAhead + 1 };
+    // a starting review has its seat and a start time: it is being checked, not waiting
+    case "starting":
+    case "running":
+      return { kind: "checking", seat: row.seatId, since: row.startedAt ?? row.createdAt };
+    case "reported": {
+      // a park after findings is the hub's hold, not the developer fixing
+      if (row.blocking > 0)
+        return (loop?.phase === "parked" ? holdOf(loop) : null) ?? { kind: "sent" };
+      return holdOf(loop) ?? { kind: "ready" };
+    }
+    case "failed":
+      // the engine re-requests a failed attempt at once; past the cap the run parks review-failed
+      return loop?.phase === "parked"
+        ? { kind: "held", by: "hub" }
+        : { kind: "queued", position: queueAhead + 1 };
+    default:
+      return null;
+  }
+}
+
+/** 1st, 2nd, 3rd, 4th, 11th, 22nd. */
+export function ordinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  const suffix = { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
+  return `${n}${suffix}`;
+}
+
+/** The one pill for a review state; the words are the same on every surface. */
+export function reviewCheckPill(check: ReviewCheckState, now: number): PillSpec {
+  switch (check.kind) {
+    case "queued":
+      return { label: `Waiting for review · ${ordinal(check.position)} in queue`, tone: "plain" };
+    case "checking":
+      return {
+        label: `${check.seat.toUpperCase()} checking · ${Math.max(0, Math.floor((now - check.since) / 60_000))} min`,
+        tone: "warn",
+      };
+    case "sent":
+      return { label: "Findings sent · developer fixing", tone: "crit" };
+    case "ready":
+      return { label: "Ready to merge", tone: "ok" };
+    case "held":
+      return { label: `Held · ${check.by}`, tone: "warn" };
+  }
+}

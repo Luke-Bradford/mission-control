@@ -18,7 +18,7 @@ afterEach(() => {
 const api = () =>
   stubFetch({
     "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
-    "/api/crew": {
+    "/api/crew?shape=summary": {
       rows: [
         crewRow(),
         crewRow({ id: "shop-app-dev", kind: "crew", loopKind: "crew", role: "dev" }),
@@ -30,7 +30,7 @@ const api = () =>
         sessions: [{ id: "s1", repoId: "shop-app", seats: [{ id: "shop-app-dev", role: "dev" }] }],
       },
     },
-    "/api/comms/agents/shop-app-dev": {
+    "/api/comms/agents/shop-app-dev?summary=1": {
       messages: [],
       inbox: [],
       contacts: [
@@ -39,7 +39,7 @@ const api = () =>
     },
     "/api/attention": [item()],
     "/api/boards/shop-app": [boardItem()],
-    "/api/repos/shop-app/prs": [
+    "/api/repos/shop-app/prs?shape=summary": [
       {
         repoId: "shop-app",
         number: 88,
@@ -93,7 +93,7 @@ describe("CommandPalette", () => {
     const rows = await screen.findAllByRole("option");
     expect(rows[0]?.textContent).toContain("shop-app#3349");
     key("Enter");
-    expect(window.location.pathname).toBe("/board/shop-app/3349");
+    expect(window.location.pathname).toBe("/tickets/shop-app/3349");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(JSON.parse(readKey(PALETTE_RECENT_KEY) ?? "[]")).toEqual(["ticket:shop-app#3349"]);
   });
@@ -128,7 +128,9 @@ describe("CommandPalette", () => {
     const fetch = api();
     render(<CommandPalette />);
     act(() => openPalette());
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/crew", expect.anything()));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/crew?shape=summary", expect.anything()),
+    );
     fireEvent.change(box(), { target: { value: "pause" } });
     await waitFor(() => expect(screen.getAllByRole("option")[0]?.textContent).toMatch(/Pause/));
     key("Enter");
@@ -154,17 +156,17 @@ describe("CommandPalette", () => {
     );
     key("Enter");
     expect(window.location.pathname).toMatch(
-      /^\/comms\/agents\/shop-app-dev\/contacts\/CAPCOM$|^\/board\//,
+      /^\/comms\/agents\/shop-app-dev\/contacts\/CAPCOM$|^\/tickets\//,
     );
   });
 
   it("names what is still loading, and does not say nothing matches", async () => {
     const fetch_ = stubFetch({
       "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/config": { crew: null },
       "/api/attention": [],
-      "/api/repos/shop-app/prs": [],
+      "/api/repos/shop-app/prs?shape=summary": [],
     });
     // the board request never answers
     const answered = fetch_.getMockImplementation();
@@ -185,11 +187,11 @@ describe("CommandPalette", () => {
   it("names a source that failed, and does not say nothing matches", async () => {
     stubFetch({
       "/api/repos": [{ id: "shop-app", github: "octo-org/shop-app", project: 1 }],
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/config": { crew: null },
       "/api/attention": [],
       "/api/boards/shop-app": () => ({ status: 500, body: { error: "boom" } }),
-      "/api/repos/shop-app/prs": () => ({ status: 500, body: { error: "boom" } }),
+      "/api/repos/shop-app/prs?shape=summary": () => ({ status: 500, body: { error: "boom" } }),
     });
     render(<CommandPalette />);
     act(() => openPalette());

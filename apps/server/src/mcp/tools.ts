@@ -10,11 +10,15 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  CALL_FLIGHT_SELF,
+  CALLED_FLIGHT,
+  type CheckDrop,
   type CheckState,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
@@ -34,7 +38,11 @@ import {
   commsCutMarker,
   crewAuthorName,
   DEFAULT_PROFILES,
+  DONE_WHEN_STATUSES,
+  type DoneWhenEntry,
+  doneWhenBadLineText,
   doneWhenCount,
+  doneWhenMissingText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -66,6 +74,7 @@ import {
   firstPrNotifier,
   fixKey,
   formerSubmoduleText,
+  grantedPath,
   isProtectedPath,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
@@ -85,6 +94,9 @@ import {
   MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
+  MC_PR_BODY_EMPTY,
+  MC_PR_BODY_MAX,
+  MC_PR_BODY_NO_PR,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
   MC_PR_FAILED,
@@ -106,6 +118,7 @@ import {
   MC_SYNC_OFF,
   MC_TEXT_MAX,
   MC_TOOL_NAMES,
+  MINOR_HEADING,
   mcToolHitText,
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
@@ -146,6 +159,7 @@ import {
   pushChecksText,
   pushedText,
   pushForeignText,
+  pushPrDoneText,
   pushReferenceText,
   pushSecretText,
   REVERT_STRAYS,
@@ -161,6 +175,7 @@ import {
   removeNotFileText,
   reviewedEventText,
   reviewFor,
+  runawayRefusedText,
   type StrayKind,
   SYNC_MAIN_GAP_MIN,
   scanSecrets,
@@ -178,12 +193,16 @@ import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
+import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
+import { recordSeatCall } from "../flight/signals.ts";
+import { runPathGrants } from "../path-grants.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
   CREW_GIT_SLOW_MS,
+  gitIdentity,
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
@@ -232,6 +251,8 @@ export interface McToolsDeps {
    * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
    */
   checks: (runId: string) => Promise<readonly string[]>;
+  /** The run's check calls the hub saw start and did not count, with the reasons; none when unset. */
+  checkDrops?: (runId: string) => readonly CheckDrop[];
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -272,7 +293,12 @@ const CommitArgs = z.strictObject({
   message: text(MC_TEXT_MAX),
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
+const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const CallArgs = z.strictObject({
+  reason: text(MC_TEXT_MAX),
+  ref: z.string().trim().min(1).max(120).optional(),
+});
 const CommsReadArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
@@ -354,6 +380,16 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  doneWhen: z
+    .array(
+      z.strictObject({
+        line: z.int().min(1).max(REVIEW_FINDINGS_MAX),
+        status: z.enum(DONE_WHEN_STATUSES),
+        evidence: text(MC_TEXT_MAX),
+      }),
+    )
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
   tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
   testsAdded: z
     .array(z.strictObject({ file: text(FINDING_FILE_MAX), failedOnBase: z.boolean() }))
@@ -372,6 +408,22 @@ const ReportedTestSchema = {
     duration: { type: "integer", minimum: 0 },
   },
   required: ["command", "passed", "failed", "skipped", "duration"],
+  additionalProperties: false,
+};
+const DoneWhenAnswerSchema = {
+  type: "object",
+  properties: {
+    line: { type: "integer", minimum: 1, description: "The Done-when line's number, from 1." },
+    status: { type: "string", enum: [...DONE_WHEN_STATUSES] },
+    evidence: {
+      type: "string",
+      minLength: 1,
+      maxLength: MC_TEXT_MAX,
+      description:
+        "met: the test name, file or measurement that proves it. not_met: why you could not meet it.",
+    },
+  },
+  required: ["line", "status", "evidence"],
   additionalProperties: false,
 };
 const TestsAddedSchema = {
@@ -682,28 +734,79 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     }
 
     /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
-    async function unmetChecks(
-      sha: string,
-    ): Promise<
-      { command: string; state: CheckState; recorded: ReturnType<Store["newestCheckRun"]> }[]
+    async function unmetChecks(sha: string): Promise<
+      {
+        command: string;
+        state: CheckState;
+        recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
+      }[]
     > {
       const unmet: {
         command: string;
         state: CheckState;
         recorded: ReturnType<Store["newestCheckRun"]>;
+        dropped: CheckDrop | null;
       }[] = [];
+      const drops = deps.checkDrops?.(runId) ?? [];
+      // the newest call of this check that was not counted: on the pushed commit first, else any
+      const droppedFor = (command: string): CheckDrop | null => {
+        const mine = drops.filter((x) => x.command === command);
+        return mine.findLast((x) => x.head === sha) ?? mine.at(-1) ?? null;
+      };
       for (const command of await deps.checks(runId)) {
         const last = store.latestCheckRun(runId, command, sha);
         if (last === null)
-          unmet.push({ command, state: "missing", recorded: store.newestCheckRun(runId, command) });
+          unmet.push({
+            command,
+            state: "missing",
+            recorded: store.newestCheckRun(runId, command),
+            dropped: droppedFor(command),
+          });
         else if (!last.ok)
           unmet.push({
             command,
             state: "failed",
             recorded: last,
+            dropped: droppedFor(command),
           });
       }
       return unmet;
+    }
+
+    /**
+     * The run's PR (the one its loop records) when it has merged or closed; "unreadable" when gh
+     * cannot say. A run with no PR yet has none to check.
+     */
+    async function donePr(
+      run: Run,
+    ): Promise<{ number: number; word: "merged" | "closed" } | "unreadable" | null> {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (repo === undefined) return null;
+      const number = run.loop?.prNumber ?? null;
+      if (number === null) {
+        // no PR of this run yet: a branch whose last PR merged (a new run reusing it) stays closed
+        const onBranch = deps.store.pullRequests(run.repoId).filter((p) => p.branch === branch);
+        const newest = onBranch.sort((a, b) => b.number - a.number)[0];
+        return newest?.state === "merged" && !onBranch.some((p) => p.state === "open")
+          ? { number: newest.number, word: "merged" }
+          : null;
+      }
+      const viewed = await deps.gh(
+        ["pr", "view", String(number), `--repo=${repo}`, "--json=state"],
+        { cwd: crewDir(deps.dbPath) },
+      );
+      let state: unknown;
+      try {
+        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+      } catch {
+        state = null;
+      }
+      if (state === "OPEN") return null;
+      if (state === "MERGED") return { number, word: "merged" };
+      if (state === "CLOSED") return { number, word: "closed" };
+      deps.log?.(`mc push: gh pr view ${number} failed (${String(viewed.code)})`);
+      return "unreadable";
     }
 
     async function steps(
@@ -741,9 +844,31 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
           () => false,
         );
 
+      /**
+       * The pushed head becomes the run's newest commit when it contains the one it had (a merge
+       * recorded under an earlier run of the branch, say): the engine compares the push with the
+       * newest commit, and a descendant head would otherwise never match it. Only a head that is
+       * already one of the crew's commits on this branch: a commit someone else put on origin is
+       * never recorded as the crew's.
+       */
+      const adoptHead = async () => {
+        const newest = store.newestRunCommit(runId)?.sha;
+        if (newest === undefined || newest === sha) return;
+        if (!store.branchCommits(run.repoId, branch).has(sha) || !(await has(newest))) return;
+        const contains = await g(["merge-base", "--is-ancestor", newest, sha]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+        if (contains) store.addRunCommit({ runId, repoId: run.repoId, branch, sha, at: now() });
+      };
+
       // 1. origin's tip
       const remote = heads.branchSha;
       if (remote === sha) {
+        await adoptHead();
         store.setRunPush({ runId, sha, at: now() });
         bus.emit("agents");
         return { text: alreadyOnOriginText(sha) };
@@ -761,6 +886,13 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         if (!ancestor) return { text: originMovedText(branch), isError: true };
       }
+
+      // 1b. the run's PR on this branch is merged or closed: GitHub deletes a merged branch, and a
+      // push would bring it back
+      const done = await donePr(run);
+      if (done === "unreadable") return { text: MC_PUSH_FAILED, isError: true };
+      if (done !== null)
+        return { text: pushPrDoneText(branch, done.number, done.word), isError: true };
 
       // 2. the new commits: exactly what this push sends
       if (!(await has(heads.defaultSha))) {
@@ -886,6 +1018,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         }
         throw e;
       }
+      await adoptHead();
       store.setRunPush({ runId, sha, at: now() });
       bus.emit("agents");
       return { text: pushedText(sha, branch) };
@@ -1130,7 +1263,7 @@ export async function editRunPrBody(
   deps: McToolsDeps,
   runId: string,
   prNumber: number,
-  body: string,
+  next: string | ((current: string) => string),
 ): Promise<Result> {
   const { store, bus } = deps;
   const now = deps.now ?? Date.now;
@@ -1142,8 +1275,10 @@ export async function editRunPrBody(
   const repo = repoOf(deps, run);
   const issue = issueOf(run);
   const known = await readKnown(deps, "pr_body");
-  const problem = prTextProblem(body, { repo, issue, known, label: "PR body", unclosed: true });
-  if (problem !== null) {
+  // refuses a body that fails the text checks, counting a secret as a guard hit
+  const refuse = (text: string): Result | null => {
+    const problem = prTextProblem(text, { repo, issue, known, label: "PR body", unclosed: true });
+    if (problem === null) return null;
     if (problem.problem === "secret") {
       store.addGuardHit({
         agentId: place.seat.id,
@@ -1155,6 +1290,11 @@ export async function editRunPrBody(
       bus.emit("guard");
     }
     return { text: MC_PR_BODY_REFUSED, isError: true };
+  };
+  // a body given whole is checked before gh is asked anything
+  if (typeof next === "string") {
+    const refused = refuse(next);
+    if (refused !== null) return refused;
   }
 
   const cwd = crewDir(deps.dbPath);
@@ -1163,11 +1303,11 @@ export async function editRunPrBody(
     return { text: MC_PR_EDIT_FAILED, isError: true };
   };
   const viewed = await deps.gh(
-    ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=headRefName,state"],
+    ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=headRefName,state,body"],
     { cwd },
   );
   if (viewed.code !== 0) return failed("pr view", viewed);
-  let info: { headRefName?: unknown; state?: unknown } | null;
+  let info: { headRefName?: unknown; state?: unknown; body?: unknown } | null;
   try {
     info = JSON.parse(viewed.stdout) as typeof info;
   } catch {
@@ -1175,6 +1315,14 @@ export async function editRunPrBody(
   }
   if (info?.state !== "OPEN" || info.headRefName !== run.branch) {
     return { text: prNotRunsText(prNumber), isError: true };
+  }
+  let body: string;
+  if (typeof next === "string") body = next;
+  else {
+    // composed from the PR as it stands, so it is checked once that is known
+    body = next(typeof info.body === "string" ? info.body : "");
+    const refused = refuse(body);
+    if (refused !== null) return refused;
   }
 
   const file = crewPrBodyPath(deps.dbPath);
@@ -1192,6 +1340,47 @@ export async function editRunPrBody(
   } finally {
     await rm(file, { force: true });
   }
+}
+
+/**
+ * The engine's minor-findings section of a PR body (heading to the next heading, the closing line
+ * or the hub's line), or null when the body has none.
+ */
+export function minorSection(body: string): string | null {
+  const at = body.indexOf(MINOR_HEADING);
+  if (at === -1) return null;
+  const rest = body.slice(at + MINOR_HEADING.length);
+  const end = rest.search(/^(?:#{1,2}\s|Closes #\d+\.|Opened by )/m);
+  return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
+}
+
+/** The heading line every hub PR body opens with: `#<issue>`, then ` — <title>` when it fits. */
+const hubHeading = (issue: number): RegExp =>
+  new RegExp(`^#${issue}(?!\\d)(?: +[—-][^\\n]*)?[ \\t]*(?:\\n+|$)`);
+
+/**
+ * A PR body a seat wrote with `pr_body`: it does not open with the hub's heading (`pr_body` drops
+ * one the seat copied). An empty body is the hub's, not a seat's.
+ */
+export function seatWroteBody(body: string, issue: number): boolean {
+  return body.trim() !== "" && !hubHeading(issue).test(body);
+}
+
+/**
+ * `body` without the parts the hub adds around a seat's text: its minor-findings section, the
+ * closing line and its own line. `section`, when given, goes at the end.
+ */
+export function withEngineSection(body: string, issue: number, section: string | null): string {
+  const own = minorSection(body);
+  const rest = (own === null ? body : body.replace(own, ""))
+    .split("\n")
+    .filter(
+      (l) => l.trim() !== prClosesLine(issue) && !/^Opened by .* \(Mission Control\)\.$/.test(l),
+    )
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return section === null ? rest : `${rest}\n\n${section}`;
 }
 
 /** Another open writer run whose changes share paths with a commit. */
@@ -1361,6 +1550,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const parsed = CommsSendArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
+    const flightCall = isFlight(ctx.seatId);
+    if (flightCall) {
+      const tripped = runawayTrip(store);
+      if (tripped !== null) return { text: runawayRefusedText(tripped.reason), isError: true };
+    }
     if (
       parsed.data.to === COMMS_CAPCOM &&
       parsed.data.label === "question" &&
@@ -1385,6 +1579,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       bus.emit("agents");
       bus.emit("attention");
+      if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsSend, parsed.data);
       return { text: `Sent ${sent.id}.` };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms message refused.", isError: true };
@@ -1400,6 +1595,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       [];
     if (!crew.includes(ctx.seatId))
       return { text: "This seat is no longer in the crew.", isError: true };
+    const flightCall = isFlight(ctx.seatId);
+    if (flightCall) {
+      const tripped = runawayTrip(store);
+      if (tripped !== null) return { text: runawayRefusedText(tripped.reason), isError: true };
+    }
     try {
       reactComms(
         store,
@@ -1411,6 +1611,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       bus.emit("agents");
       bus.emit("attention");
+      if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsReact, parsed.data);
       return { text: "Reaction recorded." };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };
@@ -1503,6 +1704,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return deps.syncMain(ctx.runId);
   }
 
+  async function prBodyTool(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = PrBodyArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const place = writerPlace(deps, ctx.runId, MC_TOOL_NAMES.prBody);
+    if ("text" in place) return place;
+    const run = deps.store.run(ctx.runId);
+    if (run === null || run.endedAt !== null) return ENDED;
+    const prNumber = run.loop?.prNumber ?? null;
+    if (prNumber === null) return { text: MC_PR_BODY_NO_PR, isError: true };
+    // the PR title carries the heading, and a body that opened with it would read as the hub's own
+    const issue = issueOf(run);
+    const own = (
+      issue === null ? parsed.data.body : parsed.data.body.replace(hubHeading(issue), "")
+    ).trim();
+    if (own === "") return { text: MC_PR_BODY_EMPTY, isError: true };
+    // the engine's own section outlives the seat's rewrite
+    return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
+      const section = minorSection(current);
+      return section === null ? own : `${own}\n\n${section}`;
+    });
+  }
+
   async function commit(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = CommitArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -1568,6 +1791,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const writers = session.seats.filter((s) => s.id !== seat.id && seatDef(s).mode === "writer");
       /** The repo's own protected globs, on top of PROTECTED_FILES. */
       const extra = config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
+      /** Files outside the area that FLIGHT approved for this run alone. */
+      const grants = runPathGrants(store, run.id);
       /** What this call has deleted so far: every answer from then on says so. */
       const removed: string[] = [];
       /** The advisory lines about files another open run changed; appended to a commit's answer. */
@@ -1623,7 +1848,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             foreign.push(p);
             continue;
           }
-          if (isProtectedPath(p, extra)) {
+          if (!grantedPath(grants, p) && isProtectedPath(p, extra)) {
             kept.push(p);
             continue;
           }
@@ -1635,7 +1860,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           if (h === "folder" || h === "nested" || w === "folder") notFile.push(p);
           else if (w === "linked") linked.push(p);
           else if (h === "none" && w === "missing") missing.push(p);
-          else if (h === "file" && !pathInArea(seat.area, p)) {
+          else if (h === "file" && !grantedPath(grants, p) && !pathInArea(seat.area, p)) {
             const owner = writers.find((x) => pathInArea(x.area, p));
             if (owner === undefined) outside.push(p);
             else {
@@ -1795,9 +2020,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           } else if (fromMain.has(p)) {
             // main's own version of the path: no area, protected or stray check applies
             if (special.has(p)) links.push(p);
-          } else if (isProtectedPath(p, extra)) {
+          } else if (!grantedPath(grants, p) && isProtectedPath(p, extra)) {
             kept.push(p);
-          } else if (!pathInArea(seat.area, p)) {
+          } else if (!grantedPath(grants, p) && !pathInArea(seat.area, p)) {
             const owner = writers.find((w) => pathInArea(w.area, p));
             if (owner === undefined) {
               outside.push(p);
@@ -1927,7 +2152,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             "--cleanup=whitespace",
             `--message=${message}`,
           ],
-          { env: { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name }, timeoutMs: CREW_GIT_SLOW_MS },
+          { env: gitIdentity(name), timeoutMs: CREW_GIT_SLOW_MS },
         );
         committed = true;
         return recordCommit((await g(["rev-parse", "--verify", "HEAD"])).trim());
@@ -1966,11 +2191,32 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       from: ctx.seatId,
       to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
-      text: parsed.data.question,
+      text: ASK_FLIGHT_COMMS_POINTER,
     });
     bus.emit("attention");
     bus.emit("agents");
     return { text: ASKED_FLIGHT };
+  }
+
+  /**
+   * A seat's call to FLIGHT: a wake reason (a `seat_call` signal) the watch delivers after its
+   * debounce, well inside one 5-minute tick. It writes nothing of FLIGHT's: FLIGHT decides.
+   */
+  async function callFlight(ctx: McToolContext, args: unknown): Promise<Result> {
+    if (isFlight(ctx.seatId)) return { text: CALL_FLIGHT_SELF, isError: true };
+    const parsed = CallArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    const place = seatPlace(config, ctx.seatId);
+    if (live === null || place === null) return { text: MC_RUN_ENDED, isError: true };
+    recordSeatCall(store, place.session.repoId, {
+      seat: ctx.seatId,
+      reason: parsed.data.reason,
+      ref: parsed.data.ref ?? live.run.ticket ?? null,
+      at: now(),
+    });
+    bus.emit("attention");
+    return { text: CALLED_FLIGHT };
   }
 
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
@@ -1986,7 +2232,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded } = parsed.data;
+    const { note, tests, testsAdded, doneWhen } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2065,6 +2311,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
+      // every Done-when line the run started with is answered, so a gap is the seat's to name
+      const lines = store.runDoneWhen(currentRun.id);
+      // only a ruling with no new commit owes no table; a report on a fresh commit always does
+      const rulingOnly = ciRuling && !fresh;
+      // a ruling changes no code, so the table of the last report still stands for the review
+      const answers: DoneWhenEntry[] = rulingOnly ? [...(reported?.doneWhen ?? [])] : [];
+      if (lines.length > 0 && !rulingOnly) {
+        const seen = new Set<number>();
+        for (const a of doneWhen ?? []) {
+          if (a.line > lines.length || seen.has(a.line)) {
+            return { text: doneWhenBadLineText(a.line, lines.length), isError: true };
+          }
+          seen.add(a.line);
+          answers.push({ ...a, text: lines[a.line - 1] ?? "" });
+        }
+        const missing = lines.flatMap((text, i) =>
+          seen.has(i + 1) ? [] : [{ line: i + 1, text }],
+        );
+        if (missing.length > 0) return { text: doneWhenMissingText(missing), isError: true };
+        answers.sort((a, b) => a.line - b.line);
+      }
+
       const problem = prTextProblem(note, {
         repo: repoOf(deps, currentRun),
         issue: issueOf(currentRun),
@@ -2085,7 +2353,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded });
+      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
@@ -2448,6 +2716,26 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       call: syncMain,
     },
     {
+      name: MC_TOOL_NAMES.prBody,
+      description:
+        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          body: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_PR_BODY_MAX,
+            description: "The new PR body, in Markdown.",
+          },
+        },
+        required: ["body"],
+        additionalProperties: false,
+      },
+      modes: ["writer"],
+      call: prBodyTool,
+    },
+    {
       name: MC_TOOL_NAMES.askFlight,
       description:
         "Ask FLIGHT, the crew's head agent, a question you cannot answer from the ticket, the code or the repo. FLIGHT answers it, or takes it to the operator with its brief when the decision is theirs. The answer arrives later as a message; carry on with what you can meanwhile.",
@@ -2470,9 +2758,37 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       call: askFlight,
     },
     {
+      name: MC_TOOL_NAMES.callFlight,
+      description:
+        "Call FLIGHT, the crew's head agent, to your side: it wakes within 5 minutes with your reason and decides. Use it when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding. It is a call, not a question: for a question FLIGHT answers in a message, use ask_flight.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_TEXT_MAX,
+            description: "Why you are calling, with what FLIGHT needs to act on it.",
+          },
+          ref: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description:
+              "The ticket, PR or seat it is about, e.g. mission-control#1182. Defaults to your ticket.",
+          },
+        },
+        required: ["reason"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      offeredTo: (seatId) => !isFlight(seatId),
+      call: callFlight,
+    },
+    {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note, optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note, one doneWhen entry for every line of the ticket's ## Done when (met with its evidence, or not met with the reason; Mission Control refuses a report that leaves one out), optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2483,6 +2799,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
+          doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
           testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: TestsAddedSchema },
         },
