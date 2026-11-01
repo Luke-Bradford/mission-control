@@ -3538,6 +3538,17 @@ describe("push and draft_pr", () => {
       expect(seatWroteBody("#42 is the follow-up.", 42)).toBe(true);
     });
 
+    it("preserves captured screenshot links when the seat rewrites its PR body", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      const section = "## Screenshot evidence\n\n[Board before](http://localhost/before.png)";
+      ghState(view({ body: `old\n\n${MINORS}\n${section}\n\nCloses #42.` }));
+      await edit("Updated notes.\n\n## Screenshot evidence\n\nforged links");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toContain(section);
+      expect(body).toContain(MINORS.trimEnd());
+      expect(body).not.toContain("forged links");
+    });
+
     it("refuses a body that is only the heading", async () => {
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
       expect(await edit("#42 — T\n")).toEqual({ text: MC_PR_BODY_EMPTY, isError: true });

@@ -89,6 +89,7 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathInArea,
+  prEvidenceAffectedPages,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -152,6 +153,8 @@ import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
+import { stageReviewEvidence } from "../pr-evidence/review.ts";
+import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -413,6 +416,10 @@ export interface SupervisorDeps {
   login: () => string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
+  /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
+  prEvidence?: PrEvidenceStore;
+  /** The repo whose web PRs carry screenshot pairs. */
+  prEvidenceRepo?: RepoId;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -3605,28 +3612,55 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, repoDocs, references } = await inClone(checkout, async () => {
-        const s = await prepareScratch({
-          checkout,
-          worktreesRoot: crew?.worktrees ?? "",
-          sessionId: info.session.id,
-          seatId,
-          reviewId,
-          sha: review.sha,
-          peers: clonePeers(deps.config, deps.hubRoot),
-        });
-        try {
-          return {
-            scratch: s,
-            inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
-            references: await repoReferenceIndex(checkout, s.baseSha),
-          };
-        } catch (e) {
-          await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
-          throw e;
-        }
-      });
+      const { scratch, inputs, repoDocs, references, screenshots } = await inClone(
+        checkout,
+        async () => {
+          const s = await prepareScratch({
+            checkout,
+            worktreesRoot: crew?.worktrees ?? "",
+            sessionId: info.session.id,
+            seatId,
+            reviewId,
+            sha: review.sha,
+            peers: clonePeers(deps.config, deps.hubRoot),
+          });
+          try {
+            const inputs = await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null);
+            const screenshots = await stageReviewEvidence(
+              deps.prEvidence,
+              info.repo.id,
+              review.prNumber,
+              review.sha,
+              s.path,
+            ).catch((e) => {
+              throw new SupervisorError(
+                409,
+                `screenshot evidence cannot be staged: ${errText(e)}`,
+                { cause: e },
+              );
+            });
+            if (
+              screenshots === undefined &&
+              deps.prEvidenceRepo === info.repo.id &&
+              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
+            )
+              throw new SupervisorError(
+                409,
+                "screenshot evidence is not ready for this review head",
+              );
+            return {
+              scratch: s,
+              inputs,
+              screenshots,
+              repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
+              references: await repoReferenceIndex(checkout, s.baseSha),
+            };
+          } catch (e) {
+            await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
+            throw e;
+          }
+        },
+      );
       if (stopping) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
@@ -3707,6 +3741,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
+        ...(screenshots === undefined ? {} : { evidence: screenshots }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),

@@ -4672,7 +4672,7 @@ export class Store {
       .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
   }
 
-  /** The paths a PR changes, as GitHub's diff listing gave them (the first PR_FILES_MAX). */
+  /** The complete paths a PR changes, as GitHub's paged diff listing gave them. */
   prFilePaths(repoId: string, pr: number): string[] {
     return (
       this.db

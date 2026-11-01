@@ -282,6 +282,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
@@ -342,6 +343,8 @@ const TELEMETRY_COMMIT_CONCURRENCY = 4;
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
 const MAX_ISSUE_NUMBER = 2 ** 31 - 1;
+const EVIDENCE_REPO = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const FULL_SHA = /^[0-9a-f]{40}$/;
 /** The most PR titles one lookup reads. */
 const PR_TITLES_MAX = 50;
 
@@ -407,6 +410,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
+  prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
   reviewShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
@@ -3157,6 +3162,53 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("x-content-type-options", "nosniff")
           .type("image/png")
           .send(png);
+      });
+
+      // Reader: docs/runbook.md#pr-screenshot-evidence (the operator opens the links in a web PR's body)
+      api.get<{ Params: { n: string }; Querystring: { repo?: unknown; sha?: unknown } }>(
+        "/prs/:n/evidence",
+        async (req, reply) => {
+          const evidence = deps.prEvidence;
+          const n = /^[1-9]\d{0,9}$/.test(req.params.n) ? Number(req.params.n) : 0;
+          const { repo, sha } = req.query;
+          if (n === 0 || n > MAX_ISSUE_NUMBER)
+            return reply.code(400).send({ error: "pull request number required" });
+          if (repo !== undefined && !(typeof repo === "string" && EVIDENCE_REPO.test(repo)))
+            return reply.code(400).send({ error: "repo must be a repo id" });
+          if (sha !== undefined && !(typeof sha === "string" && FULL_SHA.test(sha)))
+            return reply.code(400).send({ error: "sha must be a full commit sha" });
+          if (!evidence) return reply.code(404).send({ error: "no screenshot evidence" });
+          const repos = repo === undefined ? evidence.reposWith(n) : [repo];
+          if (repos.length > 1)
+            return reply.code(409).send({ error: "several repos have this PR: pass repo" });
+          const manifest = repos[0] === undefined ? null : evidence.manifest(repos[0], n, sha);
+          if (!manifest) return reply.code(404).send({ error: "no screenshot evidence" });
+          return manifest;
+        },
+      );
+
+      // Reader: docs/runbook.md#pr-screenshot-evidence (the image links in a web PR's body)
+      api.get<{
+        Params: { n: string; sha: string; name: string };
+        Querystring: { repo?: unknown };
+      }>("/prs/:n/evidence/:sha/:name", async (req, reply) => {
+        const n = /^[1-9]\d{0,9}$/.test(req.params.n) ? Number(req.params.n) : 0;
+        const evidence = deps.prEvidence;
+        const { repo } = req.query;
+        if (repo !== undefined && !(typeof repo === "string" && EVIDENCE_REPO.test(repo)))
+          return reply.code(400).send({ error: "repo must be a repo id" });
+        const repos = repo === undefined ? (evidence?.reposWith(n) ?? []) : [repo];
+        // the image is looked up in each repo that has the PR; a sha names one commit
+        for (const id of repos) {
+          const png = evidence?.image(id, n, req.params.sha, req.params.name);
+          if (png)
+            return reply
+              .header("cache-control", "private, max-age=3600, immutable")
+              .header("x-content-type-options", "nosniff")
+              .type("image/png")
+              .send(png);
+        }
+        return reply.code(404).send({ error: "not found" });
       });
 
       if (operatorToken !== undefined) {

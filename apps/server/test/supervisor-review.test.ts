@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/review-preview.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
@@ -620,6 +621,30 @@ describe("startReview", () => {
     expect(recorded()).toEqual([]);
     expect(store.review(r.reviewId)?.state).toBe("starting");
     expect(store.seatSession("retro")?.state).toBe("idle");
+  });
+
+  it("does not launch a web review when screenshot evidence staging is incomplete", async () => {
+    const r = reviewOfPush();
+    const evidence = prEvidenceStore(join(dir, "evidence"));
+    evidence.save(
+      {
+        repoId: "mc",
+        pr: 9,
+        sha: r.sha,
+        mainSha: r.fork,
+        capturedAt: 1,
+        pairs: [
+          { page: "board", scheme: "light", changedPixels: 0, changedPercent: 0, regions: [] },
+        ],
+      },
+      [],
+    );
+    const { sup } = make({ scratchRetro: true, prEvidence: evidence, prEvidenceRepo: "mc" });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow("image is missing");
+    expect(userLines()).toHaveLength(0);
+    expect(existsSync(scratch(r.reviewId))).toBe(false);
+    expect(store.runs("retro", 1)).toHaveLength(0);
   });
 
   it("refuses scratch storage inside hub data before preparing a review", async () => {

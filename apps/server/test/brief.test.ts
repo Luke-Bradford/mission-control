@@ -512,6 +512,37 @@ describe("reviewBrief", () => {
     expect(reviewBrief(review)).not.toContain("second, independent");
   });
 
+  it("lists the screenshot pairs", () => {
+    const out = reviewBrief({
+      ...review,
+      evidence: {
+        dir: ".mc-review/evidence",
+        mainSha: "c".repeat(40),
+        pairs: [
+          {
+            page: "board",
+            scheme: "light",
+            changedPixels: 480,
+            changedPercent: 0.03,
+            regions: [{ x: 16, y: 32, width: 96, height: 48 }],
+          },
+          { page: "board", scheme: "dark", changedPixels: 0, changedPercent: 0, regions: [] },
+        ],
+      },
+    });
+    expect(out).toContain("## Screenshot evidence");
+    expect(out).toContain(".mc-review/evidence/board-light-diff.png");
+    expect(out).toContain("board, light: 0.03% changed, 1 region (96×48 at 16,32)");
+    expect(out).toContain("board, dark: no change");
+    expect(out).toContain("main ccccccc");
+    expect(reviewBrief(review)).not.toContain("Screenshot evidence");
+  });
+
+  it("tells the reviewer when a web PR has no pairs", () => {
+    const out = reviewBrief({ ...review, evidenceMissing: "none were made for this head" });
+    expect(out).toContain("- Screenshot evidence: none were made for this head");
+  });
+
   it("tells a scratch reviewer that a whole suite waits for the test lock", () => {
     const out = reviewBrief({ ...review, fullSuite: ["pnpm -s test"] });
     expect(out).toContain(
