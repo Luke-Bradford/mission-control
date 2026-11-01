@@ -298,6 +298,7 @@ describe("the allowlist in phase 2b", () => {
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
+      codeHealth: "mcp__mc__code_health",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       reassignTicket: "mcp__mc__reassign_ticket",
@@ -619,7 +620,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan", "read_ticket"],
+        tools: ["report_plan", "read_ticket", "code_health"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -628,6 +629,7 @@ describe("crew constants", () => {
         mode: "read-only",
         loop: "watch",
         tools: [
+          "code_health",
           "log_decision",
           "wait_on",
           "read_ticket",
@@ -692,7 +694,7 @@ describe("seatDef", () => {
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
     expect(seatDef({ role: "FAO" })).toMatchObject({
       loop: "plan",
-      mcTools: ["report_plan", "read_ticket"],
+      mcTools: ["report_plan", "read_ticket", "code_health"],
     });
   });
 
@@ -754,6 +756,7 @@ describe("mc tool grants", () => {
 
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
+      "code_health",
       "log_decision",
       "wait_on",
       "read_ticket",

@@ -39,6 +39,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
+  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
@@ -193,7 +194,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket, MC_TOOL_NAMES.codeHealth],
     here: hereOf("FAO"),
   },
 };
