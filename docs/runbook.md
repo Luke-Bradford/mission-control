@@ -2119,3 +2119,25 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).
+
+## Affected tests before a crew push
+
+This repo requires `pnpm -s lint`, `pnpm -s typecheck` and
+`pnpm -s test:related` before `mc push`. The existing hub check recorder counts
+a command only when it starts and finishes on the same clean commit in the session clone. A
+failed or missing command holds the push and names the check to run. Run checks after committing;
+a check on uncommitted edits is not evidence for that commit. Re-run after changing the head.
+
+The wrapper verifies `origin/HEAD`, its commit and the merge base, then passes the immutable
+base SHA to Vitest. This prevents a missing-ref comparison from becoming a no-tests success.
+Vitest's changed mode selects changed test files and tests importing changed source files against
+the merge base with the clone's `origin/HEAD`. Its configured force-rerun triggers still apply.
+A documentation-only diff can legitimately select no tests; that is different from a named flaky
+test diagnostic, which must execute tests. The full CI suite remains required before merge.
+This selection uses the import graph; it cannot discover arbitrary runtime file reads, so authors
+still run targeted fixture/role checks for those changes and reviewers verify the coverage.
+
+If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the clone's default
+branch ref rather than changing the required command. The hub never executes the seat's check
+code in the server process. Its existing exception for engine-only clean merges of main is
+unchanged; this check gates seat-authored pushes and does not certify that separate publish path.

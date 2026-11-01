@@ -10,7 +10,8 @@
     "build": "pnpm --filter @mc/web build",
     "lint": "biome check .",
     "typecheck": "pnpm -r --if-present --workspace-concurrency=1 typecheck",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:related": "node --experimental-strip-types scripts/check-related.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
