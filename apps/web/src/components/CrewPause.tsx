@@ -6,6 +6,9 @@ import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
 import "./CrewPause.css";
 
+const pauseTime = (at: number) =>
+  new Date(at).toISOString().replace("T", " ").replace(".000Z", " UTC");
+
 export function CrewPauseControl() {
   const { data: pause, error } = useResource<CrewPause | null>(RESOURCES.crewPause);
   const { data: config } = useResource<ConfigView>(RESOURCES.config);
@@ -62,6 +65,8 @@ export function CrewPauseControl() {
         </button>
       )}
       {failure && <span role="alert">{failure}</span>}
+      {error && <span role="alert">Crew pause could not be loaded. Reload the page to retry.</span>}
+      {pause === undefined && !error && <span role="status">Loading crew pause…</span>}
       {open &&
         createPortal(
           <form
@@ -71,6 +76,57 @@ export function CrewPauseControl() {
               void save();
             }}
           >
+            {pause ? (
+              <section className="crew-pause-audit" aria-label="Crew pause audit">
+                <p>
+                  {pause.at === 0 ? (
+                    "Pause record unreadable; owner and time unknown."
+                  ) : (
+                    <>
+                      Paused by {pause.by} · {pauseTime(pause.at)}
+                    </>
+                  )}
+                </p>
+                <h3>Run exceptions</h3>
+                {pause.except?.length ? (
+                  <ul>
+                    {pause.except.map((item) => (
+                      <li key={item.runId}>
+                        <p>
+                          <strong>{item.by}</strong> let <strong>{item.seat}</strong> continue
+                        </p>
+                        <p className="mono">Run {item.runId}</p>
+                        <p>
+                          <time dateTime={new Date(item.at).toISOString()}>
+                            {pauseTime(item.at)}
+                          </time>
+                        </p>
+                        <details>
+                          <summary>Reason for this exception</summary>
+                          <p>{item.reason}</p>
+                        </details>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">No run exceptions.</p>
+                )}
+                {!!pause.legacyExcept?.length && (
+                  <p className="muted">
+                    Older seat-only entries: {pause.legacyExcept.join(", ")}. Their run and grantor
+                    are unknown; they do not bypass this pause.
+                  </p>
+                )}
+                {pause.liftedBy && !pause.except?.length && (
+                  <p className="muted">
+                    Earlier pause edit by {pause.liftedBy}; no run exception remains.
+                  </p>
+                )}
+                <p className="muted">Each exception ends with its run. Other tickets still wait.</p>
+              </section>
+            ) : (
+              <p className="muted">The crew is not paused.</p>
+            )}
             <label>
               Reason
               <input
@@ -102,7 +158,7 @@ export function CrewPauseControl() {
                 </label>
               ))}
             <span className="muted s">
-              Live runs are left as they are. New tickets, reviews and rework wait.
+              Live sessions stay running. Other work waits unless its run has an exception.
             </span>
             <button
               type="submit"

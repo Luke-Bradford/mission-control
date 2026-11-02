@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 import { seatStatus } from "../src/crew.ts";
+import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CREW_CONFIG, seatRow } from "./fixtures.ts";
 
@@ -74,4 +75,116 @@ it("offers watch seats and renders the form outside clipping panels", async () =
   expect(form).toBeTruthy();
   expect(container.contains(form)).toBe(false);
   expect(document.body.contains(form)).toBe(true);
+});
+
+it("shows who granted the run exception, its time and reason, while retaining the pause owner", async () => {
+  const at = Date.UTC(2026, 10, 2, 12);
+  const exception = {
+    seat: "guido-1",
+    runId: "guido-1:20261102-120000",
+    by: "FLIGHT",
+    at,
+    reason: "Finish the approved fix only",
+  };
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": {
+      seats: "all",
+      reason: "Save tokens",
+      by: "operator",
+      at: at - 1000,
+      except: [exception],
+      liftedBy: "FLIGHT",
+    },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  const audit = screen.getByRole("region", { name: "Crew pause audit" });
+  expect(audit.textContent).toContain("Paused by operator");
+  expect(audit.textContent).toContain("FLIGHT let guido-1 continue");
+  expect(audit.textContent).toContain(`Run ${exception.runId}`);
+  expect(audit.textContent).toContain("2026-11-02 12:00:00 UTC");
+  expect(audit.textContent).toContain(exception.reason);
+  expect(audit.textContent).toContain("Other tickets still wait");
+});
+
+it("states when the pause has no run exceptions", async () => {
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": {
+      seats: "all",
+      reason: "Save tokens",
+      by: "operator",
+      at: 1,
+    },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  expect(screen.getByText("No run exceptions.")).toBeTruthy();
+});
+
+it("labels older seat-only records without inventing a run or grantor", async () => {
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": {
+      seats: "all",
+      reason: "Save tokens",
+      by: "operator",
+      at: 1,
+      legacyExcept: ["guido-1"],
+      except: [],
+    },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  expect(screen.getByText(/Older seat-only entries: guido-1/)).toBeTruthy();
+  expect(screen.getByText(/Their run and grantor are unknown/)).toBeTruthy();
+});
+
+it("does not invent an owner or 1970 timestamp for the unreadable-record fallback", async () => {
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": {
+      seats: "all",
+      reason: "Crew pause setting is unreadable",
+      by: "operator",
+      at: 0,
+    },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  expect(screen.getByText("Pause record unreadable; owner and time unknown.")).toBeTruthy();
+  expect(screen.queryByText(/1970/)).toBeNull();
+});
+
+it("refreshes run exceptions when a run ends and the agents topic changes", async () => {
+  const exception = {
+    seat: "guido-1",
+    runId: "one-run",
+    by: "FLIGHT",
+    at: 2,
+    reason: "Finish this run",
+  };
+  const pause = { seats: "all", reason: "Save tokens", by: "operator", at: 1, except: [exception] };
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": () => ({ status: 200, body: pause }),
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  expect(screen.getByText("Run one-run")).toBeTruthy();
+  pause.except = [];
+  hub.refetchTopic("agents");
+  expect(await screen.findByText("No run exceptions.")).toBeTruthy();
+  expect(screen.queryByText("Run one-run")).toBeNull();
+});
+
+it("shows an explicit read failure and keeps pause controls disabled", async () => {
+  stubFetch({ "/api/config": CREW_CONFIG });
+  render(<CrewPauseControl />);
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Crew pause could not be loaded. Reload the page to retry.",
+  );
+  expect(screen.getByRole("button", { name: "Pause crew" }).hasAttribute("disabled")).toBe(true);
 });

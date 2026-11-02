@@ -148,7 +148,7 @@ export function seatMayTake(
   seatId: string,
   maxOpenRuns: number = DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
 ): boolean {
-  if (pausedSeat(store, seatId)) return false;
+  if (pausedSeat(store, seatId, null)) return false;
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
   const open = store.asideRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
   if (open.length >= maxOpenRuns) return false;
@@ -480,7 +480,7 @@ async function foreignBranch(
  */
 export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const { config, store, supervisor } = deps;
-  if (!deps.enabled || deps.login === null || pausedSeat(store, seatId)) return;
+  if (!deps.enabled || deps.login === null || pausedSeat(store, seatId, null)) return;
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
   if (
     machineCapacity(
@@ -581,7 +581,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
     (s) => s.seat.id === seatId && s.session.repoId === repoId,
   );
   if (
-    pausedSeat(store, seatId) ||
+    pausedSeat(store, seatId, null) ||
     !current ||
     !matchesFocus(current.seat.focus, { ...card, labels: latest.labels ?? [] })
   ) {

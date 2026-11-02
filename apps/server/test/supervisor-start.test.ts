@@ -56,6 +56,7 @@ import {
   PNPM_STORE_ENV,
   type Profile,
   pathGrantProblem,
+  pauseWithout,
   READONLY_BUILTINS,
   READONLY_TOOLS,
   type RepoRules,
@@ -76,6 +77,7 @@ import {
 } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
+import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
@@ -525,6 +527,52 @@ describe("startRun profiles", () => {
 });
 
 describe("startRun", () => {
+  it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
+    const { sup } = make();
+    sup.start();
+    const pause = { seats: ["guido-1"], reason: "Hold the queue", at: 1, by: "operator" };
+    writeCrewPause(store, pause, 1);
+    let prepared: string | undefined;
+    const result = await sup.startRun("guido-1", 42, {
+      beforeLaunch: (run) => {
+        expect(store.run(run.id)?.endedAt).toBeNull();
+        expect(run.agentId).toBe("guido-1");
+        prepared = run.id;
+        writeCrewPause(
+          store,
+          pauseWithout(pause, run.agentId, {
+            runId: run.id,
+            by: "FLIGHT",
+            at: 2,
+            reason: "Finish this ticket only",
+          }),
+          2,
+          undefined,
+          "FLIGHT",
+        );
+      },
+    });
+    expect(result.runId).toBe(prepared);
+    expect(pausedSeat(store, "guido-1", result.runId)).toBeNull();
+    expect(pausedSeat(store, "guido-1", null)?.reason).toBe("Hold the queue");
+    await until(() => expect(userLines()).toHaveLength(1));
+  });
+
+  it("keeps the final pause gate when a run-bound pre-launch hook grants nothing", async () => {
+    const { sup } = make();
+    sup.start();
+    writeCrewPause(
+      store,
+      { seats: ["guido-1"], reason: "Hold the queue", at: 1, by: "operator" },
+      1,
+    );
+    await expect(sup.startRun("guido-1", 42, { beforeLaunch: () => {} })).rejects.toMatchObject({
+      status: 409,
+      message: "Paused: Hold the queue",
+    });
+    expect(userLines()).toEqual([]);
+  });
+
   it("records the start prompt's sections, adding up to the prompt file and brief", async () => {
     const { sup } = make();
     sup.start();

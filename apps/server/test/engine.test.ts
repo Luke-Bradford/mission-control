@@ -61,6 +61,7 @@ import {
   type Profile,
   type PullRequestView,
   parkedEventText,
+  pauseWithout,
   prNamedRefText,
   prNotifyText,
   prSecretText,
@@ -2229,6 +2230,28 @@ describe("taking by rule", () => {
     );
     await h.engine.tick();
     expect(h.taken).toEqual([]);
+  });
+
+  it("a run-bound exception never deals another ticket after its run ends", async () => {
+    const pause = { seats: [SEAT], reason: "Keep new work paused", at: clock, by: "operator" };
+    writeCrewPause(
+      store,
+      pauseWithout(pause, SEAT, {
+        runId: RUN,
+        by: "FLIGHT",
+        at: clock,
+        reason: "Finish this run only",
+      }),
+      clock,
+    );
+    store.setRunEnded(RUN, clock, "ok", "engine");
+    seatIdle(null);
+    await h.engine.tick();
+    expect(h.taken).toEqual([]);
+    expect(store.getSetting("crew.paused")).not.toBe("null");
+    writeCrewPause(store, null, clock);
+    await h.engine.tick();
+    expect(h.taken).toContain(SEAT);
   });
 
   it("a tick refills the queues, then asks each idle writer seat with no run to take", async () => {

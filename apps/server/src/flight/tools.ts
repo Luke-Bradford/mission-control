@@ -44,6 +44,7 @@ import {
   CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
+  type CrewPause,
   ciLogText,
   ciNoCheckText,
   ciNoFailedText,
@@ -258,6 +259,7 @@ import {
   START_NO_GITHUB,
   START_NO_RULES,
   START_SEAT_DESCRIPTION,
+  sameCrewPauseRecord,
   scratchSeatText,
   seatCallSign,
   seatDef,
@@ -1004,16 +1006,66 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const seatCfg = (seatId: string) =>
     flightSeat(config)?.session.seats.find((s) => s.id === seatId);
   /**
-   * Lets one seat out of the crew pause, naming FLIGHT in the pause record; the text for the
-   * decision it is filed under, or null when the seat was not paused.
+   * Grant the actual live run an exception, retaining the operator's original pause and scope.
    */
-  const unpauseSeat = (seat: string, call: string, at: number): string | null => {
-    const pause = pausedSeat(store, seat);
+  const unpauseSeat = (
+    seat: string,
+    call: string,
+    at: number,
+    run: Run,
+    basis: string,
+    expected?: CrewPause,
+  ): string | null => {
+    const pause = pausedSeat(store, seat, run.id);
     if (pause === null) return null;
-    if (!writeCrewPause(store, pauseWithout(pause, seat, "FLIGHT"), at, undefined, "FLIGHT"))
-      return null;
+    const actual = store.run(run.id);
+    if (
+      actual === null ||
+      actual.agentId !== seat ||
+      actual.endedAt !== null ||
+      (expected !== undefined && !sameCrewPauseRecord(expected, pause))
+    )
+      throw new SupervisorError(409, "The run or crew pause changed. Check the state and retry.");
+    const next = pauseWithout(pause, seat, { runId: run.id, by: "FLIGHT", at, reason: basis });
+    if (
+      !writeCrewPause(
+        store,
+        next,
+        at,
+        undefined,
+        "FLIGHT",
+        `FLIGHT let ${call} out of the crew pause for ${run.ticket ?? run.id} (run ${run.id}): ${basis}`,
+      )
+    )
+      throw new SupervisorError(409, "The crew pause was kept. Check the state and retry.");
     bus.emit("settings");
-    return `FLIGHT lifted the crew pause for ${call} (set by ${pause.by} at ${clockHm(pause.at, config.operator.timezone)}: ${pause.reason})`;
+    const origin =
+      pause.at === 0
+        ? "original pause owner and time unknown"
+        : `set by ${pause.by} at ${clockHm(pause.at, config.operator.timezone)}: ${pause.reason}`;
+    return `FLIGHT lifted the crew pause for ${call} (${origin}) for run ${run.id}`;
+  };
+  const restorePauseGrant = (prior: CrewPause, runId: string, grantedAt: number): boolean => {
+    const current = readCrewPause(store);
+    if (current === null || !sameCrewPauseRecord(prior, current)) return false;
+    const except = current.except?.filter(
+      (item) => item.runId !== runId || item.by !== "FLIGHT" || item.at !== grantedAt,
+    );
+    // An ended run has already lost its exception. Its original pause still holds.
+    if (except?.length === current.except?.length) {
+      bus.emit("settings");
+      return true;
+    }
+    const restored = writeCrewPause(
+      store,
+      { ...current, except },
+      now(),
+      undefined,
+      "FLIGHT",
+      `FLIGHT ended the crew-pause exception for run ${runId} after its start failed.`,
+    );
+    if (restored) bus.emit("settings");
+    return restored;
   };
   const unendedRun = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -1363,24 +1415,33 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // what a failed start puts back: the seat's row and the crew pause
     const priorPause = readCrewPause(store);
     const priorSeat = store.seatSession(seat);
-    // FLIGHT says why on every start: a stopped seat goes back in rotation, a paused one is let out
-    // of the pause, and the decision below records both
-    const unpaused = unpauseSeat(seat, call, at);
+    // A stopped seat goes back in rotation. A paused seat gets only the actual prepared run's
+    // exception; no seat-wide permission exists while the supervisor prepares it.
+    let unpaused: string | null = null;
+    const pauseGrants: { runId: string; at: number }[] = [];
+    const beforeLaunch =
+      priorPause !== null && pausedSeat(store, seat, null) !== null
+        ? (run: Run) => {
+            const grantedAt = now();
+            unpaused = unpauseSeat(seat, call, grantedAt, run, basis, priorPause);
+            if (unpaused !== null) pauseGrants.push({ runId: run.id, at: grantedAt });
+          }
+        : undefined;
     if (wasStopped) {
       const row = store.seatSession(seat);
       if (row !== null && row.runId === null)
         store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
     }
     // what this start left, so a rollback only undoes its own change
-    const pauseAfter = JSON.stringify(readCrewPause(store));
     const seatAfter = JSON.stringify(store.seatSession(seat));
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
       if (planner) {
-        if (override || away)
+        if (override || away || beforeLaunch)
           await deps.supervisor.startRun(seat, issue, {
             ...(override ? { override } : {}),
             ...(away ? { flight: true } : {}),
+            ...(beforeLaunch ? { beforeLaunch } : {}),
           });
         else await deps.supervisor.startRun(seat, issue);
       } else {
@@ -1388,21 +1449,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         await deps.supervisor.startRun(
           seat,
           issue,
-          override || loop.loop || away
-            ? { ...loop, ...(override ? { override } : {}), ...(away ? { flight: true } : {}) }
+          override || loop.loop || away || beforeLaunch
+            ? {
+                ...loop,
+                ...(override ? { override } : {}),
+                ...(away ? { flight: true } : {}),
+                ...(beforeLaunch ? { beforeLaunch } : {}),
+              }
             : undefined,
         );
       }
     } catch (e) {
       // an operator who paused or stopped the seat again meanwhile keeps their change
-      if (
-        priorPause !== null &&
-        unpaused !== null &&
-        JSON.stringify(readCrewPause(store)) === pauseAfter
-      ) {
-        writeCrewPause(store, priorPause, at, undefined, "FLIGHT");
-        bus.emit("settings");
-      }
+      const grant = pauseGrants.at(-1);
+      if (priorPause !== null && grant !== undefined)
+        restorePauseGrant(priorPause, grant.runId, grant.at);
       if (priorSeat !== null && wasStopped && JSON.stringify(store.seatSession(seat)) === seatAfter)
         store.setSeatSession({ ...priorSeat });
       // the supervisor's own eligibility refusal: the same text start_seat gives
@@ -3221,7 +3282,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const superTools = [
     superTool(
       MC_TOOL_NAMES.resumeSeat,
-      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). Lifts the seat's stop or crew pause and names it; a live seat that is only paused is let out of the pause. A failed resume puts the pause and stop back and says so. Refuses budget, account, Away-quota, machine-capacity and held runs.",
+      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). A stop can be lifted; a crew-pause exception applies only to this unfinished run, including a live session that is paused. The original pause keeps covering other work. A failed resume removes its own exception and restores the stop unless the operator changed it. Refuses budget, account, Away-quota, machine-capacity and held runs.",
       ResumeSeatArgs,
       "pause",
       async (a) => {
@@ -3258,7 +3319,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             return fail(
               held(run) ? "Run is held." : `${call} is already running, and is not paused.`,
             );
-          unpauseSeat(a.seat, call, at);
+          unpauseSeat(a.seat, call, at, run, a.basis, paused);
           const text = `${call} let out of the pause; its session was already live.`;
           record(now(), {
             kind: "pause",
@@ -3285,7 +3346,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return fail("Run is held.");
         }
         const pause = pausedSeat(store, a.seat);
-        const pauseText = unpauseSeat(a.seat, call, at);
+        const pauseText = unpauseSeat(a.seat, call, at, run, a.basis, pause ?? undefined);
         const stopText = row.state === "stopped" ? "the operator had stopped the seat" : null;
         const liftedText = (parts: (string | null)[]): string =>
           parts.filter((t) => t !== null).join("; ");
@@ -3300,7 +3361,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
         };
         // What this call wrote; a rollback leaves a newer change by the operator alone.
-        const pauseAfter = JSON.stringify(readCrewPause(store));
         try {
           await deps.supervisor.resumeRun(run.id);
         } catch {
@@ -3313,11 +3373,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
           deps.supervisor.sessionAlive?.(a.seat) === true;
         if (!isLive) {
-          const pauseBack = pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter;
-          if (pauseBack) {
-            writeCrewPause(store, pause, at, undefined, "FLIGHT");
-            bus.emit("settings");
-          }
+          const pauseBack =
+            pause !== null && pauseText !== null && restorePauseGrant(pause, run.id, at);
           // Only a newer stop is the operator's; an error the failed resume left is not.
           const cur = row.state === "stopped" ? store.seatSession(a.seat) : null;
           const stopBack = cur !== null && cur.state !== "stopped";

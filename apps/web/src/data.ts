@@ -128,7 +128,7 @@ export const RESOURCES = {
     path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
     topic: "settings",
   }),
-  crewPause: { path: "/api/settings/crew-pause", topic: "settings" },
+  crewPause: { path: "/api/settings/crew-pause", topic: ["settings", "agents"] },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
