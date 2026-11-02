@@ -185,6 +185,80 @@ describe("observed executed-attempt test health", () => {
       ordered: true,
     });
   });
+  it("pages declared retry chronology before report/import order across more than fifty attempts", () => {
+    // Import the retry first and give it an earlier report completion, while individual
+    // execution timestamps and declared run/order retain the actual failure/recovery sequence.
+    const retry = body(Array(30).fill("passed"), {
+      runAttempt: 2,
+      jobRun: "202",
+      completedAt: NOW - 200,
+    });
+    retry.cases.reverse();
+    put(retry);
+    const first = body(Array(30).fill("passed"), { completedAt: NOW - 100 });
+    first.cases[0].state = "failed";
+    for (const [index, row] of first.cases.entries()) row.completedAt = NOW - 500 + index;
+    first.cases.reverse();
+    put(first);
+    qa();
+    const disruption = data().disruption[0];
+    expect(disruption).toMatchObject({ classification: "confirmed-flaky", ordered: true });
+    const ref = disruption.evidence[0];
+    const page1 = reader.evidence("sample", ref.id, undefined);
+    expect(page1.rows).toHaveLength(50);
+    expect(page1.nextCursor).toBeDefined();
+    const page2 = reader.evidence("sample", ref.id, page1.nextCursor ?? undefined);
+    expect(page2.rows).toHaveLength(10);
+    expect(page2.nextCursor).toBeNull();
+    const rows = [...page1.rows, ...page2.rows];
+    expect(rows.map((row) => [row.runAttempt, row.executionOrder])).toEqual([
+      ...Array.from({ length: 30 }, (_, index) => [1, index]),
+      ...Array.from({ length: 30 }, (_, index) => [2, index]),
+    ]);
+    expect(rows.every((row) => row.executionOrderStatus === "explicit")).toBe(true);
+    expect(rows[0].state).toBe("failed");
+    expect(rows[1].state).toBe("passed");
+    expect(new Set(rows.map((row) => row.attemptId)).size).toBe(60);
+  });
+  it("labels missing and tied retry positions without inventing chronology or interleaving groups", () => {
+    const value = body(Array(54).fill("passed"));
+    value.cases[0].state = "failed";
+    value.cases[51].executionOrder = 50;
+    value.cases[52].executionOrder = null;
+    value.cases[53].executionOrder = null;
+    value.cases.reverse();
+    put(value);
+    put(body(["failed"], { workflowRun: "102", jobRun: "202", completedAt: NOW - 10 }));
+    const result = view();
+    const ref = result.evidence.find((row) => row.label === "Imported named-test attempts");
+    if (!ref) throw new Error("Missing attempt reference");
+    const first = reader.evidence("sample", ref.id, undefined);
+    const second = reader.evidence("sample", ref.id, first.nextCursor ?? undefined);
+    const rows = [...first.rows, ...second.rows];
+    // Earlier report selects the first group; it does not reorder retry positions within a group.
+    expect(rows[0]).toMatchObject({
+      workflowRun: "102",
+      executionOrder: 0,
+      executionOrderStatus: "explicit",
+    });
+    const selected = rows.filter((row) => row.workflowRun === "101");
+    expect(selected.slice(0, 50).map((row) => row.executionOrder)).toEqual(
+      Array.from({ length: 50 }, (_, index) => index),
+    );
+    expect(
+      selected.slice(50, 52).map((row) => [row.executionOrder, row.executionOrderStatus]),
+    ).toEqual([
+      [50, "tied"],
+      [50, "tied"],
+    ]);
+    expect(selected.slice(52).map((row) => [row.executionOrder, row.executionOrderStatus])).toEqual(
+      [
+        [null, "missing"],
+        [null, "missing"],
+      ],
+    );
+    expect(data().disruption.every((row) => row.classification === "candidate")).toBe(true);
+  });
   it("distinguishes observed repeated failures and recorded infrastructure causes", () => {
     put(body(["failed", "failed"]));
     expect(data().disruption[0].classification).toBe("consistently-failing");

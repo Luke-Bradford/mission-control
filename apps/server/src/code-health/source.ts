@@ -277,14 +277,24 @@ export function codeHealthEvidenceSource(
         where += ` AND ${column}=?`;
         extras.push(value);
       }
+    // Keep a test/series together, then use only its declared retry positions before paging.
+    // Group time and stable IDs order presentation; null/tied positions remain explicitly uncertain.
     return db
-      .prepare(`SELECT a.id AS attemptId,a.test_id AS testId,a.file,a.suite,a.name,a.execution_order AS executionOrder,
+      .prepare(`WITH attempts AS (SELECT a.id AS attemptId,a.test_id AS testId,a.file,a.suite,a.name,a.execution_order AS executionOrder,
       a.state,a.completed_at AS completedAt,a.duration,a.duration_unit AS durationUnit,a.duration_ms AS durationMs,
       r.head_sha AS headSha,r.workflow,r.workflow_run AS workflowRun,r.job,r.job_run AS jobRun,r.run_attempt AS runAttempt,
       r.environment,r.completed_at AS reportCompletedAt,r.expected_attempts AS declaredAttempts,
-      r.source_format AS sourceFormat,r.collection_note AS collectionNote,r.cause,r.cause_evidence AS causeEvidence,r.received_at AS importedAt,r.actor
+      r.source_format AS sourceFormat,r.collection_note AS collectionNote,r.cause,r.cause_evidence AS causeEvidence,r.received_at AS importedAt,r.actor,
+      r.series_key AS seriesKey,MIN(r.completed_at) OVER (PARTITION BY a.test_id,r.series_key) AS groupFirstReport,
+      CASE WHEN a.execution_order IS NULL THEN 'missing'
+        WHEN COUNT(*) OVER (PARTITION BY a.test_id,r.series_key,r.run_attempt,a.execution_order)>1 THEN 'tied'
+        ELSE 'explicit' END AS executionOrderStatus
       FROM code_health_test_attempts a JOIN code_health_test_reports r ON r.repo_id=a.repo_id AND r.id=a.report_id
-      WHERE a.repo_id=? AND r.completed_at>=? AND r.completed_at<? ${where} ORDER BY r.completed_at,r.id,a.id LIMIT ? OFFSET ?`)
+      WHERE a.repo_id=? AND r.completed_at>=? AND r.completed_at<? ${where})
+      SELECT attemptId,testId,file,suite,name,executionOrder,executionOrderStatus,state,completedAt,duration,durationUnit,durationMs,
+      headSha,workflow,workflowRun,job,jobRun,runAttempt,environment,reportCompletedAt,declaredAttempts,
+      sourceFormat,collectionNote,cause,causeEvidence,importedAt,actor FROM attempts
+      ORDER BY groupFirstReport,testId,seriesKey,runAttempt,executionOrder IS NULL,executionOrder,attemptId LIMIT ? OFFSET ?`)
       .all(
         query.repoId,
         query.from,
