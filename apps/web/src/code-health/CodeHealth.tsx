@@ -43,8 +43,18 @@ export function CodeHealth() {
   const heading = useRef<HTMLHeadingElement>(null),
     tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
-    const repos = config.data?.repos ?? [];
-    if (repos.length && !repos.some((r) => r.id === repo)) setRepo(repos[0].id);
+    if (!config.data) return;
+    const repos = config.data.repos;
+    if (!repos.some((row) => row.id === repo)) {
+      const next = repos[0]?.id ?? "";
+      if (next !== repo) {
+        setRepo(next);
+        setAction(undefined);
+        setEvidence(undefined);
+        setHistory(false);
+        setNotice("");
+      }
+    }
   }, [config.data, repo]);
   const ref = useMemo(
       () => (repo ? RESOURCES.codeHealth(repo, window, tab) : null),
@@ -67,12 +77,19 @@ export function CodeHealth() {
   const disconnected = !connected,
     stale =
       expired ||
+      (!!view && Date.now() >= view.generatedAt + 120000) ||
       !!res.error ||
       (view?.coverage.some(
         (c) => c.state === "stale" || c.state === "disconnected" || c.state === "error",
       ) ??
         false);
-  const blocked = disconnected || stale || res.loading || !res.data;
+  const configured = !!config.data?.repos.some((row) => row.id === repo) && !config.error;
+  const currentSelection = JSON.stringify([repo, window, tab]),
+    selection = useRef(currentSelection),
+    currentAction = useRef(action);
+  selection.current = currentSelection;
+  currentAction.current = configured ? action : undefined;
+  const blocked = !configured || disconnected || stale || res.loading || !res.data;
   const retry = () => {
     if (ref) hub.refetch(ref.path);
   };
@@ -114,6 +131,13 @@ export function CodeHealth() {
     ),
   ];
   const onSaved = (row: CodeHealthRecommendation) => {
+    if (
+      selection.current !== currentSelection ||
+      currentAction.current !== action ||
+      row.repoId !== repo ||
+      row.id !== action?.row.id
+    )
+      return;
     setAction(undefined);
     setNotice(
       `Decision recorded: ${label(row.state.kind)}. ${row.state.kind === "accepted" ? "FLIGHT work is pending through its authorised ticket path." : "The decision is retained in recommendation history."}`,
@@ -380,7 +404,7 @@ export function CodeHealth() {
           onClose={() => setEvidence(undefined)}
         />
       )}
-      {action && (
+      {action && action.row.repoId === repo && (
         <ActionDialog
           key={`${repo}-${action.row.id}-${action.kind}`}
           repo={repo}
@@ -392,6 +416,7 @@ export function CodeHealth() {
       )}
       {history && (
         <HistoryDialog
+          key={repo}
           repo={repo}
           onClose={() => setHistory(false)}
           onInspect={(row) => {

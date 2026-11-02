@@ -83,7 +83,18 @@ function view(tab: "overview" | "review" = "overview", repo = "sample"): CodeHea
     evidence: [evidence],
     data:
       tab === "overview"
-        ? { tab, recommendations: [proposal], review: { ...review, rounds: [...review.rounds] } }
+        ? {
+            tab,
+            recommendations: [
+              {
+                ...proposal,
+                repoId: repo,
+                id: repo === "sample" ? ID : `chr_${"d".repeat(32)}`,
+                proposal: repo === "sample" ? proposal.proposal : "Other scope proposal",
+              },
+            ],
+            review: { ...review, rounds: [...review.rounds] },
+          }
         : { tab, review: { ...review, rounds: [...review.rounds] } },
   };
 }
@@ -106,6 +117,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   hub.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -325,4 +337,155 @@ it("shows a later assessment without promising another board handoff", async () 
   fireEvent.click(screen.getByRole("button", { name: "Recommendation history" }));
   await screen.findByText(/Assessment recorded/);
   expect(screen.queryByText(/Board handoff pending/)).toBeNull();
+});
+it("keeps keyboard focus in the named dialog while a decision is pending", async () => {
+  setup();
+  let finish: (response: Response) => void = () => {};
+  const previousFetch = fetch;
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+    init?.method === "POST"
+      ? new Promise<Response>((resolve) => {
+          finish = resolve;
+        })
+      : previousFetch(input, init),
+  );
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+  fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+  const dialog = screen.getByRole("dialog");
+  await waitFor(() => expect(document.activeElement).toBe(dialog));
+  for (const shiftKey of [false, true]) {
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey });
+    expect(document.activeElement).toBe(dialog);
+  }
+  expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText(/Decision recorded/)).toBeNull();
+  await act(async () =>
+    finish(
+      new Response(
+        JSON.stringify({
+          ...proposal,
+          state: { kind: "accepted", owner: "operator", reviewAt: NOW + 10000, linkedWork: null },
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+  await screen.findByText(/Decision recorded: accepted/);
+});
+it("releases a stalled decision as unconfirmed and ignores a late success", async () => {
+  setup();
+  let finish: (response: Response) => void = () => {};
+  const previousFetch = fetch;
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+    init?.method === "POST"
+      ? new Promise<Response>((resolve) => {
+          finish = resolve;
+        })
+      : previousFetch(input, init),
+  );
+  render(<CodeHealth />);
+  await ready();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+  fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15001);
+  });
+  expect(screen.getByRole("alert").textContent).toContain("not confirmed");
+  expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("textbox", { name: "Owner" }) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await act(async () =>
+    finish(
+      new Response(
+        JSON.stringify({
+          ...proposal,
+          state: { kind: "accepted", owner: "operator", reviewAt: NOW + 10000, linkedWork: null },
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+  expect(screen.queryByText(/Decision recorded/)).toBeNull();
+});
+it("ignores an old scope's completion without closing a newer action dialog", async () => {
+  setup();
+  let finish: (response: Response) => void = () => {};
+  const previousFetch = fetch;
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+    init?.method === "POST"
+      ? new Promise<Response>((resolve) => {
+          finish = resolve;
+        })
+      : previousFetch(input, init),
+  );
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+  fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
+  fireEvent.change(screen.getByRole("combobox", { name: "Repo" }), { target: { value: "other" } });
+  await screen.findByText("Other scope proposal");
+  fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+  const newer = screen.getByRole("dialog");
+  await act(async () =>
+    finish(
+      new Response(
+        JSON.stringify({
+          ...proposal,
+          state: { kind: "accepted", owner: "operator", reviewAt: NOW + 10000, linkedWork: null },
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+  expect(screen.getByRole("dialog")).toBe(newer);
+  expect(screen.queryByText(/Decision recorded/)).toBeNull();
+  expect((screen.getByRole("combobox", { name: "Repo" }) as HTMLSelectElement).value).toBe("other");
+});
+it("never enables an initially expired response in any committed render", async () => {
+  const expired = view();
+  expired.generatedAt = NOW - 180000;
+  expired.coverage = [
+    { ...coverage, observedUntil: expired.generatedAt, collectedAt: expired.generatedAt },
+  ];
+  setup({ "/api/code-health?repo=sample&window=30d&tab=overview": expired });
+  const states: { disabled: boolean; status: string }[] = [];
+  render(
+    <Profiler
+      id="expiry"
+      onRender={() => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+          (b) => b.textContent === "Accept",
+        );
+        if (button)
+          states.push({
+            disabled: button.disabled,
+            status: document.querySelector(".ch-coverage strong")?.textContent ?? "",
+          });
+      }}
+    >
+      <CodeHealth />
+    </Profiler>,
+  );
+  await ready();
+  expect(states.length).toBeGreaterThan(0);
+  expect(states.every((row) => row.disabled && row.status === "Stale snapshot")).toBe(true);
+});
+it("clears a removed repo and its actions when configuration becomes empty", async () => {
+  const routes = { "/api/config": config };
+  const fetch = setup(routes);
+  render(<CodeHealth />);
+  await ready();
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+    input === "/api/config"
+      ? Promise.resolve(new Response(JSON.stringify({ ...config, repos: [] }), { status: 200 }))
+      : fetch(input, init),
+  );
+  act(() => hub.refetch("/api/config"));
+  await screen.findByText(/No repos are configured/);
+  expect(screen.queryByText(proposal.proposal)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
 });

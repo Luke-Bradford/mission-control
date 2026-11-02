@@ -4,7 +4,15 @@ import type {
   CodeHealthView,
   ConfigView,
 } from "@mc/core";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ApiError, apiOperatorGet, apiPost } from "../api.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { trapTab, useOverlay, useReturnFocus } from "../shell/overlays.ts";
@@ -28,7 +36,8 @@ function HealthDialog({
   children: ReactNode;
 }) {
   const id = useId(),
-    close = useRef<HTMLButtonElement>(null);
+    close = useRef<HTMLButtonElement>(null),
+    dialog = useRef<HTMLElement>(null);
   useOverlay(`code-health-${id}`, true, () => {
     if (!busy) onClose();
   });
@@ -36,6 +45,9 @@ function HealthDialog({
   useEffect(() => {
     close.current?.focus();
   }, []);
+  useEffect(() => {
+    if (busy) dialog.current?.focus();
+  }, [busy]);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the overlay traps Tab and Escape for its named modal dialog.
     <div
@@ -46,17 +58,31 @@ function HealthDialog({
           e.preventDefault();
           e.stopPropagation();
           if (!busy) onClose();
+        } else if (busy && e.key === "Tab") {
+          e.preventDefault();
+          dialog.current?.focus();
         } else trapTab(e);
       }}
     >
-      <section className="panel ch-dialog" role="dialog" aria-modal="true" aria-labelledby={id}>
+      <section
+        ref={dialog}
+        tabIndex={-1}
+        className="panel ch-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={id}
+        aria-busy={busy}
+      >
         <div className="ph">
           <h2 id={id}>{title}</h2>
           <button ref={close} type="button" disabled={busy} onClick={onClose}>
             Close
           </button>
         </div>
-        <div className="pb ch-dialog-body">{children}</div>
+        <div className="pb ch-dialog-body">
+          {busy && <p role="status">Recording decision… Waiting for server confirmation.</p>}
+          {children}
+        </div>
       </section>
     </div>
   );
@@ -267,7 +293,14 @@ export function ActionDialog({
   const requestId = useRef(crypto.randomUUID()),
     attempt = useRef<unknown>(undefined),
     [locked, setLocked] = useState(false),
-    alert = useRef<HTMLParagraphElement>(null);
+    alert = useRef<HTMLParagraphElement>(null),
+    mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (error) alert.current?.focus();
   }, [error]);
@@ -303,13 +336,23 @@ export function ActionDialog({
     }
     setBusy(true);
     setError("");
+    let confirmationTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const saved = await apiPost<CodeHealthRecommendation>(
-        ACTIONS.codeHealthDecision(repo, row.id),
-        attempt.current,
-      );
-      onSaved(saved);
+      const saved = await Promise.race([
+        apiPost<CodeHealthRecommendation>(
+          ACTIONS.codeHealthDecision(repo, row.id),
+          attempt.current,
+        ),
+        new Promise<never>((_, reject) => {
+          confirmationTimer = setTimeout(
+            () => reject(new Error("The server has not confirmed the decision within 15 seconds.")),
+            15000,
+          );
+        }),
+      ]);
+      if (mounted.current) onSaved(saved);
     } catch (err) {
+      if (!mounted.current) return;
       if (err instanceof ApiError && err.status === 400) {
         attempt.current = undefined;
         requestId.current = crypto.randomUUID();
@@ -320,7 +363,8 @@ export function ActionDialog({
           `${message(err)} This decision is not confirmed. Retry the same decision, or close and refresh history before changing it.`,
         );
     } finally {
-      setBusy(false);
+      if (confirmationTimer) clearTimeout(confirmationTimer);
+      if (mounted.current) setBusy(false);
     }
   }
   return (
