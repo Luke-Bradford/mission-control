@@ -121,12 +121,14 @@ let store: Store;
 let app: FastifyInstance;
 let issueBody: string | null;
 let githubDown: boolean;
+let closingPrs: unknown[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "ticket-history-"));
   store = new Store(join(dir, "mc.sqlite"));
   issueBody = BODY;
   githubDown = false;
+  closingPrs = [];
   app = buildApp({
     config,
     store,
@@ -148,7 +150,7 @@ beforeEach(async () => {
                   labels: { nodes: [{ name: "type:feature" }] },
                   milestone: null,
                   subIssues: { nodes: [] },
-                  closedByPullRequestsReferences: { nodes: [] },
+                  closedByPullRequestsReferences: { nodes: closingPrs },
                 },
         },
       };
@@ -163,6 +165,21 @@ afterEach(async () => {
 });
 
 const read = async (path: string) => app.inject({ method: "GET", url: path });
+
+it("the Board detail retains locally associated PRs without GitHub closing references", async () => {
+  store.upsertPullRequests("shop-app", [pr(30)], NOW);
+  const response = await read("/api/boards/shop-app/items/7");
+  expect(response.statusCode).toBe(200);
+  expect(response.json().pullRequests).toEqual([
+    {
+      number: 30,
+      title: "PR 30",
+      url: "https://github.com/o/shop-app/pull/30",
+      state: "open",
+      repoId: "shop-app",
+    },
+  ]);
+});
 
 /** A reviewed round of PR 30: queued, run, reported with these findings. */
 function review(round: number, sha: string, at: number, findings: number, resolved = false) {
@@ -475,4 +492,29 @@ describe("GET /api/tickets/:repoId/:number", () => {
       expect(plan(sql, ...args), sql).not.toMatch(/\bSCAN\b/);
     }
   });
+});
+
+it("retains live closing PR identities when local PR collection has not caught up", async () => {
+  closingPrs = [
+    {
+      number: 99,
+      title: "Delivered",
+      url: "https://github.com/o/shop-app/pull/99",
+      state: "CLOSED",
+      merged: true,
+      repository: { name: "shop-app", owner: { login: "o" } },
+    },
+  ];
+  const response = await read("/api/tickets/shop-app/7");
+  expect(response.statusCode).toBe(200);
+  expect(response.json().prs).toEqual([]);
+  expect(response.json().linkedPullRequests).toEqual([
+    {
+      number: 99,
+      title: "Delivered",
+      url: "https://github.com/o/shop-app/pull/99",
+      state: "merged",
+      repoId: "shop-app",
+    },
+  ]);
 });

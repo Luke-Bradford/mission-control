@@ -702,6 +702,8 @@ export interface TicketHistory {
   githubError: string | null;
   runs: TicketRunView[];
   prs: TicketPrView[];
+  /** Live closing PR references, including PRs not yet collected into local history. */
+  linkedPullRequests?: TicketView["pullRequests"];
   /** Newest first; one page. */
   timeline: TicketEvent[];
   /** Pass as `before` for the next page; null on the last. */

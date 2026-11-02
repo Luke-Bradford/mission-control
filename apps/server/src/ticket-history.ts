@@ -233,6 +233,7 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
   return {
     repoId,
     number,
+    linkedPullRequests: i.issue?.pullRequests ?? [],
     url: i.issue?.url ?? card?.url ?? `https://github.com/${i.github}/issues/${number}`,
     title: i.issue?.title ?? card?.title ?? runs[0]?.ticketTitle ?? ref,
     state: i.issue?.state ?? (card === null ? "open" : card.closed ? "closed" : "open"),

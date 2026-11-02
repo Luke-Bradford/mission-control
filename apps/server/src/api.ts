@@ -3443,6 +3443,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           try {
             const ticket = await fetchTicket(repo, n, await githubGql(), config.repos);
+            if (ticket) {
+              const linked = new Set(ticket.pullRequests.map((pr) => pr.url));
+              for (const pr of store.pullRequestsOnTicket(repo.id, `${repo.id}#${n}`)) {
+                if (!linked.has(pr.url)) {
+                  ticket.pullRequests.push({
+                    number: pr.number,
+                    title: pr.title,
+                    url: pr.url,
+                    state: pr.state,
+                    repoId: repo.id,
+                  });
+                  linked.add(pr.url);
+                }
+              }
+            }
             return ticket ?? reply.code(404).send({ error: "unknown issue" });
           } catch (e) {
             captureError(reply, e);

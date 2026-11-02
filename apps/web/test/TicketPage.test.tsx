@@ -5,6 +5,7 @@ import { hub, RESOURCES } from "../src/data.ts";
 import { TicketPage } from "../src/pages/TicketPage.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG } from "./fixtures.ts";
+import { ticketQaReportFixture } from "./qaReportFixture.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -322,4 +323,30 @@ describe("TicketPage", () => {
     const more = tl.querySelector("details.tk-more");
     expect(more?.querySelector(".tk-text")?.textContent).toBe(long);
   });
+});
+
+it("a closed ticket exposes QA for a live closing PR before it reaches the local collector", async () => {
+  const r = ticketQaReportFixture();
+  stubFetch({
+    "/api/config": CONFIG,
+    [PATH]: history({
+      state: "closed",
+      prs: [],
+      linkedPullRequests: [
+        {
+          number: 40,
+          title: "cache it",
+          url: "https://github.com/octo-org/shop-app/pull/40",
+          state: "merged",
+          repoId: "shop-app",
+        },
+      ],
+      timeline: [],
+    }),
+    "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [r] },
+  });
+  render(<TicketPage repoId="shop-app" number={3349} />);
+  expect(
+    (await screen.findByRole("link", { name: "Open QA report · aaaaaaaa" })).getAttribute("href"),
+  ).toBe(r.permalink);
 });
