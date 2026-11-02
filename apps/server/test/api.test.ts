@@ -1355,6 +1355,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/code-health/recommendations?repo=shop-app"],
   ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
+  ["POST", "/api/code-health/test-reports", {}],
+  ["POST", "/api/code-health/test-qa", {}],
   ["GET", "/api/code-health?repo=shop-app"],
   ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
@@ -2291,6 +2293,10 @@ describe("local access", () => {
       if (url.startsWith("/api/code-health/evidence/")) continue; // issued references are covered by code-health-reader.test.ts
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
+        expect((await post(url, json, body)).statusCode).toBe(401);
+        continue;
+      }
+      if (url === "/api/code-health/test-reports" || url === "/api/code-health/test-qa") {
         expect((await post(url, json, body)).statusCode).toBe(401);
         continue;
       }

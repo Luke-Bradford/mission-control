@@ -355,18 +355,27 @@ export function recommendationProposals(
       );
   const files = fileRecommendationProposals(store, repoId, at, checkout);
   proposals.push(...files.proposals);
-  const missing = [...files.missing, "ordered CI attempts", "named-test results"];
-  add(
-    "collection",
-    "risk-and-tests",
-    missing,
-    `Missing measurement sources: ${missing.join(", ")}.`,
-    "Check missing collection before judging file trends or test reliability.",
-    "missing measurement sources",
-    null,
-    "Observed data is not complete GitHub history. Mixed job outcomes alone do not establish flaky tests.",
-  );
-  const collection = proposals.pop();
+  const tests = store.codeHealthTestCollection(repoId, at - 30 * 86400_000, at);
+  const missing = [
+    ...files.missing,
+    ...(!tests.hasAttempts ? ["named-test results"] : []),
+    ...(!tests.hasExecuted || tests.unorderedExecuted ? ["test execution-order metadata"] : []),
+    ...(tests.partialReports ? ["complete observed attempt counts"] : []),
+  ];
+  let collection: Proposal | undefined;
+  if (missing.length) {
+    add(
+      "collection",
+      "risk-and-tests",
+      [missing, tests],
+      `Missing measurement sources: ${missing.join(", ")}. ${tests.reports} imported test reports are recorded in this window.`,
+      "Check missing collection before judging file trends or test reliability.",
+      "missing measurement sources",
+      null,
+      "Observed imports are not complete GitHub history. Explicit order metadata is not a verified retry sequence; mixed job outcomes alone do not establish flaky tests.",
+    );
+    collection = proposals.pop();
+  }
   const priority = (rule: string) =>
     rule === "recurring-correction" ? 0 : rule === "repeated-rounds" ? 1 : 2;
   proposals.sort(

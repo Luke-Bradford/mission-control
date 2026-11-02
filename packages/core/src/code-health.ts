@@ -182,7 +182,11 @@ export type CodeHealthTabData =
       tab: "test";
       mixedJobCandidates: number | null;
       namedTestRate: CodeHealthRate | null;
+      omitted?: { disruption: number; durations: number; qaProposals: number };
       disruption: {
+        testId?: string;
+        headSha?: string;
+        ordered?: boolean;
         id: string;
         label: string;
         classification: CodeHealthCiClassification;
@@ -190,6 +194,8 @@ export type CodeHealthTabData =
         evidence: CodeHealthEvidenceRef[];
       }[];
       durations: {
+        testId?: string;
+        label?: string;
         file: string;
         p50Ms: number;
         p95Ms: number;
@@ -198,6 +204,9 @@ export type CodeHealthTabData =
         evidence: CodeHealthEvidenceRef[];
       }[];
       qaProposals: {
+        file?: string;
+        headSha?: string;
+        recordedBy?: string;
         id: string;
         testId: string;
         judgement: "stale" | "wrong" | "slow" | "flaky";

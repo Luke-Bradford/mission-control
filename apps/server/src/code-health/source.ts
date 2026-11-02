@@ -17,7 +17,11 @@ export type CodeHealthEvidenceKind =
   | "merged-files"
   | "reviewed-files"
   | "git-numstats"
-  | "size-history";
+  | "size-history"
+  | "test-reports"
+  | "test-attempts"
+  | "test-durations"
+  | "test-qa";
 
 /** Revisions track relevant source writes, including writes from another SQLite connection. */
 export function installCodeHealthRevisions(db: Db): void {
@@ -26,6 +30,9 @@ export function installCodeHealthRevisions(db: Db): void {
   )`);
   const tables = [
     ["code_health_recommendations", "direct"],
+    ["code_health_test_reports", "direct"],
+    ["code_health_test_attempts", "direct"],
+    ["code_health_test_qa", "direct"],
     ["reviews", "direct"],
     ["review_findings", "review"],
     ["review_resolutions", "review"],
@@ -203,6 +210,9 @@ export function codeHealthEvidenceSource(
     sha?: string;
     file?: string;
     otherFile?: string;
+    testId?: string;
+    seriesKey?: string;
+    environmentKey?: string;
     category?: string;
     pr?: number;
     at?: number;
@@ -218,6 +228,73 @@ export function codeHealthEvidenceSource(
   )
     throw new Error("Invalid code-health evidence page");
   const args = [query.repoId, query.from, query.until, query.limit + 1, query.offset];
+  if (query.kind === "test-reports") {
+    return db
+      .prepare(`SELECT id AS reportId,head_sha AS headSha,workflow,workflow_run AS workflowRun,job,job_run AS jobRun,
+      run_attempt AS runAttempt,environment,completed_at AS completedAt,expected_attempts AS expectedAttempts,
+      source_format AS sourceFormat,collection_note AS collectionNote,cause,cause_evidence AS causeEvidence,received_at AS importedAt,actor
+      FROM code_health_test_reports WHERE repo_id=? AND completed_at>=? AND completed_at<? ORDER BY completed_at,id LIMIT ? OFFSET ?`)
+      .all(...args) as Row[];
+  }
+  if (query.kind === "test-qa") {
+    const extras = [] as (string | number)[];
+    let where = "";
+    if (query.testId) {
+      where += " AND test_id=?";
+      extras.push(query.testId);
+    }
+    if (query.sha) {
+      where += " AND head_sha=?";
+      extras.push(query.sha);
+    }
+    return db
+      .prepare(`SELECT id,test_id AS testId,head_sha AS headSha,judgement,reviewer,review_id AS reviewId,
+      finding_position AS findingPosition,at,actor,file,line,summary,scenario,fix,spec_evidence AS specEvidence
+      FROM code_health_test_qa WHERE repo_id=? AND at>=? AND at<? ${where} ORDER BY at,id LIMIT ? OFFSET ?`)
+      .all(
+        query.repoId,
+        query.from,
+        query.until,
+        ...extras,
+        query.limit + 1,
+        query.offset,
+      ) as Row[];
+  }
+  if (query.kind === "test-attempts" || query.kind === "test-durations") {
+    const extras = [] as (string | number)[];
+    let where =
+      query.kind === "test-durations"
+        ? " AND a.state IN ('passed','failed') AND a.duration_ms IS NOT NULL"
+        : "";
+    for (const [value, column] of [
+      [query.testId, "a.test_id"],
+      [query.sha, "r.head_sha"],
+      [query.seriesKey, "r.series_key"],
+      [query.environmentKey, "r.environment_key"],
+      [query.file, "a.file"],
+    ] as const)
+      if (value) {
+        where += ` AND ${column}=?`;
+        extras.push(value);
+      }
+    return db
+      .prepare(`SELECT a.id AS attemptId,a.test_id AS testId,a.file,a.suite,a.name,a.execution_order AS executionOrder,
+      a.state,a.completed_at AS completedAt,a.duration,a.duration_unit AS durationUnit,a.duration_ms AS durationMs,
+      r.head_sha AS headSha,r.workflow,r.workflow_run AS workflowRun,r.job,r.job_run AS jobRun,r.run_attempt AS runAttempt,
+      r.environment,r.completed_at AS reportCompletedAt,r.expected_attempts AS declaredAttempts,
+      r.source_format AS sourceFormat,r.collection_note AS collectionNote,r.cause,r.cause_evidence AS causeEvidence,r.received_at AS importedAt,r.actor
+      FROM code_health_test_attempts a JOIN code_health_test_reports r ON r.repo_id=a.repo_id AND r.id=a.report_id
+      WHERE a.repo_id=? AND r.completed_at>=? AND r.completed_at<? ${where} ORDER BY r.completed_at,r.id,a.id LIMIT ? OFFSET ?`)
+      .all(
+        query.repoId,
+        query.from,
+        query.until,
+        ...extras,
+        query.limit + 1,
+        query.offset,
+      ) as Row[];
+  }
+
   if (query.kind === "git-numstats" && !query.checkout) return [];
   if (query.kind === "git-numstats" && query.checkout) {
     const metrics = gitFileMetrics(

@@ -184,6 +184,13 @@ import {
   codeHealthSourceRevision,
   installCodeHealthRevisions,
 } from "./code-health/source.ts";
+import { installTestQa, linkTestQa, readTestQa } from "./code-health/test-qa.ts";
+import {
+  importTestReport,
+  installTestReports,
+  testAttemptSource,
+  testCollectionCoverage,
+} from "./code-health/test-reports.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -1261,7 +1268,40 @@ export class Store {
     installGitFileSources(this.db);
     installFileSizes(this.db);
     installRecommendations(this.db);
+    installTestReports(this.db);
+    installTestQa(this.db);
     installCodeHealthRevisions(this.db);
+  }
+
+  importCodeHealthTestReport(
+    raw: unknown,
+    actor: string,
+    at: number,
+    knownSecrets: readonly string[],
+  ) {
+    let result: ReturnType<typeof importTestReport> | undefined;
+    this.transaction(() => {
+      result = importTestReport(this.db, raw, actor, at, knownSecrets);
+    }, true);
+    if (!result) throw new Error("The test report was not stored.");
+    return result;
+  }
+  linkCodeHealthTestQa(raw: unknown, actor: string, at: number, knownSecrets: readonly string[]) {
+    let result: ReturnType<typeof linkTestQa> | undefined;
+    this.transaction(() => {
+      result = linkTestQa(this.db, raw, actor, at, knownSecrets);
+    }, true);
+    if (!result) throw new Error("The test QA proposal was not stored.");
+    return result;
+  }
+  codeHealthTestQa(repoId: string, from: number, until: number) {
+    return readTestQa(this.db, repoId, from, until);
+  }
+  codeHealthTestAttempts(repoId: string, from: number, until: number) {
+    return testAttemptSource(this.db, repoId, from, until);
+  }
+  codeHealthTestCollection(repoId: string, from: number, until: number) {
+    return testCollectionCoverage(this.db, repoId, from, until);
   }
 
   codeHealthRecommendations(repoId: string, openAt?: number) {
