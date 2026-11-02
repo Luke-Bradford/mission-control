@@ -15,6 +15,7 @@ import type { Store } from "../store.ts";
 import type { RecommendationRecord } from "./recommendations.ts";
 import { buildRiskTab } from "./risk-view.ts";
 import type { CodeHealthEvidenceKind } from "./source.ts";
+import { buildTestTab } from "./test-view.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
@@ -29,6 +30,9 @@ interface EvidenceQuery {
   sha?: string;
   file?: string;
   otherFile?: string;
+  testId?: string;
+  seriesKey?: string;
+  environmentKey?: string;
   category?: string;
   pr?: number;
 }
@@ -216,45 +220,17 @@ export class CodeHealthReader {
       data = risk.data;
       evidence.push(...risk.evidence);
     } else {
-      const source = this.store.codeHealthCi(repoId, bounds.from, bounds.until);
-      const ciCoverage = describe(
-        "CI job observations",
-        source.observedFrom,
-        source.observedUntil,
-        `${source.observations} job observations. Mixed outcomes are candidates; attempt order and causes are not established.`,
-      );
-      evidence.push(
-        this.reference(
-          { ...base, kind: "ci" },
-          "CI job observations",
-          "Stored job states grouped by repo, SHA, workflow and job. These are not named-test attempts.",
-          ciCoverage,
-        ),
-      );
-      const durationCoverage = describe(
-        "test identity, duration and QA collection",
-        null,
-        null,
-        `${source.unnormalisedCommandRecords} review-command records have undocumented duration units. Stable test IDs and evidenced QA proposals need collection.`,
-        "not-collected",
-      );
-      evidence.push(
-        this.reference(
-          { ...base, kind: "durations" },
-          "Unnormalised command evidence",
-          "Raw command results do not provide a unique test-attempt denominator or documented duration unit.",
-          durationCoverage,
-        ),
-      );
-      data = {
-        tab,
-        mixedJobCandidates: source.observations ? source.mixedJobCandidates : null,
-        namedTestRate: null,
-        disruption: [],
-        durations: [],
-        qaProposals: [],
-      };
+      const tests = buildTestTab({
+        store: this.store,
+        repoId,
+        base,
+        describe,
+        reference: (query, label, definition, c) => this.reference(query, label, definition, c),
+      });
+      data = tests.data;
+      evidence.push(...tests.evidence);
     }
+
     const value: CodeHealthView = { repoId, window, generatedAt: at, coverage, evidence, data };
     if (this.cache.size >= CACHE_MAX) {
       const oldest = this.cache.keys().next().value;

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { RecommendationMutation } from "../src/code-health/recommendations.ts";
@@ -64,6 +64,57 @@ describe("durable code-health decisions", () => {
     store.refreshCodeHealthRecommendations("sample", NOW);
     return present(store.codeHealthRecommendations("sample")[0]);
   }
+  it("updates collection gaps from imported metadata without materialising named attempts on Overview", () => {
+    const full = vi.spyOn(store, "codeHealthTestAttempts").mockImplementation(() => {
+      throw new Error("Overview must not load the attempt payload");
+    });
+    store.refreshCodeHealthRecommendations("sample", NOW);
+    expect(
+      store.codeHealthRecommendations("sample").find((row) => row.rule === "collection")
+        ?.observation,
+    ).toContain("named-test results");
+    store.importCodeHealthTestReport(
+      {
+        version: 1,
+        repo: "sample",
+        headSha: "a".repeat(40),
+        workflow: "fixture",
+        workflowRun: "101",
+        job: "unit",
+        jobRun: "201",
+        runAttempt: 1,
+        environment: "fixture-environment",
+        completedAt: NOW - 1,
+        expectedAttempts: 1,
+        cases: [
+          {
+            testId: "test-a",
+            attemptId: "test-a:1",
+            file: "test/example.test.ts",
+            suite: "example",
+            name: "does the work",
+            executionOrder: 0,
+            state: "passed",
+            completedAt: NOW - 2,
+            duration: 10,
+            durationUnit: "ms",
+          },
+        ],
+      },
+      "operator",
+      NOW,
+      [],
+    );
+    store.refreshCodeHealthRecommendations("sample", NOW);
+    const collection = store
+      .codeHealthRecommendations("sample")
+      .find((row) => row.rule === "collection");
+    expect(collection?.observation).not.toContain("named-test results");
+    expect(collection?.observation).not.toContain("test execution-order metadata");
+    expect(collection?.observation).toContain("1 imported test reports");
+    expect(full).not.toHaveBeenCalled();
+    full.mockRestore();
+  });
   function request(
     row = proposal(),
     change: unknown = { action: "accept", owner: "owner", reviewAt: NOW + 1000 },
