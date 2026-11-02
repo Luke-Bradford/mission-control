@@ -1677,3 +1677,19 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+.crew-scroll-note {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+/* Inset rings stay visible inside the compact cells' clipping bounds. */
+#agentsList a:focus-visible,
+#agentsList button:focus-visible,
+#agentsList select:focus-visible,
+.overview-lane:focus-visible {
+  outline-offset: -2px;
+}

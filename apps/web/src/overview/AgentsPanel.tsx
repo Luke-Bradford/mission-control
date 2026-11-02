@@ -8,7 +8,7 @@ import {
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
-import { type ReactNode, type RefObject, useEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecondWhile, useTz } from "../clock.ts";
@@ -601,6 +601,7 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
 
 /** FLIGHT heads the crew, observed loops and stopped seats. */
 export function AgentsPanel() {
+  const scrollHint = useId();
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
@@ -630,6 +631,7 @@ export function AgentsPanel() {
   // Crew seats make the roster; observed loops sit in the Loops strip beneath it.
   const seatRows = rows?.filter((r) => r.kind === "crew") ?? null;
   const loopRows = rows?.filter((r) => r.kind === "loop") ?? [];
+  const seatCount = (seatRows?.length ?? 0) + (flight ? 1 : 0);
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
   const placeholders = config
@@ -671,11 +673,17 @@ export function AgentsPanel() {
           Crew refresh failed. Showing the last received rows.
         </p>
       )}
+      {seatCount > 11 && (
+        <p id={scrollHint} className="crew-scroll-note">
+          {plural(seatCount, "seat")} · Scroll the roster to see every seat.
+        </p>
+      )}
       <div
         role="table"
         // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded roster supports keyboard scrolling.
         tabIndex={0}
         aria-label="Crew"
+        aria-describedby={seatCount > 11 ? scrollHint : undefined}
         id="agentsList"
         aria-busy={!crew.data && !crew.error}
       >

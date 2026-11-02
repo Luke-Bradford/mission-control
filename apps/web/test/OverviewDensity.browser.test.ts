@@ -362,6 +362,13 @@ describeRendered("Approved Overview hierarchy", () => {
             expect(facts.docWidth).toBeLessThanOrEqual(1600);
             if (scenario === "many") {
               expect(facts.rosterRows).toBe(50);
+              expect(
+                await page.evaluate(
+                  () =>
+                    document.querySelector(".crew-scroll-note")?.textContent?.includes("50 seats"),
+                  undefined,
+                ),
+              ).toBe(true);
               expect(facts.rosterScroll?.scroll).toBeGreaterThan(
                 facts.rosterScroll?.client ?? Infinity,
               );
@@ -390,13 +397,16 @@ describeRendered("Approved Overview hierarchy", () => {
                 const region = roster.getBoundingClientRect();
                 return {
                   atBottom: roster.scrollTop + roster.clientHeight >= roster.scrollHeight - 1,
-                  focused: !!link && document.activeElement === link,
+                  focused:
+                    !!link && document.activeElement === link && link.matches(":focus-visible"),
+                  focusInset: !!link && getComputedStyle(link).outlineOffset === "-2px",
                   route: link?.getAttribute("href"),
                   visible: !!bounds && bounds.top >= region.top && bounds.bottom <= region.bottom,
                 };
               }, undefined);
               expect(bottom.atBottom).toBe(true);
               expect(bottom.focused).toBe(true);
+              expect(bottom.focusInset).toBe(true);
               expect(bottom.visible).toBe(true);
               expect(bottom.route).toMatch(/^\/agent\//);
               await capture(page, `overview-many-bottom-1600x700-${scheme}-after`);
