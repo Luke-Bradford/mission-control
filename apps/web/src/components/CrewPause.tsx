@@ -20,6 +20,7 @@ export function CrewPauseControl() {
   const [failure, setFailure] = useState("");
   const seats = (config?.crew?.sessions ?? []).flatMap((s) => s.seats);
   async function save(resume = false) {
+    if (pause === undefined || error) return;
     setBusy(true);
     setFailure("");
     try {
@@ -60,7 +61,12 @@ export function CrewPauseControl() {
         {pause ? "Edit crew pause" : "Pause crew"}
       </button>
       {pause && (
-        <button type="button" className="sm" disabled={busy} onClick={() => void save(true)}>
+        <button
+          type="button"
+          className="sm"
+          disabled={busy || !!error}
+          onClick={() => void save(true)}
+        >
           Resume crew
         </button>
       )}
@@ -163,7 +169,7 @@ export function CrewPauseControl() {
             <button
               type="submit"
               className="sm"
-              disabled={busy || !reason.trim() || (!all && !selected.length)}
+              disabled={busy || !!error || !reason.trim() || (!all && !selected.length)}
             >
               {all ? "Pause all seats" : "Pause selected seats"}
             </button>

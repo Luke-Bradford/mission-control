@@ -188,3 +188,26 @@ it("shows an explicit read failure and keeps pause controls disabled", async () 
   );
   expect(screen.getByRole("button", { name: "Pause crew" }).hasAttribute("disabled")).toBe(true);
 });
+
+it("keeps a stale pause visible but refuses writes after a refresh fails", async () => {
+  let failed = false;
+  const fetch = stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": () =>
+      failed
+        ? { status: 503, body: { error: "Unavailable" } }
+        : { status: 200, body: { seats: "all", reason: "Save tokens", by: "operator", at: 1 } },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  failed = true;
+  hub.refetchTopic("settings");
+  await screen.findByRole("alert");
+  expect(screen.getByText("Paused")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Resume crew" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Pause all seats" }).hasAttribute("disabled")).toBe(
+    true,
+  );
+  fireEvent.submit(screen.getByLabelText("Reason").closest("form") as HTMLFormElement);
+  expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
