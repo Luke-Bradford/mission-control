@@ -303,6 +303,7 @@ function make(
     enabled?: boolean;
     fetchTicket?: FetchTicket;
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
+    fileContext?: SupervisorDeps["fileContext"];
     command?: string;
     codexCommand?: string;
     codexAuthPath?: string;
@@ -385,6 +386,7 @@ function make(
     ...(over.externalReviewSubject === undefined
       ? {}
       : { externalReviewSubject: over.externalReviewSubject }),
+    fileContext: over.fileContext,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),

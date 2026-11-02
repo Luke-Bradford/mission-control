@@ -450,6 +450,8 @@ export interface SupervisorDeps {
     repo: CcConfig["repos"][number],
     review: import("@mc/core").ReviewRow,
   ) => Promise<ExternalReviewSubject | null>;
+  /** Optional redacted file observations, read locally without starting any seat. */
+  fileContext?: (repoId: string, body: string) => Promise<string | null>;
   /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
   claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
   /** false: `MC_NO_CREW=1`, or no `crew` config. */
@@ -3225,6 +3227,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         throw new SupervisorError(409, "a newer handoff arrived; retry this ticket");
       const title = ticket.title;
+      const fileContext =
+        planner && info.seat.role === "FAO" && !ticket.bodyTruncated
+          ? await deps.fileContext?.(info.repo.id, ticket.body)
+          : null;
+      if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
       const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
@@ -3442,6 +3449,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         issue,
         title,
         body: ticket.body,
+        fileContext,
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,

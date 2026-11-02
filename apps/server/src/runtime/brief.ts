@@ -25,6 +25,7 @@ import {
   REVIEW_SINCE_FILE,
   type RunProfile,
   type StoredFinding,
+  wrapExternalText,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -78,6 +79,8 @@ export interface BriefInput {
   profileNames?: readonly string[];
   /** Quoted porcelain status from a reused ticket worktree. */
   leftoverChanges?: readonly string[];
+  /** Redacted, bounded observations for explicitly declared ticket files. */
+  fileContext?: string | null;
 }
 
 const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``).join(", ");
@@ -176,6 +179,14 @@ export function ticketBrief(i: BriefInput): string {
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     last,
+    ...(i.role === "FAO" && i.loop === "plan" && i.fileContext
+      ? [
+          "",
+          "## Relevant file evidence",
+          "Use this evidence within the declared ticket scope. Existing approval and action rules apply.",
+          wrapExternalText(i.fileContext.slice(0, 4000)),
+        ]
+      : []),
     ...((i.leftoverChanges?.length ?? 0) > 0
       ? [
           "",
