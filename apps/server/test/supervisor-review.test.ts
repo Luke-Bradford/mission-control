@@ -445,6 +445,7 @@ describe("startWatch", () => {
     ).toEqual([
       ...FLIGHT_FULL_BUILTINS,
       ...READONLY_TOOLS.filter((t) => t.startsWith("mcp__")),
+      "mcp__mc__code_health",
       "mcp__mc__log_decision",
       "mcp__mc__wait_on",
       "mcp__mc__read_ticket",

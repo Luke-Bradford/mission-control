@@ -220,7 +220,7 @@ async function usesFilters(worktree: string, base: string[], exec: GitExec): Pro
 }
 
 /** The read-only arguments every call in a worktree starts with (see the module comment). */
-async function readOnlyBase(worktree: string, exec: GitExec): Promise<string[]> {
+export async function readOnlyBase(worktree: string, exec: GitExec): Promise<string[]> {
   return [
     "--no-optional-locks",
     ...(await noLazyFetch(exec)),
@@ -231,6 +231,17 @@ async function readOnlyBase(worktree: string, exec: GitExec): Promise<string[]> 
     "-c",
     "core.attributesFile=/dev/null",
   ];
+}
+
+/** Object collectors require proof that missing objects cannot start a promisor fetch. */
+export async function readOnlyObjectBase(
+  worktree: string,
+  exec: GitExec = realGitExec,
+): Promise<string[]> {
+  const base = await readOnlyBase(worktree, exec);
+  if (!base.includes("--no-lazy-fetch"))
+    throw Error("Object collection requires verified no-lazy-fetch support");
+  return ["--no-replace-objects", ...base];
 }
 
 /** `diff` with no external driver, textconv or submodule look-inside; a rename is a delete and an add. */

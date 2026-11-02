@@ -1,0 +1,758 @@
+[
+  {
+    "name": "overview-1440x900-light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1440,
+      "docWidth": 1440,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1440x900-light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1440,
+      "docWidth": 1440,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1440x900-dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1440,
+      "docWidth": 1440,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1440x900-dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1440,
+      "docWidth": 1440,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1280x900-light",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1280,
+      "docWidth": 1280,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1280x900-light",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1280,
+      "docWidth": 1280,
+      "contentBottom": 951,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1280x900-dark",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1280,
+      "docWidth": 1280,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1280x900-dark",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1280,
+      "docWidth": 1280,
+      "contentBottom": 951,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1920x1080-light",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1920,
+      "docWidth": 1920,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1920x1080-light",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1920,
+      "docWidth": 1920,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1920x1080-dark",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1920,
+      "docWidth": 1920,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1920x1080-dark",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1920,
+      "docWidth": 1920,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-2560x1440-light",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 2560,
+      "docWidth": 2560,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-2560x1440-light",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 2560,
+      "docWidth": 2560,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-2560x1440-dark",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 2560,
+      "docWidth": 2560,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-2560x1440-dark",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 2560,
+      "docWidth": 2560,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1600x700-light",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1600x700-light",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "light",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "overview-1600x700-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "review-1600x700-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "dark",
+    "state": "normal",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 911,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "empty-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "empty",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 699,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "loading-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "loading",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 392,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "error-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "error",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 392,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "stale-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "stale",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1078,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "disconnected-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "disconnected",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1078,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "long-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "long",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1084,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "evidence-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "evidence",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "validation-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "validation",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "accept-1600x1000-light",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "state": "accept",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 925,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 2
+    }
+  },
+  {
+    "name": "empty-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "empty",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 699,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "loading-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "loading",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 392,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "error-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "error",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 392,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 0
+    }
+  },
+  {
+    "name": "stale-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "stale",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1078,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "disconnected-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "disconnected",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1078,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "long-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "long",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 1084,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "evidence-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "evidence",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "validation-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "validation",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 992,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 3
+    }
+  },
+  {
+    "name": "accept-1600x1000-dark",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "state": "accept",
+    "errors": [],
+    "metrics": {
+      "width": 1600,
+      "docWidth": 1600,
+      "contentBottom": 925,
+      "small": 0,
+      "smallControls": 0,
+      "proposals": 2
+    }
+  }
+]

@@ -19,6 +19,8 @@ import {
   CI_TRIES,
   type CiRunsView,
   type CliAccountStatus,
+  CODE_HEALTH_TABS,
+  CODE_HEALTH_WINDOWS,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -174,6 +176,9 @@ import {
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import { cleanText } from "./clean.ts";
+import { cleanCodeHealth } from "./code-health/clean.ts";
+import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
+import { RecommendationMutation } from "./code-health/recommendations.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -419,6 +424,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
+  /** Shared bounded reader; the MCP read handler can use this same instance. */
+  codeHealth?: CodeHealthReader;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
@@ -764,6 +771,7 @@ type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const codeHealth = deps.codeHealth ?? new CodeHealthReader(store, config, now);
   let transcriptFootprintCache: {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
@@ -4206,6 +4214,135 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })),
           generatedAt: now(),
         };
+      });
+      const CodeHealthQuery = z.strictObject({
+        repo: z.string().trim().min(1).max(128),
+        window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+        tab: z.enum(CODE_HEALTH_TABS).default("overview"),
+      });
+      const codeHealthOutput = async (value: unknown) =>
+        cleanCodeHealth(value, [
+          operatorToken ?? "",
+          ...(await (deps.knownSecrets?.() ?? Promise.resolve([]))),
+        ]);
+      const codeHealthFailure = (error: unknown, reply: FastifyReply) =>
+        reply.code(error instanceof CodeHealthReadError ? error.status : 503).send({
+          error:
+            error instanceof CodeHealthReadError
+              ? error.message
+              : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
+        });
+      // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
+      api.get("/code-health", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = CodeHealthQuery.safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { repo, window, tab } = parsed.data;
+          return await codeHealthOutput(codeHealth.read(repo, window, tab));
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
+      api.get("/code-health/evidence/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const params = z.strictObject({ id: z.string().min(1).max(64) }).safeParse(req.params);
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            cursor: z.string().min(1).max(5).optional(),
+          })
+          .safeParse(req.query);
+        if (!params.success || !parsed.success)
+          return reply.code(400).send({ error: "Invalid code-health evidence query" });
+        reply.header("cache-control", "no-store");
+        try {
+          return await codeHealthOutput(
+            codeHealth.evidence(parsed.data.repo, params.data.id, parsed.data.cursor),
+          );
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (bounded recommendation history, including accepted work and assessments)
+      api.get("/code-health/recommendations", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const query = z
+          .strictObject({
+            repo: z.string().min(1).max(128),
+            cursor: z
+              .string()
+              .regex(/^(0|[1-9][0-9]{0,5})$/)
+              .default("0"),
+          })
+          .safeParse(req.query);
+        if (!query.success || Number(query.data.cursor) % 50 !== 0)
+          return reply.code(400).send({ error: "Invalid recommendation history query" });
+        if (!config.repos.some((row) => row.id === query.data.repo))
+          return reply.code(404).send({ error: "Unknown code-health repo" });
+        reply.header("cache-control", "no-store");
+        try {
+          return await codeHealthOutput(
+            codeHealth.recommendationHistory(query.data.repo, Number(query.data.cursor)),
+          );
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (operator decisions on durable code-health recommendations)
+      api.post("/code-health/recommendations/:id", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const params = z
+          .strictObject({ id: z.string().regex(/^chr_[a-f0-9]{32}$/) })
+          .safeParse(req.params);
+        const query = z
+          .strictObject({ repo: z.string().trim().min(1).max(128) })
+          .safeParse(req.query);
+        const body = RecommendationMutation.safeParse(req.body);
+        if (!params.success || !query.success || !body.success)
+          return reply.code(400).send({ error: "Invalid recommendation decision" });
+        if (!config.repos.some((repo) => repo.id === query.data.repo))
+          return reply.code(404).send({ error: "Unknown code-health repo" });
+        reply.header("cache-control", "no-store");
+        try {
+          const cleaned = await codeHealthOutput(body.data);
+          if (JSON.stringify(cleaned) !== JSON.stringify(body.data))
+            return reply.code(400).send({
+              error: "Decision contains unsafe text or credentials. Remove it before retrying.",
+            });
+          if (
+            body.data.change.action === "assess" &&
+            !store.codeHealthDecisionRecorded(query.data.repo, body.data.requestId)
+          )
+            codeHealth.evidence(query.data.repo, body.data.change.evidenceId, undefined);
+          const result = store.decideCodeHealthRecommendation(
+            query.data.repo,
+            params.data.id,
+            body.data,
+            config.operator.id,
+            now(),
+            flightSeat(config)?.session.repoId === query.data.repo
+              ? flightSeat(config)?.seat.id
+              : undefined,
+          );
+          bus.emit("flight");
+          bus.emit("agents");
+          return await codeHealthOutput(result);
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
       });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>

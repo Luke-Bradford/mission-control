@@ -314,7 +314,7 @@ describe("configView crew roles", () => {
       model: "opus",
       mode: "read-only",
       loop: "plan",
-      tools: ["report_plan", "read_ticket"],
+      tools: ["report_plan", "read_ticket", "code_health"],
       here: "planner: writes each ticket's plan for the developers",
     });
     expect(crew?.sessions[0]?.seats.map((s) => s.loop)).toEqual(["build", "plan"]);

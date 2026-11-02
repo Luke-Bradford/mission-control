@@ -343,8 +343,31 @@ afterEach(() => {
 });
 
 describe("the mc tools", () => {
+  it("confines code_health reads to the live session repo and fails closed on secret lookup", async () => {
+    const ctx = { seatId: "guido-1", runId: RUN };
+    const reader = tool(MC_TOOL_NAMES.codeHealth);
+    const result = await reader.call(ctx, { tab: "overview" });
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.text).repoId).toBe("mc");
+    expect((await reader.call(ctx, { tab: "overview", repo: "other" })).isError).toBe(true);
+    expect((await reader.call({ ...ctx, runId: "ended" }, { tab: "overview" })).isError).toBe(true);
+    expect(
+      (
+        await tool(
+          MC_TOOL_NAMES.codeHealth,
+          make({
+            knownSecrets: async () => {
+              throw Error("fixture failure");
+            },
+          }),
+        ).call(ctx, { tab: "overview" })
+      ).isError,
+    ).toBe(true);
+  });
+
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.codeHealth, []],
       [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsInbox, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
@@ -361,6 +384,7 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.codeHealth,
       MC_TOOLS.commsRead,
       MC_TOOLS.commsInbox,
       MC_TOOLS.commsSend,
@@ -1297,6 +1321,52 @@ describe("call_flight", () => {
 });
 
 describe("through /mcp", () => {
+  it("offers code_health only to a granted read-only role and refuses a writer call", async () => {
+    const tokens = new RunTokens(),
+      readerToken = tokens.issue("reader", "reader:1"),
+      writerToken = tokens.issue("guido-1", RUN);
+    liveSeat("reader", "reader:1");
+    const app = buildApp({
+      config: config(),
+      store,
+      bus,
+      tokens,
+      mcpTools: () => tools,
+      seatMode: (id) => (id === "reader" ? "read-only" : "writer"),
+      seatGrants: (id) => (id === "reader" ? [MC_TOOL_NAMES.codeHealth] : []),
+    });
+    const rpc = async (token: string, method: string, params?: unknown) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { authorization: `Bearer ${token}` },
+          payload: { jsonrpc: "2.0", id: 1, method, params },
+        })
+      ).json();
+    try {
+      const names = (await rpc(readerToken, "tools/list")).result.tools.map(
+        (t: { name: string }) => t.name,
+      );
+      expect(names).toContain(MC_TOOL_NAMES.codeHealth);
+      expect(
+        (
+          await rpc(writerToken, "tools/call", {
+            name: MC_TOOL_NAMES.codeHealth,
+            arguments: { tab: "overview" },
+          })
+        ).error.message,
+      ).toBe("unknown tool");
+      const read = await rpc(readerToken, "tools/call", {
+        name: MC_TOOL_NAMES.codeHealth,
+        arguments: { tab: "overview" },
+      });
+      expect(read.result.isError).not.toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("never offers FLIGHT ask_flight; a seat beside it still has it (#758)", async () => {
     const cfg = withFlight();
     tools = make({ config: cfg });

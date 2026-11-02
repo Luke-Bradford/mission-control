@@ -140,6 +140,48 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import {
+  failGitFileSource,
+  gitFileMetrics,
+  gitFileSource,
+  installGitFileSources,
+  markGitFileChecked,
+  recordGitFileSource,
+} from "./code-health/git-store.ts";
+import {
+  installRecommendations,
+  linkRecommendation,
+  type Mutation,
+  mutateRecommendation,
+  recommendationProposals,
+  recommendationRow,
+  recommendationRows,
+  upsertRecommendation,
+} from "./code-health/recommendations.ts";
+import {
+  aggregateDatedRisk,
+  datedPrFiles,
+  installRiskMemberships,
+  pruneRiskMemberships,
+  recordRiskMembership,
+  reviewedFileMembership,
+} from "./code-health/risk.ts";
+import {
+  checkFileSizes,
+  failFileSizes,
+  fileSizeHistory,
+  fileSizeSource,
+  installFileSizes,
+  recordFileSizes,
+} from "./code-health/size-store.ts";
+import {
+  codeHealthCiSource,
+  codeHealthEvidenceSource,
+  codeHealthReviewSource,
+  codeHealthSizeSource,
+  codeHealthSourceRevision,
+  installCodeHealthRevisions,
+} from "./code-health/source.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -1213,6 +1255,220 @@ export class Store {
       );
     this.migrate();
     this.backfillAuditHistory();
+    installRiskMemberships(this.db);
+    installGitFileSources(this.db);
+    installFileSizes(this.db);
+    installRecommendations(this.db);
+    installCodeHealthRevisions(this.db);
+  }
+
+  codeHealthRecommendations(repoId: string, openAt?: number) {
+    return recommendationRows(this.db, repoId, openAt);
+  }
+  codeHealthRecommendationPage(repoId: string, offset: number) {
+    const rows = this.db
+      .prepare(
+        "SELECT id FROM code_health_recommendations WHERE repo_id=? ORDER BY created_at DESC,id LIMIT 51 OFFSET ?",
+      )
+      .all(repoId, offset);
+    return {
+      recommendations: rows
+        .slice(0, 50)
+        .map((row) => recommendationRow(this.db, repoId, String(row.id))),
+      nextCursor: rows.length > 50 ? String(offset + 50) : null,
+    };
+  }
+  codeHealthRecommendation(repoId: string, id: string) {
+    return recommendationRow(this.db, repoId, id);
+  }
+  refreshCodeHealthRecommendations(repoId: string, at: number) {
+    this.transaction(() => {
+      const proposals = recommendationProposals(this, repoId, at);
+      for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
+      const ids = proposals.map((row) => row.id);
+      this.db
+        .prepare(
+          `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
+        )
+        .run(at, repoId, ...ids);
+    });
+  }
+  codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
+        )
+        .get(repoId, requestId) !== undefined
+    );
+  }
+  decideCodeHealthRecommendation(
+    repoId: string,
+    id: string,
+    request: Mutation,
+    actor: string,
+    at: number,
+    flightId?: string,
+  ) {
+    let response: ReturnType<typeof mutateRecommendation> | undefined;
+    this.transaction(() => {
+      const previous = this.db
+        .prepare(
+          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
+        )
+        .get(repoId, request.requestId);
+      response = mutateRecommendation(this.db, repoId, id, request, actor, at);
+      if (!previous) {
+        if (request.change.action === "accept" && flightId)
+          this.insertComms(
+            {
+              at,
+              from: COMMS_CAPCOM,
+              to: flightId,
+              ticket: null,
+              text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
+            },
+            `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
+            null,
+          );
+        this.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: actor,
+          targetRunId: null,
+          ref: id,
+          questionId: null,
+          about: `Code health ${repoId}: ${id}`,
+          decision: JSON.stringify({ actor, change: request.change, response: response.state }),
+          basis: request.basis,
+        });
+      }
+    }, true);
+    if (!response) throw new Error("Recommendation transaction returned no result");
+    return response;
+  }
+  linkCodeHealthRecommendation(
+    repoId: string,
+    id: string,
+    link: string,
+    actor: string,
+    at: number,
+  ) {
+    this.transaction(() => {
+      linkRecommendation(this.db, repoId, id, link, at);
+      this.addFlightDecision({
+        at,
+        kind: "ticket",
+        seatId: actor,
+        targetRunId: null,
+        ref: id,
+        questionId: null,
+        about: `Code health ${repoId}: ${id}`,
+        decision: `Linked ${link}`,
+        basis: "Accepted recommendation; existing authorised FLIGHT ticket path.",
+      });
+    });
+  }
+
+  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number): boolean {
+    const result = this.db
+      .prepare(
+        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL AND json_extract(state,'$.kind')='accepted'",
+      )
+      .run(JSON.stringify({ fingerprint, at }), repoId, id);
+    return Number(result.changes) === 1;
+  }
+  completeCodeHealthWork(repoId: string, id: string) {
+    this.db
+      .prepare(
+        "UPDATE code_health_recommendations SET work_ready=1 WHERE repo_id=? AND id=? AND linked_work IS NOT NULL",
+      )
+      .run(repoId, id);
+  }
+
+  codeHealthDatedRisk(repoId: string, from: number, until: number) {
+    return aggregateDatedRisk(datedPrFiles(this.db, repoId, from, until));
+  }
+  codeHealthGitSource(repoId: string, checkout: string) {
+    return gitFileSource(this.db, repoId, checkout);
+  }
+  recordCodeHealthGitSource(
+    repoId: string,
+    checkout: string,
+    source: Parameters<typeof recordGitFileSource>[3],
+    at: number,
+  ) {
+    this.transaction(() => recordGitFileSource(this.db, repoId, checkout, source, at));
+  }
+  markCodeHealthGitChecked(repoId: string, checkout: string, sha: string, at: number) {
+    markGitFileChecked(this.db, repoId, checkout, sha, at);
+  }
+  failCodeHealthGitSource(repoId: string, checkout: string, sha: string | null, at: number) {
+    failGitFileSource(this.db, repoId, checkout, sha, at);
+  }
+  codeHealthGitMetrics(repoId: string, checkout: string, from: number, until: number, at: number) {
+    return gitFileMetrics(this.db, repoId, checkout, from, until, at);
+  }
+  codeHealthReviewedFiles(repoId: string, from: number, until: number) {
+    return reviewedFileMembership(this.db, repoId, from, until);
+  }
+  recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
+    recordRiskMembership(this.db, input);
+  }
+  codeHealthRevision(repoId: string): string {
+    return codeHealthSourceRevision(this.db, repoId);
+  }
+
+  /** A consistent, deferred read snapshot; WAL writers remain independent. */
+  codeHealthSnapshot<T>(read: () => T): T {
+    let result: T | undefined;
+    this.transaction(() => {
+      result = read();
+    });
+    return result as T;
+  }
+
+  codeHealthReviews(repoId: string, from: number, until: number) {
+    return codeHealthReviewSource(this.db, repoId, from, until);
+  }
+
+  codeHealthCi(repoId: string, from: number, until: number) {
+    return codeHealthCiSource(this.db, repoId, from, until);
+  }
+
+  codeHealthSizes(checkout: string) {
+    return codeHealthSizeSource(this.db, checkout);
+  }
+  codeHealthSizeSnapshot(repoId: string, checkout: string) {
+    return fileSizeSource(this.db, repoId, checkout);
+  }
+  recordCodeHealthSizeSnapshot(
+    repoId: string,
+    checkout: string,
+    snapshot: Parameters<typeof recordFileSizes>[3],
+    at: number,
+  ) {
+    this.transaction(() => recordFileSizes(this.db, repoId, checkout, snapshot, at));
+  }
+  checkCodeHealthSizes(repoId: string, checkout: string, sha: string, at: number) {
+    checkFileSizes(this.db, repoId, checkout, sha, at);
+  }
+  failCodeHealthSizes(repoId: string, checkout: string, sha: string | null, at: number) {
+    failFileSizes(this.db, repoId, checkout, sha, at);
+  }
+  codeHealthSizeHistory(
+    repoId: string,
+    checkout: string,
+    paths: readonly string[],
+    from: number,
+    until: number,
+    sha: string,
+  ) {
+    return fileSizeHistory(this.db, repoId, checkout, paths, from, until, sha);
+  }
+
+  codeHealthEvidence(query: Parameters<typeof codeHealthEvidenceSource>[1]) {
+    return codeHealthEvidenceSource(this.db, query);
   }
 
   /** One-time-safe reconstruction from sources that already survived retention. */
@@ -2535,9 +2791,15 @@ export class Store {
 
   private historyNextTable = 0;
   private operationalHistoryNextTable = 0;
+  private riskMembershipPruneCursor = { at: -1, id: 0 };
 
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
+    this.riskMembershipPruneCursor = pruneRiskMemberships(
+      this.db,
+      now,
+      this.riskMembershipPruneCursor,
+    );
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     this.db
@@ -3034,6 +3296,25 @@ export class Store {
       if (p.files !== undefined) {
         deleteFiles.run(repoId, p.number);
         for (const f of p.files) addFile.run(repoId, p.number, f.path, f.changeType);
+        if (p.headSha) {
+          try {
+            recordRiskMembership(this.db, {
+              repoId,
+              pr: p.number,
+              sha: p.headSha,
+              kind: "github-head",
+              files: p.files.map((file) => file.path),
+              declaredFiles: p.changedFiles ?? null,
+              at: readAt,
+            });
+          } catch {
+            this.db
+              .prepare(
+                "DELETE FROM code_health_file_memberships WHERE repo_id=? AND pr_number=? AND sha=? AND kind='github-head'",
+              )
+              .run(repoId, p.number, p.headSha);
+          }
+        }
       }
       ins.run(
         repoId,
