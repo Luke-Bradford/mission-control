@@ -326,4 +326,22 @@ describe("read-only git file evidence", () => {
       /numstat coverage/,
     );
   });
+  it("ignores replacement objects and rejects legacy parent grafts at the same analysed SHA", async () => {
+    const sha = mergedChange(),
+      p1 = git("rev-parse", "HEAD^1"),
+      p2 = git("rev-parse", "HEAD^2");
+    const before = await collectGitFileSource(checkout, realGitExec, NOW - 91 * DAY);
+    writeFileSync(join(checkout, "replacement.ts"), "replacement\n".repeat(9));
+    git("add", "replacement.ts");
+    const tree = git("write-tree"),
+      replacement = git("commit-tree", tree, "-p", p1, "-p", p2, "-m", "replacement");
+    git("replace", sha, replacement);
+    const after = await collectGitFileSource(checkout, realGitExec, NOW - 91 * DAY);
+    expect(after.analysedSha).toBe(before.analysedSha);
+    expect(after.commits).toEqual(before.commits);
+    writeFileSync(join(checkout, ".git/info/grafts"), `${sha} ${p2} ${p1}\n`);
+    await expect(collectGitFileSource(checkout, realGitExec, NOW - 91 * DAY)).rejects.toThrow(
+      /Local graft rules/,
+    );
+  });
 });

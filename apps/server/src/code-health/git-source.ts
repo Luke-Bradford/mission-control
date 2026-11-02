@@ -118,47 +118,53 @@ export function parseGitFileLog(output: string): GitFileCommit[] {
 }
 
 /** Local info rules override tree attributes. Reject them rather than cache machine-dependent counts. */
-async function noLocalAttributeRules(checkout: string, base: string[], exec: GitExec) {
+async function noLocalOverrides(checkout: string, base: string[], exec: GitExec) {
   try {
     const overrides = await exec([...base, "config", "--get-regexp", "^diff\\..*\\.binary$"]);
     if (overrides.trim()) throw Error("Named diff binary overrides prevent immutable evidence");
   } catch (error) {
     if (!error || typeof error !== "object" || !("code" in error) || error.code !== 1) throw error;
   }
-  const path = (await exec([...base, "rev-parse", "--git-path", "info/attributes"])).trim();
-  if (!path) throw Error("Cannot resolve local attribute scope");
-  const file = await open(
-    isAbsolute(path) ? path : join(checkout, path),
-    constants.O_RDONLY | constants.O_NONBLOCK,
-  ).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  });
-  if (!file) return;
-  try {
-    if (!(await file.stat()).isFile()) throw Error("Unsupported local attribute source");
-    const buffer = Buffer.alloc(65537),
-      { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (
-      bytesRead > 65536 ||
-      buffer
-        .subarray(0, bytesRead)
-        .toString("utf8")
-        .split(/\r?\n/)
-        .some((line) => line.trim() && !line.trim().startsWith("#"))
-    )
-      throw Error("Local attribute rules prevent immutable git evidence");
-  } finally {
-    await file.close();
+  for (const name of ["info/attributes", "info/grafts"]) {
+    const path = (await exec([...base, "rev-parse", "--git-path", name])).trim();
+    if (!path) throw Error("Cannot resolve local attribute scope");
+    const file = await open(
+      isAbsolute(path) ? path : join(checkout, path),
+      constants.O_RDONLY | constants.O_NONBLOCK,
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!file) continue;
+    try {
+      if (!(await file.stat()).isFile()) throw Error("Unsupported local attribute source");
+      const buffer = Buffer.alloc(65537),
+        { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      if (
+        bytesRead > 65536 ||
+        buffer
+          .subarray(0, bytesRead)
+          .toString("utf8")
+          .split(/\r?\n/)
+          .some((line) => line.trim() && !line.trim().startsWith("#"))
+      )
+        throw Error(
+          name === "info/attributes"
+            ? "Local attribute rules prevent immutable git evidence"
+            : "Local graft rules prevent immutable git evidence",
+        );
+    } finally {
+      await file.close();
+    }
   }
 }
 
 /** Committed objects only. The caller persists the result under repo, checkout and immutable SHA. */
 export async function gitFileHead(checkout: string, exec: GitExec = realGitExec) {
-  const base = await readOnlyBase(checkout, exec);
+  const base = ["--no-replace-objects", ...(await readOnlyBase(checkout, exec))];
   const sha = (await exec([...base, "rev-parse", "--verify", "origin/HEAD^{commit}"])).trim();
   if (!SHA.test(sha)) throw Error("Invalid git evidence head");
-  await noLocalAttributeRules(checkout, base, exec);
+  await noLocalOverrides(checkout, base, exec);
   return sha;
 }
 export async function collectGitFileSource(
@@ -168,11 +174,11 @@ export async function collectGitFileSource(
   immutableSha?: string,
 ) {
   const started = performance.now(),
-    base = await readOnlyBase(checkout, exec);
+    base = ["--no-replace-objects", ...(await readOnlyBase(checkout, exec))];
   const sha = immutableSha ?? (await gitFileHead(checkout, exec));
   if (!SHA.test(sha) || !Number.isSafeInteger(from) || from < 0)
     throw Error("Invalid git evidence scope");
-  await noLocalAttributeRules(checkout, base, exec);
+  await noLocalOverrides(checkout, base, exec);
   const output = await exec([
     ...base,
     `--attr-source=${sha}`,
@@ -201,7 +207,7 @@ export async function collectGitFileSource(
     sha,
     "--",
   ]);
-  await noLocalAttributeRules(checkout, base, exec);
+  await noLocalOverrides(checkout, base, exec);
   const commits = parseGitFileLog(output);
   if (!commits.length || commits[0].sha !== sha) throw Error("Git evidence head mismatch");
   return {
