@@ -15,6 +15,7 @@ describe("planner file context wiring", () => {
       const rolesDir = join(dir, "roles");
       mkdirSync(rolesDir);
       writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
+      writeFileSync(join(rolesDir, "GUIDO.md"), "# GUIDO: developer\n");
       const body = TICKET.body + "\n\n## Files\n- `src/example.ts`",
         fileContext = vi.fn(async () => '[{"file":"src/example.ts","recommendation":"fixture"}]');
       const { sup } = make({
