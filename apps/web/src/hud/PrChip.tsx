@@ -147,15 +147,17 @@ export function PrChip({
         url={pr.url}
         to={ticket ? ticketPath(ticket.repoId, ticket.number) : undefined}
       />
-      <a
-        className="qa-report-link"
-        href={`/qa?repo=${encodeURIComponent(pr.repoId)}&pr=${pr.number}${"headSha" in pr && pr.headSha ? `&head=${encodeURIComponent(pr.headSha)}` : ""}`}
-        aria-label={`QA report for ${pr.repoId} PR #${pr.number}`}
-        title="Open QA report"
-        onClick={(event) => event.stopPropagation()}
-      >
-        QA
-      </a>
+      <span className="rref">
+        <a
+          className="qa-report-link"
+          href={`/qa?repo=${encodeURIComponent(pr.repoId)}&pr=${pr.number}${"headSha" in pr && pr.headSha ? `&head=${encodeURIComponent(pr.headSha)}` : ""}`}
+          aria-label={`QA report for ${pr.repoId} PR #${pr.number}`}
+          title="Open QA report"
+          onClick={(event) => event.stopPropagation()}
+        >
+          QA
+        </a>
+      </span>
       {showState && pr.state === "open" && pr.uat ? (
         <Pill tone="warn">Waiting for your acceptance</Pill>
       ) : showState && pill ? (
