@@ -87,6 +87,7 @@ export interface CodeHealthFileMeasure {
   additions: number | null;
   deletions: number | null;
   findings: number | null;
+  outsideDiffFindings: number | null;
   incidence: CodeHealthRate | null;
   evidence: CodeHealthEvidenceRef[];
 }

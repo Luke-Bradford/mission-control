@@ -3,6 +3,11 @@ import { posix } from "node:path";
 import { promisify } from "node:util";
 import type { BoardItem, MapSnapshot, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import {
+  MAP_COUPLING_CAP,
+  MAP_COUPLING_PR_FILES_MAX,
+  mapCouplingEligible,
+} from "./history-rules.ts";
 
 const exec = promisify(execFile);
 type Tree = Pick<MapSnapshot, "tree" | "imports" | "hist">;
@@ -21,9 +26,6 @@ export interface MapPersist {
 
 /** The History lens's deliberately bounded view of merged work. */
 export const MAP_HISTORY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
-const MAP_COUPLING_MIN = 4;
-const MAP_COUPLING_CAP = 600;
-const MAP_COUPLING_PR_FILES_MAX = 25;
 
 /** The commit `ref` names in the checkout: one cheap read, the key the cached tree is under. */
 export async function mapHead(checkout: string, ref = "origin/HEAD"): Promise<string> {
@@ -320,8 +322,7 @@ export function mapTree(
         const smaller = Math.min(couplingFiles.get(left) ?? 0, couplingFiles.get(right) ?? 0);
         return leftIndex === undefined ||
           rightIndex === undefined ||
-          count < MAP_COUPLING_MIN ||
-          count * 2 < smaller
+          !mapCouplingEligible(count, smaller)
           ? []
           : [[leftIndex, rightIndex, count, count / smaller] as [number, number, number, number]];
       })

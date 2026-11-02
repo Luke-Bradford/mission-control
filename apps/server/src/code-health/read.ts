@@ -13,20 +13,22 @@ import {
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import type { RecommendationRecord } from "./recommendations.ts";
+import { buildRiskTab } from "./risk-view.ts";
+import type { CodeHealthEvidenceKind } from "./source.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
 const EVIDENCE_MAX = 2000;
-type EvidenceKind = "review-rounds" | "findings" | "sizes" | "ci" | "durations";
 interface EvidenceQuery {
   repoId: string;
-  kind: EvidenceKind;
+  kind: CodeHealthEvidenceKind;
   from: number;
   until: number;
   revision: string;
   reference: CodeHealthEvidenceRef;
   sha?: string;
   file?: string;
+  otherFile?: string;
   category?: string;
   pr?: number;
 }
@@ -203,74 +205,16 @@ export class CodeHealthReader {
         };
       } else data = { tab, review };
     } else if (tab === "risk") {
-      const checkout = this.checkout(repoId);
-      const sizes = checkout ? this.store.codeHealthSizes(checkout) : null;
-      const observedReviews = this.store.codeHealthReviews(repoId, bounds.from, bounds.until);
-      const byFile = new Map<string, number>();
-      for (const finding of observedReviews.findings) {
-        if (finding.file) byFile.set(finding.file, (byFile.get(finding.file) ?? 0) + 1);
-      }
-      const findingCoverage = describe(
-        "findings on recorded file paths",
-        observedReviews.observedFrom,
-        observedReviews.observedUntil,
-        "Finding counts describe observed reported reviews, including findings outside a PR diff. Incidence is unavailable without complete changed-file membership.",
-      );
-      const sizeCoverage = describe(
-        "cached file-size snapshot",
-        null,
-        null,
-        sizes
-          ? "Largest 50 files at the analysed SHA. Snapshot collection time is not recorded."
-          : "A file-size snapshot has not been collected for this repo.",
-        sizes ? "available" : "not-collected",
-        sizes?.analysedSha ?? null,
-      );
-      let sizeRef: CodeHealthEvidenceRef | undefined;
-      if (sizes) {
-        sizeRef = this.reference(
-          { ...base, kind: "sizes", sha: sizes.analysedSha },
-          "File-size snapshot",
-          "Current line counts at one SHA; size alone does not establish growth or risk.",
-          sizeCoverage,
-        );
-        evidence.push(sizeRef);
-      }
-      describe(
-        "windowed file change and history",
-        null,
-        null,
-        "Dated touches, complete changed-file denominators, numstats and comparable size history are not collected.",
-        "not-collected",
-      );
-      data = {
-        tab,
-        files:
-          sizes?.files.map((file) => {
-            const refs = sizeRef ? [sizeRef] : [];
-            if (observedReviews.reviews.length) {
-              const findingRef = this.reference(
-                { ...base, kind: "findings", file: file.path },
-                `Findings: ${file.path}`,
-                "Findings recorded for this file in the selected reported-review window.",
-                findingCoverage,
-              );
-              refs.push(findingRef);
-            }
-            return {
-              ...file,
-              analysedSha: sizes.analysedSha,
-              mergedPrTouches: null,
-              additions: null,
-              deletions: null,
-              findings: observedReviews.reviews.length ? (byFile.get(file.path) ?? 0) : null,
-              incidence: null,
-              evidence: refs,
-            };
-          }) ?? [],
-        sizeHistory: [],
-        coupling: [],
-      };
+      const risk = buildRiskTab({
+        store: this.store,
+        checkout: this.checkout(repoId),
+        repoId,
+        base,
+        describe,
+        reference: (...args) => this.reference(...args),
+      });
+      data = risk.data;
+      evidence.push(...risk.evidence);
     } else {
       const source = this.store.codeHealthCi(repoId, bounds.from, bounds.until);
       const ciCoverage = describe(

@@ -1,10 +1,19 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { CodeHealthFinding, CodeHealthReviewRound } from "@mc/core";
+import { MAP_COUPLING_PR_FILES_MAX } from "../map/history-rules.ts";
+import { datedPrFiles, reviewedFileMembership } from "./risk.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
 type Row = Record<string, unknown>;
 const SOURCE_ROWS_MAX = 20_000;
-export type CodeHealthEvidenceKind = "review-rounds" | "findings" | "sizes" | "ci" | "durations";
+export type CodeHealthEvidenceKind =
+  | "review-rounds"
+  | "findings"
+  | "sizes"
+  | "ci"
+  | "durations"
+  | "merged-files"
+  | "reviewed-files";
 
 /** Revisions track relevant source writes, including writes from another SQLite connection. */
 export function installCodeHealthRevisions(db: Db): void {
@@ -21,6 +30,7 @@ export function installCodeHealthRevisions(db: Db): void {
     ["pull_requests", "direct"],
     ["pr_history", "direct"],
     ["pr_files", "direct"],
+    ["code_health_file_memberships", "direct"],
     ["map_cache", "global"],
   ] as const;
   for (const [table, scope] of tables) {
@@ -184,6 +194,7 @@ export function codeHealthEvidenceSource(
     checkout?: string;
     sha?: string;
     file?: string;
+    otherFile?: string;
     category?: string;
     pr?: number;
   },
@@ -198,6 +209,37 @@ export function codeHealthEvidenceSource(
   )
     throw new Error("Invalid code-health evidence page");
   const args = [query.repoId, query.from, query.until, query.limit + 1, query.offset];
+  if (query.kind === "merged-files") {
+    return datedPrFiles(db, query.repoId, query.from, query.until)
+      .filter(
+        (row) =>
+          (!query.file || row.files.includes(query.file)) &&
+          (!query.otherFile ||
+            (row.complete &&
+              row.files.includes(query.otherFile) &&
+              (row.declaredFiles ?? Infinity) <= MAP_COUPLING_PR_FILES_MAX)),
+      )
+      .slice(query.offset, query.offset + query.limit + 1)
+      .map((row) => ({
+        pr: row.pr,
+        sha: row.sha,
+        mergedAt: row.mergedAt,
+        collectedAt: row.collectedAt,
+        declaredFiles: row.declaredFiles,
+        complete: row.complete,
+        source: row.source,
+      }));
+  }
+  if (query.kind === "reviewed-files") {
+    const cohort = reviewedFileMembership(db, query.repoId, query.from, query.until);
+    return cohort.provenance.slice(query.offset, query.offset + query.limit + 1).map((row) => ({
+      pr: row.pr,
+      sha: row.sha,
+      changedFile: query.file && row.complete ? row.files.includes(query.file) : null,
+      complete: row.complete,
+      cohortMembershipComplete: cohort.complete,
+    }));
+  }
   if (query.kind === "review-rounds")
     return db
       .prepare(`SELECT id AS reviewId,
