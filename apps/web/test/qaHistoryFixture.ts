@@ -86,6 +86,8 @@ export function nativeQaFixture(index = 1): QaNativeHistory {
     },
     findings: [],
     coverage: [],
+    receipts: [],
+    resolutions: [],
     tests: [
       {
         command: "pnpm test",

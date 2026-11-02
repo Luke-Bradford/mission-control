@@ -296,3 +296,52 @@ it("does not hide a different native identity that reuses a pruned review id", (
     reviewer: { id: "retro-new" },
   });
 });
+
+it("retains original resolutions and separates bound command receipts from reported test counts", () => {
+  const prior = native(1),
+    id = native(2);
+  store.addCheckRun({
+    runId: "review-2",
+    command: "pnpm check",
+    headSha: nativeHead(2),
+    ok: true,
+    exitCode: 0,
+    at: 900,
+  });
+  store.addCheckRun({
+    runId: "review-2",
+    command: "wrong head check",
+    headSha: "f".repeat(40),
+    ok: true,
+    at: 901,
+  });
+  const db = new DatabaseSync(store.path);
+  db.prepare(
+    "INSERT INTO test_lock_runs (run_id, seat_id, command, queued_at, started_at, ended_at, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run("review-2", "retro-2", "focused tool command", 700, 710, 800, "pass");
+  db.prepare(
+    "INSERT INTO review_resolutions (review_id, prior_review_id, finding_pos, outcome) VALUES (?, ?, ?, ?)",
+  ).run(id, prior, 0, "fixed");
+  db.close();
+  const value = qaNativeHistory(store, config, id, identity(id));
+  expect(value?.receipts).toHaveLength(2);
+  expect(value?.receipts.find((r) => r.command === "pnpm check")).toMatchObject({
+    origin: "hub-receipt",
+    outcome: "passed",
+    exitCode: 0,
+    at: 900,
+  });
+  const lock = value?.receipts.find((r) => r.command === "focused tool command");
+  expect(lock).toMatchObject({
+    origin: "hub-receipt",
+    outcome: "unknown",
+    exitCode: null,
+    at: 800,
+  });
+  expect(lock?.evidence).toContain("scratch source cleanliness were not recorded");
+  expect(value?.tests[0]).toMatchObject({ passed: 3, failed: 1 });
+  expect(value?.resolutions).toEqual([
+    { findingRef: { reviewId: prior, pos: 0 }, outcome: "fixed" },
+  ]);
+  expect(store.qaReports("sample", 8)).toEqual([]);
+});

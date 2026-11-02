@@ -151,6 +151,19 @@ describeRendered("QA history in the application shell", () => {
     async () => {
       const f = qaHistoryFixture(),
         r = qaReportFixture();
+      const legacy = nativeQaFixture();
+      legacy.receipts = [
+        {
+          command: "focused tool command",
+          origin: "hub-receipt",
+          outcome: "unknown",
+          exitCode: null,
+          at: legacy.entry.recordedAt - 1000,
+          evidence:
+            "A retained tool invocation; process exit, test counts and source cleanliness were not recorded.",
+        },
+      ];
+      legacy.resolutions = [{ findingRef: { reviewId: 1, pos: 0 }, outcome: "fixed" }];
       const page = await renderAt({
         page: "test/desktopBrowser.html",
         width: 1600,
@@ -161,7 +174,7 @@ describeRendered("QA history in the application shell", () => {
           ...qaHistoryApi(),
           "/api/qa/history?limit=50": f,
           [`/api/qa-reports/${r.id}`]: r,
-          [`/api/qa/history/native/2?identity=${"d".repeat(64)}`]: nativeQaFixture(),
+          [`/api/qa/history/native/2?identity=${"d".repeat(64)}`]: legacy,
         },
       });
       try {
@@ -181,6 +194,14 @@ describeRendered("QA history in the application shell", () => {
         await page.boxes(".qa-history-table");
         await page.click('.qa-history-table a[href*="native=2"]');
         await page.boxes(".qa-history-native");
+        await page.click(".qa-history-native details summary");
+        expect(
+          await page.evaluate(
+            () => document.querySelector(".qa-history-native details[open]")?.textContent,
+            null,
+          ),
+        ).toContain("unknown · exit not recorded");
+
         expect(
           await page.evaluate(
             () => ({

@@ -2426,7 +2426,8 @@ verdict never grants acceptance or deployment readiness for another head. Use **
 
 Original native records include reported, failed and superseded review attempts that have no matching
 saved snapshot. They retain their actual seat, exact head, summary, findings, coverage and reported test
-counts where available. Failed attempts without a verdict stay unknown. Reads do not reconstruct reports,
+counts where available. Original resolutions and retained hub command records are shown separately;
+lock-only records keep their unknown exit/outcome and source-cleanliness limitations. Failed attempts without a verdict stay unknown. Reads do not reconstruct reports,
 fetch current CI, or change history. Native records still follow existing retention; already pruned records
 cannot be recovered here. Legacy screenshot references load only on request with existing operator auth;
 the original bytes may have expired. Missing CI, checklist coverage, applicability or images is stated,

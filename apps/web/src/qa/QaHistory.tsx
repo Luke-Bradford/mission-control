@@ -256,6 +256,13 @@ export function NativeQaHistory({ id, identity }: { id: string; identity: string
     record?.review.id === Number(id) &&
     new URLSearchParams(record.entry.permalink.split("?")[1]).get("identity") === identity;
   const connected = useStore(streamStatus).connected;
+  const receiptCopies = new Map<string, number>();
+  const receipts = (record?.receipts ?? []).map((receipt) => {
+    const content = JSON.stringify(receipt),
+      occurrence = receiptCopies.get(content) ?? 0;
+    receiptCopies.set(content, occurrence + 1);
+    return { receipt, key: `${content}:${occurrence}` };
+  });
   return (
     <section id="page-qa-readiness" className="uat-page qa-history">
       <header className="uat-title">
@@ -344,13 +351,40 @@ export function NativeQaHistory({ id, identity }: { id: string; identity: string
                 </details>
               ))}
               {!record.findings.length && <p>No findings were retained for this review.</p>}
+              {record.resolutions.map((item) => (
+                <p key={`${item.findingRef.reviewId}:${item.findingRef.pos}`}>
+                  Recorded resolution: review {item.findingRef.reviewId}, finding{" "}
+                  {item.findingRef.pos} · {item.outcome}
+                </p>
+              ))}
             </div>
           </Panel>
+
+          {record.receipts.length > 0 && (
+            <Panel title="Retained hub command records">
+              <div className="pb qa-history-native">
+                <p>
+                  Original run records, separate from reported counts. Each record keeps its own
+                  time and limits.
+                </p>
+                {receipts.map(({ receipt, key }) => (
+                  <details key={key}>
+                    <summary>{receipt.command}</summary>
+                    <p>
+                      {receipt.outcome} · exit {receipt.exitCode ?? "not recorded"} ·{" "}
+                      {date(receipt.at ?? null)}
+                    </p>
+                    <p>{receipt.evidence}</p>
+                  </details>
+                ))}
+              </div>
+            </Panel>
+          )}
           <Panel title="Reviewer-reported tests">
             <div className="pb qa-history-native">
               <p>
-                These are reported counts. This legacy record does not prove execution or preserve
-                command receipts.
+                These are reported counts, not execution receipts. Retained hub command records,
+                when available, appear separately with their own limits.
               </p>
               {record.tests.map((test, n) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: legacy tests are immutable insertion-ordered rows within this keyed review record.
@@ -364,6 +398,9 @@ export function NativeQaHistory({ id, identity }: { id: string; identity: string
                 </details>
               ))}
               {!record.tests.length && <p>No test counts were retained.</p>}
+              {!record.receipts.length && (
+                <p>No hub command records were retained for this review and commit.</p>
+              )}
             </div>
           </Panel>
           <Panel title="Recorded browser screenshots">

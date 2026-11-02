@@ -10,7 +10,7 @@ const LIMITATIONS = [
 const LEGACY_LIMITATIONS = [
   "This is an original stored native review record, not an immutable saved report. Findings show their currently retained resolution state.",
   "No historical CI snapshot or immutable before/after archive was saved with this record. Current CI is not substituted for past CI.",
-  "Test counts are reviewer-reported, not command execution receipts. Missing coverage and unknown verdicts are not a pass.",
+  "Test counts are reviewer-reported, separate from any retained hub command records. Hub records keep their own timestamps and limits; they are not an immutable review snapshot. Missing coverage and unknown verdicts are not a pass.",
   "Recorded screenshots may have expired. Opening one checks availability; it does not recreate or retain missing bytes.",
 ];
 
@@ -115,6 +115,20 @@ export function qaNativeHistory(
     findings: store.findingsOf(id),
     coverage: store.reviewChecks(id),
     tests: store.reviewTests(id),
+    receipts: (review.runId ? store.qaCheckReceipts(review.runId, review.sha) : []).map(
+      (check) => ({
+        command: check.command,
+        origin: "hub-receipt",
+        outcome: check.ok === null ? "unknown" : check.ok ? "passed" : "failed",
+        at: check.at,
+        exitCode: check.exitCode,
+        evidence: check.evidence,
+      }),
+    ),
+    resolutions: store.reviewResolutions(id).map((item) => ({
+      findingRef: { reviewId: item.reviewId, pos: item.pos },
+      outcome: item.outcome,
+    })),
     screenshots: store.reviewShots(id),
     limitations: LEGACY_LIMITATIONS,
   };

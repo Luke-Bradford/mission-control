@@ -1,5 +1,11 @@
-import type { QaReport } from "./qa-report.ts";
-import type { ReportedTest, ReviewCheck, ReviewRow, StoredFinding } from "./review.ts";
+import type { QaReport, QaTestReceipt } from "./qa-report.ts";
+import type {
+  FindingResolution,
+  ReportedTest,
+  ReviewCheck,
+  ReviewRow,
+  StoredFinding,
+} from "./review.ts";
 import type { ReviewShotView } from "./views.ts";
 
 /** A small index entry. It contains no image URLs, report body, or live approval. */
@@ -42,6 +48,8 @@ export interface QaNativeHistory {
   headUrl: string | null;
   findings: StoredFinding[];
   coverage: ReviewCheck[];
+  receipts: QaTestReceipt[];
+  resolutions: FindingResolution[];
   tests: (Omit<ReportedTest, "file"> & { file: string | null })[];
   screenshots: ReviewShotView[];
   limitations: string[];

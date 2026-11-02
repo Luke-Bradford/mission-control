@@ -158,3 +158,27 @@ it("requests native images with operator auth only on demand and names pruned by
   );
   expect(new Headers(imageCall?.[1]?.headers).get(OPERATOR_HEADER)).toBe("fictional-history-key");
 });
+
+it("shows legacy hub records with unknown tool outcomes separately from reported counts and original resolutions", async () => {
+  window.history.replaceState(null, "", `/qa?view=history&native=2&identity=${"d".repeat(64)}`);
+  const record = nativeQaFixture();
+  record.receipts = [
+    {
+      command: "focused tool command",
+      origin: "hub-receipt",
+      outcome: "unknown",
+      exitCode: null,
+      at: 1000,
+      evidence:
+        "Tool completion recorded; numeric exit, counts and source cleanliness were not recorded.",
+    },
+  ];
+  record.resolutions = [{ findingRef: { reviewId: 1, pos: 0 }, outcome: "fixed" }];
+  stubFetch({ [`/api/qa/history/native/2?identity=${"d".repeat(64)}`]: record });
+  render(<QaReadiness />);
+  expect(await screen.findByText("Retained hub command records")).toBeTruthy();
+  expect(screen.getByText(/unknown · exit not recorded/)).toBeTruthy();
+  expect(screen.getByText(/Reported: 2 passed · 1 failed/)).toBeTruthy();
+  expect(screen.getByText(/Recorded resolution: review 1, finding 0 · fixed/)).toBeTruthy();
+  expect(screen.queryByText(/QA passed/)).toBeNull();
+});
