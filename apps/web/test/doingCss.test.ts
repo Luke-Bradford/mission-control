@@ -49,7 +49,7 @@ function solve(tracks: Track[], avail: number, gap: number): number[] {
 
 /** The nth px length after `prop:` in a rule (`max(16px, …)` and `8px 14px` both read). */
 const pxOf = (r: string, prop: string, nth = 1) => {
-  const values = r.match(new RegExp(`${prop}: (?:max\\()?(\\d+)px(?: (\\d+)px)?`));
+  const values = r.match(new RegExp(`${prop}: (?:max\\()?(\\d+)(?:px)?(?: (\\d+)px)?`));
   return Number(values?.[nth] ?? values?.[1]);
 };
 
@@ -125,30 +125,29 @@ describe("doing lines and run rows (hud.css)", () => {
     expect(rule(String.raw`\.runrow button\.rsummary`)).toContain("line-height: inherit");
   });
 
-  it("fits all seven Crew columns at the controller's docked and wide viewport widths", () => {
+  it("fits all seven Crew columns in the redesigned comparison surface and exposes narrow overflow", () => {
     for (const [viewport, dock] of [
       [1440, true],
       [2000, false],
     ] as const) {
       const main = viewport - 32 - (dock ? 392 : 0);
-      const panel = main - main * (viewport >= 1920 ? 0.27 : 0.31) - 12 - 18;
+      // The roster is full content width below1450; wider layouts cap its independent column
+      // at1200. A smaller screen scrolls the explicit1050px comparison surface, never clips it.
+      const panel = (main < 1450 ? main : Math.min(1200, main - 340 - 12)) - 2;
       const selector = String.raw`#agentsList \.trow`;
-      const cssAtWidth =
-        panel < 900
-          ? css.slice(css.indexOf("@container agents (width < 900px)"))
-          : panel < 1000
-            ? css.slice(css.indexOf("@container agents (width < 1000px)"))
-            : css;
-      const grid = cssAtWidth.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
-      const tracks = templateOf(grid);
-      const gap = panel < 900 ? 4 : 6;
-      const available = panel - 16;
-      const widths = solve(tracks, available, gap);
+      const grid = rule(selector),
+        tracks = templateOf(grid);
+      const minimum = pxOf(grid, "min-width");
+      const rowWidth = Math.max(panel, minimum),
+        available = rowWidth - 2 * pxOf(grid, "padding", 2);
+      const widths = solve(tracks, available, 8);
       expect(tracks).toHaveLength(7);
-      expect(widths[2]).toBeGreaterThan(100);
-      expect(widths.reduce((a, b) => a + b, 0) + gap * 6).toBeLessThanOrEqual(available + 0.01);
+      expect(widths[2]).toBeGreaterThanOrEqual(260);
+      expect(widths[5]).toBeGreaterThanOrEqual(178);
+      expect(widths.reduce((a, b) => a + b, 0) + 8 * 6).toBeLessThanOrEqual(available + 0.01);
+      if (minimum > panel) expect(rule("#agentsList")).toContain("overflow-x: auto");
     }
-    expect(rule("#agentsList")).toContain("overflow-x: hidden");
+    expect(rule("#agentsList")).toContain("overflow-x: auto");
   });
 
   it("the loop step is one line and a 4px bar, with the mockup's colours", () => {

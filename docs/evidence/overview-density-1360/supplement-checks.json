@@ -1,0 +1,493 @@
+{
+  "scope": "Author supplemental real-browser keyboard proof on source-bound production025build; fictional loaded APIs, no source/CSS injection, writes refused. No baseline-pair claim.",
+  "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+  "buildChecks": {
+    "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+    "build": "after-build",
+    "builtAt": "2026-11-02T23:02:03.079Z",
+    "harnessSha256": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+    "fixtureSha256": "925ff8a1f37eddf35cb80203fc54ac10465e706f4670bfd25d3180a54a4dd989",
+    "scope": "Clean committed production App and CSS, controlled fixture entry. No source/CSS injection or live requests."
+  },
+  "browser": "151.0.7922.34",
+  "receipts": [
+    {
+      "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+      "scenario": "allowance",
+      "scheme": "light",
+      "width": 1600,
+      "height": 1000,
+      "deviceScaleFactor": 1,
+      "fixtureClock": "2026-10-17T12:00:00.000Z",
+      "apiSha256": "118e31bf522d021328503e59b170e61999f76140370909d0158b66bee7d30c3b",
+      "capturedAt": "2026-11-02T23:16:08.943Z",
+      "readsBefore": 22,
+      "readsAfter": 22,
+      "errors": [],
+      "facts": {
+        "textRanges": [
+          {
+            "x": 355.28125,
+            "y": 308,
+            "width": 163.203125,
+            "height": 15,
+            "top": 308,
+            "right": 518.484375,
+            "bottom": 323,
+            "left": 355.28125
+          },
+          {
+            "x": 355.28125,
+            "y": 340.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 340.5,
+            "right": 465.796875,
+            "bottom": 355.5,
+            "left": 355.28125
+          },
+          {
+            "x": 355.28125,
+            "y": 356.5,
+            "width": 30.984375,
+            "height": 15,
+            "top": 356.5,
+            "right": 386.265625,
+            "bottom": 371.5,
+            "left": 355.28125
+          },
+          {
+            "x": 386.265625,
+            "y": 356.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 356.5,
+            "right": 395.84375,
+            "bottom": 371.5,
+            "left": 386.265625
+          },
+          {
+            "x": 395.84375,
+            "y": 356.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 356.5,
+            "right": 475.53125,
+            "bottom": 371.5,
+            "left": 395.84375
+          },
+          {
+            "x": 355.28125,
+            "y": 381.5,
+            "width": 140.359375,
+            "height": 15,
+            "top": 381.5,
+            "right": 495.640625,
+            "bottom": 396.5,
+            "left": 355.28125
+          },
+          {
+            "x": 495.640625,
+            "y": 381.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 381.5,
+            "right": 606.15625,
+            "bottom": 396.5,
+            "left": 495.640625
+          },
+          {
+            "x": 355.28125,
+            "y": 397.5,
+            "width": 59,
+            "height": 15,
+            "top": 397.5,
+            "right": 414.28125,
+            "bottom": 412.5,
+            "left": 355.28125
+          },
+          {
+            "x": 414.28125,
+            "y": 397.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 397.5,
+            "right": 423.859375,
+            "bottom": 412.5,
+            "left": 414.28125
+          },
+          {
+            "x": 423.859375,
+            "y": 397.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 397.5,
+            "right": 503.546875,
+            "bottom": 412.5,
+            "left": 423.859375
+          },
+          {
+            "x": 355.28125,
+            "y": 422.5,
+            "width": 140.359375,
+            "height": 15,
+            "top": 422.5,
+            "right": 495.640625,
+            "bottom": 437.5,
+            "left": 355.28125
+          },
+          {
+            "x": 495.640625,
+            "y": 422.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 422.5,
+            "right": 606.15625,
+            "bottom": 437.5,
+            "left": 495.640625
+          },
+          {
+            "x": 355.28125,
+            "y": 438.5,
+            "width": 59,
+            "height": 15,
+            "top": 438.5,
+            "right": 414.28125,
+            "bottom": 453.5,
+            "left": 355.28125
+          },
+          {
+            "x": 414.28125,
+            "y": 438.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 438.5,
+            "right": 423.859375,
+            "bottom": 453.5,
+            "left": 414.28125
+          },
+          {
+            "x": 423.859375,
+            "y": 438.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 438.5,
+            "right": 503.546875,
+            "bottom": 453.5,
+            "left": 423.859375
+          }
+        ],
+        "focus": true,
+        "left": 167,
+        "client": 567,
+        "scroll": 760,
+        "cue": "Scroll ↔ for every allowance column",
+        "lastHeader": "Forecast / freshness",
+        "lastColumnVisible": true,
+        "paintVisible": true,
+        "rowEvidence": [
+          "claude-main · 5h5h 41%59% left14:00not filling at this rateoauth · read 5 min ago",
+          "claude-main · 7d7d 63%37% leftSun 18 Oct 18:00103% projected at reset · not filling at this rateapp-server · read 5 min ago",
+          "codex-main · 7d7d 12%88% leftSun 18 Oct 18:00103% projected at reset · not filling at this rateapp-server · read 5 min ago"
+        ],
+        "rect": {
+          "x": 37,
+          "y": 304,
+          "width": 581.625,
+          "height": 155.5,
+          "top": 304,
+          "right": 618.625,
+          "bottom": 459.5,
+          "left": 37
+        }
+      },
+      "files": [
+        {
+          "file": "allowance-light-viewport.png",
+          "sha256": "979b291b1886cef40b47c3f797ff0991ea7dd9ef32b478c5842742df4547e9fb"
+        },
+        {
+          "file": "allowance-light-panel.png",
+          "sha256": "5d64792521dc0b26a82f35f93cf78744132506a00fb493c1176d659bd5d07b66"
+        }
+      ]
+    },
+    {
+      "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+      "scenario": "many",
+      "scheme": "light",
+      "width": 1600,
+      "height": 700,
+      "deviceScaleFactor": 1,
+      "fixtureClock": "2026-10-17T12:00:00.000Z",
+      "apiSha256": "3648bdd41728277481f965d2772d6742b875bd5a198cf90804e165002930ca1d",
+      "capturedAt": "2026-11-02T23:16:09.599Z",
+      "readsBefore": 22,
+      "readsAfter": 22,
+      "errors": [],
+      "facts": {
+        "rows": 50,
+        "top": 1408,
+        "height": 224,
+        "scroll": 1632,
+        "atBottom": true,
+        "focus": true,
+        "focusVisible": true,
+        "route": "/agent/dev-9",
+        "paintVisible": true,
+        "rowVisible": true,
+        "focusInset": "-2px",
+        "cue": "50 seats · 6 fully visible · scroll ↕ to see every seat"
+      },
+      "files": [
+        {
+          "file": "many-light-viewport.png",
+          "sha256": "c958115794c03d22fe89f31e4d4cce4effd6ea9632b195ebccb08619f2f3ab60"
+        },
+        {
+          "file": "many-light-panel.png",
+          "sha256": "ba8e9ac967d5fe70860cafd32e5558b66767b387e73a254b273ec4e12a633b37"
+        }
+      ]
+    },
+    {
+      "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+      "scenario": "allowance",
+      "scheme": "dark",
+      "width": 1600,
+      "height": 1000,
+      "deviceScaleFactor": 1,
+      "fixtureClock": "2026-10-17T12:00:00.000Z",
+      "apiSha256": "118e31bf522d021328503e59b170e61999f76140370909d0158b66bee7d30c3b",
+      "capturedAt": "2026-11-02T23:16:10.145Z",
+      "readsBefore": 22,
+      "readsAfter": 22,
+      "errors": [],
+      "facts": {
+        "textRanges": [
+          {
+            "x": 360.28125,
+            "y": 308,
+            "width": 163.203125,
+            "height": 15,
+            "top": 308,
+            "right": 523.484375,
+            "bottom": 323,
+            "left": 360.28125
+          },
+          {
+            "x": 360.28125,
+            "y": 340.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 340.5,
+            "right": 470.796875,
+            "bottom": 355.5,
+            "left": 360.28125
+          },
+          {
+            "x": 360.28125,
+            "y": 356.5,
+            "width": 30.984375,
+            "height": 15,
+            "top": 356.5,
+            "right": 391.265625,
+            "bottom": 371.5,
+            "left": 360.28125
+          },
+          {
+            "x": 391.265625,
+            "y": 356.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 356.5,
+            "right": 400.84375,
+            "bottom": 371.5,
+            "left": 391.265625
+          },
+          {
+            "x": 400.84375,
+            "y": 356.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 356.5,
+            "right": 480.53125,
+            "bottom": 371.5,
+            "left": 400.84375
+          },
+          {
+            "x": 360.28125,
+            "y": 381.5,
+            "width": 140.359375,
+            "height": 15,
+            "top": 381.5,
+            "right": 500.640625,
+            "bottom": 396.5,
+            "left": 360.28125
+          },
+          {
+            "x": 500.640625,
+            "y": 381.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 381.5,
+            "right": 611.15625,
+            "bottom": 396.5,
+            "left": 500.640625
+          },
+          {
+            "x": 360.28125,
+            "y": 397.5,
+            "width": 59,
+            "height": 15,
+            "top": 397.5,
+            "right": 419.28125,
+            "bottom": 412.5,
+            "left": 360.28125
+          },
+          {
+            "x": 419.28125,
+            "y": 397.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 397.5,
+            "right": 428.859375,
+            "bottom": 412.5,
+            "left": 419.28125
+          },
+          {
+            "x": 428.859375,
+            "y": 397.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 397.5,
+            "right": 508.546875,
+            "bottom": 412.5,
+            "left": 428.859375
+          },
+          {
+            "x": 360.28125,
+            "y": 422.5,
+            "width": 140.359375,
+            "height": 15,
+            "top": 422.5,
+            "right": 500.640625,
+            "bottom": 437.5,
+            "left": 360.28125
+          },
+          {
+            "x": 500.640625,
+            "y": 422.5,
+            "width": 110.515625,
+            "height": 15,
+            "top": 422.5,
+            "right": 611.15625,
+            "bottom": 437.5,
+            "left": 500.640625
+          },
+          {
+            "x": 360.28125,
+            "y": 438.5,
+            "width": 59,
+            "height": 15,
+            "top": 438.5,
+            "right": 419.28125,
+            "bottom": 453.5,
+            "left": 360.28125
+          },
+          {
+            "x": 419.28125,
+            "y": 438.5,
+            "width": 9.578125,
+            "height": 15,
+            "top": 438.5,
+            "right": 428.859375,
+            "bottom": 453.5,
+            "left": 419.28125
+          },
+          {
+            "x": 428.859375,
+            "y": 438.5,
+            "width": 79.6875,
+            "height": 15,
+            "top": 438.5,
+            "right": 508.546875,
+            "bottom": 453.5,
+            "left": 428.859375
+          }
+        ],
+        "focus": true,
+        "left": 162,
+        "client": 567,
+        "scroll": 760,
+        "cue": "Scroll ↔ for every allowance column",
+        "lastHeader": "Forecast / freshness",
+        "lastColumnVisible": true,
+        "paintVisible": true,
+        "rowEvidence": [
+          "claude-main · 5h5h 41%59% left14:00not filling at this rateoauth · read 5 min ago",
+          "claude-main · 7d7d 63%37% leftSun 18 Oct 18:00103% projected at reset · not filling at this rateapp-server · read 5 min ago",
+          "codex-main · 7d7d 12%88% leftSun 18 Oct 18:00103% projected at reset · not filling at this rateapp-server · read 5 min ago"
+        ],
+        "rect": {
+          "x": 37,
+          "y": 304,
+          "width": 581.625,
+          "height": 155.5,
+          "top": 304,
+          "right": 618.625,
+          "bottom": 459.5,
+          "left": 37
+        }
+      },
+      "files": [
+        {
+          "file": "allowance-dark-viewport.png",
+          "sha256": "f9d4852d2d54f53dc59afd7ff3f691e576cf9c803e526a58cd2b8dbba8da44c3"
+        },
+        {
+          "file": "allowance-dark-panel.png",
+          "sha256": "4274649c53ef27b5679f651bd67984699accac6e16938399d4d6f7e90aa58e0c"
+        }
+      ]
+    },
+    {
+      "source": "025859761b2866d58585631d7857b8e3ff872fdd",
+      "scenario": "many",
+      "scheme": "dark",
+      "width": 1600,
+      "height": 700,
+      "deviceScaleFactor": 1,
+      "fixtureClock": "2026-10-17T12:00:00.000Z",
+      "apiSha256": "3648bdd41728277481f965d2772d6742b875bd5a198cf90804e165002930ca1d",
+      "capturedAt": "2026-11-02T23:16:10.798Z",
+      "readsBefore": 22,
+      "readsAfter": 22,
+      "errors": [],
+      "facts": {
+        "rows": 50,
+        "top": 1408,
+        "height": 224,
+        "scroll": 1632,
+        "atBottom": true,
+        "focus": true,
+        "focusVisible": true,
+        "route": "/agent/dev-9",
+        "paintVisible": true,
+        "rowVisible": true,
+        "focusInset": "-2px",
+        "cue": "50 seats · 6 fully visible · scroll ↕ to see every seat"
+      },
+      "files": [
+        {
+          "file": "many-dark-viewport.png",
+          "sha256": "6820b1b6271c742bf6be2c0aea083d2b08566c30576daac17b90c8a5d64564ae"
+        },
+        {
+          "file": "many-dark-panel.png",
+          "sha256": "2bc5535e612d2f794bc0f60e0241d07890359ba0cd9d5833adb64e0530c9a079"
+        }
+      ]
+    }
+  ]
+}

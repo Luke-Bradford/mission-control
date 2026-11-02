@@ -43,9 +43,10 @@ describe("Quota panel", () => {
     await waitFor(() => expect(container.querySelectorAll(".quotarow")).toHaveLength(2));
     const [claude, codex] = [...container.querySelectorAll<HTMLElement>(".quotarow")];
     expect(within(claude as HTMLElement).getByText(/5h 41%/)).toBeTruthy();
-    expect(
-      within(claude as HTMLElement).getByText(/7d 63% · full in ~2d at this rate/),
-    ).toBeTruthy();
+    const weekly = within(claude as HTMLElement).getByRole("row", { name: /claude-main.*7d/ });
+    expect(within(weekly).getByText(/7d 63%/)).toBeTruthy();
+    expect(within(weekly).getByText(/Full in ~2d at this rate/)).toBeTruthy();
+    expect(within(weekly).getByText("37% left")).toBeTruthy();
     expect(within(codex as HTMLElement).getByText(/7d 12%/)).toBeTruthy();
     expect(codex?.textContent).not.toContain("5h");
     expect(codex?.textContent).not.toContain("99%");

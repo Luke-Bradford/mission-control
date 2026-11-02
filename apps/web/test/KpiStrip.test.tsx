@@ -81,11 +81,11 @@ describe("KpiStrip", () => {
     await screen.findByText("~$24.31");
     const labels = [
       "Agents working · now",
-      "Tokens/min",
+      "Tokens/min · 1m",
       "Cost · today",
       "In progress · now",
       "Merged · 24h",
-      "CI pass rate",
+      "CI pass rate · 24h",
       "Cycle time p50 · 14d",
       "Needs you · now",
     ];

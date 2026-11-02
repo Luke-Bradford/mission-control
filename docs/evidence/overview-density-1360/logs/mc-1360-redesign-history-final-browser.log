@@ -1,0 +1,32 @@
+
+ RUN  v3.2.7 [controller]/codex-overview-density
+
+ ❯ |web| test/OverviewDensity.browser.test.ts (7 tests | 1 failed | 6 skipped) 2670ms
+   ↓ Approved Overview hierarchy > settles known context, full allowance and recorded timeline sources in the delivered App
+   × Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize 1377ms
+     → expected 0 to be greater than 0
+   ↓ Approved Overview hierarchy > preserves nine configured seats and two observed loops through the real session filter
+   ↓ Approved Overview hierarchy > keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open
+   ↓ Approved Overview hierarchy > opens complete shortened content with the keyboard using actual read-only detail routes
+   ↓ Approved Overview hierarchy > keeps the settled full-App hierarchy and all row controls reachable at every required viewport
+   ↓ Approved Overview hierarchy > keeps empty, one, fifty, long and collection states honest without losing keyboard routes
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewDensity.browser.test.ts > Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize
+AssertionError: expected 0 to be greater than 0
+ ❯ test/OverviewDensity.browser.test.ts:394:35
+    392|           expect(retained.sameRow).toBe(true);
+    393|           expect(retained.history).toBe("ci");
+    394|           expect(retained.scroll).toBeGreaterThan(0);
+       |                                   ^
+    395|           expect(retained.sticky).toBe("sticky");
+    396|           expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  22:33:25
+   Duration  3.30s (transform 201ms, setup 277ms, collect 191ms, tests 2.67s, environment 0ms, prepare 27ms)

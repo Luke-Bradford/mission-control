@@ -19,9 +19,9 @@ it("uses every KPI's minute series instead of hourly history", async () => {
   // Registry figures without a minute history (working, merged, cycle time) draw no trace.
   expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(5);
   for (const graph of screen.getAllByRole("img")) {
-    // 0 at the baseline (y 23), the peak (4) on the top gridline (y 9), newest at the right edge
+    // 0 at the baseline (y 23), the peak (4) on the top gridline (y 3), newest at the right edge
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
-      "M0.0,19.5L50.0,16.0L100.0,9.0",
+      "M0.0,18.0L50.0,13.0L100.0,3.0",
     );
     expect(graph.getAttribute("aria-label")).toMatch(/peak .+ · latest /);
     expect(graph.querySelectorAll("circle")).toHaveLength(0);
@@ -38,24 +38,28 @@ it("keeps empty minute series honest even when hourly figures exist", async () =
   render(<KpiStrip />);
   await screen.findByText("41.2k");
   expect(screen.queryAllByRole("img")).toHaveLength(0);
-  for (const tile of screen.getAllByRole("link")) {
-    expect(within(tile).getAllByText("—").length).toBeGreaterThan(0);
-  }
+  const tokens = screen.getByRole("link", { name: /Tokens\/min/ });
+  expect(within(tokens).getByText("41.2k")).toBeTruthy();
+  expect(within(tokens).getByText("History not collected")).toBeTruthy();
+  expect(within(tokens).queryByRole("img")).toBeNull();
 });
 
-it("graphs free disk GB with gaps for missing minutes", async () => {
+it("graphs free disk GiB with gaps for missing minutes", async () => {
   stubFetch({
     "/api/overview": { ...OVERVIEW, machine: { disk: [80, null, 40, 60] } },
     "/api/machine": { latest: null },
     "/api/test-lock": { holder: null, waiting: [] },
   });
   render(<MachinePanel />);
-  const graph = await screen.findByRole("img", { name: "Disk history · GB free" });
+  const graph = await screen.findByRole("img", { name: "Disk history · GiB free" });
   expect(graph.getAttribute("data-max")).toBe("80");
   expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
     "M0.0,3.0M66.7,12.5L100.0,7.8",
   );
   expect(graph.querySelectorAll("path")).toHaveLength(3);
+  expect(
+    screen.getByText(/CPU, memory history not collected; those bars use the current sample/),
+  ).toBeTruthy();
 });
 
 it("links run chips to the specific run and preserves chips without a run", async () => {

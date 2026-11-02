@@ -215,12 +215,18 @@ describe("Overview panels", () => {
   it("every panel carries its mockup id", async () => {
     stub();
     const { container } = render(<Overview />);
-    expect(container.querySelector(".overview-work > #agentsP")).toBeTruthy();
-    expect(container.querySelector(".overview-work > #timelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #agentsP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #timelineP")).toBeTruthy();
     expect(container.querySelector(".overview-grid > #pipelineP")).toBeTruthy();
-    expect(container.querySelector(".ov > #actP")).toBeTruthy();
-    expect(container.querySelector(".ov > .col > #machP")).toBeTruthy();
-    expect(container.querySelector(".ov > .col > #quotaP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #actP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #machP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #quotaP")).toBeTruthy();
+    const grid = container.querySelector(".overview-grid")!;
+    expect([...grid.children].map((child) => child.id || child.className)).toEqual([
+      "overview-metrics",
+      "overview-workspace",
+      "pipelineP",
+    ]);
     for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
     }
@@ -259,7 +265,15 @@ describe("Agents panel", () => {
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
         (cell) => cell.textContent,
       ),
-    ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+    ).toEqual([
+      "Agent",
+      "State",
+      "Work",
+      "Tokens/min · 30m avg",
+      "Cost",
+      "Context · used / limit · left · used%",
+      "In state",
+    ]);
   });
 
   it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
@@ -292,7 +306,9 @@ describe("Agents panel", () => {
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
-    const line = await screen.findByText("Crew off");
+    const line = await within(container.querySelector("#agentsP") as HTMLElement).findByText(
+      "Crew off",
+    );
     expect(line.getAttribute("role")).toBe("status");
     expect(line.title).toBe("crew lock held by pid 123");
     expect(container.querySelector("#agentsP .ph")?.contains(line)).toBe(true);
@@ -413,7 +429,7 @@ describe("Agents panel", () => {
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Error")).toBeTruthy();
     expect(flight.title).toBe("Run failed");
-    expect(flight.querySelector(".meter")?.textContent).toContain("ctx");
+    expect(flight.querySelector(".context-capacity")?.textContent).toContain("limit unknown");
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
@@ -876,8 +892,8 @@ describe("Agents panel", () => {
     await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".tok")?.textContent).toContain("0/min");
-    expect(row.textContent).toContain("ctx —");
-    expect(row.querySelector(".meter")?.textContent).toContain("—");
+    expect(row.querySelector(".context-capacity")?.textContent).toBe("— / — · limit unknown");
+    expect(row.querySelector(".context-track i")).toBeNull();
     expect(row.title).toBe("Free for work");
     expect(row.querySelector(".spark")).toBeTruthy();
   });
@@ -1136,7 +1152,9 @@ describe("Agents panel", () => {
     );
     expect(row.textContent).toContain("133/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.textContent).toContain("ctx 48%");
+    expect(row.querySelector(".context-capacity")?.textContent).toBe(
+      "483k / 1.00M · 517k left · 48%",
+    );
     expect(container.querySelector("#quotaP")?.textContent).toContain("82%");
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(container.querySelector("#quotaP .meter.hi")).toBeTruthy(); // 82 % is amber
@@ -1467,9 +1485,9 @@ describe("Machine panel", () => {
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await within(mach).findByText("Transcripts");
-    expect(row.parentElement?.textContent).toContain("12.3 MB");
+    expect(row.parentElement?.textContent).toContain("12.3 MiB");
     expect(row.parentElement?.textContent).toContain("oldest 3 h ago");
-    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MB · 3 files");
+    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MiB · 3 files");
   });
 
   it("leaves out the transcript footprint when the server has none", async () => {
@@ -1485,10 +1503,10 @@ describe("Machine panel", () => {
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
-    expect(mach.textContent).toContain("every 2 s");
-    expect(mach.textContent).toContain("37% of 16 threads");
-    expect(mach.textContent).toContain("20.5 of 64 GB");
-    expect(mach.textContent).toContain("412 GB free");
+    expect(mach.textContent).toContain("Host sample at");
+    expect(mach.textContent).toContain("37% · 16 threads");
+    expect(mach.textContent).toContain("20.5 of 64 GiB");
+    expect(mach.textContent).toContain("412 GiB free");
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (3)",
     );
@@ -1513,7 +1531,7 @@ describe("Machine panel", () => {
     expect(mach.querySelectorAll(".slots i").length).toBe(8);
     expect(mach.querySelectorAll(".slots i.used").length).toBe(6);
     expect(row.textContent).toContain("6 of 8");
-    expect(row.title).toContain("up to 3 per session");
+    expect(row.title).toContain("3 in the largest configured session");
     expect(row.title).toContain("Room for 2 more agents");
     expect(row.className).toContain("ok-t");
   });
@@ -1556,10 +1574,10 @@ describe("Machine panel", () => {
     });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toContain("Swap");
-    expect(swap.textContent).toContain("3.5 GB (5% of RAM)");
+    expect(swap.textContent).toContain("3.5 GiB (5% of RAM)");
     // The bar fills against physical RAM (3.5 of 64 GB), not the 8 GB swap file.
     expect(swap.querySelector<HTMLElement>(".stack i")?.style.width).toBe("5.5%");
     expect(mach.querySelector(".capwarn")).toBeNull();
@@ -1569,7 +1587,7 @@ describe("Machine panel", () => {
     stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toBe("Swap—");
   });
@@ -1595,7 +1613,7 @@ describe("Machine panel", () => {
     stub({ machine: sample({ cpuPct: null, cores: 0, agents: null, memUsedBytes: null }) });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
     expect(cpu.querySelectorAll(".stack i").length).toBe(0);
     expect(cpu.textContent).toContain("—");
@@ -1604,7 +1622,7 @@ describe("Machine panel", () => {
 });
 
 describe("Account quota panel", () => {
-  it("each account keeps its last reading time on hover", async () => {
+  it("each account window keeps its own visible reading time and hover evidence", async () => {
     stub({
       limits: [
         limit5h({ accountId: "claude-main", sampledAt: NOW - 4 * MIN }),
@@ -1616,8 +1634,11 @@ describe("Account quota panel", () => {
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByTitle(/read 4 min ago/);
     const rows = quota.querySelectorAll(".quotarow");
-    expect(rows[0]?.textContent).not.toContain("9 min");
-    expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toContain("read just now");
+    expect(rows[0]?.textContent).toContain("read 9 min ago");
+    expect(rows[0]?.textContent).toContain("read 4 min ago");
+    const codex = rows[1] as HTMLElement;
+    expect(codex.textContent).toContain("read just now");
+    expect(within(codex).getByTitle(/codex-main 7d:.*read just now/)).toBeTruthy();
   });
 
   it("shows the last successful quota and collector note while rate limited", async () => {
@@ -1637,7 +1658,11 @@ describe("Account quota panel", () => {
     });
     const { container } = render(<Overview />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
-    await within(quota).findByText("7d 86% · 8h 0m ago");
+    await within(quota).findByText("7d 86%");
+    const staleWindow = within(quota).getByRole("row", { name: /claude-main · 7d/ });
+    expect(staleWindow.textContent).toContain("read 8 h ago");
+    expect(staleWindow.textContent).toContain("14% left");
+    expect(within(staleWindow).getByText("Usage endpoint rate limited")).toBeTruthy();
     await waitFor(() =>
       expect(quota.querySelector('[title*="Usage endpoint rate limited"]')).toBeTruthy(),
     );
@@ -1698,13 +1723,16 @@ describe("Account quota panel", () => {
     expect(rows[1]?.querySelector('[title*="7d: 9%"]')?.getAttribute("title")).toContain(
       "resets Thu 29 Oct 16:22",
     );
-    // the Codex row has its 7d bar in the slot after the name, shaped like Claude's 7d slot
-    const slot = (r: Element | undefined, i: number) => r?.children[i];
-    expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
-    expect(slot(rows[1], 1)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
-    expect(slot(rows[1], 1)?.querySelectorAll("*").length).toBe(
-      slot(rows[0], 2)?.querySelectorAll("*").length,
+    // Native table rows preserve the same used meter for the supported7d windows.
+    const claudeWeek = rows[0]?.querySelectorAll("tr")[1];
+    const codexWeek = rows[1]?.querySelector("tr");
+    expect(claudeWeek?.querySelector("td .track")).toBeTruthy();
+    expect(codexWeek?.querySelector("td .track")).toBeTruthy();
+    expect(claudeWeek?.querySelector(".meter")?.children.length).toBe(
+      codexWeek?.querySelector(".meter")?.children.length,
     );
+    expect(codexWeek?.querySelectorAll("td")).toHaveLength(4);
+    expect(codexWeek?.textContent).toContain("91% left");
   });
 
   it("a 5h bar's hover says too little history when paceReady is false, the pace when true", async () => {
@@ -1907,14 +1935,14 @@ describe("Activity panel", () => {
     );
     const { container } = render(<Overview />);
     fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-    await screen.findByText("Original decision");
     const list = container.querySelector("#actList") as HTMLElement;
+    await within(list).findByText("Original decision");
     const node = list.querySelector(".arow");
     list.scrollTop = 80;
     fireEvent.scroll(list);
     current = [{ ...current[0], text: "Updated decision" }];
     act(() => hub.refetchAll());
-    await screen.findByText("Updated decision");
+    await within(list).findByText("Updated decision");
     expect(list.querySelector(".arow")).toBe(node);
     expect(list.scrollTop).toBe(80);
   });
@@ -1940,13 +1968,14 @@ describe("Activity panel", () => {
     });
     const { container } = render(<Overview />);
     fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-    await screen.findByText("Pick a layout");
+    const activity = container.querySelector("#actP") as HTMLElement;
+    await within(activity).findByText("Pick a layout");
     // a session on another repo hides nothing waiting on the operator
     act(() => setSession("shop-app-session"));
     const rows = () => container.querySelectorAll("#actList .arow");
     await waitFor(() => expect(rows()).toHaveLength(2));
-    expect(screen.getByText("PR #9 · You: review")).toBeTruthy();
-    expect(screen.queryByText("FLIGHT's to settle")).toBeNull();
+    expect(within(activity).getByText("PR #9 · You: review")).toBeTruthy();
+    expect(within(activity).queryByText("FLIGHT's to settle")).toBeNull();
     act(() => setSession(SESSION_ALL));
   });
 
@@ -2733,7 +2762,7 @@ it("holds the configured roster, Timeline lanes and five Pipeline lanes while da
   expect(container.querySelectorAll(".crew-skeleton")).toHaveLength(7);
   expect(container.querySelectorAll(".overview-lane")).toHaveLength(8);
   expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
-  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(40);
+  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(5);
   expect(container.querySelector("#agentsList")?.getAttribute("aria-busy")).toBe("true");
   await act(async () => {
     for (const finish of release) finish();

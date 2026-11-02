@@ -41,8 +41,17 @@ it("clips spans to the last hour and extends open spans to now", async () => {
     ["75%", "25%"],
     ["90%", "10%"],
   ]);
-  // The hub still sends tool-call times; the Timeline draws no ticks for them.
-  expect(container.querySelectorAll(".overview-tick")).toHaveLength(0);
+  // Only recorded in-window tool starts are drawn, with a shape distinct from a duration span.
+  const ticks = container.querySelectorAll<HTMLElement>(".overview-instant");
+  expect(ticks).toHaveLength(1);
+  expect(ticks[0].style.left).toBe("50%");
+  expect(ticks[0].textContent).toBe("◆");
+  expect(spans.map((span) => span.textContent)).toEqual([
+    "turn · 30m",
+    "checks · 15m",
+    "review · 6m",
+  ]);
+  expect(spans[1].title).toContain("ongoing, end not recorded");
 });
 
 it("shows the axis and legend even for an empty window", async () => {
