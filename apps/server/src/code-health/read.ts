@@ -214,7 +214,6 @@ export class CodeHealthReader {
                 "Findings recorded for this file in the selected reported-review window.",
                 findingCoverage,
               );
-              evidence.push(findingRef);
               refs.push(findingRef);
             }
             return {
