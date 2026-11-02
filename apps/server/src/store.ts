@@ -151,6 +151,14 @@ import {
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
 import {
+  aggregateDatedRisk,
+  datedPrFiles,
+  installRiskMemberships,
+  pruneRiskMemberships,
+  recordRiskMembership,
+  reviewedFileMembership,
+} from "./code-health/risk.ts";
+import {
   codeHealthCiSource,
   codeHealthEvidenceSource,
   codeHealthReviewSource,
@@ -1231,6 +1239,7 @@ export class Store {
       );
     this.migrate();
     this.backfillAuditHistory();
+    installRiskMemberships(this.db);
     installRecommendations(this.db);
     installCodeHealthRevisions(this.db);
   }
@@ -1359,6 +1368,15 @@ export class Store {
       .run(repoId, id);
   }
 
+  codeHealthDatedRisk(repoId: string, from: number, until: number) {
+    return aggregateDatedRisk(datedPrFiles(this.db, repoId, from, until));
+  }
+  codeHealthReviewedFiles(repoId: string, from: number, until: number) {
+    return reviewedFileMembership(this.db, repoId, from, until);
+  }
+  recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
+    recordRiskMembership(this.db, input);
+  }
   codeHealthRevision(repoId: string): string {
     return codeHealthSourceRevision(this.db, repoId);
   }
@@ -2708,9 +2726,15 @@ export class Store {
 
   private historyNextTable = 0;
   private operationalHistoryNextTable = 0;
+  private riskMembershipPruneCursor = { at: -1, id: 0 };
 
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
+    this.riskMembershipPruneCursor = pruneRiskMemberships(
+      this.db,
+      now,
+      this.riskMembershipPruneCursor,
+    );
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     this.db
@@ -3207,6 +3231,25 @@ export class Store {
       if (p.files !== undefined) {
         deleteFiles.run(repoId, p.number);
         for (const f of p.files) addFile.run(repoId, p.number, f.path, f.changeType);
+        if (p.headSha) {
+          try {
+            recordRiskMembership(this.db, {
+              repoId,
+              pr: p.number,
+              sha: p.headSha,
+              kind: "github-head",
+              files: p.files.map((file) => file.path),
+              declaredFiles: p.changedFiles ?? null,
+              at: readAt,
+            });
+          } catch {
+            this.db
+              .prepare(
+                "DELETE FROM code_health_file_memberships WHERE repo_id=? AND pr_number=? AND sha=? AND kind='github-head'",
+              )
+              .run(repoId, p.number, p.headSha);
+          }
+        }
       }
       ins.run(
         repoId,

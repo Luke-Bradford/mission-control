@@ -198,6 +198,7 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
+import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
@@ -2844,7 +2845,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
               : codeHealth.read(live.run.repoId, parsed.data.window, parsed.data.tab);
           if (value === null)
             return { text: "Unknown code-health recommendation in this repo.", isError: true };
-          const text = JSON.stringify(cleanCodeHealth(value, known));
+          const summary = "data" in value ? codeHealthToolSummary(value) : value;
+          const text = JSON.stringify(cleanCodeHealth(summary, known));
           if (text.length > 120_000)
             return {
               text: "Code-health response exceeds the bounded tool limit. Choose another tab or page evidence.",
