@@ -138,3 +138,24 @@ performs the bounded reconstruction before publishing classifications.
 HTTP requests read local stored evidence. Neither the dashboard nor its evidence drawer runs git,
 opens an imported file, fetches a report URL or starts paid collection. No private machine paths,
 credentials or other-project identities belong in committed examples or verification receipts.
+
+## Verification record
+
+Implementation commit `7fc2e8b0658dbd6e8c933fb7cc82ab597a004078` was checked on 2 November 2026.
+The focused server block passed 124 tests in nine files; the API access/inventory subset passed
+another 17. Server/core types and repository lint passed. A separate clean-commit run of
+`code-health-test-reports.test.ts`, with `--maxWorkers=1 --retry=0 --reporter=json`, passed 19 tests.
+That actual local artifact normalized through the CLI and posted to an ephemeral server backed by
+a copied database. The authenticated replay returned the same report and its 19 attempts. This was
+local verification, not a GitHub workflow or live-history import.
+
+The copied real cohort contained no imported named-test reports. Its 7-, 30- and 90-day reads took
+11–14 ms cold for Overview and 5.8–6.4 ms cold for Test health; cached reads were below 0.1 ms.
+These measurements describe that sparse local cohort, not a populated-history performance claim.
+
+A separate synthetic scratch database tested the reader boundary through the actual importer:
+20,001 attempts remained stored, 20,000 were selected, failure percentage stayed unknown, and each
+50-row duration/disruption summary disclosed 19,950 omitted groups. On the same machine, ingestion
+took 1.27 s, the bounded source read 65 ms, aggregation 118 ms and Overview collection metadata 6 ms.
+The metadata query used the covering repo/window index. These are single local observations, not a
+service latency guarantee. The synthetic cohort never entered the copied real cohort or live hub.
