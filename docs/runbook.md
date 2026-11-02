@@ -2249,3 +2249,48 @@ If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the
 branch ref rather than changing the required command. The hub never executes the seat's check
 code in the server process. Its existing exception for engine-only clean merges of main is
 unchanged; this check gates seat-authored pushes and does not certify that separate publish path.
+
+
+### Durable QA reports
+
+Each new native `report_findings` call saves its findings and immutable QA snapshot in one database
+transaction before notifying the engine. The content-addressed JSON report records its exact PR/head,
+reviewer and model, review time, registration time, original verdict, checklist, test receipt provenance,
+findings/resolutions, works-well observations, limitations and follow-up dispositions. A saved verdict
+is historical evidence; it never grants current merge approval or replaces CI, acceptance or repo rules.
+
+`GET /api/qa-reports?repoId=<repo>&prNumber=<number>&headSha=<40-sha>` lists up to 100 saved reports.
+The head filter is optional; repo and PR are required. `GET /api/qa-reports/<64-hash>` reads one JSON
+report, and `/api/qa-reports/<64-hash>/markdown` exports its Markdown. These reads require a configured
+repository and work after merge without an open queue row. The UI permalink is
+`/qa?repo=<repo>&pr=<number>&report=<64-hash>`. Native rework/Comms and existing PR-body/review-comment
+paths cite that report. The server does not introduce another GitHub write path.
+
+`POST /api/qa-reports/import` requires the actual operator token and refuses seat credentials. The
+bounded body names repoId, prNumber, exact headSha, reviewer, nullable reviewedAt, sourceRef (this PR's
+GitHub review/comment permalink), verdict and summary. Optional worksWell, coverage, findings,
+resolutions, tests, limitations, followUps and visual fields retain gaps honestly. Imports create no
+Run or native review. Registration time is current; an unknown original review time remains null.
+The server verifies the exact current GitHub PR head, including merged PRs, and observes CI afresh
+on that head. The observation time and source stay with the snapshot.
+
+Test counts supplied by a reviewer remain `reviewer-reported`. Hub command completions are
+`hub-receipt`, bound to the review run and head. Shared-lock receipts prove a tool invocation, but
+keep numeric exit/counts/source cleanliness unknown when those were not recorded. A controller may
+register `controller-recorded` receipts with their actual time, exit and retained evidence. Counts
+alone never fulfill the execution-receipt requirement. Missing receipts, checklist coverage, original
+time or required images make the report incomplete; they are not displayed as a clean sign-off.
+
+The report embeds the native image manifest and copies before/after and browser PNGs into private
+content-addressed `qa-report-assets/` storage. `/api/qa-report-assets/<sha256>` serves a referenced
+retained PNG independently of the native three-head/age sweep. PNG reads keep the existing
+operator-header protection and private/no-store policy; archive metadata does not expose their bytes. Report JSON lives in the private
+`qa_reports` table, outside the operational review/run sweep. It is never rewritten. Controller
+image links must be same-repository immutable Git commit PNG URLs with capture provenance.
+Reconstructed controlled fixtures are labelled as such; they never become live captures or original
+approvals. Known web changes require before/after pairs even if a reviewer supplies a nonvisual reason.
+
+Report import and native snapshot secret scans fail closed when known credentials cannot be read.
+Raw strings are scanned before JSON escaping, and rejected secrets are neither saved nor echoed.
+Only bounded validated report fields and PNG assets enter this archive; no submitted path is read
+from the controller's filesystem. Images still need a human check for sensitive visible data.

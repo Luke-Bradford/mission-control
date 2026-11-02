@@ -11,11 +11,13 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiPost, apiReviewImage } from "../api.ts";
 import { useNow } from "../clock.ts";
+import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, streamStatus, useResource } from "../data.ts";
 import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { ArchivedQaReport, CurrentQaReport, QaReportArchive } from "../qa/QaReport.tsx";
 import { mapPath, navigate, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import "./qa-readiness.css";
@@ -60,6 +62,44 @@ export function QaReadiness() {
     prs.find((p) => p.repoId === params.get("repo") && String(p.number) === params.get("pr")) ??
     waiting[0] ??
     review[0];
+  const reportId = params.get("report");
+  const requestedPr = params.get("pr");
+  const requestedRepo = params.get("repo");
+  const requestedHead = params.get("head");
+  const archivedPr =
+    requestedRepo &&
+    requestedPr &&
+    /^[1-9]\d{0,9}$/.test(requestedPr) &&
+    (params.get("history") === "1" ||
+      !prs.some(
+        (p) =>
+          p.repoId === requestedRepo &&
+          String(p.number) === requestedPr &&
+          (!requestedHead || requestedHead === p.headSha),
+      ));
+  if (reportId || archivedPr)
+    return (
+      <section id="page-qa-readiness" className="uat-page">
+        <header className="uat-title">
+          <h1>QA · Saved report</h1>
+          <a href="/qa">Return to the current QA queue</a>
+        </header>
+        {!connection.connected && (
+          <p className="uat-banner" role="status">
+            Disconnected from the hub. Saved evidence may be unavailable.
+          </p>
+        )}
+        {reportId ? (
+          <ArchivedQaReport id={reportId} repo={requestedRepo} pr={requestedPr} />
+        ) : (
+          <QaReportArchive
+            repo={requestedRepo ?? ""}
+            pr={Number(requestedPr)}
+            head={requestedHead}
+          />
+        )}
+      </section>
+    );
   return (
     <section id="page-qa-readiness" className="uat-page">
       <header className="uat-title">
@@ -280,44 +320,46 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <Pairs
-        pr={pr}
-        manifest={pairs}
-        loading={evidence.loading}
-        error={
-          evidence.error instanceof ApiError && evidence.error.status === 404
-            ? null
-            : evidence.error
-        }
-      />
-      <div className="uat-grid-two uat-tests-grid">
-        <Tests data={data} checks={fullPr?.checks ?? []} />
-        <Panel title="Rework timeline">
-          <ol className="pb uat-rounds">
-            {data?.rounds.map((r) => (
-              <li key={r.reviewId}>
-                <header>
-                  <strong>Round {r.sequence ?? r.round}</strong>
-                  <span>{shortSha(r.sha)}</span>
-                  <Pill tone={r.result === "open" ? "warn" : "ok"}>{r.result}</Pill>
-                </header>
-                {r.blocking.map((f) => (
-                  <p key={`${f.file}:${f.line}:${f.summary}`}>
-                    {f.severity}: {f.summary}
-                  </p>
-                ))}
-                {r.reply && (
-                  <p>
-                    <strong>{r.reply.from}:</strong> {r.reply.text}
-                  </p>
-                )}
-                {r.fixSha && <p>Fix commit {shortSha(r.fixSha)}</p>}
-              </li>
-            ))}
-            {!data?.rounds.length && <li>No completed review rounds captured.</li>}
-          </ol>
-        </Panel>
-      </div>
+      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha}>
+        <Pairs
+          pr={pr}
+          manifest={pairs}
+          loading={evidence.loading}
+          error={
+            evidence.error instanceof ApiError && evidence.error.status === 404
+              ? null
+              : evidence.error
+          }
+        />
+        <div className="uat-grid-two uat-tests-grid">
+          <Tests data={data} checks={fullPr?.checks ?? []} />
+          <Panel title="Rework timeline">
+            <ol className="pb uat-rounds">
+              {data?.rounds.map((r) => (
+                <li key={r.reviewId}>
+                  <header>
+                    <strong>Round {r.sequence ?? r.round}</strong>
+                    <span>{shortSha(r.sha)}</span>
+                    <Pill tone={r.result === "open" ? "warn" : "ok"}>{r.result}</Pill>
+                  </header>
+                  {r.blocking.map((f) => (
+                    <p key={`${f.file}:${f.line}:${f.summary}`}>
+                      {f.severity}: {f.summary}
+                    </p>
+                  ))}
+                  {r.reply && (
+                    <p>
+                      <strong>{r.reply.from}:</strong> {r.reply.text}
+                    </p>
+                  )}
+                  {r.fixSha && <p>Fix commit {shortSha(r.fixSha)}</p>}
+                </li>
+              ))}
+              {!data?.rounds.length && <li>No completed review rounds captured.</li>}
+            </ol>
+          </Panel>
+        </div>
+      </CurrentQaReport>
       <div className="uat-grid-two">
         <Panel title="Impact">
           <div className="pb uat-stack">
@@ -712,7 +754,9 @@ function Thread({
                 <strong>{m.from === COMMS_CAPCOM ? "You" : m.from}</strong>
                 <span>{elapsed(Math.max(0, now - m.at))} ago</span>
               </header>
-              <p>{m.text}</p>
+              <p>
+                <MentionText text={m.text} />
+              </p>
             </li>
           ))}
         </ol>

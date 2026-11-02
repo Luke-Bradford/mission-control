@@ -835,6 +835,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map((row) => ({
         ...reviewFact(row),
+        reportPermalink: store.qaReportForReview(row.id)?.permalink,
         design: store.reviewChecks(row.id).find((check) => check.check === "design") ?? null,
       }));
       const cur = pushed
@@ -1072,7 +1073,12 @@ export function createEngine(deps: EngineDeps): Engine {
       ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
       : [];
     return review && findings.length > 0
-      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
+      ? fixText({
+          retro: seatCallSign(review.seatId),
+          sha: review.sha,
+          findings,
+          reportPermalink: store.qaReportForReview(review.id)?.permalink,
+        })
       : `FLIGHT requests rework: ${reason}`;
   }
 
@@ -1392,6 +1398,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 retro: seatCallSign(review.seatId),
                 sha: review.sha,
                 findings: store.findingsOf(review.id),
+                reportPermalink: store.qaReportForReview(review.id)?.permalink,
               }),
             );
           }

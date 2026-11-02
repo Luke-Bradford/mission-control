@@ -10,6 +10,7 @@ import type {
   PromptSection,
   PromptSectionCost,
   PromptWakeCost,
+  QaReport,
   RunHandoff,
 } from "@mc/core";
 import {
@@ -330,6 +331,13 @@ CREATE TABLE IF NOT EXISTS review_checks (
   review_id INTEGER NOT NULL, check_id TEXT NOT NULL, result TEXT NOT NULL, note TEXT,
   PRIMARY KEY (review_id, check_id)
 );
+-- Immutable QA snapshots are independent of the native review/run retention sweep.
+CREATE TABLE IF NOT EXISTS qa_reports (
+  id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL,
+  head_sha TEXT NOT NULL, registered_at INTEGER NOT NULL, native_review_id INTEGER UNIQUE,
+  report TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS qa_reports_subject ON qa_reports(repo_id, pr_number, head_sha, registered_at DESC);
 CREATE TABLE IF NOT EXISTS review_shots (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, shot_id TEXT NOT NULL, label TEXT NOT NULL,
   width INTEGER NOT NULL, theme TEXT NOT NULL, at INTEGER NOT NULL
@@ -4824,6 +4832,67 @@ export class Store {
     return row ? toReview(row) : null;
   }
 
+  /** The first snapshot wins. No update method exists; later evidence creates a new report. */
+  putQaReport(report: QaReport): boolean {
+    return (
+      this.db
+        .prepare(`INSERT OR IGNORE INTO qa_reports
+      (id, repo_id, pr_number, head_sha, registered_at, native_review_id, report)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          report.id,
+          report.repoId,
+          report.prNumber,
+          report.headSha,
+          report.registeredAt,
+          report.nativeReviewId ?? null,
+          JSON.stringify(report),
+        ).changes === 1
+    );
+  }
+
+  qaReport(id: string): QaReport | null {
+    const row = this.db.prepare("SELECT report FROM qa_reports WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    try {
+      return row ? (JSON.parse(row.report as string) as QaReport) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {
+    const rows = this.db
+      .prepare(`SELECT report FROM qa_reports WHERE repo_id = ? AND pr_number = ?
+      ${headSha === undefined ? "" : "AND head_sha = ?"} ORDER BY registered_at DESC, id DESC LIMIT 100`)
+      .all(repoId, pr, ...(headSha === undefined ? [] : [headSha])) as Row[];
+    return rows.flatMap((row) => {
+      try {
+        return [JSON.parse(row.report as string) as QaReport];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  qaReportForReview(reviewId: number): QaReport | null {
+    const row = this.db
+      .prepare("SELECT id FROM qa_reports WHERE native_review_id = ?")
+      .get(reviewId) as Row | undefined;
+    return row ? this.qaReport(row.id as string) : null;
+  }
+
+  qaAssetReferenced(id: string, repoIds: readonly string[]): boolean {
+    if (!repoIds.length) return false;
+    return (
+      this.db
+        .prepare(`SELECT 1 FROM qa_reports WHERE repo_id IN (${repoIds.map(() => "?").join(",")})
+      AND instr(report, ?) > 0 LIMIT 1`)
+        .get(...repoIds, `/api/qa-report-assets/${id}`) !== undefined
+    );
+  }
+
   reviewsOfRun(authorRunId: string): ReviewRow[] {
     const rows = this.db
       .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
@@ -4916,6 +4985,7 @@ export class Store {
       checked?: ReviewCheck[];
       tests?: ReportedTest[];
       resolutions?: FindingResolution[];
+      qaReport?: QaReport;
       at: number;
     },
   ): boolean {
@@ -5039,6 +5109,8 @@ export class Store {
         findings: r.findings,
       });
       this.clearNoReportNotes(runId, r.at);
+      if (r.qaReport && !this.putQaReport(r.qaReport))
+        throw new Error("QA report snapshot already exists");
       recorded = true;
     }, true);
     return recorded;
@@ -6549,6 +6621,50 @@ export class Store {
         c.exitCode ?? null,
         c.at,
       );
+  }
+
+  qaCheckReceipts(
+    runId: string,
+    headSha: string,
+  ): {
+    command: string;
+    ok: boolean | null;
+    exitCode: number | null;
+    at: number;
+    evidence: string;
+  }[] {
+    const checks = (
+      this.db
+        .prepare(`SELECT invoked_command, ok, exit_code, at FROM check_runs
+      WHERE run_id = ? AND head_sha = ? ORDER BY at DESC, id DESC LIMIT 100`)
+        .all(runId, headSha) as Row[]
+    ).map((row) => ({
+      command: row.invoked_command as string,
+      ok: row.ok === 1,
+      exitCode: row.exit_code as number | null,
+      at: row.at as number,
+      evidence: `Hub check recorder observed command completion at exact head ${headSha}. Counts were not parsed.`,
+    }));
+    const locks =
+      this.reviewOfRun(runId)?.sha === headSha
+        ? (this.db
+            .prepare(`SELECT command, started_at, ended_at, outcome
+      FROM test_lock_runs WHERE run_id = ? AND ended_at IS NOT NULL AND outcome IN ('pass', 'fail')
+      ORDER BY ended_at DESC, id DESC LIMIT 100`)
+            .all(runId) as Row[])
+        : [];
+    return [
+      ...checks,
+      ...locks
+        .filter((row) => !checks.some((check) => check.command === row.command))
+        .map((row) => ({
+          command: row.command as string,
+          ok: null,
+          exitCode: null,
+          at: row.ended_at as number,
+          evidence: `Hub observed this locked tool invocation in review run ${runId}, reviewing ${headSha}, from ${row.started_at} to ${row.ended_at} (tool ${row.outcome}). Numeric process exit, test counts and scratch source cleanliness were not recorded.`,
+        })),
+    ].slice(0, 100);
   }
 
   /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */

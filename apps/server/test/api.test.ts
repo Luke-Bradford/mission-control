@@ -1353,6 +1353,11 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
+  ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
+  ["POST", "/api/qa-reports/import", {}],
+  ["GET", "/api/qa-reports/:id"],
+  ["GET", "/api/qa-reports/:id/markdown"],
+  ["GET", "/api/qa-report-assets/:id"],
   ["GET", "/api/code-health/recommendations?repo=shop-app"],
   ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
   ["GET", "/api/code-health?repo=shop-app"],
@@ -2282,6 +2287,7 @@ describe("local access", () => {
     expect((await get("/api/health")).statusCode).toBe(200);
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
+      if (url.startsWith("/api/qa-reports") || url.startsWith("/api/qa-report-assets")) continue; // durable archive auth/reads have their own tests
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it

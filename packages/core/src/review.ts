@@ -65,6 +65,10 @@ export interface ReportedTest {
   failed: number;
   skipped: number;
   duration: number;
+  at?: number;
+  exitCode?: number | null;
+  /** Reviewer-supplied receipt, kept separate from hub-observed command completion. */
+  evidence?: string;
 }
 
 export const FINDING_RESOLUTION_OUTCOMES = ["fixed", "reply-accepted", "held", "waived"] as const;
@@ -212,6 +216,7 @@ export function fixText(i: {
   retro: string;
   sha: string;
   findings: readonly ReviewFinding[];
+  reportPermalink?: string;
 }): string {
   const ordered = BLOCKING_SEVERITIES.flatMap((s) => i.findings.filter((f) => f.severity === s));
   const n = ordered.length;
@@ -222,7 +227,7 @@ export function fixText(i: {
   );
   const more = (k: number): string => `…and ${k} more; the next review lists them again.`;
   const build = (kept: number): string => {
-    const parts = [head, ""];
+    const parts = [...(i.reportPermalink ? [`QA report: ${i.reportPermalink}`] : []), head, ""];
     if (kept > 0) parts.push(entries.slice(0, kept).join("\n\n"));
     if (kept < entries.length) {
       if (kept > 0) parts.push("");
@@ -240,12 +245,13 @@ export function fixCommsText(i: {
   retro: string;
   sha: string;
   findings: readonly ReviewFinding[];
+  reportPermalink?: string;
 }): string {
   const counts = FINDING_SEVERITIES.flatMap((severity) => {
     const n = i.findings.filter((f) => f.severity === severity).length;
     return n === 0 ? [] : [`${n} ${severity}`];
   });
-  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\n${i.reportPermalink ? `QA report: ${i.reportPermalink}. ` : ""}Findings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
 }
 
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";
@@ -299,6 +305,7 @@ export const isReviewBudgetFailure = (failure: string | null): boolean =>
 export const REVIEW_RUN_MAX_MS = 60 * 60_000;
 
 export interface ReviewFact {
+  reportPermalink?: string;
   id: number;
   sha: string;
   epoch: number;

@@ -220,6 +220,7 @@ import {
   previewRequest,
 } from "../preview-browser.ts";
 import type { ProfilesError } from "../profiles.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
@@ -235,6 +236,8 @@ import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
 import type { McTool, McToolContext, McToolResult } from "./server.ts";
 
 export interface McToolsDeps {
+  qaReports?: QaReportService;
+  qaReportBaseUrl?: string;
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
@@ -404,10 +407,27 @@ const ReportedTestArgs = z.strictObject({
   failed: z.int().min(0),
   skipped: z.int().min(0),
   duration: z.int().min(0),
+  at: z.int().min(0).max(8_640_000_000_000_000).optional(),
+  exitCode: z.int().min(-255).max(65535).nullable().optional(),
+  evidence: text(12000).optional(),
 });
 const FindingsArgs = z.strictObject({
   verdict: z.strictObject({ spec: z.enum(VERDICTS), quality: z.enum(VERDICTS) }),
   summary: text(REVIEW_SUMMARY_MAX),
+  worksWell: z.array(text(MC_TEXT_MAX)).max(50).optional(),
+  limitations: z.array(text(MC_TEXT_MAX)).max(100).optional(),
+  visualReason: text(MC_TEXT_MAX).optional(),
+  followUps: z
+    .array(
+      z.strictObject({
+        text: text(MC_TEXT_MAX),
+        disposition: z.enum(["fixed", "ticket", "accepted", "pending"]),
+        ticket: text(500).optional(),
+        basis: text(MC_TEXT_MAX).optional(),
+      }),
+    )
+    .max(100)
+    .optional(),
   findings: z.array(FindingArgs).max(REVIEW_FINDINGS_MAX),
   checked: z
     .array(
@@ -461,6 +481,9 @@ const ReportedTestSchema = {
     failed: { type: "integer", minimum: 0 },
     skipped: { type: "integer", minimum: 0 },
     duration: { type: "integer", minimum: 0 },
+    at: { type: "integer", minimum: 0 },
+    exitCode: { type: ["integer", "null"], minimum: -255, maximum: 65535 },
+    evidence: { type: "string", minLength: 1, maxLength: 12000 },
   },
   required: ["command", "passed", "failed", "skipped", "duration"],
   additionalProperties: false,
@@ -2612,6 +2635,29 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: FINDINGS_BLOCKING_NEEDS_FAIL, isError: true };
     }
     const at = now();
+    // Prepare before committing the verdict; the report and findings land in one DB transaction.
+    const reports =
+      deps.qaReports ??
+      createQaReports({
+        store,
+        config,
+        gh: deps.gh,
+        cwd: crewDir(deps.dbPath),
+        knownSecrets: deps.knownSecrets,
+        now,
+      });
+    let qaReport: Awaited<ReturnType<typeof reports.prepareNative>>;
+    try {
+      qaReport = await reports.prepareNative(review, { ...parsed.data, resolutions: resolved }, at);
+    } catch (error) {
+      return {
+        text:
+          error instanceof QaReportError
+            ? `Review not recorded: ${error.message}`
+            : "Review not recorded: its durable QA report could not be saved safely. Retry when the secret scan and evidence storage are available.",
+        isError: true,
+      };
+    }
     if (
       !store.recordFindings(review.id, run.id, {
         verdict,
@@ -2620,6 +2666,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         checked,
         tests,
         resolutions: resolved,
+        qaReport,
         at,
       })
     ) {
@@ -2636,7 +2683,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     );
     bus.emit("agents");
     deps.onFindings?.(ctx.seatId, ctx.runId);
-    return { text: FINDINGS_RECORDED };
+    return { text: `${FINDINGS_RECORDED}\nQA report: ${qaReport.permalink}` };
   }
 
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3101,7 +3148,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportFindings,
       description:
-        "Report your review, once, when you are done: every finding at every severity, each with category, file, line (0 for the whole file), a one-line summary, a failure scenario and the exact fix; optional checked standards, test runs and later-round resolutions; plus your verdict on spec and quality. Mission Control decides what happens next: Critical and Important findings go back to the author to fix; Minor ones are logged in the PR body. An empty list with pass verdicts means nothing to fix.",
+        "Report your review once: verdict, summary, every finding, worksWell, checklist checked, limitations, followUps with dispositions, and visualReason only when before/after images do not apply. Tests must distinguish your reported counts from execution receipts: add command, counts, at, exitCode and evidence when available; never imply another person's run was yours. The hub saves an immutable report with exact PR/head, provenance and retained images. Missing evidence is marked incomplete. Critical and Important findings go back to the author; Minor ones are logged in the PR body.",
       inputSchema: {
         type: "object",
         properties: {
@@ -3127,6 +3174,32 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             minLength: 1,
             maxLength: REVIEW_SUMMARY_MAX,
             description: "Two or three sentences on the change as a whole.",
+          },
+          worksWell: {
+            type: "array",
+            maxItems: 50,
+            items: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          },
+          limitations: {
+            type: "array",
+            maxItems: 100,
+            items: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          },
+          visualReason: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          followUps: {
+            type: "array",
+            maxItems: 100,
+            items: {
+              type: "object",
+              properties: {
+                text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+                disposition: { type: "string", enum: ["fixed", "ticket", "accepted", "pending"] },
+                ticket: { type: "string", minLength: 1, maxLength: 500 },
+                basis: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+              },
+              required: ["text", "disposition"],
+              additionalProperties: false,
+            },
           },
           findings: {
             type: "array",
