@@ -4,11 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import {
-  externalPrControl,
-  setExternalMergeHold,
-  setExternalPrControl,
-} from "../src/external-pr-control.ts";
+import { externalPrControl, setExternalMergeHold } from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
@@ -28,6 +24,7 @@ const config: CcConfig = {
   poll: { usageMinutes: 5, githubSeconds: 60 },
   repos: [{ id: "sample", github: "example/sample", project: 1, statusMap: {}, autonomy: "merge" }],
   crew: {
+    maxSeats: 4,
     worktrees: "/fixture/worktrees",
     sessions: [
       {
@@ -120,6 +117,7 @@ function harness() {
     ruleReads: 0,
     expireOnFinalRead: false,
     moveDuringFiles: false,
+    metadataDuringFiles: false,
   };
   const merges: string[][] = [];
   let merged = false;
@@ -135,6 +133,7 @@ function harness() {
     else if (args[1]?.includes("/files?")) {
       value = [state.files];
       if (state.moveDuringFiles) wire.head.sha = BASE;
+      if (state.metadataDuringFiles) facts.baseRefOid = "c".repeat(40);
     } else if (args[1]?.includes("/contents/CLAUDE.md"))
       value = {
         encoding: "base64",
@@ -183,7 +182,7 @@ describe("external PR controller merge", () => {
     expect(store.run(externalReviewKey("sample", 7))).toBeNull();
   });
 
-  it.each(["ci", "review", "head", "files", "hold", "fork"])(
+  it.each(["ci", "review", "head", "files", "hold", "fork", "metadata"])(
     "refuses missing or changed merge evidence: %s",
     async (failure) => {
       const h = harness();
@@ -193,6 +192,7 @@ describe("external PR controller merge", () => {
         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
       }
       if (failure === "head") h.state.moveDuringFiles = true;
+      if (failure === "metadata") h.state.metadataDuringFiles = true;
       if (failure === "files") h.facts.changedFiles = 2;
       if (failure === "hold")
         setExternalMergeHold(store, "sample", 7, "CAPCOM: waiting for the demo");

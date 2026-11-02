@@ -2,6 +2,10 @@
 
 /** Code that enforces FLIGHT's floors requires independent RETRO review. */
 export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
+  "apps/server/src/api.ts",
+  "apps/server/src/main.ts",
+  "apps/server/src/flight-approvals.ts",
+  "apps/server/src/external-pr-control.ts",
   "apps/server/src/away.ts",
   "apps/server/src/guard/**",
   "apps/server/src/mcp/**",
@@ -11,6 +15,7 @@ export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
   "packages/core/src/away.ts",
   "packages/core/src/guard.ts",
   "packages/core/src/flight.ts",
+  "packages/core/src/flight-access.ts",
   "packages/core/src/loop.ts",
   "packages/core/src/repo-rules.ts",
   "packages/core/src/runtime.ts",

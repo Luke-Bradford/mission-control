@@ -162,7 +162,6 @@ export async function mergeExternalPr(i: {
     }
     if (cached.ticket?.startsWith(`${repo.id}#`))
       numbers.add(Number(cached.ticket.slice(repo.id.length + 1)));
-    if (numbers.size > 20) return fail("Too many closing issues to check safely in one merge.");
     for (const ticketNumber of numbers) {
       if (!Number.isSafeInteger(ticketNumber) || ticketNumber < 1)
         return fail("The linked ticket could not be verified.");
@@ -250,12 +249,15 @@ export async function mergeExternalPr(i: {
       "view",
       String(number),
       `--repo=${repo.github}`,
-      "--json=headRefOid,reviewDecision,mergeable,statusCheckRollup",
+      "--json=headRefOid,baseRefOid,changedFiles,reviewDecision,mergeable,statusCheckRollup,closingIssuesReferences",
     ]);
     if (finalFacts === null || typeof finalFacts !== "object")
       return fail("The final PR checks could not be verified.");
     const final = finalFacts as {
       headRefOid?: unknown;
+      baseRefOid?: unknown;
+      changedFiles?: unknown;
+      closingIssuesReferences?: unknown;
       reviewDecision?: unknown;
       mergeable?: unknown;
       statusCheckRollup?: unknown;
@@ -276,6 +278,10 @@ export async function mergeExternalPr(i: {
       finalSubject.ticket.body !== subject.ticket.body ||
       JSON.stringify(finalSubject.ticket.labels) !== JSON.stringify(subject.ticket.labels) ||
       final.headRefOid !== sha ||
+      final.baseRefOid !== facts.baseRefOid ||
+      final.changedFiles !== facts.changedFiles ||
+      JSON.stringify(final.closingIssuesReferences) !==
+        JSON.stringify(facts.closingIssuesReferences) ||
       final.mergeable !== "MERGEABLE" ||
       !Array.isArray(final.statusCheckRollup) ||
       finalChecks.length !== final.statusCheckRollup.length ||

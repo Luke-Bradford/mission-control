@@ -1215,9 +1215,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // A preview child owns no live loop. Its parent uses these pings only to expire an unused child.
   app.addHook("onRequest", async () => deps.previewActivity?.());
 
-  // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
-  // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
-  // check keeps its own run token; /mcp is outside /api.
+  // The served HUD and full-access FLIGHT hold the operator token. In-process FLIGHT requests
+  // retain their seat/run provenance so supported controller-only actions remain independent.
+  // This is a workflow guardrail; full same-user machine access is not an OS security boundary.
   const flightActor = (req: FastifyRequest): { seatId: string; runId: string } | null => {
     const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
     if (typeof raw !== "string") return null;
@@ -4699,8 +4699,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
-      // The operator's verdict on a run parked on its ticket's `## Controller check`. FLIGHT has no
-      // tool for this; the operator token is required like every mutating route.
+      // The verdict on a run's `## Controller check`. FLIGHT may record routine evidence, while
+      // checks of its own runtime and approval guidance require an independent controller.
       // Reader: docs/runbook.md#record-a-controller-check
       api.post<{ Params: { id: string } }>(
         "/runs/:id/controller-check",
@@ -4715,7 +4715,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (
             flightActor(req) &&
             run.loop.touches?.paths.some((path) =>
-              FLIGHT_FLOOR_ENFORCING_PATHS.some((pattern) => globMatches(pattern, path, true)),
+              [
+                ...FLIGHT_FLOOR_ENFORCING_PATHS,
+                "roles/FLIGHT.md",
+                ".claude/skills/flight-ops/**",
+              ].some((pattern) => globMatches(pattern, path, true)),
             )
           )
             return reply.code(403).send({

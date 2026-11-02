@@ -41,6 +41,8 @@ export function codexSeatConfig(
       "shell_snapshot = false",
       "shell_zsh_fork = false",
       "[shell_environment_policy]",
+      `inherit = "all"`,
+      "ignore_default_excludes = true",
       `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
       `[mcp_servers.${MC_MCP_SERVER}]`,
       `url = ${tomlString(mcpUrl)}`,

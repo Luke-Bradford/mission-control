@@ -6720,7 +6720,7 @@ describe("superuser housekeeping", () => {
         phase: "review",
         prNumber: 12,
         awaitingFlight: SHA,
-        touches: { sha: SHA, paths: ["apps/server/src/flight/tools.ts"] },
+        touches: { sha: SHA, paths: ["apps/web/src/Example.tsx"] },
       },
     });
     store.replacePullRequests(
@@ -6775,6 +6775,33 @@ describe("superuser housekeeping", () => {
       if (a[1] === "comment") expect(clearanceCalls).toEqual([["r-pr", SHA]]);
       return prior(a);
     };
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+  });
+  it.each([
+    "apps/server/src/api.ts",
+    "apps/server/src/flight-approvals.ts",
+    "apps/server/src/flight/tools.ts",
+    "packages/core/src/flight-access.ts",
+    "roles/FLIGHT.md",
+    ".claude/skills/flight-ops/SKILL.md",
+  ])("requires independent current-head controller evidence for %s", async (path) => {
+    elevated();
+    runPr();
+    const loop = need(store.run("r-pr")?.loop);
+    store.setRunLoop("r-pr", { ...loop, touches: { sha: SHA, paths: [path] } });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([]);
+    store.setRunLoop("r-pr", {
+      ...loop,
+      touches: { sha: SHA, paths: [path] },
+      controllerCheck: { sha: "old-head", from: "review", pass: true },
+    });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    store.setRunLoop("r-pr", {
+      ...loop,
+      touches: { sha: SHA, paths: [path] },
+      controllerCheck: { sha: SHA, from: "review", pass: true },
+    });
     expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
   });
   it.each(["ruling", "review-failed", "conflict"])("cannot accept a %s park", async (kind) => {
@@ -6960,9 +6987,8 @@ describe("superuser housekeeping", () => {
     );
     runPr();
     store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
-    expect(await call("merge_pr", { pr: 12 })).toEqual(
-      refused("No awaiting-flight run PR in your lane."),
-    );
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([]);
     store.setSeatSession(row("guido-1", "r-pr"));
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),

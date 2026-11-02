@@ -118,6 +118,9 @@ describe("codexSeatConfig", () => {
     expect(config).toContain('sandbox_mode = "danger-full-access"');
     expect(config).not.toContain("approval_policy");
     expect(config).toContain('web_search = "live"');
+    expect(config).toContain('inherit = "all"');
+    expect(config).toContain("ignore_default_excludes = true");
+    expect(config).toContain('exclude = ["MC_SEAT_TOKEN"]');
     expect(config).not.toContain("default_permissions");
     expect(config).not.toContain("filesystem");
     expect(config).not.toContain("TOKEN_VALUE");
