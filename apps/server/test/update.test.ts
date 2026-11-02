@@ -119,6 +119,15 @@ interface Call {
   cwd: string;
 }
 
+const PRODUCTION_GIT_CONFIG = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=",
+  "-c",
+  "protocol.ext.allow=never",
+];
+
 /**
  * git runs for real (in the temp repos); pnpm is faked: `install` succeeds, `build` writes
  * `$MC_WEB_OUTDIR/index.html` unless `fail` names the step.
@@ -127,10 +136,10 @@ function fakeExec(fail: { install?: boolean; build?: boolean } = {}) {
   const calls: Call[] = [];
   const exec: Exec = async (file, args, o) => {
     // the git calls' leading `-c` pairs are recorded once, below, not in every command line
-    const shown = file === "git" ? args.slice(4) : args;
+    const shown = file === "git" ? args.slice(PRODUCTION_GIT_CONFIG.length) : args;
     calls.push({ cmd: [file, ...shown].join(" "), env: o.env, timeoutMs: o.timeoutMs, cwd: o.cwd });
     if (file === "git") {
-      expect(args.slice(0, 4)).toEqual(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor="]);
+      expect(args.slice(0, PRODUCTION_GIT_CONFIG.length)).toEqual(PRODUCTION_GIT_CONFIG);
       return execFileP(file, [...args], { cwd: o.cwd, env: o.env, encoding: "utf8" });
     }
     if (args[0] === "install") {
@@ -1440,7 +1449,10 @@ describe("auto update", () => {
     const { u } = updater({
       exec: async (file, args, o) => {
         const result = await f.exec(file, args, o);
-        if (file === "git" && args.slice(4).join(" ") === "rev-parse origin/main") {
+        if (
+          file === "git" &&
+          args.slice(PRODUCTION_GIT_CONFIG.length).join(" ") === "rev-parse origin/main"
+        ) {
           tipReads++;
           if (tipReads === 2) return { stdout: `${"f".repeat(40)}\n`, stderr: "" };
         }

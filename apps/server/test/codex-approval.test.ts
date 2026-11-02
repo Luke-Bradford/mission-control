@@ -22,6 +22,7 @@ function approver(
   runGrants?: () => readonly string[],
   checks?: CheckRecorder,
   lock = new TestLock(),
+  fullAccess = false,
 ) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
@@ -38,6 +39,7 @@ function approver(
     seatId: "seat",
     runId: "run",
     mode,
+    fullAccess,
     area: ["apps/**"],
     cwd,
     lock,
@@ -72,6 +74,33 @@ const commandRequest = (command: string) => ({
 });
 
 describe("Codex MCP approvals", () => {
+  it("lets FLIGHT use controller commands and files while retaining repository floors", async () => {
+    const h = approver("read-only", [], undefined, undefined, new TestLock(), true);
+    for (const command of [
+      "gh pr close 7",
+      "curl -X POST http://127.0.0.1:7420/api/runs/run/resume",
+      "git worktree remove /old",
+    ])
+      expect(await h.approve(commandRequest(command), undefined, signal())).toBe("accept");
+    expect(await h.approve(commandRequest("git push origin main"), undefined, signal())).toBe(
+      "decline",
+    );
+    expect(
+      await h.approve(
+        { id: 4, method: "item/fileChange/requestApproval", params: {} },
+        ["/outside/apps/new.ts"],
+        signal(),
+      ),
+    ).toBe("accept");
+    expect(
+      await h.approve(
+        { id: 5, method: "item/fileChange/requestApproval", params: {} },
+        ["/outside/.github/workflows/ci.yml"],
+        signal(),
+      ),
+    ).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith("repo-rules", expect.stringContaining(".github"));
+  });
   it.each([
     ["writer", MC_TOOL_NAMES.commit, [], "accept"],
     ["writer", MC_TOOL_NAMES.reportEvidence, [], "accept"],

@@ -28,11 +28,11 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 - An unlabelled card starts only on a hub with no lane, or on the one configured as the default lane.
 - The work machine also refines the backlog for both lanes. Keep a ticket's destination lane when you plan it.
 
-## Card fields and ticket bodies (superuser repos)
+## Card fields and ticket bodies
 
 - `mc edit_card` sets fields and settles lane conflicts.
 - `mc set_fields` sets priority, size, labels and milestone. Keep exactly one `area:` label; lane changes use `edit_card`.
   - It can also move a card to Blocked, for a ticket that waits on something outside this repo. You can't move it back.
-  - It refuses draft workspaces, closed tickets and tickets with a live run, and shares promote's moves-an-hour cap.
+  - It refuses draft workspaces, closed tickets and tickets with a live run.
 - `mc edit_issue` sets a ticket's title or whole body. It refuses a ticket with a live run, and changes to its Controller check section.
 - Prefer asking the planner (`mc comment_ticket`) to change a started ticket's body.

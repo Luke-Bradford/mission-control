@@ -70,6 +70,8 @@ export interface SessionInput {
   /** Every stdout line is appended here by the keeper (mode 0600 when created). */
   transcriptPath: string;
   env?: NodeJS.ProcessEnv;
+  /** Inherited by the keeper and CLI, never written into spec.json. */
+  privateEnv?: Record<string, string>;
   /** The node that runs the keeper, and the keeper's entry file. */
   node: string;
   entry: string;
@@ -558,6 +560,7 @@ export function startKeeperSession(i: KeeperSessionInput): KeeperSession {
         (e): e is [string, string] => typeof e[1] === "string",
       ),
     ),
+    privateEnvKeys: Object.keys(i.privateEnv ?? {}),
     transcriptPath: i.transcriptPath,
     stdoutLineMax: i.stdoutLineMax ?? STDOUT_LINE_MAX,
     stderrLineMax: i.stderrLineMax ?? STDERR_LINE_MAX,
@@ -585,7 +588,7 @@ export function startKeeperSession(i: KeeperSessionInput): KeeperSession {
       detached: true,
       stdio: ["ignore", log, log],
       // the keeper needs none of the hub's environment; the CLI's is in the spec
-      env: { PATH: process.env.PATH ?? "" },
+      env: { PATH: process.env.PATH ?? "", ...i.privateEnv },
     });
   } finally {
     closeSync(log);

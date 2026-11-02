@@ -50,6 +50,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
@@ -57,8 +58,13 @@ import {
   ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
+  FLIGHT_APPROVAL_RULES,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
+  flightShellBreakerWrite,
+  flightShellWrite,
+  flightTicketWrites,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -68,8 +74,10 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
   GUARD_HOOK_EVENTS,
+  GUARD_RULES,
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
+  globMatches,
   guardAckKey,
   guardDenyOutput,
   guardStopOutput,
@@ -112,6 +120,7 @@ import {
   REVIEW_ROUNDS,
   type RepoId,
   type RepoProfile,
+  type RepoRules,
   type RepoView,
   type ReviewCheckState,
   RUNAWAY_NOT_TRIPPED,
@@ -167,6 +176,7 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
+import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -240,6 +250,13 @@ import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  externalMergeHold,
+  externalPrControl,
+  setExternalMergeHold,
+  setExternalPrControl,
+} from "./external-pr-control.ts";
+import { readExternalSubject } from "./external-reviews.ts";
+import {
   changedFiles,
   committedLines,
   fileDiff,
@@ -247,10 +264,12 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
+import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
-import { liftRunaway } from "./flight/runaway.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
+import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
 import {
   flightBriefView,
   flightScheduleView,
@@ -258,6 +277,12 @@ import {
   flightView,
   prFlow,
 } from "./flight/state.ts";
+import {
+  FLIGHT_APPROVAL_MAX_MS,
+  findApproval,
+  grantApproval,
+  useApproval,
+} from "./flight-approvals.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
@@ -418,6 +443,8 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
+  repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Shared bounded reader; the MCP read handler can use this same instance. */
   codeHealth?: CodeHealthReader;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
@@ -623,6 +650,16 @@ const isStopEvent = (body: unknown): boolean =>
   (body as { hook_event_name?: unknown }).hook_event_name === "Stop";
 
 /** A Stop: the event alone. */
+/** `POST /api/flight/approvals`: a controller approves FLIGHT past one rule, for one scope. */
+const FlightApprovalBody = z.strictObject({
+  rule: z.enum(FLIGHT_APPROVAL_RULES),
+  scope: z.string().trim().min(1).max(500),
+  until: z.iso.datetime({ offset: true }),
+  reason: z.string().trim().min(1).max(500),
+});
+/** The answer to a seat that calls a route only the operator may. */
+const SEAT_REFUSED = "a seat cannot use the operator's routes";
+
 const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
 
 const GuardCheckBody = z.strictObject({
@@ -630,10 +667,16 @@ const GuardCheckBody = z.strictObject({
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
   agent_id: z.string().min(1).max(256).optional(),
+  cwd: z.string().max(4096).optional(),
+  exit_code: z.number().int().min(0).nullable().optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
+      content: z.string().optional(),
+      old_string: z.string().optional(),
+      new_string: z.string().optional(),
+      replace_all: z.boolean().optional(),
       run_in_background: z.boolean().optional(),
       pages: z.string().optional(),
       offset: z.number().optional(),
@@ -1172,9 +1215,59 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // A preview child owns no live loop. Its parent uses these pings only to expire an unused child.
   app.addHook("onRequest", async () => deps.previewActivity?.());
 
-  // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
-  // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
-  // check keeps its own run token; /mcp is outside /api.
+  // The served HUD and full-access FLIGHT hold the operator token. In-process FLIGHT requests
+  // retain their seat/run provenance so supported controller-only actions remain independent.
+  // This is a workflow guardrail; full same-user machine access is not an OS security boundary.
+  const flightActor = (req: FastifyRequest): { seatId: string; runId: string } | null => {
+    const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
+    if (typeof raw !== "string") return null;
+    try {
+      const value = JSON.parse(raw);
+      if (typeof value?.seatId !== "string" || typeof value.runId !== "string") return null;
+      const seat = configuredAgents(config).find(
+        (agent) => agent.kind === "crew" && agent.id === value.seatId,
+      );
+      const run = store.run(value.runId);
+      return seat?.kind === "crew" &&
+        crewSeatDef(config, seat.id).loop === "watch" &&
+        run?.agentId === seat.id &&
+        run.endedAt === null
+        ? { seatId: seat.id, runId: run.id }
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] === undefined) return;
+    const actor = flightActor(req);
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      !actor ||
+      path === OPERATOR_BOOTSTRAP_PATH ||
+      path === "/api/flight/approvals" ||
+      path === "/api/flight/runaway/lift" ||
+      path.endsWith("/uat")
+    )
+      return reply
+        .code(403)
+        .send({ error: "This action belongs to the operator or independent controller." });
+  });
+  // A seat's run token marks a request as a seat's: it never reaches the routes that hand out or use
+  // the operator's authority (the token's bootstrap, FLIGHT's approvals, lifting the breaker, and the
+  // attention items whose dismissal lifts it). The operator token is a second, separate key.
+  app.addHook("onRequest", async (req, reply) => {
+    if (!deps.tokens || deps.tokens.resolve(bearer(req)) === null) return;
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path === OPERATOR_BOOTSTRAP_PATH ||
+      path === "/api/flight/approvals" ||
+      path === "/api/flight/runaway/lift" ||
+      path.startsWith("/api/attention/")
+    )
+      return reply.code(403).send({ error: SEAT_REFUSED });
+  });
+
   const operatorToken = deps.operatorToken;
   if (operatorToken !== undefined) {
     app.addHook("onRequest", async (req, reply) => {
@@ -2191,12 +2284,56 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reply
               .type("application/json")
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
+          const fullAccess =
+            crewProfileOf(
+              seat.kind === "crew" ? seat.seat.role : "",
+              crewSeatDef(config, seat.id).loop,
+            ) === "flight-full";
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
-            // a read that failed gave the seat nothing to scroll back to
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
+            const command = body.data.tool_input?.command;
+            const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
+            if (
+              fullAccess &&
+              body.data.tool_name === "Bash" &&
+              typeof command === "string" &&
+              flightShellWrite(command) &&
+              store.getSetting(auditKey) === null
+            ) {
+              let shown = command;
+              let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
+              for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
+                if (secret !== "") {
+                  shown = shown.split(secret).join("[redacted]");
+                  cwd = cwd.split(secret).join("[redacted]");
+                }
+              }
+              shown = cleanText(shown, 1500);
+              cwd = cleanText(cwd, 1000);
+              store.addFlightDecision({
+                at: now(),
+                kind: "shell",
+                seatId: who.seatId,
+                targetRunId: who.runId,
+                ref: null,
+                questionId: null,
+                about: shown,
+                decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
+                basis: "The CLI's post-execution hook recorded this result.",
+              });
+              store.setSetting(auditKey, "recorded");
+              if (
+                flightShellBreakerWrite(
+                  command,
+                  flightShellContext(store, who.runId, body.data.cwd),
+                )
+              )
+                noteFlightWrite(store, bus, now(), "shell", { command: shown });
+              bus.emit("flight");
+            }
             return answer();
           }
           let verdict = crewGuardDecision(
@@ -2207,7 +2344,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.superuserTools,
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
+            body.data.cwd,
+            fullAccess,
           );
+          if (fullAccess)
+            verdict = await flightFloor({
+              store,
+              bus,
+              repoId: seat.repoId,
+              runId: who.runId,
+              seatId: who.seatId,
+              event: { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              verdict,
+              now: now(),
+              cwd: body.data.cwd,
+              rules: deps.repoRules,
+            });
           // a large file this run already read whole, unchanged, is not given again
           if (verdict.kind === "allow") {
             const reread = rereadDenial(
@@ -4207,6 +4359,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(404).send({ error: "Unknown repo" });
         return { notes: store.flightMemory(parsed.data.repo) };
       });
+      // A controller's approval for FLIGHT to go past one of the repo's rules, for one scope until a time.
+      // The operator token is the key: `mc operator` never reaches this route.
+      // Reader: docs/runbook.md#flight-approvals
+      api.post("/flight/approvals", async (req, reply) => {
+        const body = FlightApprovalBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const at = now();
+        const until = Date.parse(body.data.until);
+        if (until <= at || until - at > FLIGHT_APPROVAL_MAX_MS)
+          return reply.code(400).send({ error: "until must be in the future and within 7 days" });
+        const approval = grantApproval(
+          store,
+          { rule: body.data.rule, scope: body.data.scope, until, reason: body.data.reason },
+          at,
+        );
+        store.addFlightDecision({
+          at,
+          kind: "approval",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about: `${approval.rule} ${approval.scope}`,
+          decision: `A controller approved it until ${body.data.until}`,
+          basis: body.data.reason,
+        });
+        bus.emit("flight");
+        return { ok: true, id: approval.id };
+      });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
       // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
@@ -4513,9 +4694,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+        const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
-          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+          ? await deps.engine.onOperatorMessage(run.id, by, { action: "accept" })
+          : await deps.engine.onOperatorMessage(run.id, by);
         if (!lifted.lifted) {
           return reply
             .code(409)
@@ -4523,8 +4705,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
-      // The operator's verdict on a run parked on its ticket's `## Controller check`. FLIGHT has no
-      // tool for this; the operator token is required like every mutating route.
+      // The verdict on a run's `## Controller check`. FLIGHT may record routine evidence, while
+      // checks of its own runtime and approval guidance require an independent controller.
       // Reader: docs/runbook.md#record-a-controller-check
       api.post<{ Params: { id: string } }>(
         "/runs/:id/controller-check",
@@ -4536,6 +4718,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!crewGate(run.agentId, reply)) return reply;
           const body = ControllerCheckBody.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (
+            flightActor(req) &&
+            run.loop.touches?.paths.some((path) =>
+              FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
+            )
+          )
+            return reply.code(403).send({
+              error:
+                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+            });
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
             return reply.code(409).send({ error: "the loop engine is off" });
@@ -4564,6 +4756,144 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
+      const externalTarget = async (
+        repoId: string,
+        number: number,
+        prefix: string,
+        reply: FastifyReply,
+      ) => {
+        const repo = config.repos.find((value) => value.id === repoId);
+        const pr = store.pullRequests(repoId).find((value) => value.number === number);
+        const sha = pr?.headSha;
+        if (
+          !repo ||
+          !pr ||
+          pr.state !== "open" ||
+          !sha ||
+          repo.autonomy !== "merge" ||
+          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+        ) {
+          reply.code(404).send({ error: "no external PR is waiting here" });
+          return null;
+        }
+        if (deps.noLoopWrites) {
+          reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          return null;
+        }
+        if (!sha.startsWith(prefix.toLowerCase())) {
+          reply
+            .code(409)
+            .send({ error: "the PR head changed; reload its evidence before deciding" });
+          return null;
+        }
+        try {
+          if (
+            !(await readExternalSubject(
+              deps.gh ?? createGh(),
+              crewDir(store.path),
+              repo,
+              number,
+              sha,
+            )) ||
+            store.pullRequests(repoId).find((value) => value.number === number)?.headSha !== sha
+          ) {
+            reply
+              .code(409)
+              .send({ error: "the current PR head and provenance could not be verified" });
+            return null;
+          }
+        } catch {
+          reply.code(502).send({ error: "the current PR could not be read" });
+          return null;
+        }
+        return { repo, pr, sha };
+      };
+      const externalNoteAllowed = async (note: string | undefined, reply: FastifyReply) => {
+        if (note === undefined) return true;
+        try {
+          await validateCommsText(deps.knownSecrets ?? (async () => []), note);
+          return true;
+        } catch {
+          reply.code(400).send({ error: "The note contains text that cannot be recorded." });
+          return false;
+        }
+      };
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (controller PRs have no author run).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/controller-check",
+        async (req, reply) => {
+          const body = ControllerCheckBody.safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid controller-check request" });
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          const control = externalPrControl(store, target.repo.id, number, target.sha);
+          if (!control?.controllerRequired)
+            return reply.code(404).send({ error: "this head has no outstanding controller check" });
+          if (flightActor(req) && control.protectedController)
+            return reply.code(403).send({
+              error:
+                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+            });
+          if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+          setExternalPrControl(store, target.repo.id, number, target.sha, {
+            ...control,
+            controllerPassed: body.data.verdict === "pass",
+            note: body.data.note ?? null,
+          });
+          store.addHubEvent(
+            `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (external PR merge holds).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/merge-hold",
+        async (req, reply) => {
+          const body = z
+            .strictObject({
+              sha: z.string().regex(/^[a-f0-9]{40}$/i),
+              action: z.enum(["hold", "release"]),
+              reason: z.string().trim().min(1).max(300).optional(),
+            })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (
+            !body.success ||
+            !Number.isSafeInteger(number) ||
+            number < 1 ||
+            (body.data.action === "hold" && !body.data.reason)
+          )
+            return reply.code(400).send({ error: "invalid merge-hold request" });
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          const previous = externalMergeHold(store, target.repo.id, number);
+          const actor = flightActor(req);
+          if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
+            return reply
+              .code(403)
+              .send({ error: "Only the controller may change this operator merge hold." });
+          if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
+          setExternalMergeHold(
+            store,
+            target.repo.id,
+            number,
+            body.data.action === "release"
+              ? null
+              : `${actor ? "FLIGHT" : "CAPCOM"}: ${body.data.reason}`,
+          );
+          store.addHubEvent(
+            `${actor ? "FLIGHT" : "Controller"} ${body.data.action} merge hold for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.reason ? `: ${cleanText(body.data.reason, 300)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
       // The operator's acceptance (UAT) of a tested PR the repo's `uat` rule holds: accept lets it merge,
       // send back gives the seat the note and a new round. FLIGHT has no tool for this.
       // Reader: docs/runbook.md#accept-or-send-back-a-pr-at-uat
@@ -4585,8 +4915,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 r.loop?.prNumber === n &&
                 r.loop.parked?.kind === UAT_PARK,
             );
-          if (run === undefined || !run.loop?.uat)
-            return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (run === undefined || !run.loop?.uat) {
+            const target = await externalTarget(repo.id, n, body.data.sha, reply);
+            if (target === null) return reply;
+            const control = externalPrControl(store, repo.id, n, target.sha);
+            if (!control?.uatRequired)
+              return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+            if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+            setExternalPrControl(store, repo.id, n, target.sha, {
+              ...control,
+              uatAccepted: body.data.action === "accept",
+              note: body.data.note ?? null,
+            });
+            store.addHubEvent(
+              `Operator ${body.data.action === "accept" ? "accepted" : "sent back"} external PR ${repo.id}#${n} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+              now(),
+            );
+            bus.emit("boards");
+            return { ok: true };
+          }
           if (body.data.sha !== run.loop.uat.sha)
             return reply
               .code(409)
@@ -4637,8 +4984,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const result =
           body.data.action === "hold"
-            ? await engine.holdMerge(run.id, "CAPCOM", body.data.reason)
-            : await engine.releaseMergeHold(run.id, "CAPCOM");
+            ? await engine.holdMerge(
+                run.id,
+                flightActor(req) ? "FLIGHT" : "CAPCOM",
+                body.data.reason,
+              )
+            : await engine.releaseMergeHold(run.id, flightActor(req) ? "FLIGHT" : "CAPCOM");
         if (!result.ok)
           return reply.code(409).send({ error: `merge hold not changed: ${result.text}` });
         return { ok: true };

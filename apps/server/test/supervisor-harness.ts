@@ -302,6 +302,7 @@ function make(
   over: {
     enabled?: boolean;
     fetchTicket?: FetchTicket;
+    flightEnvironment?: SupervisorDeps["flightEnvironment"];
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
     fileContext?: SupervisorDeps["fileContext"];
     command?: string;
@@ -383,6 +384,7 @@ function make(
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
+    flightEnvironment: over.flightEnvironment,
     ...(over.externalReviewSubject === undefined
       ? {}
       : { externalReviewSubject: over.externalReviewSubject }),

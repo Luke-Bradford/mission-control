@@ -108,6 +108,26 @@ async function reattach(over: Partial<CodexAttachInput> = {}) {
 }
 
 describe("Codex session", () => {
+  it("verifies FLIGHT's full-access thread and reports actual shell completion facts", async () => {
+    const { session, events, approve } = start({}, { fullAccess: true });
+    session.send(JSON.stringify({ command: "gh pr close 7", cwd: dir, exitCode: 0 }));
+    await until(() => expect(events.some((event) => event.kind === "result")).toBe(true));
+    expect(recorded().find((message) => message.method === "thread/start").params).toMatchObject({
+      sandbox: "danger-full-access",
+      approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
+    });
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-result",
+        ok: true,
+        exitCode: 0,
+        command: "gh pr close 7",
+        cwd: dir,
+      }),
+    );
+  });
   it("queues send until the checked handshake, then reports a turn and context usage", async () => {
     const { session, events } = start();
     session.send(

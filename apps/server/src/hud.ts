@@ -33,7 +33,6 @@ import {
   escalationKind,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
-  FLIGHT_HANDLING_MAX_MS,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
@@ -1374,7 +1373,6 @@ function buildAttentionItems(
     }
     if (seatAsk && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
-      if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
       if (brief?.for === "flight")
         return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
@@ -1389,7 +1387,6 @@ function buildAttentionItems(
     // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
     if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
-    if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
     if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };

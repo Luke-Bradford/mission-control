@@ -27,6 +27,13 @@ export const ROLE_PROMPT_DIR = "roles";
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
 /** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
 export type CrewEffort = string;
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
+export const CREW_PROFILES = ["standard", "flight-full"] as const;
+export type CrewProfile = (typeof CREW_PROFILES)[number];
+/** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
+export const crewProfileOf = (role: string, loop: string): CrewProfile =>
+  role === "FLIGHT" && loop === "watch" ? "flight-full" : "standard";
+
 /** The modes a seat's config may name; every other mode comes from the role. */
 export const CONFIG_SEAT_MODES = ["scratch"] as const;
 export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
@@ -83,6 +90,9 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.releaseHold,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
+  MC_TOOL_NAMES.operator,
+  MC_TOOL_NAMES.ghWrite,
+  MC_TOOL_NAMES.crewTidy,
 ];
 
 /**
@@ -912,6 +922,8 @@ export interface CrewSandboxInput {
   allowRead?: string[];
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
+  /** The hub's own checkout: FLIGHT's full profile may not write it (the hub runs that code). */
+  hubRoot?: string;
 }
 
 /** Credential files and folders (relative to home) no seat's Bash may read. */
@@ -1089,7 +1101,15 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
  * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
-export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
+export function crewSandboxSettings(
+  i: CrewSandboxInput,
+  mode: CrewMode,
+  hook: CrewHook,
+  profile: CrewProfile = "standard",
+): string {
+  if (profile === "flight-full") {
+    return JSON.stringify({ hooks: guardHooks(hook), sandbox: { enabled: false } });
+  }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
   const tempDenies = i.tempRoot === undefined ? [] : [...TEMP_DENY_GLOBS];
@@ -1148,6 +1168,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
 export interface CrewCliInput {
   model: string;
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile; all other seats stay standard. */
+  profile?: CrewProfile;
   /** Absolute path of the role brief, `roles/<CALL>.md`. */
   rolePromptFile: string;
   sessionId: string;
@@ -1258,7 +1280,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
       : [t],
   );
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
-  return [
+  const profile = i.profile ?? "standard";
+  const args = [
     "-p",
     "--input-format",
     "stream-json",
@@ -1269,24 +1292,40 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
     ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
-    ...CREW_ISOLATION_FLAGS,
+    ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
-    "--tools",
-    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
     "--settings",
-    crewSandboxSettings(i.sandbox, i.mode, i.hook),
+    crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
     "--mcp-config",
     i.mcpConfigFile,
-    "--allowedTools",
-    ...allowed,
-    "--disallowedTools",
-    ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
     "--append-system-prompt-file",
     i.rolePromptFile,
     i.resume ? "--resume" : "--session-id",
     i.sessionId,
   ];
+  if (profile === "flight-full") {
+    // Keep the guard hooks; use the controller's tools and filesystem without per-tool grants.
+    args.splice(args.indexOf("--settings"), 0, "--permission-mode", "bypassPermissions");
+    return args;
+  }
+  const settingsAt = args.indexOf("--settings");
+  args.splice(
+    settingsAt,
+    0,
+    "--tools",
+    (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
+  );
+  const promptAt = args.indexOf("--append-system-prompt-file");
+  args.splice(
+    promptAt,
+    0,
+    "--allowedTools",
+    ...allowed,
+    "--disallowedTools",
+    ...DENIED_TOOLS,
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? [], i.granted ?? []),
+  );
+  return args;
 }
 
 /**
@@ -1315,6 +1354,9 @@ export type SessionEvent =
       toolUseId: string;
       ok?: boolean;
       exitCode?: number | null;
+      /** Exact completed Codex command facts, supplied only for FLIGHT audit. */
+      command?: string;
+      cwd?: string;
       /** UTF-8 bytes of the result the model reads; Codex events carry none. */
       bytes?: number;
     }

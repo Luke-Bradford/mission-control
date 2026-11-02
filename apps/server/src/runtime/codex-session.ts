@@ -34,6 +34,9 @@ export interface CodexSessionInput {
   args: string[];
   cwd: string;
   env: Record<string, string>;
+  privateEnv?: Record<string, string>;
+  /** FLIGHT's controller authority; all other threads retain mc_seat. */
+  fullAccess?: boolean;
   transcriptPath: string;
   node: string;
   entry: string;
@@ -140,6 +143,7 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
 }
 
 export interface CodexAttachInput {
+  fullAccess?: boolean;
   /** Earlier lines rebuild protocol state without repeating supervisor events. */
   from: number;
   threadId: string;
@@ -579,6 +583,12 @@ function codexSession(
               toolUseId: key,
               ok: item.status === "completed" && item.exitCode === 0,
               ...(typeof item.exitCode === "number" ? { exitCode: item.exitCode } : {}),
+              ...(i.fullAccess &&
+              key === item.id &&
+              typeof item.command === "string" &&
+              typeof item.cwd === "string"
+                ? { command: item.command, cwd: item.cwd }
+                : {}),
             });
           }
         }
@@ -626,6 +636,7 @@ function codexSession(
       cwd: i.cwd,
       model: i.model,
       approvalPolicy: "untrusted",
+      ...(i.fullAccess ? { sandbox: "danger-full-access" } : {}),
       approvalsReviewer: "user",
       developerInstructions: i.developerInstructions,
       config: CODEX_PROJECT_DOC_CONFIG,
@@ -636,10 +647,12 @@ function codexSession(
       !isObj(result) ||
       result.approvalPolicy !== "untrusted" ||
       result.approvalsReviewer !== "user" ||
-      !isObj(result.activePermissionProfile) ||
-      result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
       !isObj(result.sandbox) ||
-      result.sandbox.networkAccess !== false ||
+      (i.fullAccess
+        ? result.sandbox.type !== "dangerFullAccess"
+        : !isObj(result.activePermissionProfile) ||
+          result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
+          result.sandbox.networkAccess !== false) ||
       !Array.isArray(result.instructionSources) ||
       result.instructionSources.length !== 0 ||
       !isObj(result.thread) ||

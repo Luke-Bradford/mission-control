@@ -13,7 +13,7 @@ Read this when you reconcile the ledger, or write the brief or headline. Where t
   - what it waits on;
   - what evidence or checkpoint will make you revisit it.
 - Use stable keys, short titles and a concrete next step. Update the status when it changes. Close an entry with `mc untrack` and an outcome when it resolves.
-- Ledger edits share a cap of 60 an hour and are not logged.
+- Ledger edits keep the programme view current; the runaway breaker still applies.
 
 ## Kinds
 
