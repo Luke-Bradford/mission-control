@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CODE_HEALTH_RULES,
@@ -8,9 +7,15 @@ import {
 import { z } from "zod";
 import type { Store } from "../store.ts";
 import { CodeHealthReadError } from "./error.ts";
+import { fileRecommendationProposals } from "./file-recommendations.ts";
+import { recommendationHash as hash } from "./proposal-hash.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
 export interface RecommendationScope {
+  kind?: "file-risk";
+  sizeSha?: string;
+  sizeCapturedAt?: number;
+  sizeVersion?: number;
   from: number;
   until: number;
   file?: string;
@@ -19,7 +24,10 @@ export interface RecommendationScope {
   observedFrom: number | null;
   observedUntil: number | null;
 }
-type Proposal = Omit<CodeHealthRecommendation, "createdAt" | "updatedAt" | "state" | "evidence"> & {
+export type Proposal = Omit<
+  CodeHealthRecommendation,
+  "createdAt" | "updatedAt" | "state" | "evidence"
+> & {
   scope: RecommendationScope | null;
 };
 export interface RecommendationRecord extends CodeHealthRecommendation {
@@ -79,6 +87,22 @@ export function recommendationRow(db: Db, repo: string, id: string): Recommendat
     .prepare("SELECT * FROM code_health_recommendations WHERE repo_id=? AND id=?")
     .get(repo, id);
   return row ? decode(row) : null;
+}
+export function recommendationRowsForFiles(
+  db: Db,
+  repo: string,
+  paths: readonly string[],
+  at: number,
+) {
+  if (paths.length > 100) throw Error("Recommendation file scope limit");
+  if (!paths.length) return [];
+  return db
+    .prepare(`SELECT * FROM code_health_recommendations WHERE repo_id=? AND active=1
+    AND json_extract(proposal,'$.scope.file') IN (SELECT value FROM json_each(?))
+    AND (json_extract(state,'$.kind') IN ('proposed','accepted') OR (json_extract(state,'$.kind')='snoozed' AND json_extract(state,'$.until')<=?))
+    ORDER BY CASE json_extract(proposal,'$.rule') WHEN 'recurring-correction' THEN 0 ELSE 1 END,json_extract(proposal,'$.target.baseline') DESC,updated_at DESC,id LIMIT 3`)
+    .all(repo, JSON.stringify(paths), at)
+    .map(decode);
 }
 export function upsertRecommendation(db: Db, proposal: Proposal, at: number) {
   db.prepare(`INSERT INTO code_health_recommendations(id,repo_id,proposal,created_at,updated_at) VALUES(?,?,?,?,?)
@@ -233,10 +257,13 @@ export function linkRecommendation(db: Db, repo: string, id: string, link: strin
     "UPDATE code_health_recommendations SET linked_work=?,state=?,updated_at=? WHERE repo_id=? AND id=?",
   ).run(link, JSON.stringify(row.state), Math.max(at, row.updatedAt + 1), repo, id);
 }
-const hash = (value: unknown) =>
-  createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 32);
 /** Conservative rules consume only measured source rows; missing prerequisites remain collection proposals. */
-export function recommendationProposals(store: Store, repoId: string, at: number): Proposal[] {
+export function recommendationProposals(
+  store: Store,
+  repoId: string,
+  at: number,
+  checkout?: string,
+): Proposal[] {
   const source = store.codeHealthReviews(repoId, at - 30 * 86400_000, at),
     proposals: Proposal[] = [];
   function add(
@@ -326,20 +353,25 @@ export function recommendationProposals(store: Store, repoId: string, at: number
         "Recent cohorts are provisional; round counts do not establish a production defect.",
         { pr },
       );
+  const files = fileRecommendationProposals(store, repoId, at, checkout);
+  proposals.push(...files.proposals);
+  const missing = [...files.missing, "ordered CI attempts", "named-test results"];
   add(
     "collection",
     "risk-and-tests",
-    ["dated-file-touches", "ordered-test-results"],
-    "Dated per-file touches, ordered CI attempts and named-test results are not yet collected.",
-    "Collect dated PR/file membership and ordered test results before judging churn, size trends or flaky tests.",
+    missing,
+    `Missing measurement sources: ${missing.join(", ")}.`,
+    "Check missing collection before judging file trends or test reliability.",
     "missing measurement sources",
     null,
-    "Unordered mixed job outcomes are candidates only; no flaky-test rate or size-change trend is inferred.",
+    "Observed data is not complete GitHub history. Mixed job outcomes alone do not establish flaky tests.",
   );
   const collection = proposals.pop();
+  const priority = (rule: string) =>
+    rule === "recurring-correction" ? 0 : rule === "repeated-rounds" ? 1 : 2;
   proposals.sort(
     (a, b) =>
-      (a.rule === b.rule ? 0 : a.rule === "recurring-correction" ? -1 : 1) ||
+      priority(a.rule) - priority(b.rule) ||
       (b.target.baseline ?? 0) - (a.target.baseline ?? 0) ||
       a.id.localeCompare(b.id),
   );

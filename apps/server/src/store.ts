@@ -156,6 +156,7 @@ import {
   recommendationProposals,
   recommendationRow,
   recommendationRows,
+  recommendationRowsForFiles,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
 import {
@@ -173,6 +174,7 @@ import {
   fileSizeSource,
   installFileSizes,
   recordFileSizes,
+  sizedPaths,
 } from "./code-health/size-store.ts";
 import {
   codeHealthCiSource,
@@ -1281,9 +1283,9 @@ export class Store {
   codeHealthRecommendation(repoId: string, id: string) {
     return recommendationRow(this.db, repoId, id);
   }
-  refreshCodeHealthRecommendations(repoId: string, at: number) {
+  refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
     this.transaction(() => {
-      const proposals = recommendationProposals(this, repoId, at);
+      const proposals = recommendationProposals(this, repoId, at, checkout);
       for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
       const ids = proposals.map((row) => row.id);
       this.db
@@ -1292,6 +1294,9 @@ export class Store {
         )
         .run(at, repoId, ...ids);
     });
+  }
+  codeHealthFileRecommendations(repoId: string, paths: readonly string[], at: number) {
+    return recommendationRowsForFiles(this.db, repoId, paths, at);
   }
   codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
     return (
@@ -1441,6 +1446,15 @@ export class Store {
   }
   codeHealthSizeSnapshot(repoId: string, checkout: string) {
     return fileSizeSource(this.db, repoId, checkout);
+  }
+  codeHealthSizedPaths(
+    repoId: string,
+    checkout: string,
+    sha: string,
+    paths: readonly string[],
+    minimum: number,
+  ) {
+    return sizedPaths(this.db, repoId, checkout, sha, paths, minimum);
   }
   recordCodeHealthSizeSnapshot(
     repoId: string,

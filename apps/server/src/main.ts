@@ -35,6 +35,7 @@ import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.t
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
+import { createFileContext } from "./code-health/file-context.ts";
 import { createGitFileCollector } from "./code-health/git-collector.ts";
 import {
   fetchBoard,
@@ -463,6 +464,11 @@ export async function main(): Promise<void> {
     profiles,
     checks: checkRecorder,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    fileContext: createFileContext({
+      config,
+      store,
+      knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    }),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
     enabled: crewEnabled,
