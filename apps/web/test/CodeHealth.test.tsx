@@ -120,6 +120,9 @@ it("fetches Code risk on selection and preserves repo/window while inspecting ev
   await screen.findByRole("region", { name: "File risk measurements" });
   fireEvent.click(screen.getAllByRole("button", { name: "src/domain/state.ts" })[0]);
   await screen.findByRole("dialog", { name: "src/domain/state.ts" });
+  expect(
+    screen.getByRole("link", { name: "Open analysed commit bbbbbbbb" }).getAttribute("href"),
+  ).toBe(`https://github.com/example/sample/commit/${"b".repeat(40)}`);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.getByRole("tab", { name: "Code risk" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByRole("button", { name: "30 days" }).getAttribute("aria-pressed")).toBe("true");

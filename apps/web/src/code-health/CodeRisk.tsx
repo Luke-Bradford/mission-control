@@ -303,12 +303,13 @@ export function CodeRisk({
                   </tr>
                 </thead>
                 <tbody>
-                  {couples.map((row) => (
+                  {couples.slice(0, 6).map((row) => (
                     <tr key={JSON.stringify([row.left, row.right])}>
                       <th scope="row">
                         <button
                           type="button"
                           className="ch-risk-path"
+                          title={`${row.left}\n${row.right}`}
                           onClick={() =>
                             onInspect(
                               `Coupling: ${row.left} + ${row.right}`,
@@ -336,8 +337,9 @@ export function CodeRisk({
             </section>
           )}
           <p className="ch-secondary pb">
-            Diffs with more than {couples[0]?.excludedBroadPrThreshold ?? 25} raw paths are excluded
-            before scope filtering. Shared changes are an investigation input, not a defect score.
+            Showing {Math.min(6, couples.length)} of {couples.length} qualifying pairs. Diffs with
+            more than {couples[0]?.excludedBroadPrThreshold ?? 25} raw paths are excluded before
+            scope filtering. Shared changes are an investigation input, not a defect score.
           </p>
         </Panel>
       </div>

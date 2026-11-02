@@ -87,3 +87,16 @@ it("names missing collection instead of treating an empty cohort as healthy", ()
   expect(screen.getByText(/Size history is not collected/)).toBeTruthy();
   expect(screen.getByText(/No qualifying pairs are available/)).toBeTruthy();
 });
+it("keeps coupling short and states how many qualifying pairs are omitted", () => {
+  const h = setup();
+  h.data.coupling = Array.from({ length: 10 }, (_, i) => ({
+    ...h.data.coupling[0],
+    left: `src/left-${i}.ts`,
+    right: `src/right-${i}.ts`,
+  }));
+  h.renderRisk();
+  expect(
+    within(screen.getByRole("region", { name: "Paired-file coupling" })).getAllByRole("row"),
+  ).toHaveLength(7);
+  expect(screen.getByText(/Showing 6 of 10 qualifying pairs/)).toBeTruthy();
+});
