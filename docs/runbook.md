@@ -18,8 +18,46 @@ answer 404 with the same recovery. These reads send no GitHub or config writes.
 Summary caches follow relevant review, CI, PR and Map writes, including writes from another
 SQLite connection. Unrelated settings and machine samples leave them intact. Collection reads
 use a consistent deferred SQLite snapshot. Responses redact credentials and bound evidence
-text; a failed secret-provider read fails closed. Recommendations and named-test ingestion
-retain their explicit collection states until their dependent services are available.
+text; a failed secret-provider read fails closed. Named-test ingestion retains its explicit
+collection state until its dependent service is available.
+
+### Code-health recommendation decisions
+
+Overview shows at most three ranked open proposals. Conservative rules use reported 30-day
+review evidence. Dated file touches and ordered test results remain collection proposals until
+those sources exist. Refresh materialises derived proposal rows in the local database; it never
+changes a decision, starts a seat, files a ticket or applies code or rules. Expired proposals become
+inactive, while decisions and accepted metric baselines remain durable. Each proposal carries
+its own fixed-30-day query and observed coverage, including category/file or PR filters.
+Changing the dashboard window cannot substitute a shorter cohort for that evidence.
+
+Read retained records with `GET /api/code-health/recommendations?repo=<id>&cursor=0`.
+Pages hold at most 50 records. Both history and decisions require the operator token.
+`POST /api/code-health/recommendations/<id>?repo=<id>` takes `requestId` (UUID), `basis`,
+`expectedUpdatedAt` and `change`. Change actions are `accept` (owner, future reviewAt),
+`dismiss` (reason), `snooze` (future until), or `assess` (paid-off/no-effect outcome, reason,
+comparison, and an issued evidenceId). Assessment waits for the metric review date. It records
+an explicit comparison, never an automatic claim of causation. Replaying a request ID returns
+its recorded response; conflicting reuse and stale decisions return 409.
+
+Accept leaves linked work pending and records a durable message for the configured repo's
+FLIGHT. FLIGHT reads the recommendation, then uses its existing authorised `create_ticket`
+path with `recommendationId`. That path retains engine, role, secret, breaker and Away checks.
+It records the issue link before project updates, so a project failure cannot create another
+issue on retry. The same call finishes a failed board handoff and preserves an existing card
+status. A stable body marker recovers an issue whose creation response was lost, even after rephrasing.
+The creation attempt is recorded before calling GitHub. If its outcome is uncertain and no
+marker is found in the bounded issue list, the handoff stays pending for inspection; the
+service does not risk a second issue. Partial recovery writes count toward the runaway breaker. Config/rule
+changes still need their existing proposal and approval paths. No recommendation action
+applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
+
+Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
+issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
+read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and
+proposal text is untrusted data. Decision actor, basis, response and linked work enter the
+existing flight decision audit. The read tool cannot accept, dismiss, snooze or assess.
+
 
 Mission Control is a local hub that watches the autonomous loops on this Mac. It reads their state
 files, transcripts, usage limits and GitHub boards, and shows them in one web app, the HUD. In

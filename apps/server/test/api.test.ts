@@ -1353,6 +1353,8 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
+  ["GET", "/api/code-health/recommendations?repo=shop-app"],
+  ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
   ["GET", "/api/code-health?repo=shop-app"],
   ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
@@ -2415,6 +2417,11 @@ describe("local access", () => {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
+        continue;
+      }
+      if (url.startsWith("/api/code-health/recommendations")) {
+        // This local-access fixture has no operator token; recommendation history and decisions always require it.
+        expect(r.statusCode).toBe(401);
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);

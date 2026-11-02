@@ -514,7 +514,7 @@ export async function main(): Promise<void> {
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
-    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS)],
+    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),

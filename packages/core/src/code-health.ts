@@ -224,6 +224,7 @@ export const CODE_HEALTH_READ_INPUT_SCHEMA = {
     tab: { type: "string", enum: CODE_HEALTH_TABS },
     window: { type: "string", enum: CODE_HEALTH_WINDOWS, default: "30d" },
     repo: { type: "string", minLength: 1 },
+    recommendation: { type: "string", pattern: "^chr_[a-f0-9]{32}$" },
     evidence: { type: "string", minLength: 1 },
     cursor: { type: "string", minLength: 1 },
   },

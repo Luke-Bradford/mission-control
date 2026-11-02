@@ -169,6 +169,7 @@ import {
 import type { ChangeBus } from "./bus.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
+import { RecommendationMutation } from "./code-health/recommendations.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -4108,6 +4109,76 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return await codeHealthOutput(
             codeHealth.evidence(parsed.data.repo, params.data.id, parsed.data.cursor),
           );
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (bounded recommendation history, including accepted work and assessments)
+      api.get("/code-health/recommendations", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const query = z
+          .strictObject({
+            repo: z.string().min(1).max(128),
+            cursor: z
+              .string()
+              .regex(/^(0|[1-9][0-9]{0,5})$/)
+              .default("0"),
+          })
+          .safeParse(req.query);
+        if (!query.success || Number(query.data.cursor) % 50 !== 0)
+          return reply.code(400).send({ error: "Invalid recommendation history query" });
+        if (!config.repos.some((row) => row.id === query.data.repo))
+          return reply.code(404).send({ error: "Unknown code-health repo" });
+        reply.header("cache-control", "no-store");
+        try {
+          return await codeHealthOutput(
+            codeHealth.recommendationHistory(query.data.repo, Number(query.data.cursor)),
+          );
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (operator decisions on durable code-health recommendations)
+      api.post("/code-health/recommendations/:id", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const params = z
+          .strictObject({ id: z.string().regex(/^chr_[a-f0-9]{32}$/) })
+          .safeParse(req.params);
+        const query = z
+          .strictObject({ repo: z.string().trim().min(1).max(128) })
+          .safeParse(req.query);
+        const body = RecommendationMutation.safeParse(req.body);
+        if (!params.success || !query.success || !body.success)
+          return reply.code(400).send({ error: "Invalid recommendation decision" });
+        if (!config.repos.some((repo) => repo.id === query.data.repo))
+          return reply.code(404).send({ error: "Unknown code-health repo" });
+        reply.header("cache-control", "no-store");
+        try {
+          const cleaned = await codeHealthOutput(body.data);
+          if (JSON.stringify(cleaned) !== JSON.stringify(body.data))
+            return reply.code(400).send({
+              error: "Decision contains unsafe text or credentials. Remove it before retrying.",
+            });
+          if (
+            body.data.change.action === "assess" &&
+            !store.codeHealthDecisionRecorded(query.data.repo, body.data.requestId)
+          )
+            codeHealth.evidence(query.data.repo, body.data.change.evidenceId, undefined);
+          const result = store.decideCodeHealthRecommendation(
+            query.data.repo,
+            params.data.id,
+            body.data,
+            config.operator.id,
+            now(),
+            flightSeat(config)?.session.repoId === query.data.repo
+              ? flightSeat(config)?.seat.id
+              : undefined,
+          );
+          bus.emit("flight");
+          bus.emit("agents");
+          return await codeHealthOutput(result);
         } catch (error) {
           return codeHealthFailure(error, reply);
         }

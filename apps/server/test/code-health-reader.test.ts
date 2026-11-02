@@ -85,7 +85,7 @@ describe("bounded code-health reads", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     const view = response.json<CodeHealthView>();
     expect(view.data.tab).toBe("overview");
-    expect(view.coverage.map((row) => row.state)).toEqual(["empty", "not-collected"]);
+    expect(view.coverage.map((row) => row.state)).toEqual(["empty", "available"]);
   });
 
   it("keeps repo/window cohorts separate and unknown denominators explicit", async () => {

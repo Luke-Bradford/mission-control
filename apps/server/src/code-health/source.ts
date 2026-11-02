@@ -12,6 +12,7 @@ export function installCodeHealthRevisions(db: Db): void {
     repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0
   )`);
   const tables = [
+    ["code_health_recommendations", "direct"],
     ["reviews", "direct"],
     ["review_findings", "review"],
     ["review_resolutions", "review"],
@@ -183,6 +184,8 @@ export function codeHealthEvidenceSource(
     checkout?: string;
     sha?: string;
     file?: string;
+    category?: string;
+    pr?: number;
   },
 ): Row[] {
   if (
@@ -199,9 +202,16 @@ export function codeHealthEvidenceSource(
     return db
       .prepare(`SELECT id AS reviewId,
     pr_number AS pr, sha, round, state, ended_at AS reportedAt FROM reviews
-    WHERE repo_id = ? AND state = 'reported' AND ended_at >= ? AND ended_at < ?
+    WHERE repo_id = ? AND state = 'reported' AND ended_at >= ? AND ended_at < ? ${query.pr === undefined ? "" : "AND pr_number=?"}
     ORDER BY pr_number, round, id LIMIT ? OFFSET ?`)
-      .all(...args) as Row[];
+      .all(
+        query.repoId,
+        query.from,
+        query.until,
+        ...(query.pr === undefined ? [] : [query.pr]),
+        query.limit + 1,
+        query.offset,
+      ) as Row[];
   if (query.kind === "findings")
     return db
       .prepare(`SELECT f.id AS findingId,
@@ -209,13 +219,15 @@ export function codeHealthEvidenceSource(
     f.line, f.summary, f.scenario, f.fix, f.category, f.state, f.resolution,
     f.resolved_review_id AS resolvedReviewId, v.ended_at AS reportedAt
     FROM review_findings f JOIN reviews v ON v.id = f.review_id
-    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ? ${query.file === undefined ? "" : "AND f.file = ?"}
+    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ? ${query.file === undefined ? "" : "AND f.file = ?"} ${query.category === undefined ? "" : "AND f.category=?"} ${query.pr === undefined ? "" : "AND v.pr_number=?"}
     ORDER BY v.ended_at, f.id LIMIT ? OFFSET ?`)
       .all(
         query.repoId,
         query.from,
         query.until,
         ...(query.file === undefined ? [] : [query.file]),
+        ...(query.category === undefined ? [] : [query.category]),
+        ...(query.pr === undefined ? [] : [query.pr]),
         query.limit + 1,
         query.offset,
       ) as Row[];

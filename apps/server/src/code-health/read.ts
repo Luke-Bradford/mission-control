@@ -12,6 +12,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
+import type { RecommendationRecord } from "./recommendations.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
@@ -26,15 +27,13 @@ interface EvidenceQuery {
   reference: CodeHealthEvidenceRef;
   sha?: string;
   file?: string;
+  category?: string;
+  pr?: number;
 }
 
-export class CodeHealthReadError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+export { CodeHealthReadError } from "./error.ts";
+
+import { CodeHealthReadError } from "./error.ts";
 
 /** One bounded calculation shared by the HUD and the later read-only tool handler. */
 export class CodeHealthReader {
@@ -45,6 +44,7 @@ export class CodeHealthReader {
     string,
     { revision: string; expires: number; value: CodeHealthView }
   >();
+  private readonly recommendationRefresh = new Map<string, { revision: string; at: number }>();
   private readonly evidenceQueries = new Map<string, EvidenceQuery>();
 
   constructor(store: Store, config: CcConfig, now: () => number = Date.now) {
@@ -88,6 +88,23 @@ export class CodeHealthReader {
   }
 
   read(repoId: string, window: CodeHealthWindow, tab: CodeHealthTab): CodeHealthView {
+    this.repo(repoId);
+    if (tab === "overview") {
+      const revision = this.store.codeHealthRevision(repoId),
+        cached = this.recommendationRefresh.get(repoId),
+        at = this.now();
+      if (!cached || cached.revision !== revision || at - cached.at >= CACHE_MS) {
+        this.store.refreshCodeHealthRecommendations(repoId, at);
+        if (this.recommendationRefresh.size >= CACHE_MAX) {
+          const first = this.recommendationRefresh.keys().next().value;
+          if (first) this.recommendationRefresh.delete(first);
+        }
+        this.recommendationRefresh.set(repoId, {
+          revision: this.store.codeHealthRevision(repoId),
+          at,
+        });
+      }
+    }
     return this.store.codeHealthSnapshot(() => this.build(repoId, window, tab));
   }
 
@@ -155,14 +172,35 @@ export class CodeHealthReader {
         ),
       );
       if (tab === "overview") {
+        const recommendations = this.store
+          .codeHealthRecommendations(repoId, at)
+          .filter(
+            (row) =>
+              row.active &&
+              (row.state.kind === "proposed" ||
+                (row.state.kind === "snoozed" && row.state.until <= at)),
+          );
+        const priority = (rule: string) =>
+          rule === "recurring-correction" ? 0 : rule === "repeated-rounds" ? 1 : 2;
+        recommendations.sort(
+          (a, b) =>
+            priority(a.rule) - priority(b.rule) ||
+            (b.target.baseline ?? 0) - (a.target.baseline ?? 0) ||
+            a.id.localeCompare(b.id),
+        );
         describe(
           "recommendations",
-          null,
-          null,
-          "Recommendations have not been generated for this repo.",
-          "not-collected",
+          at,
+          at,
+          "Up to three conservative 30-day triage proposals. Durable decisions and accepted baselines are available from the recommendation history reader. No causal effect is inferred.",
         );
-        data = { tab, recommendations: [], review };
+        data = {
+          tab,
+          recommendations: recommendations
+            .slice(0, 3)
+            .map((row) => this.recommendationEvidence(row, revision)),
+          review,
+        };
       } else data = { tab, review };
     } else if (tab === "risk") {
       const checkout = this.checkout(repoId);
@@ -280,6 +318,73 @@ export class CodeHealthReader {
     }
     this.cache.set(key, { revision, expires: at + CACHE_MS, value });
     return structuredClone(value);
+  }
+
+  private recommendationEvidence(
+    row: RecommendationRecord,
+    revision: string,
+  ): RecommendationRecord {
+    const scope = row.scope;
+    if (!scope) return { ...row, evidence: [] };
+    const coverage: CodeHealthCoverage = {
+      state: scope.observedFrom === null ? "empty" : "available",
+      requestedWindow: "30d",
+      from: scope.from,
+      until: scope.until,
+      observedFrom: scope.observedFrom,
+      observedUntil: scope.observedUntil,
+      collectedAt: scope.observedUntil,
+      analysedSha: null,
+      source: "reported 30-day recommendation cohort",
+      complete: false,
+      note: "Conservative fixed-30-day triage, independent of the selected dashboard window. Coverage describes the observed cohort; this query is narrowed to the recommendation's PR or category/file. Earlier unobserved periods are not zero.",
+    };
+    const { file, category, pr, from, until } = scope;
+    return {
+      ...row,
+      evidence: [
+        this.reference(
+          {
+            repoId: row.repoId,
+            revision,
+            from,
+            until,
+            file,
+            category,
+            pr,
+            kind: row.rule === "recurring-correction" ? "findings" : "review-rounds",
+          },
+          row.rule === "recurring-correction"
+            ? "Recurring correction evidence · 30d"
+            : "Repeated review rounds · 30d",
+          "Reported rows in the recommendation's own 30-day window, filtered to its category/file or PR.",
+          coverage,
+        ),
+      ],
+    };
+  }
+
+  recommendation(repoId: string, id: string) {
+    this.repo(repoId);
+    return this.store.codeHealthSnapshot(() => {
+      const row = this.store.codeHealthRecommendation(repoId, id);
+      if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation");
+      return this.recommendationEvidence(row, this.store.codeHealthRevision(repoId));
+    });
+  }
+
+  recommendationHistory(repoId: string, offset: number) {
+    this.repo(repoId);
+    return this.store.codeHealthSnapshot(() => {
+      const page = this.store.codeHealthRecommendationPage(repoId, offset),
+        revision = this.store.codeHealthRevision(repoId);
+      return {
+        ...page,
+        recommendations: page.recommendations
+          .filter((row): row is RecommendationRecord => row !== null)
+          .map((row) => this.recommendationEvidence(row, revision)),
+      };
+    });
   }
 
   /** References are issued for this reader's bounded snapshots, never arbitrary SQL or paths. */

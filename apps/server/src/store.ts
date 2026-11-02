@@ -141,6 +141,16 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 import {
+  installRecommendations,
+  linkRecommendation,
+  type Mutation,
+  mutateRecommendation,
+  recommendationProposals,
+  recommendationRow,
+  recommendationRows,
+  upsertRecommendation,
+} from "./code-health/recommendations.ts";
+import {
   codeHealthCiSource,
   codeHealthEvidenceSource,
   codeHealthReviewSource,
@@ -1221,7 +1231,132 @@ export class Store {
       );
     this.migrate();
     this.backfillAuditHistory();
+    installRecommendations(this.db);
     installCodeHealthRevisions(this.db);
+  }
+
+  codeHealthRecommendations(repoId: string, openAt?: number) {
+    return recommendationRows(this.db, repoId, openAt);
+  }
+  codeHealthRecommendationPage(repoId: string, offset: number) {
+    const rows = this.db
+      .prepare(
+        "SELECT id FROM code_health_recommendations WHERE repo_id=? ORDER BY created_at DESC,id LIMIT 51 OFFSET ?",
+      )
+      .all(repoId, offset);
+    return {
+      recommendations: rows
+        .slice(0, 50)
+        .map((row) => recommendationRow(this.db, repoId, String(row.id))),
+      nextCursor: rows.length > 50 ? String(offset + 50) : null,
+    };
+  }
+  codeHealthRecommendation(repoId: string, id: string) {
+    return recommendationRow(this.db, repoId, id);
+  }
+  refreshCodeHealthRecommendations(repoId: string, at: number) {
+    this.transaction(() => {
+      const proposals = recommendationProposals(this, repoId, at);
+      for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
+      const ids = proposals.map((row) => row.id);
+      this.db
+        .prepare(
+          `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
+        )
+        .run(at, repoId, ...ids);
+    });
+  }
+  codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
+        )
+        .get(repoId, requestId) !== undefined
+    );
+  }
+  decideCodeHealthRecommendation(
+    repoId: string,
+    id: string,
+    request: Mutation,
+    actor: string,
+    at: number,
+    flightId?: string,
+  ) {
+    let response: ReturnType<typeof mutateRecommendation> | undefined;
+    this.transaction(() => {
+      const previous = this.db
+        .prepare(
+          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
+        )
+        .get(repoId, request.requestId);
+      response = mutateRecommendation(this.db, repoId, id, request, actor, at);
+      if (!previous) {
+        if (request.change.action === "accept" && flightId)
+          this.insertComms(
+            {
+              at,
+              from: COMMS_CAPCOM,
+              to: flightId,
+              ticket: null,
+              text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
+            },
+            `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
+            null,
+          );
+        this.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: actor,
+          targetRunId: null,
+          ref: id,
+          questionId: null,
+          about: `Code health ${repoId}: ${id}`,
+          decision: JSON.stringify({ actor, change: request.change, response: response.state }),
+          basis: request.basis,
+        });
+      }
+    }, true);
+    if (!response) throw new Error("Recommendation transaction returned no result");
+    return response;
+  }
+  linkCodeHealthRecommendation(
+    repoId: string,
+    id: string,
+    link: string,
+    actor: string,
+    at: number,
+  ) {
+    this.transaction(() => {
+      linkRecommendation(this.db, repoId, id, link, at);
+      this.addFlightDecision({
+        at,
+        kind: "ticket",
+        seatId: actor,
+        targetRunId: null,
+        ref: id,
+        questionId: null,
+        about: `Code health ${repoId}: ${id}`,
+        decision: `Linked ${link}`,
+        basis: "Accepted recommendation; existing authorised FLIGHT ticket path.",
+      });
+    });
+  }
+
+  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number): boolean {
+    const result = this.db
+      .prepare(
+        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL AND json_extract(state,'$.kind')='accepted'",
+      )
+      .run(JSON.stringify({ fingerprint, at }), repoId, id);
+    return Number(result.changes) === 1;
+  }
+  completeCodeHealthWork(repoId: string, id: string) {
+    this.db
+      .prepare(
+        "UPDATE code_health_recommendations SET work_ready=1 WHERE repo_id=? AND id=? AND linked_work IS NOT NULL",
+      )
+      .run(repoId, id);
   }
 
   codeHealthRevision(repoId: string): string {
