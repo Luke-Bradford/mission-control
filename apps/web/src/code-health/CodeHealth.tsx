@@ -307,6 +307,10 @@ export function CodeHealth() {
             coverage={view.coverage}
             evidence={view.evidence}
             onInspect={inspect}
+            onRecommendations={() => {
+              changeScope(() => setTab("overview"));
+              tabRefs.current[0]?.focus();
+            }}
           />
         )}
         {view && tab === "risk" && view.data.tab === "risk" && (

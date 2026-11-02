@@ -223,6 +223,12 @@ it("loads Test health on demand and pages explicit exact-head attempts through a
     "true",
   );
   expect(screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Open recommendations" }));
+  await screen.findByText("Inspect planning and corrections before extending the same work.");
+  expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
+  expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Overview" }));
+  expect(screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")).toBe("true");
+  expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
 it("keeps uncertain retry positions and original QA/spec provenance distinct", async () => {
   const fixture = testHealthFixture(NOW);

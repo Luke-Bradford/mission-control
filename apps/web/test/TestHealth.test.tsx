@@ -6,11 +6,16 @@ import { testHealthFixture } from "./testHealthFixtures.ts";
 afterEach(cleanup);
 function setup(count = 4) {
   const fixture = testHealthFixture(undefined, count),
-    onInspect = vi.fn();
+    onInspect = vi.fn(),
+    onRecommendations = vi.fn();
   return {
     ...fixture,
     onInspect,
-    render: () => render(<TestHealth {...fixture} onInspect={onInspect} />),
+    onRecommendations,
+    render: () =>
+      render(
+        <TestHealth {...fixture} onInspect={onInspect} onRecommendations={onRecommendations} />,
+      ),
   };
 }
 it("separates job candidates, executed denominators and four classifications", () => {
@@ -65,6 +70,8 @@ it("opens exact group, documented-unit samples and original QA provenance", () =
   );
   expect(screen.getByText(/reviewer reviewer-0/)).toBeTruthy();
   expect(screen.getAllByText(/by operator-fixture/)).toHaveLength(4);
+  fireEvent.click(screen.getByRole("button", { name: "Open recommendations" }));
+  expect(h.onRecommendations).toHaveBeenCalledOnce();
 });
 it("names missing collection without zero failures, invented durations or age verdicts", () => {
   const h = setup(0);

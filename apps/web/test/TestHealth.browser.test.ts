@@ -3,10 +3,130 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import { desktopFixture } from "./desktopFixtures.ts";
+import { NOW } from "./fixtures.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
 
 const { renderAt } = browserSession();
 describeRendered("Test health measured layout", () => {
+  it(
+    "fits the delivered App with FLIGHT folded or open and preserves keyboard evidence access",
+    async () => {
+      for (const [width, height] of [
+        [1280, 900],
+        [1600, 1000],
+        [1920, 1080],
+        [1600, 700],
+      ])
+        for (const colorScheme of ["light", "dark"] as const)
+          for (const rail of ["collapsed", "expanded"] as const) {
+            const many =
+              width === 1600 && height === 700 && colorScheme === "dark" && rail === "expanded";
+            const fixture = testHealthFixture(NOW, many ? 50 : 4),
+              shell = desktopFixture();
+            const shellConfig = shell.api["/api/config"] as { repos: Record<string, unknown>[] };
+            const api = {
+              ...shell.api,
+              ...fixture.api,
+              "/api/config": {
+                ...shellConfig,
+                repos: [{ ...shellConfig.repos[0], id: "sample", github: "example/sample" }],
+              },
+            };
+            const page = await renderAt({
+              page: "test/desktopBrowser.html",
+              width,
+              height,
+              colorScheme,
+              search: "?path=/audit",
+              api,
+            });
+            try {
+              await page.boxes(".ch-recommendation");
+              if (rail === "expanded") await page.click("#dock .dockrail button");
+              await page.click("#ch-tab-test");
+              await page.boxes(".ch-test");
+              const metrics = await page.evaluate(
+                () => ({
+                  width: innerWidth,
+                  documentWidth: document.documentElement.scrollWidth,
+                  bottom: document.querySelector(".code-health")?.getBoundingClientRect().bottom,
+                  header: document.querySelector(".ch-heading")?.getBoundingClientRect().top,
+                  dockWidth: document.querySelector("#dock")?.getBoundingClientRect().width,
+                  small: [
+                    ...document.querySelectorAll(
+                      ".code-health button,.code-health a[href],.code-health select,.code-health summary",
+                    ),
+                  ].filter((element) => {
+                    const r = element.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24);
+                  }).length,
+                }),
+                undefined,
+              );
+              expect(metrics.documentWidth).toBeLessThanOrEqual(width);
+              expect(metrics.small).toBe(0);
+              expect(metrics.dockWidth).toBe(rail === "collapsed" ? 48 : 380);
+              if (width === 1600 && height === 1000)
+                expect(metrics.bottom).toBeLessThanOrEqual(1000);
+              expect(
+                (await page.reachable(".ch-test button,.ch-test summary")).every(Boolean),
+              ).toBe(true);
+              if (width === 1600 && height === 1000 && rail === "expanded") {
+                await page.evaluate(
+                  () =>
+                    (
+                      document.querySelector(".ch-test-disruption button") as HTMLButtonElement
+                    ).focus(),
+                  undefined,
+                );
+                await page.press("Enter");
+                await page.boxes(".ch-dialog");
+                expect(
+                  (await page.reachable(".ch-dialog button,.ch-dialog select")).every(Boolean),
+                ).toBe(true);
+                await page.press("Escape");
+                await page.evaluate(
+                  () =>
+                    new Promise<void>((resolve) =>
+                      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+                    ),
+                  undefined,
+                );
+                expect(
+                  await page.evaluate(
+                    () =>
+                      document.activeElement ===
+                      document.querySelector(".ch-test-disruption button"),
+                    undefined,
+                  ),
+                ).toBe(true);
+              }
+              if (many) {
+                await page.evaluate(
+                  () => (document.querySelector(".ch-test-disruption") as HTMLElement).focus(),
+                  undefined,
+                );
+                await page.press("End");
+                await page.evaluate(
+                  () => new Promise((resolve) => setTimeout(resolve, 150)),
+                  undefined,
+                );
+                expect(
+                  await page.evaluate(
+                    () => document.querySelector(".ch-test-disruption")?.scrollTop,
+                    undefined,
+                  ),
+                ).toBeGreaterThan(0);
+              }
+              expect(page.errors()).toEqual([]);
+            } finally {
+              await page.close();
+            }
+          }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it(
     "fits the normal desktop and keeps real controls reachable at all required sizes and themes",
     async () => {
@@ -91,8 +211,18 @@ describeRendered("Test health measured layout", () => {
           const fixture = testHealthFixture(Date.now(), count);
           if (count === 50) {
             fixture.data.disruption[0].label = `tests/${"long-module/".repeat(24)}account.test.ts › preserves state`;
+            const fullIdentity = fixture.data.disruption[0].label;
+            const records = fixture.api[
+              "/api/code-health/evidence/ch_test_ordered?repo=sample&cursor=0"
+            ] as { rows: Record<string, unknown>[] };
+            for (const row of records.rows) row.name = fullIdentity;
             fixture.data.durations[0].environment = "isolated runner / ".repeat(15);
             fixture.data.qaProposals[0].reviewer = "reviewer-with-long-identity-".repeat(12);
+            for (const row of records.rows) row.environment = fixture.data.durations[0].environment;
+            const qaRecords = fixture.api[
+              "/api/code-health/evidence/ch_test_qa_linked?repo=sample&cursor=0"
+            ] as { rows: Record<string, unknown>[] };
+            for (const row of qaRecords.rows) row.reviewer = fixture.data.qaProposals[0].reviewer;
             if (fixture.data.namedTestRate) fixture.data.namedTestRate.percent = null;
             for (const row of fixture.data.disruption) if (row.rate) row.rate.percent = null;
             fixture.coverage[1].complete = false;
@@ -131,6 +261,16 @@ describeRendered("Test health measured layout", () => {
                 undefined,
               );
               expect(links).toContain(`https://github.com/example/sample/commit/${"a".repeat(40)}`);
+              if (count === 50)
+                expect(
+                  await page.evaluate(
+                    () =>
+                      [...document.querySelectorAll(".ch-evidence-item dd")]
+                        .map((element) => element.textContent)
+                        .some((text) => text?.includes("long-module/".repeat(24))),
+                    undefined,
+                  ),
+                ).toBe(true);
             }
           } finally {
             await page.close();

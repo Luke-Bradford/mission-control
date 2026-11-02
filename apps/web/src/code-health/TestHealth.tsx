@@ -25,11 +25,13 @@ export function TestHealth({
   coverage,
   evidence,
   onInspect,
+  onRecommendations,
 }: {
   data: TestData;
   coverage: CodeHealthCoverage[];
   evidence: CodeHealthEvidenceRef[];
   onInspect: Inspect;
+  onRecommendations: () => void;
 }) {
   const source = (name: string) => coverage.find((row) => row.source === name);
   const ci = source("CI job observations"),
@@ -326,6 +328,9 @@ export function TestHealth({
             <Omitted count={data.omitted?.qaProposals} label="QA proposals" />
             <div className="ch-test-foot">
               <Source coverage={qa} />
+              <button type="button" onClick={onRecommendations}>
+                Open recommendations
+              </button>
             </div>
             <p className="ch-test-foot ch-secondary">
               Inspect code/spec evidence first. Accept, Dismiss or Snooze matching recommendations
