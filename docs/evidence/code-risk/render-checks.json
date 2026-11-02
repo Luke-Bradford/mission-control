@@ -1,0 +1,222 @@
+{
+  "captureAt": 1793622531523,
+  "fixture": "same fictional API fixture; fixed clock for comparability; no QA run created",
+  "before": {
+    "sha": "8c665fb3de38cac8b9d588be10689b0b1113ebbc",
+    "view": "Prior Audit; no Code risk tab"
+  },
+  "after": {
+    "sha": "df87f99b68b2d2c28f0e08215872b15c4a221ba8",
+    "dirty": false
+  },
+  "reports": [
+    {
+      "side": "before",
+      "width": 1280,
+      "height": 900,
+      "colorScheme": "light",
+      "file": "risk-1280x900-light-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1280,
+        "bottom": 1565,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1280,
+      "height": 900,
+      "colorScheme": "dark",
+      "file": "risk-1280x900-dark-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1280,
+        "bottom": 1565,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1600,
+      "height": 1000,
+      "colorScheme": "light",
+      "file": "risk-1600x1000-light-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1600,
+      "height": 1000,
+      "colorScheme": "dark",
+      "file": "risk-1600x1000-dark-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1920,
+      "height": 1080,
+      "colorScheme": "light",
+      "file": "risk-1920x1080-light-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1920,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1920,
+      "height": 1080,
+      "colorScheme": "dark",
+      "file": "risk-1920x1080-dark-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1920,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1600,
+      "height": 700,
+      "colorScheme": "light",
+      "file": "risk-1600x700-light-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "before",
+      "width": 1600,
+      "height": 700,
+      "colorScheme": "dark",
+      "file": "risk-1600x700-dark-before.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 992,
+        "tab": "Overview"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1280,
+      "height": 900,
+      "colorScheme": "light",
+      "file": "risk-1280x900-light-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1280,
+        "bottom": 1243,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1280,
+      "height": 900,
+      "colorScheme": "dark",
+      "file": "risk-1280x900-dark-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1280,
+        "bottom": 1243,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1600,
+      "height": 1000,
+      "colorScheme": "light",
+      "file": "risk-1600x1000-light-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1600,
+      "height": 1000,
+      "colorScheme": "dark",
+      "file": "risk-1600x1000-dark-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1920,
+      "height": 1080,
+      "colorScheme": "light",
+      "file": "risk-1920x1080-light-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1920,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1920,
+      "height": 1080,
+      "colorScheme": "dark",
+      "file": "risk-1920x1080-dark-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1920,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1600,
+      "height": 700,
+      "colorScheme": "light",
+      "file": "risk-1600x700-light-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    },
+    {
+      "side": "after",
+      "width": 1600,
+      "height": 700,
+      "colorScheme": "dark",
+      "file": "risk-1600x700-dark-after.png",
+      "errors": [],
+      "metrics": {
+        "width": 1600,
+        "bottom": 976,
+        "tab": "Code risk"
+      }
+    }
+  ]
+}
