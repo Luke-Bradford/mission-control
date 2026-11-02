@@ -1281,11 +1281,22 @@ repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are 
 hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
 [FLIGHT approvals](#flight-approvals)) is what lifts one.
 
+The crew-pause panel lists active run exceptions, who granted each, its reason and time. A
+finished or missing run no longer has an exception, even after a hub restart. The hub event
+also names FLIGHT, the seat, the actual run and the reason. Existing full-access operator
+actions remain available; this run scope applies to the start/resume shortcuts.
+
+The operator pause API accepts `all` or an explicit seat list; it does not accept seat-wide
+`except` entries. A named seat list keeps its recorded scope. Older seat-only exception entries
+are retained as labelled audit data, but cannot identify an authorised run or grantor and do
+not bypass the pause. The reader never reconstructs seats previously removed from an older
+named pause or attributes an unknown grant to FLIGHT.
+
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
-| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). Any FLIGHT write to the pause only edits the seats of a record someone else set: it never clears or replaces it, a refused write leaves the record and goes in the hub log, and a change is logged as FLIGHT's. A start that fails puts the stop and the pause back |
-| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
+| `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |

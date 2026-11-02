@@ -61,6 +61,7 @@ import {
   type Profile,
   type PullRequestView,
   parkedEventText,
+  pauseWithout,
   prNamedRefText,
   prNotifyText,
   prSecretText,
@@ -2229,6 +2230,28 @@ describe("taking by rule", () => {
     );
     await h.engine.tick();
     expect(h.taken).toEqual([]);
+  });
+
+  it("a run-bound exception never deals another ticket after its run ends", async () => {
+    const pause = { seats: [SEAT], reason: "Keep new work paused", at: clock, by: "operator" };
+    writeCrewPause(
+      store,
+      pauseWithout(pause, SEAT, {
+        runId: RUN,
+        by: "FLIGHT",
+        at: clock,
+        reason: "Finish this run only",
+      }),
+      clock,
+    );
+    store.setRunEnded(RUN, clock, "ok", "engine");
+    seatIdle(null);
+    await h.engine.tick();
+    expect(h.taken).toEqual([]);
+    expect(store.getSetting("crew.paused")).not.toBe("null");
+    writeCrewPause(store, null, clock);
+    await h.engine.tick();
+    expect(h.taken).toContain(SEAT);
   });
 
   it("a tick refills the queues, then asks each idle writer seat with no run to take", async () => {
@@ -7182,6 +7205,52 @@ describe("the engine runs reviews", () => {
       expect(h.wakes.at(-1)).toBe(RUN);
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toHaveLength(takesBefore);
+    });
+
+    it("paused rework never displaces the only run with a pause exception", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 8);
+      const pause = pauseWithout(
+        { seats: "all", reason: "Hold other work", at: clock, by: "operator" },
+        SEAT,
+        { runId: b, by: "FLIGHT", at: clock, reason: "Finish B only" },
+      );
+      writeCrewPause(store, pause, clock);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([RUN]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+      expect(store.run(b)?.loop?.aside ?? null).toBeNull();
+      expect(h.wakes).toEqual([]);
+      expect(JSON.parse(store.getSetting("crew.paused") ?? "null")).toEqual(pause);
+    });
+
+    it("paused older rework does not block waking a younger run with a pause exception", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 8);
+      store.setRunLoop(b, {
+        ...NEW_LOOP,
+        phase: "working",
+        aside: { worktree: "/w/b", wake: true },
+      });
+      seatIdle(null);
+      const pause = pauseWithout(
+        { seats: "all", reason: "Hold other work", at: clock, by: "operator" },
+        SEAT,
+        { runId: b, by: "FLIGHT", at: clock, reason: "Finish B only" },
+      );
+      writeCrewPause(store, pause, clock);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(b);
+      expect(h.wakes).toEqual([b]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+      expect(store.run(b)?.loop?.aside).toBeNull();
+      expect(asideRun()).not.toBeNull();
+      expect(JSON.parse(store.getSetting("crew.paused") ?? "null")).toEqual(pause);
     });
 
     describe("a run stopped on someone else's call", () => {

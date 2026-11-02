@@ -117,6 +117,7 @@ function stub(d: Data = {}) {
       ? () => ({ status: 200, body: d.activityNow?.() })
       : (d.activity ?? []),
     "/api/settings/away": d.away ?? { on: false, until: "", may: {} },
+    "/api/settings/crew-pause": null,
     "/api/config": d.config ?? CONFIG,
     "/api/test-lock": d.lock ?? { holder: null, waiting: [] },
     "/api/crew/status": d.crewStatus ?? { enabled: true, note: null },
@@ -291,10 +292,10 @@ describe("Agents panel", () => {
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
-    const line = await within(container.querySelector("#agentsP") as HTMLElement).findByRole(
-      "status",
+    const line = await within(container.querySelector("#agentsP") as HTMLElement).findByText(
+      "Crew off",
     );
-    expect(line.textContent).toBe("Crew off");
+    expect(line.getAttribute("role")).toBe("status");
     expect(line.title).toBe("crew lock held by pid 123");
     expect(container.querySelector("#agentsP .ph")?.contains(line)).toBe(true);
   });

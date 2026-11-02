@@ -543,6 +543,15 @@ interface AccountTransfer {
   queued?: [string, string][];
 }
 
+export interface StartRunOptions {
+  loop?: RunLoop;
+  override?: ProfileOverride;
+  flight?: boolean;
+  operator?: boolean;
+  /** Internal synchronous hook after the actual run exists, immediately before its pause gate. */
+  beforeLaunch?: (run: Run) => void;
+}
+
 export interface Supervisor {
   /** Excludes process launches and recovery until account config is committed. */
   withAccountUpdate<T>(fn: () => Promise<T>): Promise<T>;
@@ -625,7 +634,7 @@ export interface Supervisor {
   startRun(
     seatId: string,
     issue: number,
-    opts?: { loop?: RunLoop; override?: ProfileOverride; flight?: boolean; operator?: boolean },
+    opts?: StartRunOptions,
   ): Promise<{ runId: string; branch: string }>;
   /**
    * Starts the watch seat (FLIGHT): no ticket and no branch, a detached worktree of the default
@@ -1634,7 +1643,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     privateEnv?: Record<string, string>,
   ): Live {
-    const pause = pausedSeat(store, info.seat.id);
+    const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
     const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
@@ -3143,11 +3152,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return moving;
   }
 
-  async function startRun(
-    seatId: string,
-    issue: number,
-    opts?: { loop?: RunLoop; override?: ProfileOverride; flight?: boolean; operator?: boolean },
-  ) {
+  async function startRun(seatId: string, issue: number, opts?: StartRunOptions) {
     const info = need(seatId);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
@@ -3188,6 +3193,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (inReview !== undefined) {
       const branch = inReview.branch;
       if (branch === null) throw new SupervisorError(409, NOT_ASIDE);
+      opts?.beforeLaunch?.(inReview);
       await wakeRun(inReview.id, { reviewResume: true });
       return { runId: inReview.id, branch };
     }
@@ -3594,7 +3600,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           repoDocs,
           references,
           false,
-          undefined,
+          () => {
+            opts?.beforeLaunch?.(run);
+            return undefined;
+          },
           (system) => recordPromptVersion(run, def.prompt, brief, briefPieces, system),
         );
       } catch (e) {

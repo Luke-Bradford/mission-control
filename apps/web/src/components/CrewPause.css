@@ -4,6 +4,7 @@
   gap: var(--sp-1);
   flex-wrap: wrap;
   position: relative;
+  max-width: 100%;
 }
 
 .crew-pause-form {
@@ -33,4 +34,36 @@
 .crew-pause-form input:not([type="checkbox"]) {
   min-width: 0;
   flex: 1;
+}
+
+.crew-pause-form input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+}
+
+.crew-pause-audit,
+.crew-pause-audit ul,
+.crew-pause-audit li {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.crew-pause-audit {
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-s);
+}
+
+.crew-pause-audit ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: var(--sp-3);
+}
+
+.crew-pause-audit summary {
+  cursor: pointer;
+  min-height: 24px;
 }

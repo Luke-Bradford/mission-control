@@ -4176,7 +4176,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
       seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
-        const pause = pausedSeat(store, id);
+        const pause = pausedSeat(store, id, null);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
