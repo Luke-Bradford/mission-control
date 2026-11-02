@@ -64,6 +64,7 @@ export function PipelinePanel() {
   const [session] = useSession();
   const { data, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const crew = useResource<Crew>(RESOURCES.crew).data;
+  const hasWork = data?.pipeline?.some((stage) => stage.count > 0) ?? false;
   return (
     <Panel
       id="pipelineP"
@@ -106,17 +107,13 @@ export function PipelinePanel() {
                 <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
                   {label}
                 </a>
-                <span className="num">{data ? count : "—"}</span>
-                {more > 0 && (
-                  <span
-                    className="pipeline-omitted s muted"
-                    title={`${more} additional tickets; open the lane heading to inspect them on Board`}
-                  >
-                    +{more} more
-                  </span>
-                )}
               </h3>
-              {collapsed && <p className="pipeline-empty s muted">Observed empty</p>}
+              <p className="pipeline-counts s num">
+                {data
+                  ? `${count} total${more > 0 ? ` · ${more} not shown` : collapsed && !hasWork ? " · empty" : ""}`
+                  : "Total not received"}
+              </p>
+              {collapsed && hasWork && <p className="pipeline-empty s muted">Observed empty</p>}
               {!data &&
                 !error &&
                 Array.from({ length: COLLAPSED_CARDS }, (_, i) => (

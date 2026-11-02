@@ -63,7 +63,7 @@ describe("Pipeline", () => {
     const readyLane = await screen.findByRole("region", { name: "Ready" });
     // Overview is a bounded summary: one real example, with every omission counted.
     expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(1);
-    expect(within(readyLane).getByText("+9 more")).toBeTruthy();
+    expect(within(readyLane).getByText("10 total · 9 not shown")).toBeTruthy();
     expect(within(readyLane).queryByRole("button")).toBeNull();
     expect(within(readyLane).getByRole("link", { name: "Ready" }).getAttribute("href")).toBe(
       "/board?stage=ready",
@@ -81,14 +81,14 @@ describe("Pipeline", () => {
     const progressLane = screen.getByRole("region", { name: "Building · checks" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
     expect(within(progressLane).queryByText("Checked ticket")).toBeNull();
-    expect(within(progressLane).getByText("+1 more")).toBeTruthy();
+    expect(within(progressLane).getByText("2 total · 1 not shown")).toBeTruthy();
     expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(
       "/board?stage=progress",
     );
     // An empty lane stays on the page as a narrow, labelled column with its Board link.
     const reviewLane = screen.getByRole("region", { name: "In review" });
     expect(reviewLane.classList.contains("empty")).toBe(true);
-    expect(within(reviewLane).getByText("0")).toBeTruthy();
+    expect(within(reviewLane).getByText("0 total")).toBeTruthy();
     expect(within(reviewLane).getAllByRole("link")).toHaveLength(1);
     expect(readyLane.classList.contains("empty")).toBe(false);
   });
@@ -102,6 +102,8 @@ describe("Pipeline", () => {
       expect(container.querySelectorAll(".pipeline-stage.empty")).toHaveLength(5),
     );
     expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
+    expect(screen.getAllByText("0 total · empty")).toHaveLength(5);
+    expect(container.querySelectorAll(".pipeline-empty")).toHaveLength(0);
     data = summary();
     await act(async () => {
       hub.refetchTopic("boards");

@@ -124,6 +124,13 @@ async function geometry(page: RenderedPage) {
       ),
       pipeline: {
         height: document.querySelector("#pipelineP")?.getBoundingClientRect().height,
+        headingTops: [...document.querySelectorAll(".pipeline-stage h3 a")].map(
+          (el) => el.getBoundingClientRect().top,
+        ),
+        countTops: [...document.querySelectorAll(".pipeline-counts")].map(
+          (el) => el.getBoundingClientRect().top,
+        ),
+        counts: [...document.querySelectorAll(".pipeline-counts")].map((el) => el.textContent),
         chipTops: [...document.querySelectorAll(".pipeline-chip")].map(
           (el) => el.getBoundingClientRect().top,
         ),
@@ -304,6 +311,13 @@ describeRendered("Approved Overview hierarchy", () => {
               ).toBe(true);
               expect(facts.small).toEqual([]);
               expect(facts.clippedKpiFooters).toEqual([]);
+              expect(
+                Math.max(...facts.pipeline.headingTops) - Math.min(...facts.pipeline.headingTops),
+              ).toBeLessThanOrEqual(1);
+              expect(
+                Math.max(...facts.pipeline.countTops) - Math.min(...facts.pipeline.countTops),
+              ).toBeLessThanOrEqual(1);
+              expect(facts.pipeline.counts).toContain("2 total · 1 not shown");
               expect(
                 Math.max(...facts.pipeline.chipTops) - Math.min(...facts.pipeline.chipTops),
               ).toBeLessThanOrEqual(1);
