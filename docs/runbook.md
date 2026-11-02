@@ -2345,6 +2345,20 @@ unchanged; this check gates seat-authored pushes and does not certify that separ
 
 ### Durable QA reports
 
+Ticket details, including closed tickets, show a **QA reports** section with immutable report
+links for associated PRs. The ticket timeline also opens report references in Comms. Missing
+reports are stated explicitly; a closed ticket does not establish recorded QA coverage.
+
+Choose visual evidence for the change. Layout changes need page context at the required viewport
+sizes; changed forms or components need focused before/after views plus enough context to locate
+them. Capture additional states such as validation, expanded controls or keyboard focus when they
+are part of the change. Use a full-page capture when content beyond the viewport matters; bounded
+scrolling panels need their own relevant states. A full-page image does not prove those states.
+Pair labels and provenance must name the page or form, capture scope (viewport, full page or
+region), viewport size, theme and state. Match data, clock and state across before/after captures,
+and name their source commits. Record the checks performed and untested areas separately.
+Existing native captures use viewport screenshots; do not describe them as full-page evidence.
+
 Each new native `report_findings` call saves its findings and immutable QA snapshot in one database
 transaction before notifying the engine. The content-addressed JSON report records its exact PR/head,
 reviewer and model, review time, registration time, original verdict, checklist, test receipt provenance,

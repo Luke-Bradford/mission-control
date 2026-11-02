@@ -6,6 +6,7 @@ import { RESOURCES, useResource } from "../src/data.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, CREW_CONFIG, crewRow, seatRow } from "./fixtures.ts";
+import { ticketQaReportFixture } from "./qaReportFixture.ts";
 
 const GH = "https://github.com/octo-org/shop-app";
 
@@ -694,4 +695,29 @@ describe("Start a seat", () => {
     expect(within(sec).getAllByRole("option")).toHaveLength(1);
     expect(sec.textContent).not.toContain("GUIDO-1 ·");
   });
+});
+
+it("a closed board ticket links its retained QA report before the description", async () => {
+  const r = ticketQaReportFixture();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/boards/shop-app/items/3349": view({
+      state: "closed",
+      pullRequests: [
+        {
+          number: 40,
+          title: "cache it",
+          url: `${GH}/pull/40`,
+          state: "merged",
+          repoId: "shop-app",
+        },
+      ],
+    }),
+    "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [r] },
+  });
+  show();
+  expect(
+    (await screen.findByRole("link", { name: "Open QA report · aaaaaaaa" })).getAttribute("href"),
+  ).toBe(r.permalink);
+  expect(screen.getByRole("heading", { name: "QA reports" })).toBeTruthy();
 });

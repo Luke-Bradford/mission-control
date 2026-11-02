@@ -180,6 +180,8 @@ import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
+import { TestQaProposal } from "./code-health/test-qa.ts";
+import { TEST_REPORT_BYTES_MAX, TestReport } from "./code-health/test-reports.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -3443,6 +3445,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           try {
             const ticket = await fetchTicket(repo, n, await githubGql(), config.repos);
+            if (ticket) {
+              const linked = new Set(ticket.pullRequests.map((pr) => pr.url));
+              for (const pr of store.pullRequestsClosingTicket(repo.id, n)) {
+                if (!linked.has(pr.url)) {
+                  ticket.pullRequests.push({
+                    number: pr.number,
+                    title: pr.title,
+                    url: pr.url,
+                    state: pr.state,
+                    repoId: repo.id,
+                  });
+                  linked.add(pr.url);
+                }
+              }
+            }
             return ticket ?? reply.code(404).send({ error: "unknown issue" });
           } catch (e) {
             captureError(reply, e);
@@ -4334,6 +4351,91 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? error.message
               : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
         });
+      const codeHealthImportSecrets = async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const known = await Promise.race([
+            deps.knownSecrets?.() ?? Promise.resolve([]),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("Secret lookup unavailable")), 5000);
+            }),
+          ]);
+          return [operatorToken ?? "", ...known];
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const testEvidenceAuth = async (req: FastifyRequest, reply: FastifyReply) => {
+        if (
+          operatorToken === undefined ||
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        if (deps.tokens?.resolve(bearer(req)) != null)
+          return reply.code(403).send({
+            error: "Test evidence imports require operator authority, not a seat identity.",
+          });
+      };
+      // Reader: docs/runbooks/code-health-test-evidence.md (operator imports result data only).
+      api.post(
+        "/code-health/test-reports",
+        {
+          bodyLimit: TEST_REPORT_BYTES_MAX,
+          onRequest: testEvidenceAuth,
+        },
+        async (req, reply) => {
+          const parsed = TestReport.safeParse(req.body);
+          if (!parsed.success)
+            return reply.code(400).send({ error: "Invalid version 1 test report." });
+          if (!config.repos.some((repo) => repo.id === parsed.data.repo))
+            return reply.code(404).send({ error: "Unknown code-health repo" });
+          try {
+            const known = await codeHealthImportSecrets();
+            const result = store.importCodeHealthTestReport(
+              parsed.data,
+              flightActor(req)?.seatId ?? config.operator.id,
+              now(),
+              known,
+            );
+            if (!result.reused) bus.emit("health");
+            return reply
+              .code(result.reused ? 200 : 201)
+              .header("cache-control", "no-store")
+              .send(result);
+          } catch (error) {
+            return codeHealthFailure(error, reply);
+          }
+        },
+      );
+      // Reader: docs/runbooks/code-health-test-evidence.md (links existing QA findings only).
+      api.post(
+        "/code-health/test-qa",
+        {
+          bodyLimit: 16384,
+          onRequest: testEvidenceAuth,
+        },
+        async (req, reply) => {
+          const body = TestQaProposal.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: "Invalid test QA proposal." });
+          if (!config.repos.some((repo) => repo.id === body.data.repo))
+            return reply.code(404).send({ error: "Unknown code-health repo" });
+          try {
+            const result = store.linkCodeHealthTestQa(
+              body.data,
+              flightActor(req)?.seatId ?? config.operator.id,
+              now(),
+              await codeHealthImportSecrets(),
+            );
+            if (!result.reused) bus.emit("health");
+            return reply
+              .code(result.reused ? 200 : 201)
+              .header("cache-control", "no-store")
+              .send(result);
+          } catch (error) {
+            return codeHealthFailure(error, reply);
+          }
+        },
+      );
       // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
       api.get("/code-health", async (req, reply) => {
         if (

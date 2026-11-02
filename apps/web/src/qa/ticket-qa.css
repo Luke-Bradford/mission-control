@@ -1,0 +1,21 @@
+.ticket-qa,
+.ticket-qa ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+  overflow-wrap: anywhere;
+}
+.ticket-qa ul {
+  margin-top: var(--sp-1);
+}
+.ticket-qa p {
+  margin: var(--sp-1) 0 0;
+}
+.ticket-qa-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 24px;
+}
