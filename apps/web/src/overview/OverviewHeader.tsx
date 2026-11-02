@@ -1,5 +1,4 @@
 import type { AttentionItem, OverviewSummary } from "@mc/core";
-import { needsYouItems, openNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
@@ -27,34 +26,26 @@ export function OverviewHeader() {
         : !summary.data
           ? "Loading current work"
           : "Connected";
+  const healthy = state === "Connected" && !attention.error;
   return (
-    <header className="overview-heading">
-      <div>
-        <h1>What needs attention, and what comes next?</h1>
-        <p className="s muted">
-          {session === "all" ? "All sessions" : session} · current work first
-          {summary.data && tz ? ` · read ${hhmm(summary.data.at, tz)}` : ""}
-        </p>
-      </div>
-      <div className="overview-status">
-        <span role="status" className={state === "Connected" ? "ok-t" : "warn-t"}>
-          {state}
-        </span>
-        {attention.data ? (
-          <button type="button" className="sm" onClick={openNeedsYou}>
-            ◆ Needs you · {needsYouItems(attention.data).length}
-          </button>
-        ) : (
-          <span className="s">
-            {attention.error ? "Attention could not load" : "Loading attention…"}
+    <>
+      <h1 className="sr-only">Overview</h1>
+      {!healthy && (
+        <header className="overview-status">
+          <span role="status" className="warn-t">
+            {state}
           </span>
-        )}
-        {(summary.error || stale) && (
-          <button type="button" className="sm" onClick={() => hub.refetch(source.path)}>
-            Refresh overview
-          </button>
-        )}
-      </div>
-    </header>
+          {summary.data && tz && (
+            <span className="s muted">Last read {hhmm(summary.data.at, tz)}</span>
+          )}
+          {attention.error && <span className="s">Attention could not load</span>}
+          {(summary.error || stale) && (
+            <button type="button" className="sm" onClick={() => hub.refetch(source.path)}>
+              Refresh overview
+            </button>
+          )}
+        </header>
+      )}
+    </>
   );
 }

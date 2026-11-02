@@ -57,15 +57,16 @@ describe("Overview layout (hud.css)", () => {
 
   it("keeps the approved groups content-sized and bounds the roster and evidence lists", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain(
-      "grid-template-rows: max-content max-content max-content minmax(280px, max-content)",
+      "grid-template-rows: max-content max-content max-content",
     );
-    expect(rule(String.raw`\.overview-work`)).toContain(
-      "grid-template-columns: minmax(960px, 1.6fr) minmax(320px, 1fr)",
+    expect(rule(String.raw`\.overview-workspace`)).toContain(
+      "grid-template-columns: minmax(1050px, 1200px) minmax(340px, 1fr)",
     );
-    expect(css).toContain("@container overview (max-width: 1280px)");
-    expect(rule(String.raw`\.ov`)).toContain(
-      "grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr) minmax(300px, 1fr)",
+    expect(css).toContain("@container overview (max-width: 1050px)");
+    expect(css).toMatch(
+      /\.overview-primary,\s*\.overview-secondary \{[^}]*display: flex;[^}]*flex-direction: column/,
     );
+    expect(css).toContain("margin-top: calc(var(--crew-height, 432px) + var(--sp-3))");
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: auto");
     expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");
@@ -77,9 +78,10 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.pipeline-grid`)).toContain("display: flex");
-    expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("flex: 0 0 112px");
+    expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("flex: 0 0 auto");
+    expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("min-width: 112px");
     expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
-    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 760px");
+    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 1050px");
   });
 
   it("keeps measured Timeline spans labelled and tool instants distinct", () => {
@@ -89,14 +91,15 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.timeline-body`)).toContain("flex-direction: column");
   });
 
-  it("aligns Machine labels, fixed-height charts and right-aligned values", () => {
-    expect(rule(String.raw`\.overview-side #machP \.resrow`)).toContain(
-      "grid-template-columns: 64px minmax(32px, 1fr) minmax(120px, auto)",
+  it("aligns full-width measured Machine axes and right-aligned current values", () => {
+    expect(rule(String.raw`#machP \.resrow:has\(\.machine-history\)`)).toContain(
+      "grid-template-columns: 64px minmax(0, 1fr)",
     );
-    expect(rule("#machP .machine-chart")).toContain("height: 24px");
-    expect(rule(String.raw`\.overview-side #machP \.resrow > \.num`)).toContain(
-      "text-align: right",
+    expect(rule(String.raw`#machP \.machine-history \.machine-chart`)).toContain("height: 80px");
+    expect(rule(String.raw`\.machine-history`)).toContain(
+      "grid-template-columns: 48px minmax(0, 1fr)",
     );
+    expect(rule(String.raw`#machP \.resrow > \.num`)).toContain("text-align: right");
   });
 
   it("wraps KPI labels and allows exceptional Work controls to grow past a shared row", () => {
@@ -164,7 +167,7 @@ it("sizes the pipeline to its whole cards instead of scrolling or cutting them o
   expect(css).not.toMatch(/#pipelineP > \.pipeline-grid \{[^}]*overflow-y: auto/);
 });
 
-it("keeps every Overview panel header on one line", () => {
-  expect(rule(String.raw`\.overview-grid \.ph`)).toContain("flex-wrap: nowrap");
+it("keeps panel actions whole and allows the measured-history selector to wrap", () => {
+  expect(rule(String.raw`#overviewHistoryP > \.ph`)).toContain("flex-wrap: wrap");
   expect(rule(String.raw`\.overview-grid \.ph \.act`)).toContain("flex-wrap: nowrap");
 });

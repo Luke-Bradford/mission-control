@@ -18,7 +18,6 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
 import {
   callSign,
-  contextPct,
   crewOrder,
   doingLine,
   hasActiveRun,
@@ -41,7 +40,6 @@ import { cutText, elapsed, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
-import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
@@ -52,10 +50,20 @@ import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
 import { activityValues } from "./agentActivity.ts";
+import { ContextCapacity } from "./ContextCapacity.tsx";
+import { CrewOverflowNote } from "./CrewOverflowNote.tsx";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
-const COLUMNS = ["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"];
+const COLUMNS = [
+  "Agent",
+  "State",
+  "Work",
+  "Tokens/min · 30m avg",
+  "Cost",
+  "Context · used / limit · left · used%",
+  "In state",
+];
 function WorkCell({
   row,
   doing,
@@ -298,9 +306,7 @@ function FlightRow({
       />
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span role="cell">{DASH}</span>}
       <AgentCost row={row} />
-      <span role="cell" title="how full this agent's context window is">
-        <Meter label="ctx" pct={row ? contextPct(row) : null} />
-      </span>
+      <ContextCapacity row={row} />
       <span role="cell" className="num xs" title={sessionTurns}>
         {row && row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
       </span>
@@ -623,9 +629,7 @@ function AgentRow({
       />
       <AgentMeasurements row={row} max={max} />
       <AgentCost row={row} />
-      <span role="cell" title="how full this agent's context window is">
-        <Meter label="ctx" pct={contextPct(row)} />
-      </span>
+      <ContextCapacity row={row} />
       <StateAge since={row.stateSince} />
     </div>
   );
@@ -656,6 +660,7 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
 /** FLIGHT heads the crew, observed loops and stopped seats. */
 export function AgentsPanel() {
   const scrollHint = useId();
+  const rosterElement = useRef<HTMLDivElement>(null);
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
@@ -703,6 +708,13 @@ export function AgentsPanel() {
             </span>
           ) : null}
           <CrewOff compact />
+          {crew.data && (
+            <span>
+              {" "}
+              · {plural(seatCount, "seat")}
+              {loopRows.length ? ` · ${plural(loopRows.length, "observed loop")}` : ""}
+            </span>
+          )}
           <span title="FLIGHT first; then needs attention, running (most tokens in the last 10 minutes first), waiting, idle and stopped. Ties follow configured order.">
             · attention first ↓
           </span>
@@ -727,17 +739,19 @@ export function AgentsPanel() {
           Crew refresh failed. Showing the last received rows.
         </p>
       )}
-      {seatCount > 11 && (
-        <p id={scrollHint} className="crew-scroll-note">
-          {plural(seatCount, "seat")} · Scroll the roster to see every seat.
-        </p>
-      )}
+      <CrewOverflowNote
+        id={scrollHint}
+        table={rosterElement}
+        count={seatCount}
+        pending={!crew.data && !crew.error}
+      />
       <div
         role="table"
+        ref={rosterElement}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded roster supports keyboard scrolling.
         tabIndex={0}
         aria-label="Crew"
-        aria-describedby={seatCount > 11 ? scrollHint : undefined}
+        aria-describedby={scrollHint}
         id="agentsList"
         aria-busy={!crew.data && !crew.error}
       >
@@ -748,7 +762,11 @@ export function AgentsPanel() {
             <span
               role="columnheader"
               key={label}
-              title={label === "Tokens" ? "Tokens · last 30 minutes" : label}
+              title={
+                label.startsWith("Tokens")
+                  ? "Tokens/min · 30m avg: input + output over the last 30 minutes"
+                  : label
+              }
             >
               {label}
             </span>

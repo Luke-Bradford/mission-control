@@ -13,31 +13,52 @@ import { type OverviewScenario, overviewDensityFixture } from "./overviewDensity
 const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;
 async function settled(page: RenderedPage, scenario: OverviewScenario) {
-  await page.evaluate(async (scenario) => {
-    const deadline = performance.now() + 5000;
-    const ready = () => {
-      const view = document.querySelector("#page-overview");
-      if (!view) return false;
-      const text = view.textContent ?? "";
-      if (scenario === "loading") return text.includes("Loading current work");
-      if (scenario === "error")
-        return text.includes("Refresh failed") && text.includes("could not load");
-      if (scenario === "empty")
+  try {
+    await page.evaluate(async (scenario) => {
+      const deadline = performance.now() + 5000;
+      const ready = () => {
+        const view = document.querySelector("#page-overview");
+        if (!view) return false;
+        const text = view.textContent ?? "";
+        if (scenario === "loading") return text.includes("Loading current work");
+        if (scenario === "error")
+          return text.includes("Refresh failed") && text.includes("could not load");
+        if (scenario === "empty")
+          return (
+            text.includes("No crew seats are configured") &&
+            text.includes("Nothing is waiting for your decision")
+          );
         return (
-          text.includes("No crew seats are configured") &&
-          text.includes("Nothing is waiting for your decision")
+          ["41.2k", "41%", "63%", "12%"].every((value) => text.includes(value)) &&
+          (scenario === "one" || !!view.querySelector(".overview-instant"))
         );
-      return (
-        ["41.2k", "41%", "63%", "12%"].every((value) => text.includes(value)) &&
-        (scenario === "one" || !!view.querySelector(".overview-instant"))
-      );
-    };
-    while (!ready() && performance.now() < deadline)
+      };
+      while (!ready() && performance.now() < deadline)
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!ready()) throw Error(`Overview ${scenario} fixture did not settle`);
+      await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    if (!ready()) throw Error(`Overview ${scenario} fixture did not settle`);
-    await document.fonts.ready;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  }, scenario);
+    }, scenario);
+  } catch (error) {
+    await capture(page, `unsettled-${scenario}`);
+    const facts = await page.evaluate(
+      () => ({
+        text: document.querySelector("#page-overview")?.textContent,
+        ticks: document.querySelectorAll(".overview-instant").length,
+        now: Date.now(),
+        requests: performance
+          .getEntriesByType("resource")
+          .filter((e) => e.name.includes("/api/"))
+          .map((e) => e.name),
+        console: Reflect.get(window, "__overviewDiagnosticErrors"),
+        panels: [...document.querySelectorAll("#page-overview .panel")].map((p) => p.id),
+      }),
+      undefined,
+    );
+    throw new Error(
+      `${String(error)} · resource facts ${JSON.stringify(facts)} · browser errors ${JSON.stringify(page.errors())}`,
+    );
+  }
 }
 async function keyboardOpen(page: RenderedPage, selector: string) {
   await page.evaluate((selector) => {
@@ -81,6 +102,23 @@ async function geometry(page: RenderedPage) {
       return r.width > 0 && r.height > 0;
     };
     return {
+      primary: (() => {
+        const box = (selector: string) => {
+          const b = document.querySelector(selector)?.getBoundingClientRect();
+          return b ? { top: b.top, bottom: b.bottom, height: b.height } : null;
+        };
+        return {
+          crew: box("#agentsP"),
+          firstSeat: box("#agentsList .trow:not(.head)"),
+          activity: box("#actP"),
+          firstEvent: box("#actList .arow"),
+          pipeline: box("#pipelineP"),
+          machine: box("#machP"),
+          kpiTops: [...document.querySelectorAll(".overview-kpi")].map(
+            (el) => el.getBoundingClientRect().top,
+          ),
+        };
+      })(),
       width: innerWidth,
       docWidth: document.documentElement.scrollWidth,
       kpis: [...document.querySelectorAll(".overview-kpi")].map(
@@ -142,6 +180,319 @@ async function geometry(page: RenderedPage) {
 }
 
 describeRendered("Approved Overview hierarchy", () => {
+  it(
+    "settles known context, full allowance and recorded timeline sources in the delivered App",
+    async () => {
+      const page = await renderAt({
+        page: "test/overviewDensityBrowser.html",
+        width: 1600,
+        height: 1000,
+        colorScheme: "light",
+        api: overviewDensityFixture().api,
+      });
+      try {
+        await settled(page, "default");
+        await capture(page, "redesign-source-smoke-1600-folded");
+        expect(
+          await page.evaluate(
+            () => document.querySelector("#agentsList .context-capacity")?.textContent,
+            undefined,
+          ),
+        ).toContain("84.0k / 200k");
+        await page.click(".dockrail button");
+        await capture(page, "redesign-source-smoke-1600-open");
+        expect(page.errors()).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        const fixture = overviewDensityFixture();
+        fixture.summary.kpis.spendToday.series = Array.from({ length: 30 }, (_, i) =>
+          i === 5 ? 0 : i % 2 ? 0.002 : 0.001,
+        );
+        const page = await renderAt({
+          page: "test/overviewDensityBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme: scheme,
+          api: fixture.api,
+        });
+        try {
+          await settled(page, "default");
+          await page.evaluate(() => {
+            const select = document.querySelector<HTMLSelectElement>(
+              '[aria-label="Measured Overview history"]',
+            );
+            if (!select) throw Error("History selector missing");
+            select.value = "spend";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+          }, undefined);
+          expect(
+            await fullText(page, ".measured-reading > span:first-child", "Latest ~$0.002 USD/min"),
+          ).toEqual({ found: true, clipped: false });
+          await keyboardOpen(page, "#overviewHistoryP .history-data summary");
+          expect(
+            await page.evaluate(() => {
+              const table = document.querySelector("#overviewHistoryP .history-data");
+              return {
+                open: table?.hasAttribute("open"),
+                count: table?.querySelectorAll("tbody tr").length,
+                raw: [...(table?.querySelectorAll("tbody td:last-child") ?? [])].map(
+                  (el) => el.textContent,
+                ),
+              };
+            }, undefined),
+          ).toMatchObject({
+            open: true,
+            count: 30,
+            raw: expect.arrayContaining(["0", "0.001", "0.002"]),
+          });
+          await page.evaluate(
+            () =>
+              document
+                .querySelector<HTMLElement>("#overviewHistoryP .history-data-scroll")
+                ?.focus(),
+            undefined,
+          );
+          await capture(page, `history-subcent-before-end-${scheme}`);
+          await page.press("End");
+          const historyScroll = await page.evaluate(async () => {
+            const region = document.querySelector<HTMLElement>(
+              "#overviewHistoryP .history-data-scroll",
+            );
+            if (!region) throw Error("Recorded-values region missing");
+            const initial = {
+              top: region.scrollTop,
+              client: region.clientHeight,
+              height: region.scrollHeight,
+              at: performance.now(),
+            };
+            const until = performance.now() + 1000;
+            while (
+              region.scrollTop + region.clientHeight < region.scrollHeight - 1 &&
+              performance.now() < until
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const last = region.querySelector("tbody tr:last-child")?.getBoundingClientRect();
+            return {
+              initial,
+              final: { top: region.scrollTop, at: performance.now() },
+              focus: document.activeElement === region,
+              scrolled: region.scrollTop > 0,
+              bottomReached: region.scrollTop + region.clientHeight >= region.scrollHeight - 1,
+              lastRowVisible: !!last && last.bottom <= region.getBoundingClientRect().bottom + 1,
+            };
+          }, undefined);
+          if (evidence)
+            writeFileSync(
+              join(evidence, `history-end-trace-${scheme}.json`),
+              JSON.stringify(historyScroll, null, 2),
+            );
+          expect(historyScroll).toMatchObject({
+            focus: true,
+            scrolled: true,
+            bottomReached: true,
+            lastRowVisible: true,
+          });
+          await capture(page, `history-subcent-${scheme}`);
+          await page.evaluate(() => {
+            const select = document.querySelector<HTMLSelectElement>(
+              '[aria-label="Measured Overview history"]',
+            );
+            if (!select) throw Error("History selector missing");
+            select.value = "ci";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+          }, undefined);
+          expect(
+            await page.evaluate(async () => {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              return document
+                .querySelector("#overviewHistoryP .history-data")
+                ?.textContent?.includes("Not collected");
+            }, undefined),
+          ).toBe(true);
+          await keyboardOpen(page, "#quotaSummaryP .quota-details");
+          expect(
+            await page.evaluate(() => document.activeElement?.closest("#quotaP")?.id, undefined),
+          ).toBe("quotaP");
+          const allowance = await page.evaluate(
+            () => ({
+              columns: [...document.querySelectorAll("#quotaP thead th")].map(
+                (el) => el.textContent,
+              ),
+              text: document.querySelector("#quotaP")?.textContent,
+            }),
+            undefined,
+          );
+          expect(allowance.columns).toEqual([
+            "Account / window",
+            "Used",
+            "Remaining",
+            "Resets",
+            "Forecast / freshness",
+          ]);
+          for (const value of [
+            "41%",
+            "59% left",
+            "63%",
+            "37% left",
+            "12%",
+            "88% left",
+            "source",
+            "read",
+          ])
+            expect(allowance.text).toContain(value);
+          await capture(page, `allowance-evidence-${scheme}`);
+          const before = await page.evaluate(() => {
+            Reflect.set(
+              window,
+              "__retainedCrewFirst",
+              document.querySelector("#agentsList .trow:not(.head)"),
+            );
+            return performance
+              .getEntriesByType("resource")
+              .filter((entry) => entry.name.includes("/api/")).length;
+          }, undefined);
+          await page.resize(1280, 1000);
+          await page.click(".dockrail button");
+          await page.evaluate(async () => {
+            const roster = document.querySelector<HTMLElement>("#agentsList");
+            roster?.scrollIntoView({ block: "center" });
+            roster?.focus();
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }, undefined);
+          const horizontalBefore = await page.evaluate(() => {
+            const region = document.querySelector<HTMLElement>("#agentsList");
+            return {
+              focus: document.activeElement === region,
+              left: region?.scrollLeft,
+              width: region?.clientWidth,
+              scrollWidth: region?.scrollWidth,
+            };
+          }, undefined);
+          for (let step = 0; step < 16; step++) await page.press("ArrowRight");
+          const horizontalAfterRight = await page.evaluate(async () => {
+            const region = document.querySelector<HTMLElement>("#agentsList");
+            const until = performance.now() + 1000;
+            while (
+              region &&
+              (region.querySelector(".trow:not(.head) > :last-child")?.getBoundingClientRect()
+                .right ?? Infinity) >
+                region.getBoundingClientRect().right - 1 &&
+              performance.now() < until
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            return {
+              focus: document.activeElement === region,
+              left: region?.scrollLeft,
+              width: region?.clientWidth,
+              scrollWidth: region?.scrollWidth,
+            };
+          }, undefined);
+          await page.press("End");
+          const retained = await page.evaluate(async () => {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const roster = document.querySelector<HTMLElement>("#agentsList");
+            const first = roster?.querySelector<HTMLElement>(".trow:not(.head) > :first-child");
+            return {
+              reads: performance
+                .getEntriesByType("resource")
+                .filter((entry) => entry.name.includes("/api/")).length,
+              sameRow:
+                Reflect.get(window, "__retainedCrewFirst") ===
+                roster?.querySelector(".trow:not(.head)"),
+              history: document.querySelector<HTMLSelectElement>(
+                '[aria-label="Measured Overview history"]',
+              )?.value,
+              scroll: roster?.scrollLeft,
+              finalColumnVisible:
+                !!roster &&
+                (roster.querySelector(".trow:not(.head) > :last-child")?.getBoundingClientRect()
+                  .right ?? Infinity) <=
+                  roster.getBoundingClientRect().right - 1,
+              sticky: first ? getComputedStyle(first).position : null,
+            };
+          }, undefined);
+          if (evidence)
+            writeFileSync(
+              join(evidence, `context-scroll-trace-${scheme}.json`),
+              JSON.stringify(
+                { horizontalBefore, horizontalAfterRight, afterEnd: retained },
+                null,
+                2,
+              ),
+            );
+          expect(retained.reads).toBe(before);
+          expect(retained.sameRow).toBe(true);
+          expect(retained.history).toBe("ci");
+          expect(retained.scroll).toBeGreaterThan(0);
+          expect(retained.finalColumnVisible).toBe(true);
+          expect(retained.sticky).toBe("sticky");
+          expect(
+            await page.reachable("#agentsList .context-capacity", "#agentsList"),
+          ).not.toContain(false);
+          await capture(page, `context-keyboard-narrow-${scheme}`);
+          expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "preserves nine configured seats and two observed loops through the real session filter",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        const page = await renderAt({
+          page: "test/overviewDensityBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme: scheme,
+          api: overviewDensityFixture("mixed").api,
+        });
+        try {
+          await settled(page, "mixed");
+          await page.click(".dockrail button");
+          await capture(page, `overview-mixed-1600-${scheme}-open`);
+          expect(await page.boxes("#agentsList .trow:not(.head)")).toHaveLength(9);
+          expect(await page.boxes(".loops-strip .loop-chip")).toHaveLength(2);
+          expect(
+            await page.evaluate(
+              () => document.querySelector("#agentsList .context-capacity")?.textContent,
+              undefined,
+            ),
+          ).toContain("84.0k / 200k");
+          await page.evaluate(() => {
+            const select = document.querySelector<HTMLSelectElement>("#sess");
+            if (!select) throw Error("Session control missing");
+            select.value = "demo";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+          }, undefined);
+          expect(await page.boxes("#agentsList .trow:not(.head)")).toHaveLength(9);
+          expect(
+            await page.evaluate(
+              () => document.querySelectorAll(".loops-strip .loop-chip").length,
+              undefined,
+            ),
+          ).toBe(0);
+          expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   it(
     "keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open",
     async () => {
@@ -232,7 +583,7 @@ describeRendered("Approved Overview hierarchy", () => {
               }, undefined),
             ).toBe(true);
             await capture(page, `overview-timeline-details-${width}x1000-${scheme}-after`);
-            await keyboardOpen(page, ".overview-next-item button");
+            await keyboardOpen(page, ".overview-next-first button");
             expect(
               await fullText(page, "#dsBrief .brief-section .md", fixture.attention[0]!.text),
             ).toEqual({ found: true, clipped: false });
@@ -300,6 +651,16 @@ describeRendered("Approved Overview hierarchy", () => {
               const facts = await geometry(page);
               expect(facts.docWidth).toBeLessThanOrEqual(width);
               expect(facts.rosterRows).toBe(11);
+              expect(facts.primary.crew!.top).toBeLessThan(facts.primary.activity!.top);
+              expect(facts.primary.activity!.top).toBeLessThan(facts.primary.pipeline!.top);
+              expect(facts.primary.machine!.top).toBeGreaterThanOrEqual(
+                facts.primary.crew!.bottom - 1,
+              );
+              if ([1600, 1920].includes(width) && height >= 900) {
+                expect(facts.primary.firstSeat!.bottom).toBeLessThan(height - 40);
+                expect(facts.primary.firstEvent!.bottom).toBeLessThan(height - 40);
+                expect(new Set(facts.primary.kpiTops).size).toBe(1);
+              }
               if (evidence)
                 writeFileSync(
                   join(evidence, "overview-latest-geometry.json"),
@@ -374,6 +735,11 @@ describeRendered("Approved Overview hierarchy", () => {
             await settled(page, scenario);
             const facts = await geometry(page);
             expect(facts.docWidth).toBeLessThanOrEqual(1600);
+            if (scenario === "empty") {
+              expect(
+                Math.max(...facts.pipeline.countTops) - Math.min(...facts.pipeline.countTops),
+              ).toBeLessThanOrEqual(1);
+            }
             if (scenario === "many") {
               expect(facts.rosterRows).toBe(50);
               expect(

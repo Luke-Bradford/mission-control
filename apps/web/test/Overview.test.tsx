@@ -215,12 +215,18 @@ describe("Overview panels", () => {
   it("every panel carries its mockup id", async () => {
     stub();
     const { container } = render(<Overview />);
-    expect(container.querySelector(".overview-work > #agentsP")).toBeTruthy();
-    expect(container.querySelector(".overview-work > .overview-side > #timelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #agentsP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #timelineP")).toBeTruthy();
     expect(container.querySelector(".overview-grid > #pipelineP")).toBeTruthy();
-    expect(container.querySelector(".ov > #actP")).toBeTruthy();
-    expect(container.querySelector(".overview-work > .overview-side > #machP")).toBeTruthy();
-    expect(container.querySelector(".ov > .col > #quotaP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #actP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #machP")).toBeTruthy();
+    expect(container.querySelector(".overview-primary > #quotaP")).toBeTruthy();
+    const grid = container.querySelector(".overview-grid")!;
+    expect([...grid.children].map((child) => child.id || child.className)).toEqual([
+      "overview-metrics",
+      "overview-workspace",
+      "pipelineP",
+    ]);
     for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
     }
@@ -259,7 +265,15 @@ describe("Agents panel", () => {
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
         (cell) => cell.textContent,
       ),
-    ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+    ).toEqual([
+      "Agent",
+      "State",
+      "Work",
+      "Tokens/min · 30m avg",
+      "Cost",
+      "Context · used / limit · left · used%",
+      "In state",
+    ]);
   });
 
   it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
@@ -415,7 +429,7 @@ describe("Agents panel", () => {
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Error")).toBeTruthy();
     expect(flight.title).toBe("Run failed");
-    expect(flight.querySelector(".meter")?.textContent).toContain("ctx");
+    expect(flight.querySelector(".context-capacity")?.textContent).toContain("limit unknown");
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
@@ -878,8 +892,8 @@ describe("Agents panel", () => {
     await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".tok")?.textContent).toContain("0/min");
-    expect(row.textContent).toContain("ctx —");
-    expect(row.querySelector(".meter")?.textContent).toContain("—");
+    expect(row.querySelector(".context-capacity")?.textContent).toBe("— / — · limit unknown");
+    expect(row.querySelector(".context-track i")).toBeNull();
     expect(row.title).toBe("Free for work");
     expect(row.querySelector(".spark")).toBeTruthy();
   });
@@ -1138,7 +1152,9 @@ describe("Agents panel", () => {
     );
     expect(row.textContent).toContain("133/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.textContent).toContain("ctx 48%");
+    expect(row.querySelector(".context-capacity")?.textContent).toBe(
+      "483k / 1.00M · 517k left · 48%",
+    );
     expect(container.querySelector("#quotaP")?.textContent).toContain("82%");
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(container.querySelector("#quotaP .meter.hi")).toBeTruthy(); // 82 % is amber
@@ -1515,7 +1531,7 @@ describe("Machine panel", () => {
     expect(mach.querySelectorAll(".slots i").length).toBe(8);
     expect(mach.querySelectorAll(".slots i.used").length).toBe(6);
     expect(row.textContent).toContain("6 of 8");
-    expect(row.title).toContain("up to 3 per session");
+    expect(row.title).toContain("3 in the largest configured session");
     expect(row.title).toContain("Room for 2 more agents");
     expect(row.className).toContain("ok-t");
   });
@@ -1606,7 +1622,7 @@ describe("Machine panel", () => {
 });
 
 describe("Account quota panel", () => {
-  it("each account keeps its last reading time on hover", async () => {
+  it("each account window keeps its own visible reading time and hover evidence", async () => {
     stub({
       limits: [
         limit5h({ accountId: "claude-main", sampledAt: NOW - 4 * MIN }),
@@ -1618,7 +1634,8 @@ describe("Account quota panel", () => {
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByTitle(/read 4 min ago/);
     const rows = quota.querySelectorAll(".quotarow");
-    expect(rows[0]?.textContent).not.toContain("9 min");
+    expect(rows[0]?.textContent).toContain("read 9 min ago");
+    expect(rows[0]?.textContent).toContain("read 4 min ago");
     expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toContain("read just now");
   });
 
@@ -1639,7 +1656,11 @@ describe("Account quota panel", () => {
     });
     const { container } = render(<Overview />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
-    await within(quota).findByText("7d 86% · 8h 0m ago");
+    await within(quota).findByText("7d 86%");
+    const staleWindow = within(quota).getByRole("row", { name: /claude-main · 7d/ });
+    expect(staleWindow.textContent).toContain("read 8 h ago");
+    expect(staleWindow.textContent).toContain("14% left");
+    expect(within(staleWindow).getByText("Usage endpoint rate limited")).toBeTruthy();
     await waitFor(() =>
       expect(quota.querySelector('[title*="Usage endpoint rate limited"]')).toBeTruthy(),
     );
@@ -1700,13 +1721,16 @@ describe("Account quota panel", () => {
     expect(rows[1]?.querySelector('[title*="7d: 9%"]')?.getAttribute("title")).toContain(
       "resets Thu 29 Oct 16:22",
     );
-    // the Codex row has its 7d bar in the slot after the name, shaped like Claude's 7d slot
-    const slot = (r: Element | undefined, i: number) => r?.children[i];
-    expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
-    expect(slot(rows[1], 1)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
-    expect(slot(rows[1], 1)?.querySelectorAll("*").length).toBe(
-      slot(rows[0], 2)?.querySelectorAll("*").length,
+    // Native table rows preserve the same used meter for the supported7d windows.
+    const claudeWeek = rows[0]?.querySelectorAll("tr")[1];
+    const codexWeek = rows[1]?.querySelector("tr");
+    expect(claudeWeek?.querySelector("td .track")).toBeTruthy();
+    expect(codexWeek?.querySelector("td .track")).toBeTruthy();
+    expect(claudeWeek?.querySelector(".meter")?.children.length).toBe(
+      codexWeek?.querySelector(".meter")?.children.length,
     );
+    expect(codexWeek?.querySelectorAll("td")).toHaveLength(4);
+    expect(codexWeek?.textContent).toContain("91% left");
   });
 
   it("a 5h bar's hover says too little history when paceReady is false, the pace when true", async () => {

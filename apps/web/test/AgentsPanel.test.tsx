@@ -168,7 +168,15 @@ it("shows FLIGHT and the crew in seven columns with a live Work line, and observ
     within(table)
       .getAllByRole("columnheader")
       .map((h) => h.textContent),
-  ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+  ).toEqual([
+    "Agent",
+    "State",
+    "Work",
+    "Tokens/min · 30m avg",
+    "Cost",
+    "Context · used / limit · left · used%",
+    "In state",
+  ]);
   expect(within(table).getAllByRole("row")).toHaveLength(6);
   const rendered = rowsIn(container);
   expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
@@ -199,7 +207,8 @@ it("shows FLIGHT and the crew in seven columns with a live Work line, and observ
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(row.querySelector(".tok")?.textContent).toContain("40/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.querySelectorAll(".meter")).toHaveLength(1);
+    expect(row.querySelectorAll(".context-capacity")).toHaveLength(1);
+    expect(row.querySelector(".context-capacity")?.textContent).toBe("400 / 1.0k · 600 left · 40%");
   }
   expect(container.querySelector("details, summary, .agent-group, .scroll")).toBeNull();
   expect(screen.queryByText("Run details")).toBeNull();
@@ -366,7 +375,7 @@ it("labels Context, leaves quota in Systems and preserves paused state", async (
     false,
   );
   const { container } = render(<AgentsPanel />);
-  await screen.findByText("ctx 40%");
+  await screen.findByText("400 / 1.0k · 600 left · 40%");
   expect(screen.queryByText("14%")).toBeNull();
   const paused = await screen.findByText("Idle");
   expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Crew is paused");
@@ -539,8 +548,8 @@ it.each([
     [limit5h({ used: pct })],
   );
   const { container } = render(<AgentsPanel />);
-  await screen.findByText(`ctx ${pct}%`);
-  const meters = rowsIn(container)[1]?.querySelectorAll(".meter");
+  await screen.findByText(new RegExp(` · ${pct}%$`));
+  const meters = rowsIn(container)[1]?.querySelectorAll(".context-capacity");
   expect(meters).toHaveLength(1);
   for (const meter of meters ?? []) expect(meter.classList.contains(level)).toBe(true);
 });
@@ -591,7 +600,9 @@ it("uses the live FLIGHT seat while config is unavailable, without a duplicate o
   expect(flight.querySelector(".agent-identity")?.getAttribute("title")).toContain("opus");
   expect(flight.lastElementChild?.getAttribute("title")).toContain("Turns this session: 23");
   expect(flight.textContent).toContain("~$2.47");
-  expect(flight.textContent).toContain("ctx 40%");
+  expect(flight.querySelector(".context-capacity")?.textContent).toBe(
+    "400 / 1.0k · 600 left · 40%",
+  );
   expect(container.textContent).not.toContain("Loading…");
   expect(screen.queryByText("flight-1")).toBeNull();
 });

@@ -150,6 +150,16 @@ export const shortSha = (sha: string): string => sha.slice(0, 7);
 export const cost = (usd: number | null | undefined, approx = true): string =>
   usd == null ? "—" : `${approx ? "~" : ""}$${usd.toFixed(2)}`;
 
+const preciseUsd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumSignificantDigits: 1,
+  maximumSignificantDigits: 3,
+});
+/** Estimated USD/minute: preserve a nonzero sub-cent rate instead of rounding it to$0.00. */
+export const costRate = (value: number | null | undefined): string =>
+  value == null ? "—" : `~${preciseUsd.format(value)}`;
+
 /** A value on a 0–100 scale as a percent: `42%` (rounded to `places`, default whole), `—` for none. */
 export const percent = (value: number | null | undefined, places = 0): string =>
   value == null ? "—" : `${Number(value.toFixed(places))}%`;

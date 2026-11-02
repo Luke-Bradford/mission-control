@@ -4,10 +4,10 @@ import { readStyles } from "./styles.ts";
 const css = readStyles();
 it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(
-    /\.overview-grid \{[^}]*grid-template-rows: max-content max-content max-content minmax\(280px, max-content\)/,
+    /\.overview-grid \{[^}]*grid-template-rows: max-content max-content max-content/,
   );
   expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow-y: auto/);
-  // Next actions and Quota join the bounded Live log.
+  // Source-independent columns keep the bounded Live log ahead of the lower allowance table.
   expect(css).toMatch(/\.ov > \.col \{\s*display: contents/);
   expect(css).toMatch(/\.overview-grid > \*,[\s\S]*?\.ov > \.panel \{[\s\S]*?overflow: hidden/);
   expect(css).toMatch(/\.ov > \.col > \.panel > \.pb \{\s*min-height: 0;\s*overflow: auto/);
@@ -31,7 +31,7 @@ it("keeps seven compact columns and preserves inline needs controls", () => {
 
 it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*grid-template-columns: 148px 88px minmax\(260px, 1fr\) 96px 56px 64px 64px/,
+    /#agentsList \.trow \{[^}]*grid-template-columns: 128px 80px minmax\(260px, 1fr\) 96px 64px 178px 52px/,
   );
   expect(css).toMatch(/#agentsList \.ticket-cell \{[^}]*overflow: hidden/);
 });
@@ -43,7 +43,7 @@ it("keeps State pills and their age from shrinking", () => {
 });
 
 it("drops token graphs before tightening columns with FLIGHT open", () => {
-  expect(css).toMatch(/#agentsList \.trow\s*\{[^}]*min-width: 760px/);
+  expect(css).toMatch(/#agentsList \.trow\s*\{[^}]*min-width: 1050px/);
   expect(css).toContain("@container agents (width < 1000px)");
   expect(css).toContain("@container agents (width < 900px)");
   expect(css).toMatch(
@@ -74,7 +74,7 @@ it("keeps charts aligned when the live dot or rate text changes", () => {
 it("lets phone users scroll every Crew column while keeping the agent pinned", () => {
   const narrow = css.slice(css.indexOf("@media (max-width: 760px)"));
   expect(narrow).toMatch(/#agentsList \{[^}]*max-width: 100%;[^}]*overflow-x: auto/);
-  expect(narrow).toMatch(/#agentsList \.trow \{[^}]*min-width: 680px/);
+  expect(narrow).toMatch(/#agentsList \.trow \{[^}]*min-width: 1050px/);
   expect(narrow).toMatch(
     /#agentsList \.trow > :first-child \{[^}]*position: sticky;[^}]*left: 0;[^}]*z-index: 1;[^}]*background: var\(--surface\)/,
   );

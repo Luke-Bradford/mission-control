@@ -1,5 +1,5 @@
 import { type ConfigView, type Crew, type OverviewTimeline, TIMELINE_WINDOW_MS } from "@mc/core";
-import { type CSSProperties, useId } from "react";
+import { type CSSProperties, type ReactNode, useId } from "react";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
@@ -32,7 +32,7 @@ const AXIS: [string, number][] = [
  * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
  * activity stays visible, 5- and 15-minute gridlines and a "now" cursor.
  */
-export function TimelinePanel() {
+export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
   const id = useId();
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -236,6 +236,7 @@ export function TimelinePanel() {
           </details>
         )}
       </div>
+      {footer}
     </Panel>
   );
 }

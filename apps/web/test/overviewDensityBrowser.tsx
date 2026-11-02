@@ -14,6 +14,13 @@ import { streamStatus } from "../src/data.ts";
 import { NOW } from "./fixtures.ts";
 
 const state = new URLSearchParams(location.search).get("state");
+const diagnosticErrors: string[] = [];
+Reflect.set(window, "__overviewDiagnosticErrors", diagnosticErrors);
+const reportError = console.error.bind(console);
+console.error = (...args) => {
+  diagnosticErrors.push(args.map(String).join(" "));
+  reportError(...args);
+};
 const originalFetch = window.fetch.bind(window);
 const scoped = [
   "/api/overview",

@@ -104,17 +104,17 @@ describeRendered("Overview v2 layout in a browser", () => {
         // Nothing spills sideways.
         expect(await page.unclipped("#page-overview")).toEqual([true]);
 
-        // Narrow content stacks the roster above the two evidence panels; wide content puts
-        // the complete roster beside a Timeline/Machine column.
+        // Crew and activity own the primary column; measured panels remain independent.
         const crew = await page.box("#agentsP");
         const timeline = await page.box("#timelineP");
         const machine = await page.box("#machP");
-        if (width <= 1280) {
-          expect(timeline.y).toBeGreaterThanOrEqual(crew.y + crew.height - 1);
-          expect(Math.abs(timeline.y - machine.y)).toBeLessThan(2);
-        } else {
-          expect(Math.abs(crew.y - timeline.y)).toBeLessThan(2);
-          expect(machine.y).toBeGreaterThanOrEqual(timeline.y + timeline.height - 1);
+        const log = await page.box("#actP");
+        const summary = await page.box("#quotaSummaryP");
+        expect(log.y).toBeGreaterThanOrEqual(crew.y + crew.height - 1);
+        expect(machine.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
+        if (width === 1920) {
+          expect(summary.x).toBeGreaterThanOrEqual(crew.x + crew.width);
+          expect(timeline.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
         }
 
         // The Work column gets the room the others leave.
@@ -134,14 +134,13 @@ describeRendered("Overview v2 layout in a browser", () => {
         const full = await page.box("#pipelineP .pipeline-stage.progress");
         expect(empty.width).toBeLessThan(full.width);
 
-        // The log is before the operator inbox and Quota; no Machine panel is lost below it.
-        const log = await page.box("#actP");
-        const next = await page.box("#overviewNextP");
+        // Pipeline is secondary; all full evidence panels precede it without clipping.
         const quota = await page.box("#quotaP");
-        expect(Math.abs(next.y - quota.y)).toBeLessThan(2);
-        expect(next.x).toBeLessThan(quota.x);
-        if (width <= 1280) expect(next.y).toBeGreaterThanOrEqual(log.y + log.height - 1);
-        else expect(Math.abs(log.y - next.y)).toBeLessThan(2);
+        const pipeline = await page.box("#pipelineP");
+        expect(quota.y).toBeGreaterThanOrEqual(log.y + log.height - 1);
+        for (const panel of [crew, log, timeline, quota, machine]) {
+          expect(pipeline.y).toBeGreaterThanOrEqual(panel.y + panel.height - 1);
+        }
 
         // A long Comms message is one line and its "read" link stays visible and reachable.
         await page.evaluate(() => {
@@ -172,7 +171,15 @@ describeRendered("Overview v2 layout in a browser", () => {
               ),
             undefined,
           ),
-        ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+        ).toEqual([
+          "Agent",
+          "State",
+          "Work",
+          "Tokens/min · 30m avg",
+          "Cost",
+          "Context · used / limit · left · used%",
+          "In state",
+        ]);
 
         // Lower panels remain reachable in the Overview scroll region.
         expect(await page.reachable("#quotaP", ".overview-grid")).not.toContain(false);
