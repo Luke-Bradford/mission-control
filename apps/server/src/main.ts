@@ -35,6 +35,7 @@ import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.t
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
+import { createGitFileCollector } from "./code-health/git-collector.ts";
 import {
   fetchBoard,
   fetchCardNow,
@@ -855,6 +856,10 @@ export async function main(): Promise<void> {
   });
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  const gitFiles = preview ? null : createGitFileCollector({ config, store, bus });
+  app.addHook("onClose", async () => {
+    await gitFiles?.stop();
+  });
   const previewExpiry = previews ? setInterval(() => void previews.expire(), 60_000) : null;
   app.addHook("onClose", async () => {
     if (previewExpiry) clearInterval(previewExpiry);
@@ -878,6 +883,7 @@ export async function main(): Promise<void> {
     });
   }
   scheduler.start();
+  gitFiles?.start();
   supervisor.start();
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's
   // first look at the seats works; its resumed runs start in the background, so no idle event of

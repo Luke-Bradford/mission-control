@@ -220,7 +220,7 @@ async function usesFilters(worktree: string, base: string[], exec: GitExec): Pro
 }
 
 /** The read-only arguments every call in a worktree starts with (see the module comment). */
-async function readOnlyBase(worktree: string, exec: GitExec): Promise<string[]> {
+export async function readOnlyBase(worktree: string, exec: GitExec): Promise<string[]> {
   return [
     "--no-optional-locks",
     ...(await noLazyFetch(exec)),

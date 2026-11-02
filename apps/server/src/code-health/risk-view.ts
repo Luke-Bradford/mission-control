@@ -45,6 +45,42 @@ export function buildRiskTab(input: {
   const reviews = store.codeHealthReviews(repoId, bounds.from, bounds.until);
   const dated = store.codeHealthDatedRisk(repoId, bounds.from, bounds.until);
   const membership = store.codeHealthReviewedFiles(repoId, bounds.from, bounds.until);
+  const git = checkout
+    ? store.codeHealthGitMetrics(repoId, checkout, bounds.from, bounds.until, bounds.until)
+    : null;
+  const numstatsCoverage = describe(
+    "git first-parent numstats",
+    git?.rows.length ? git.rows[0].mergedAt : null,
+    git?.rows.length ? git.rows[git.rows.length - 1].mergedAt : null,
+    git?.complete
+      ? "Actual git additions/deletions for observed PR merge commits on the analysed default-branch first-parent history. Attributes for every diff are pinned to the analysed default head. Merge dates select the window. Rename changes count at their destination; binary counts are unknown."
+      : "Git numstats are unavailable or incomplete for the observed merge cohort. Missing merge SHAs, single-parent squash/rebase commits without a proven PR base, commits outside the captured traversal, failed collection and checks older than 15 minutes leave line counts unknown.",
+    git?.complete ? (git.rows.length ? "available" : "empty") : "not-collected",
+    git?.source?.analysedSha ?? null,
+  );
+  numstatsCoverage.collectedAt = git?.source?.collectedAt ?? null;
+  numstatsCoverage.complete = false;
+  const numstatRef = reference(
+    { ...base, kind: "git-numstats" },
+    "Git file additions and deletions",
+    "Committed-tree git numstats, not PR membership. Renames retain previous and destination paths; no worktree or external diff/filter is read.",
+    numstatsCoverage,
+  );
+  evidence.push(numstatRef);
+  const churn = new Map<string, { additions: number | null; deletions: number | null }>();
+  for (const row of git?.rows ?? [])
+    for (const change of row.commit?.changes ?? []) {
+      if (!riskFile(change.path) || row.commit?.excludedPaths.includes(change.path)) continue;
+      const previous = churn.get(change.path) ?? { additions: 0, deletions: 0 };
+      const sum = (left: number | null, right: number | null) =>
+        left === null || right === null || !Number.isSafeInteger(left + right)
+          ? null
+          : left + right;
+      churn.set(change.path, {
+        additions: sum(previous.additions, change.additions),
+        deletions: sum(previous.deletions, change.deletions),
+      });
+    }
   const findingCoverage = describe(
     "reviewed file membership and findings",
     reviews.observedFrom,
@@ -119,10 +155,10 @@ export function buildRiskTab(input: {
     ...new Set([...sizeByPath.keys(), ...touchedPaths, ...findingPaths.sort().slice(0, 50)]),
   ].filter(riskFile);
   describe(
-    "git numstats and comparable size history",
+    "comparable size history",
     null,
     null,
-    "Per-file additions/deletions and comparable size history are not collected. Merged-PR counts are not line churn.",
+    "Comparable size history is not collected. Merged-PR counts are not line churn, and one current size does not establish growth.",
     "not-collected",
   );
   const data: Extract<CodeHealthView["data"], { tab: "risk" }> = {
@@ -140,6 +176,15 @@ export function buildRiskTab(input: {
         changedFilesComplete: membership.complete,
       });
       const refs = sizeRef && sizeByPath.has(path) ? [sizeRef] : [];
+      if (git?.source)
+        refs.push(
+          reference(
+            { ...base, kind: "git-numstats", file: path },
+            `Git numstats: ${path}`,
+            "Actual first-parent committed-tree additions/deletions, assigned to rename destinations. Evidence includes previous paths. Binary numstats stay unknown.",
+            numstatsCoverage,
+          ),
+        );
       refs.push(
         reference(
           { ...base, kind: "merged-files", file: path },
@@ -171,8 +216,14 @@ export function buildRiskTab(input: {
         lines: sizeByPath.get(path) ?? null,
         analysedSha: sizeByPath.has(path) ? (sizes?.analysedSha ?? null) : null,
         mergedPrTouches: dated.complete && dated.prs ? (dated.touches.get(path)?.size ?? 0) : null,
-        additions: null,
-        deletions: null,
+        additions:
+          git?.complete && git.rows.length
+            ? (churn.get(path)?.additions ?? (churn.has(path) ? null : 0))
+            : null,
+        deletions:
+          git?.complete && git.rows.length
+            ? (churn.get(path)?.deletions ?? (churn.has(path) ? null : 0))
+            : null,
         findings: reviews.reviews.length ? incidence.findings : null,
         outsideDiffFindings: reviews.reviews.length ? incidence.outsideDiffFindings : null,
         incidence: reviews.reviews.length ? incidence.incidence : null,

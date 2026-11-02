@@ -141,7 +141,7 @@ export const RESOURCES = {
   }),
   codeHealth: (repo: string, window = "30d", tab = "overview"): ResourceRef => ({
     path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
-    topic: ["agents", "boards", "flight"],
+    topic: ["agents", "boards", "flight", "health"],
   }),
   codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
     path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
