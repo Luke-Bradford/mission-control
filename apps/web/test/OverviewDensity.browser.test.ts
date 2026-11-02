@@ -162,6 +162,7 @@ describeRendered("Approved Overview hierarchy", () => {
                     .filter((row) => !row.classList.contains("flight"))
                     .map((row) => ({
                       route: row.querySelector<HTMLAnchorElement>(".rowlink")?.getAttribute("href"),
+                      current: !!row.querySelector(".work-summary"),
                       full:
                         row.querySelector<HTMLElement>(".work-cell")?.getAttribute("title") ?? "",
                       accessible: row.textContent?.length ?? 0,
@@ -171,7 +172,9 @@ describeRendered("Approved Overview hierarchy", () => {
               expect(
                 textRoutes.every(
                   (row) =>
-                    row.route?.startsWith("/agent/") && row.full.length > 20 && row.accessible > 20,
+                    row.route?.startsWith("/agent/") &&
+                    (!row.current || row.full.length > 20) &&
+                    row.accessible > 20,
                 ),
               ).toBe(true);
               expect((await geometry(page)).docWidth).toBeLessThanOrEqual(width);

@@ -57,6 +57,9 @@ it("graphs free disk GiB with gaps for missing minutes", async () => {
     "M0.0,3.0M66.7,12.5L100.0,7.8",
   );
   expect(graph.querySelectorAll("path")).toHaveLength(3);
+  expect(
+    screen.getByText(/CPU, memory history not collected; those bars use the current sample/),
+  ).toBeTruthy();
 });
 
 it("links run chips to the specific run and preserves chips without a run", async () => {

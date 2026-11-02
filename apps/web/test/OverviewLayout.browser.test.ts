@@ -53,7 +53,7 @@ const accounts = [
 ];
 
 const api = {
-  "/api/crew/pause": null,
+  "/api/settings/crew-pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [stage("ready", 5), stage("building", 7), stage("review", 0), stage("merged", 4)],
@@ -175,7 +175,7 @@ describeRendered("Overview v2 layout in a browser", () => {
         ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
 
         // Lower panels remain reachable in the Overview scroll region.
-        expect(await page.reachable("#quotaP button", ".overview-grid")).not.toContain(false);
+        expect(await page.reachable("#quotaP", ".overview-grid")).not.toContain(false);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,

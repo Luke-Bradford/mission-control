@@ -75,7 +75,7 @@ const comms = (i: number) => ({
 });
 
 const api = {
-  "/api/crew/pause": null,
+  "/api/settings/crew-pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [
@@ -208,7 +208,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
             if (lanes.length === 0) out.push("pipeline: no lanes");
             return { problems: out };
           }, SCROLLING_PANELS);
-          expect(problems).toEqual([]);
+          expect(problems, JSON.stringify(problems)).toEqual([]);
           await page.close();
         },
         BROWSER_TEST_TIMEOUT_MS,
@@ -236,7 +236,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
         expect(activity.height).toBeGreaterThanOrEqual(280);
         expect(activity.height).toBeLessThan(600);
         expect(await page.reachable("#actList .arow", "#actList")).not.toContain(false);
-        expect(await page.reachable("#pipelineP .pipeline-more")).not.toContain(false);
+        expect(await page.reachable("#pipelineP .pipeline-stage h3 a")).not.toContain(false);
         expect(await page.reachable(".overview-metrics")).toEqual([true]);
         expect(await page.reachable("#pipelineP .pipeline-chip")).not.toContain(false);
         await page.screenshot(join(SHOTS, `overview-populated-1600x700-${colorScheme}.png`));

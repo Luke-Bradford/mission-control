@@ -156,9 +156,15 @@
 .ov {
   min-height: 0;
   display: grid;
+  align-items: start;
   grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr) minmax(300px, 1fr);
   grid-template-rows: minmax(280px, max-content);
   gap: var(--sp-3);
+}
+
+.ov > #actP {
+  /* Size containment keeps long logs bounded by their neighbours; only the log stretches. */
+  align-self: stretch;
 }
 
 /* Quota joins Next actions beside the Live log. */

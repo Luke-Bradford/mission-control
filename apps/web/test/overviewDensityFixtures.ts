@@ -215,7 +215,22 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           },
         ]),
     ),
-    "/api/crew/pause": null,
+    ...Object.fromEntries(
+      attention.flatMap((item) => {
+        const thread = {
+          id: `discussion:${item.key}`,
+          itemKey: item.key,
+          version: "fixture-v1",
+          messages: [],
+        };
+        const path = `/api/attention/${encodeURIComponent(item.key)}/discussion`;
+        return [
+          [path, thread],
+          [`${path}?id=${encodeURIComponent(thread.id)}`, thread],
+        ];
+      }),
+    ),
+    "/api/settings/crew-pause": null,
     "/api/config": config,
     "/api/crew?shape=summary": { rows, firstRunToday: NOW - 60 * MIN },
     "/api/attention": attention,

@@ -192,11 +192,15 @@ export function MachinePanel() {
   const diskHistory = (summary?.machine?.disk ?? []).filter(
     (value): value is number => value !== null,
   );
-  const measuredHistory = [
-    summary?.machine?.cpu,
-    summary?.machine?.mem,
-    summary?.machine?.disk,
-  ].some((values) => values?.some((value) => value !== null));
+  const histories = [
+    { name: "CPU", values: summary?.machine?.cpu },
+    { name: "memory", values: summary?.machine?.mem },
+    { name: "disk", values: summary?.machine?.disk },
+  ];
+  const measuredHistory = histories.some(({ values }) => values?.some((value) => value !== null));
+  const missingHistory = histories
+    .filter(({ values }) => !values?.some((value) => value !== null))
+    .map(({ name }) => name);
 
   return (
     <Panel
@@ -376,6 +380,12 @@ export function MachinePanel() {
           {measuredHistory
             ? `History: 30 complete minutes · CPU and memory 0–100%${diskHistory.length ? ` · disk 0–${Math.max(1, ...diskHistory).toFixed(0)} GiB free` : " · disk history not collected"}.`
             : "History not collected · current sample only. Bars begin at zero; CPU and memory show percent used, disk shows percent used."}
+          {measuredHistory && missingHistory.length > 0 && (
+            <>
+              {" "}
+              {missingHistory.join(", ")} history not collected; those bars use the current sample.
+            </>
+          )}
         </p>
       </div>
     </Panel>

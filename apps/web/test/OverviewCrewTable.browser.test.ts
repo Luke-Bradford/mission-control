@@ -79,7 +79,7 @@ const crew: Crew = {
 };
 
 const api = {
-  "/api/crew/pause": null,
+  "/api/settings/crew-pause": null,
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
