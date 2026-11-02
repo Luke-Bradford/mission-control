@@ -3,6 +3,7 @@ import type { CodeHealthFinding, CodeHealthReviewRound } from "@mc/core";
 import { MAP_COUPLING_PR_FILES_MAX } from "../map/history-rules.ts";
 import { gitFileMetrics } from "./git-store.ts";
 import { datedPrFiles, reviewedFileMembership } from "./risk.ts";
+import { sizeEvidence, sizeHistoryEvidence } from "./size-store.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
 type Row = Record<string, unknown>;
@@ -15,7 +16,8 @@ export type CodeHealthEvidenceKind =
   | "durations"
   | "merged-files"
   | "reviewed-files"
-  | "git-numstats";
+  | "git-numstats"
+  | "size-history";
 
 /** Revisions track relevant source writes, including writes from another SQLite connection. */
 export function installCodeHealthRevisions(db: Db): void {
@@ -34,6 +36,9 @@ export function installCodeHealthRevisions(db: Db): void {
     ["pr_files", "direct"],
     ["code_health_file_memberships", "direct"],
     ["code_health_git_sources", "direct"],
+    ["code_health_size_sources", "direct"],
+    ["code_health_size_snapshots", "direct"],
+    ["code_health_file_sizes", "direct"],
     ["map_cache", "global"],
   ] as const;
   for (const [table, scope] of tables) {
@@ -324,19 +329,9 @@ export function codeHealthEvidenceSource(
     WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
     ORDER BY v.ended_at, t.id LIMIT ? OFFSET ?`)
       .all(...args) as Row[];
-  if (query.kind === "sizes" && query.checkout && query.sha) {
-    const rows = db
-      .prepare(`SELECT
-    json_extract(j.value, '$.path') AS path, json_extract(j.value, '$.lines') AS lines
-    FROM map_cache c, json_each(c.value, '$.tree') j
-    WHERE c.kind = 'tree' AND c.scope = ? AND c.key = ?
-    ORDER BY lines DESC, path LIMIT ? OFFSET ?`)
-      .all(query.checkout, query.sha, query.limit + 1, query.offset) as {
-      path: string;
-      lines: number;
-    }[];
-    validateSizeRows(rows);
-    return rows;
-  }
+  if (query.kind === "sizes" && query.checkout && query.sha)
+    return sizeEvidence(db, { ...query, checkout: query.checkout, sha: query.sha });
+  if (query.kind === "size-history" && query.checkout && query.file)
+    return sizeHistoryEvidence(db, { ...query, checkout: query.checkout, file: query.file });
   throw new Error("Invalid code-health evidence source");
 }

@@ -41,7 +41,16 @@ export function buildRiskTab(input: {
   const { store, checkout, repoId, base, describe, reference } = input;
   const bounds = base;
   const evidence: CodeHealthEvidenceRef[] = [];
-  const sizes = checkout ? store.codeHealthSizes(checkout) : null;
+  const snapshot = checkout ? store.codeHealthSizeSnapshot(repoId, checkout) : null;
+  const sizes =
+    snapshot?.status === "available" &&
+    snapshot.analysedSha &&
+    snapshot.collectedAt !== null &&
+    snapshot.collectedAt <= bounds.until &&
+    snapshot.checkedAt <= bounds.until &&
+    bounds.until - snapshot.checkedAt < 15 * 60000
+      ? { ...snapshot, analysedSha: snapshot.analysedSha }
+      : null;
   const reviews = store.codeHealthReviews(repoId, bounds.from, bounds.until);
   const dated = store.codeHealthDatedRisk(repoId, bounds.from, bounds.until);
   const membership = store.codeHealthReviewedFiles(repoId, bounds.from, bounds.until);
@@ -119,16 +128,30 @@ export function buildRiskTab(input: {
     datedCoverage,
   );
   evidence.push(mergedRef);
+  const sizeState: CodeHealthCoverage["state"] = sizes
+    ? "available"
+    : !snapshot
+      ? "not-collected"
+      : snapshot.status !== "available"
+        ? "error"
+        : "stale";
+  const sizeNote = sizes
+    ? "Largest 50 regular text files at the analysed SHA, after scope exclusions. Dates are actual observations."
+    : !snapshot
+      ? "A file-size snapshot has not been collected for this repo."
+      : snapshot.status !== "available"
+        ? "The latest file-size collection failed. Current counts are unknown; last captured provenance is retained."
+        : "The file-size head check is stale or ahead of this read. Current counts are unknown; last captured provenance is retained.";
   const sizeCoverage = describe(
     "cached file-size snapshot",
-    null,
-    null,
-    sizes
-      ? "Largest 50 files at the analysed SHA. Snapshot collection time is not recorded."
-      : "A file-size snapshot has not been collected for this repo.",
-    sizes ? "available" : "not-collected",
-    sizes?.analysedSha ?? null,
+    sizes?.collectedAt ?? snapshot?.lastCapturedAt ?? null,
+    sizes?.collectedAt ?? snapshot?.lastCapturedAt ?? null,
+    sizeNote,
+    sizeState,
+    sizes?.analysedSha ?? snapshot?.lastCapturedSha ?? null,
   );
+  sizeCoverage.collectedAt = sizes?.collectedAt ?? snapshot?.lastCapturedAt ?? null;
+  sizeCoverage.complete = false;
   const sizeRef = sizes
     ? reference(
         { ...base, kind: "sizes", sha: sizes.analysedSha },
@@ -154,13 +177,49 @@ export function buildRiskTab(input: {
   const paths = [
     ...new Set([...sizeByPath.keys(), ...touchedPaths, ...findingPaths.sort().slice(0, 50)]),
   ].filter(riskFile);
-  describe(
+  const historyCoverage = describe(
     "comparable size history",
     null,
     null,
-    "Comparable size history is not collected. Merged-PR counts are not line churn, and one current size does not establish growth.",
-    "not-collected",
+    sizes
+      ? "Earliest and latest retained comparable observations in this selected window. Actual capture dates and SHAs are retained; one observation does not establish growth. Evidence pages include intermediate observations."
+      : "Comparable size snapshots have not been collected.",
+    sizes ? "available" : "not-collected",
   );
+  historyCoverage.complete = false;
+  historyCoverage.collectedAt = sizes?.collectedAt ?? null;
+  historyCoverage.analysedSha = sizes?.analysedSha ?? null;
+  const histories =
+    checkout && sizes?.analysedSha
+      ? store.codeHealthSizeHistory(
+          repoId,
+          checkout,
+          sizes.files.map((file) => file.path),
+          bounds.from,
+          bounds.until,
+          sizes.analysedSha,
+        )
+      : [];
+  const historyPoints = histories.flatMap((history) => history.points);
+  historyCoverage.state = histories.some((history) => history.comparable)
+    ? "available"
+    : "not-collected";
+  historyCoverage.observedFrom = historyPoints.length
+    ? Math.min(...historyPoints.map((point) => point.at))
+    : null;
+  historyCoverage.observedUntil = historyPoints.length
+    ? Math.max(...historyPoints.map((point) => point.at))
+    : null;
+  if (!histories.some((history) => history.comparable))
+    historyCoverage.note =
+      "Fewer than two comparable retained SHA observations exist in this selected window. Growth is unknown; one snapshot is not a zero-growth baseline.";
+  if (!sizes && snapshot) {
+    historyCoverage.state = sizeState;
+    historyCoverage.note =
+      "Current size collection is stale or failed. Prior observations remain recorded; a current growth comparison is unavailable.";
+    historyCoverage.collectedAt = snapshot.lastCapturedAt;
+    historyCoverage.analysedSha = snapshot.lastCapturedSha;
+  }
   const data: Extract<CodeHealthView["data"], { tab: "risk" }> = {
     tab: "risk",
     files: paths.map((path) => {
@@ -230,7 +289,17 @@ export function buildRiskTab(input: {
         evidence: refs,
       };
     }),
-    sizeHistory: [],
+    sizeHistory: histories.map((history) => ({
+      ...history,
+      evidence: [
+        reference(
+          { ...base, kind: "size-history", file: history.path },
+          `Size observations: ${history.path}`,
+          "Recorded regular-text line counts under size scope v1. Capture dates are not commit dates. Renamed paths are not stitched into invented history.",
+          historyCoverage,
+        ),
+      ],
+    })),
     coupling: dated.coupling.map((pair) => ({
       ...pair,
       evidence: [

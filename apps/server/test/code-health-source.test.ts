@@ -142,31 +142,38 @@ describe("code-health source projections", () => {
     }
   });
 
-  it("validates size evidence beyond the summary's first fifty files", () => {
-    const scope = "/example/checkouts/sample",
+  it("validates size evidence beyond the first fifty rows and rejects negative stored counts", () => {
+    const checkout = "/example/checkouts/sample",
       sha = "a".repeat(40);
-    const valid = Array.from({ length: 50 }, (_, i) => ({
-      path: `src/file-${i}.ts`,
-      lines: 100 + i,
-    }));
-    for (const invalid of [
-      { path: "/private/example/home/secret.txt", lines: 1 },
-      { path: "src/invalid.ts", lines: -1 },
-    ]) {
-      store.mapCachePut("tree", scope, sha, JSON.stringify({ tree: [...valid, invalid] }), true);
-      expect(store.codeHealthSizes(scope)?.files).toHaveLength(50);
-      expect(() =>
-        store.codeHealthEvidence({
-          repoId: "sample",
-          kind: "sizes",
-          from: 0,
-          until: 200,
-          offset: 50,
-          limit: 50,
-          checkout: scope,
-          sha,
-        }),
-      ).toThrow(/invalid file/);
-    }
+    store.recordCodeHealthSizeSnapshot(
+      "sample",
+      checkout,
+      {
+        version: 1,
+        analysedSha: sha,
+        files: Array.from({ length: 51 }, (_, i) => ({ path: `src/file-${i}.ts`, lines: 100 + i })),
+        excludedBinaryFiles: 0,
+        elapsedMs: 1,
+      },
+      100,
+    );
+    db.prepare(
+      "UPDATE code_health_file_sizes SET path='/private/example/home/secret.txt',lines=1 WHERE repo_id='sample' AND path='src/file-0.ts'",
+    ).run();
+    expect(() =>
+      store.codeHealthEvidence({
+        repoId: "sample",
+        kind: "sizes",
+        from: 0,
+        until: 200,
+        offset: 50,
+        limit: 50,
+        checkout,
+        sha,
+      }),
+    ).toThrow(/size file/);
+    expect(() =>
+      db.prepare("UPDATE code_health_file_sizes SET lines=-1 WHERE repo_id='sample'").run(),
+    ).toThrow(/CHECK/);
   });
 });
