@@ -328,6 +328,7 @@ import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -2504,6 +2505,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             },
             usualMs: usualLockMs(runs),
           };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-history (bounded saved and legacy native review discovery)
+      api.get<{ Querystring: { repoId?: unknown; cursor?: unknown; limit?: unknown } }>(
+        "/qa/history",
+        async (req, reply) => {
+          const page = qaHistoryPage(store, config, req.query);
+          return (
+            page ??
+            reply.code(400).send({
+              error: "Give an optional configured repoId, limit 1–50 and valid history cursor.",
+            })
+          );
+        },
+      );
+      // Reader: docs/runbook.md#qa-history (original retained native record; never reconstructed approval)
+      api.get<{ Params: { id: string }; Querystring: { identity?: unknown } }>(
+        "/qa/history/native/:id",
+        async (req, reply) => {
+          const id = Number(req.params.id);
+          const record =
+            /^[1-9]\d*$/.test(req.params.id) && Number.isSafeInteger(id)
+              ? typeof req.query.identity === "string" && /^[a-f0-9]{64}$/.test(req.query.identity)
+                ? qaNativeHistory(store, config, id, req.query.identity)
+                : null
+              : null;
+          return (
+            record ??
+            reply
+              .code(404)
+              .send({ error: "Historical native review not found. It may have been pruned." })
+          );
         },
       );
 

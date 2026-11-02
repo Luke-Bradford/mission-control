@@ -1,0 +1,337 @@
+{
+  "scope": "Actual local execution receipts, not the sample test counts visible inside screenshots. Earlier complete pack plus focused final deltas, not a claimed single final22-case run or local full suite. Final formatting-only second pass changed no behavior.",
+  "runs": [
+    {
+      "label": "Full History pack",
+      "runtimeSource": "7f61c0c71ced825fbd124489ff6d8ed8447cbb16",
+      "jsonSha256": "c94db6de04bca363887049f5d45d3e8954ed966a8d69a75241ab73b273ede9ad",
+      "actualPassed": 20,
+      "actualFailed": 0,
+      "filteredOrPending": 0,
+      "cases": [
+        {
+          "name": "QA history in the application shell keeps history columns readable at required widths/themes and both rail states",
+          "status": "passed"
+        },
+        {
+          "name": "QA history in the application shell opens older versions and native records by keyboard without current approval controls",
+          "status": "passed"
+        },
+        {
+          "name": "QA history in the application shell names empty, one, loading, error and disconnected history states",
+          "status": "passed"
+        },
+        {
+          "name": "QA history in the application shell keeps Current and filled saved reports reachable below persistent navigation at short height",
+          "status": "passed"
+        },
+        {
+          "name": "QA history in the application shell keeps a short history next to its heading and filters",
+          "status": "passed"
+        },
+        {
+          "name": "discovers saved and legacy versions lazily without fetching queue, report bodies or images",
+          "status": "passed"
+        },
+        {
+          "name": "keeps fifty rows bounded and full long identities visibly expandable",
+          "status": "passed"
+        },
+        {
+          "name": "changes repository/page scope and focuses the new page heading without writes",
+          "status": "passed"
+        },
+        {
+          "name": "opens an old immutable report without a queue entry or approval actions",
+          "status": "passed"
+        },
+        {
+          "name": "opens actual native data without fresh CI/report reconstruction or eager screenshot reads",
+          "status": "passed"
+        },
+        {
+          "name": "distinguishes loading, empty, stale errors and disconnection from a passed review",
+          "status": "passed"
+        },
+        {
+          "name": "rejects empty report references without loading the current queue",
+          "status": "passed"
+        },
+        {
+          "name": "requests native images with operator auth only on demand and names pruned bytes",
+          "status": "passed"
+        },
+        {
+          "name": "paginates saved versions and older native records without duplicates or unconfigured data",
+          "status": "passed"
+        },
+        {
+          "name": "keeps historical unknown time, failed attempts, CI and visual applicability honest",
+          "status": "passed"
+        },
+        {
+          "name": "reads the original native checks/findings/reported counts without manufacturing a report",
+          "status": "passed"
+        },
+        {
+          "name": "keeps saved reports after native pruning and includes closed/unknown PRs with no live queue entry",
+          "status": "passed"
+        },
+        {
+          "name": "fails invalid/unconfigured queries closed and bounds page size",
+          "status": "passed"
+        },
+        {
+          "name": "returns lightweight public metadata only; native detail stays scoped while assets keep existing auth",
+          "status": "passed"
+        },
+        {
+          "name": "does not hide a different native identity that reuses a pruned review id",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "Toolbar reader",
+      "runtimeSource": "623f257c5ecbead6aadc59a4cbac94e2ffc46818",
+      "jsonSha256": "67fe2d5cb0d217bf513a71f33e6c2187a177658768b0d53cc7e8cda29ee9cf73",
+      "actualPassed": 8,
+      "actualFailed": 0,
+      "filteredOrPending": 0,
+      "cases": [
+        {
+          "name": "discovers saved and legacy versions lazily without fetching queue, report bodies or images",
+          "status": "passed"
+        },
+        {
+          "name": "keeps fifty rows bounded and full long identities visibly expandable",
+          "status": "passed"
+        },
+        {
+          "name": "changes repository/page scope and focuses the new page heading without writes",
+          "status": "passed"
+        },
+        {
+          "name": "opens an old immutable report without a queue entry or approval actions",
+          "status": "passed"
+        },
+        {
+          "name": "opens actual native data without fresh CI/report reconstruction or eager screenshot reads",
+          "status": "passed"
+        },
+        {
+          "name": "distinguishes loading, empty, stale errors and disconnection from a passed review",
+          "status": "passed"
+        },
+        {
+          "name": "rejects empty report references without loading the current queue",
+          "status": "passed"
+        },
+        {
+          "name": "requests native images with operator auth only on demand and names pruned bytes",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "Toolbar browser subset",
+      "runtimeSource": "623f257c5ecbead6aadc59a4cbac94e2ffc46818",
+      "jsonSha256": "153e25009390149f8c58c62db3332ad5d506bb5019d93d7e7fe664819e49f4b0",
+      "actualPassed": 1,
+      "actualFailed": 0,
+      "filteredOrPending": 4,
+      "cases": [
+        {
+          "name": "QA history in the application shell keeps history columns readable at required widths/themes and both rail states",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell opens older versions and native records by keyboard without current approval controls",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell names empty, one, loading, error and disconnected history states",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell keeps Current and filled saved reports reachable below persistent navigation at short height",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell keeps a short history next to its heading and filters",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "Final native API and reader",
+      "runtimeSource": "8fdb9028b9946f2cea92b978c3d81892b0c4f46f",
+      "jsonSha256": "5712d12211785d2395202388398eb0e00da1950622aa2bdbcfcdc6b100e503b0",
+      "actualPassed": 17,
+      "actualFailed": 0,
+      "filteredOrPending": 0,
+      "cases": [
+        {
+          "name": "discovers saved and legacy versions lazily without fetching queue, report bodies or images",
+          "status": "passed"
+        },
+        {
+          "name": "keeps fifty rows bounded and full long identities visibly expandable",
+          "status": "passed"
+        },
+        {
+          "name": "changes repository/page scope and focuses the new page heading without writes",
+          "status": "passed"
+        },
+        {
+          "name": "opens an old immutable report without a queue entry or approval actions",
+          "status": "passed"
+        },
+        {
+          "name": "opens actual native data without fresh CI/report reconstruction or eager screenshot reads",
+          "status": "passed"
+        },
+        {
+          "name": "distinguishes loading, empty, stale errors and disconnection from a passed review",
+          "status": "passed"
+        },
+        {
+          "name": "rejects empty report references without loading the current queue",
+          "status": "passed"
+        },
+        {
+          "name": "requests native images with operator auth only on demand and names pruned bytes",
+          "status": "passed"
+        },
+        {
+          "name": "shows legacy hub records with unknown tool outcomes separately from reported counts and original resolutions",
+          "status": "passed"
+        },
+        {
+          "name": "paginates saved versions and older native records without duplicates or unconfigured data",
+          "status": "passed"
+        },
+        {
+          "name": "keeps historical unknown time, failed attempts, CI and visual applicability honest",
+          "status": "passed"
+        },
+        {
+          "name": "reads the original native checks/findings/reported counts without manufacturing a report",
+          "status": "passed"
+        },
+        {
+          "name": "keeps saved reports after native pruning and includes closed/unknown PRs with no live queue entry",
+          "status": "passed"
+        },
+        {
+          "name": "fails invalid/unconfigured queries closed and bounds page size",
+          "status": "passed"
+        },
+        {
+          "name": "returns lightweight public metadata only; native detail stays scoped while assets keep existing auth",
+          "status": "passed"
+        },
+        {
+          "name": "does not hide a different native identity that reuses a pruned review id",
+          "status": "passed"
+        },
+        {
+          "name": "retains original resolutions and separates bound command receipts from reported test counts",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "Final native navigation subset",
+      "runtimeSource": "8fdb9028b9946f2cea92b978c3d81892b0c4f46f",
+      "jsonSha256": "88811880aafed64e27f04a655cc3c4ec1898c3637aa408a09d3ed838460a3c51",
+      "actualPassed": 1,
+      "actualFailed": 0,
+      "filteredOrPending": 4,
+      "cases": [
+        {
+          "name": "QA history in the application shell keeps history columns readable at required widths/themes and both rail states",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell opens older versions and native records by keyboard without current approval controls",
+          "status": "passed"
+        },
+        {
+          "name": "QA history in the application shell names empty, one, loading, error and disconnected history states",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell keeps Current and filled saved reports reachable below persistent navigation at short height",
+          "status": "skipped"
+        },
+        {
+          "name": "QA history in the application shell keeps a short history next to its heading and filters",
+          "status": "skipped"
+        }
+      ]
+    }
+  ],
+  "retainedLogs": [
+    {
+      "file": "final-native-units.txt",
+      "sha256": "b6a430c6f81bd1023ff649d9362160da7445990bbac59a1a273672fa40ae6a62"
+    },
+    {
+      "file": "final-native-browser.txt",
+      "sha256": "43f141eae93a3e9169e9f2fb45a4476b18bf63b886f2666dd71010f61cd7fd60"
+    },
+    {
+      "file": "full-history-pack.txt",
+      "sha256": "05d89946efb77b8a0bffb43642a65eb3553de6ea7727fe80f90773c00daadec8"
+    },
+    {
+      "file": "toolbar-reader.txt",
+      "sha256": "d9b12177a9c5f62ef93f3e8f965806c0bba2e95000291e6597af077b804c3e3f"
+    },
+    {
+      "file": "toolbar-browser.txt",
+      "sha256": "abbe16e4c9cca4d894616c194be802d6e2d9a7309b456e2c01e2cae983e394a5"
+    },
+    {
+      "file": "typecheck.txt",
+      "sha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e"
+    },
+    {
+      "file": "lint.txt",
+      "sha256": "c7d152268d30b964878d83baa927f5fa50097ef509d38d456b0656d3ef832a15"
+    },
+    {
+      "file": "build.txt",
+      "sha256": "8cd44fba4b02bb68f8cafb89cf4e8a4f1224c33ad014329de6c2d11d9933f8df"
+    },
+    {
+      "file": "spacing-red-reproducer.txt",
+      "sha256": "0651460c417f609c9223e5f62e7006a6cfd370874ce371d4d9477ec8e87d522d"
+    },
+    {
+      "file": "early-keyboard-failure.txt",
+      "sha256": "6a024f1df1296065ecfc33f356cc9b9434cc5800281b2730cde37b42841ae749"
+    },
+    {
+      "file": "early-keyboard-paint-settle.txt",
+      "sha256": "86fa9965d0dbcb441a07baf8e4a01c0734c956934cd3b0ea048b454cb335aaca"
+    },
+    {
+      "file": "early-capture-fixture-failure.txt",
+      "sha256": "12aee2f4c7433f2241766541bc330dab2cb9b316c600367c9c616a8b6c36ed31"
+    }
+  ],
+  "independentReview": {
+    "runtimeSource": "8fdb9028b9946f2cea92b978c3d81892b0c4f46f",
+    "at": "2026-11-02T21:04:23Z",
+    "executor": "Independent Codex reviewer",
+    "actualPassed": 17,
+    "actualFailed": 0,
+    "exitCode": 0,
+    "durationSeconds": 2.66,
+    "receipt": "independent-api-reader.txt",
+    "sha256": "6040fcc3a623fc6253aa1538e8b1e71ca129b897884e6c0cf633fe9c924a1b26",
+    "scope": "Reviewer independently ran API/reader units and inspected author-supplied frames; no independent browser render or live approval."
+  }
+}

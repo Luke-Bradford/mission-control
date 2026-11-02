@@ -1,0 +1,159 @@
+.qa-history {
+  height: auto;
+  align-content: start;
+}
+.qa-navigation {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+.qa-navigation a {
+  padding: var(--sp-1) var(--sp-3);
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-2);
+  border: 1px solid var(--line);
+  text-decoration: none;
+}
+.qa-navigation a[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.qa-history-toolbar,
+.qa-history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+}
+.qa-history-toolbar > button {
+  align-self: flex-end;
+}
+.qa-history-toolbar label {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+}
+.qa-history-toolbar select {
+  min-height: 32px;
+  max-width: 320px;
+}
+.qa-history-scroll {
+  max-height: 520px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.qa-history-table {
+  width: 100%;
+  min-width: 850px;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+}
+.qa-history-table .qa-history-reviewer {
+  width: 22%;
+}
+.qa-history-table .qa-history-result {
+  width: 156px;
+}
+.qa-history-table .qa-history-evidence {
+  width: 204px;
+}
+.qa-history-table .qa-history-open {
+  width: 96px;
+}
+.qa-history-table :is(th, td) {
+  vertical-align: top;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.qa-history-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.qa-history-table tbody th {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.qa-history-table time,
+.qa-history-table code,
+.qa-history-note {
+  display: block;
+  color: var(--fg-2);
+  margin-top: var(--sp-1);
+}
+.qa-history-table code,
+.qa-history-native code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.qa-history-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.qa-history-table details {
+  margin-top: var(--sp-1);
+}
+.qa-history :is(a, button, summary) {
+  min-height: 24px;
+}
+.qa-history-table a {
+  display: inline-flex;
+  align-items: center;
+}
+.qa-history-table summary,
+.qa-history-native summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.qa-history-table details p {
+  margin: var(--sp-1) 0;
+  overflow-wrap: anywhere;
+}
+.qa-history-limits {
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.qa-history-limits p,
+.qa-history-native p,
+.qa-history-native h2 {
+  margin: 0;
+}
+.qa-history-native {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.qa-history-native details {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--sp-2);
+  min-width: 0;
+}
+.qa-history-native details p {
+  margin-top: var(--sp-2);
+}
+.qa-history-native img {
+  max-width: 100%;
+  height: auto;
+}
+.qa-history-native figure {
+  margin: 0;
+}

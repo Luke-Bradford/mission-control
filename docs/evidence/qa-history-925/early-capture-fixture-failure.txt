@@ -1,0 +1,9 @@
+file://[controller]/capture-qa-history-925.ts:50
+const save=async(label       ,clip     )=>{const measured=await metrics();if(measured.documentWidth>c.width||measured.small)throw Error(`Invalid geometry: ${JSON.stringify(measured)}`);if(errors.length||writes.length)throw Error(`${c.name}: ${[...errors,...writes].join('; ')}`);const file=`${c.name}-${label}-${v.name}.png`;await page.screenshot({path:join(images,file),...(clip?{clip}:{})});receipts.push({...c,version:v.name,sourceSha:v.sha,file,sha256:createHash('sha256').update(readFileSync(join(images,file))).digest('hex'),capturedAt:Date.now(),fixtureClock:NOW,metrics:measured,...(clip?{clip}:{}),errors:[...errors],expectedConsoleErrors:[...expectedConsoleErrors],writes:[...writes],requests:[...requests],scope:clip?'Same physical visible viewport region; not a full page/table capture':'Production App viewport with controlled fictional API data; not live approval'});};
+                                                                                                                                                                                                                               ^
+
+Error: history-1600x1000-light-expanded: Failed to load resource: net::ERR_FAILED {"url":"https://evidence.example/before.png","lineNumber":0,"columnNumber":0}; Failed to load resource: net::ERR_FAILED {"url":"https://evidence.example/after.png","lineNumber":0,"columnNumber":0}
+    at save (file://[controller]/capture-qa-history-925.ts:50:224)
+    at async file://[controller]/capture-qa-history-925.ts:51:1
+
+Node.js v25.9.0
