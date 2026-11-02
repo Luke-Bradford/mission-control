@@ -13,12 +13,13 @@ import { CodeRisk } from "./CodeRisk.tsx";
 import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dialogs.tsx";
 import { date, label } from "./format.ts";
 import { Categories, Comparison, ReviewRounds } from "./ReviewQuality.tsx";
+import { TestHealth } from "./TestHealth.tsx";
 import "./code-health.css";
 
 const Legacy = lazy(() =>
   import("../pages/LegacyAudit.tsx").then((m) => ({ default: m.LegacyAudit })),
 );
-const TABS = ["overview", "review", "risk"] as const;
+const TABS = ["overview", "review", "risk", "test"] as const;
 type Tab = (typeof TABS)[number];
 /** The shared operator question, with one bounded read for the selected repo/window/tab. */
 export function CodeHealth() {
@@ -149,7 +150,10 @@ export function CodeHealth() {
     heading.current?.focus();
   };
   return (
-    <section id="page-audit" className="code-health">
+    <section
+      id="page-audit"
+      className={tab === "test" ? "code-health ch-test-page" : "code-health"}
+    >
       <div className="ch-heading">
         <div>
           <h1 ref={heading} tabIndex={-1}>
@@ -255,7 +259,13 @@ export function CodeHealth() {
               }
             }}
           >
-            {t === "overview" ? "Overview" : t === "review" ? "Review quality" : "Code risk"}
+            {t === "overview"
+              ? "Overview"
+              : t === "review"
+                ? "Review quality"
+                : t === "risk"
+                  ? "Code risk"
+                  : "Test health"}
           </button>
         ))}
         <span className="ch-links">
@@ -294,6 +304,18 @@ export function CodeHealth() {
         </p>
       )}
       <div id="ch-panel" role="tabpanel" aria-labelledby={`ch-tab-${tab}`} aria-busy={res.loading}>
+        {view && tab === "test" && view.data.tab === "test" && (
+          <TestHealth
+            data={view.data}
+            coverage={view.coverage}
+            evidence={view.evidence}
+            onInspect={inspect}
+            onRecommendations={() => {
+              changeScope(() => setTab("overview"));
+              tabRefs.current[0]?.focus();
+            }}
+          />
+        )}
         {view && tab === "risk" && view.data.tab === "risk" && (
           <CodeRisk
             data={view.data}

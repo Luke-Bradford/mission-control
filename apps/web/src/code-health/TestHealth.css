@@ -1,0 +1,184 @@
+.code-health.ch-test-page {
+  height: auto;
+  align-content: start;
+  gap: var(--sp-2);
+}
+.ch-test {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.ch-test-cohorts,
+.ch-test-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.ch-test-cohort {
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-4);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+}
+.ch-test-cohort h2 {
+  margin: 0;
+  font-size: var(--fs-panel);
+  line-height: var(--lh-panel);
+}
+.ch-test-rate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.ch-test-layout > *,
+.ch-test-layout .ch-stack {
+  min-width: 0;
+}
+.ch-test-layout .ch-stack {
+  gap: var(--sp-3);
+}
+.ch-test-intro,
+.ch-test-foot {
+  padding: 0 var(--sp-3);
+}
+.ch-test-scroll {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+.ch-test-disruption {
+  max-height: 340px;
+}
+.ch-test-durations {
+  max-height: 128px;
+}
+.ch-test-qa {
+  max-height: 96px;
+  padding: 0 var(--sp-3);
+}
+.ch-test-scroll table {
+  width: 100%;
+  table-layout: fixed;
+}
+.ch-test-scroll th,
+.ch-test-scroll td {
+  padding: var(--sp-2);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.ch-test-scroll tbody th {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.ch-test-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  font: 600 var(--fs-s) / var(--lh-s) var(--sans);
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.ch-test-scroll caption {
+  text-align: left;
+  caption-side: bottom;
+  padding: var(--sp-2);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ch-test-disruption col:nth-child(2),
+.ch-test-disruption col:nth-child(3) {
+  width: 144px;
+}
+.ch-test-durations col:nth-child(2) {
+  width: 112px;
+}
+.ch-test-durations col:nth-child(3) {
+  width: 72px;
+}
+.ch-test-scroll td.ch-number {
+  overflow-wrap: normal;
+}
+.ch-test-disruption table {
+  min-width: 520px;
+}
+.ch-test-durations table {
+  min-width: 420px;
+}
+.ch-test-identity {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  text-align: left;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ch-test-detail {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--fg-2);
+  font-weight: 400;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.ch-test-classification {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ch-test-bar {
+  display: block;
+  height: 6px;
+  margin-top: var(--sp-2);
+  background: var(--surface-2);
+}
+.ch-test-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.ch-test-source {
+  margin: var(--sp-1) 0;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ch-test-foot:has(> .ch-test-source) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.ch-test-foot:has(> .ch-test-source[open]) {
+  display: block;
+}
+.ch-test-source summary {
+  min-height: 24px;
+  cursor: pointer;
+}
+.ch-test-source[open] section {
+  max-height: 112px;
+  overflow: auto;
+}
+.ch-test-qa article + article {
+  border-top: 1px solid var(--line-2);
+  padding-top: var(--sp-2);
+}
+.ch-test-qa p {
+  margin: var(--sp-1) 0;
+}
+@container (max-width: 1000px) {
+  .ch-test-cohorts,
+  .ch-test-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

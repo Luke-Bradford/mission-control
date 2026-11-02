@@ -7,6 +7,13 @@ import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { streamStatus } from "../src/data.ts";
 
 const params = new URLSearchParams(location.search);
+if (params.has("test-loading")) {
+  const fetchFixture = window.fetch.bind(window);
+  window.fetch = (input, init) =>
+    String(input).includes("/api/code-health?") && String(input).includes("tab=test")
+      ? new Promise(() => {})
+      : fetchFixture(input, init);
+}
 streamStatus.set({
   connected: !params.has("disconnected"),
   reconnecting: params.has("disconnected"),
