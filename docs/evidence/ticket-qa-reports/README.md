@@ -37,3 +37,19 @@ region. The surrounding ticket heading and timeline were checked in separate vie
 source commits and browser errors (zero). The full viewport files remain in the private controller
 proof directory; the four focused regions above are retained here. Remote CI and the final
 independent review are recorded on the PR, separately from these browser receipts.
+
+## Board-side ticket detail
+
+The second renderer is also checked through its production `/board/mission-control/1347` route.
+These paired captures show the **Board ticket panel's visible region**, top scroll position,
+**1280×900 viewport**. They photograph source `80593768fd287d5fb74b2df33297550250bcb79b`,
+which differs from implementation `02b1beb3` only in the evidence files above.
+
+| Theme | Before | After |
+| --- | --- | --- |
+| Light | ![Board ticket before, light](board-ticket-qa-region-1280x900-light-before.png) | ![Board ticket after, light](board-ticket-qa-region-1280x900-light-after.png) |
+| Dark | ![Board ticket before, dark](board-ticket-qa-region-1280x900-dark-before.png) | ![Board ticket after, dark](board-ticket-qa-region-1280x900-dark-after.png) |
+
+[Board render receipts](board-render-checks.json) cover 1280×900 and 1600×700, both themes and
+both sources, with correct report links, 24px targets, no horizontal clipping and zero page errors.
+The image crops intentionally exclude the surrounding board's unrelated operational data.
