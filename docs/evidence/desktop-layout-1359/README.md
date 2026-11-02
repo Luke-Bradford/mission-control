@@ -2,7 +2,7 @@
 
 #1359 implements the shared geometry and FLIGHT rail from the operator-approved [PR #1353 mockups](https://github.com/Luke-Bradford/mission-control/pull/1353) and [density plan](../../research/2026-11-01-hud-density-plan.md). The operator approved implementation on 2 November 2026. Historical [mockup screenshots](../desktop-density-mockups/index.md) remain unchanged.
 
-Baseline: [2b90233fa766a7ce4bfb82b03bb306cd6580c15f](https://github.com/Luke-Bradford/mission-control/commit/2b90233fa766a7ce4bfb82b03bb306cd6580c15f). Rendered implementation: [c88ab1e8c922bd28fa9448ae188c8566a8db31f6](https://github.com/Luke-Bradford/mission-control/commit/c88ab1e8c922bd28fa9448ae188c8566a8db31f6). This evidence-only successor changes no product code.
+Baseline: [2b90233fa766a7ce4bfb82b03bb306cd6580c15f](https://github.com/Luke-Bradford/mission-control/commit/2b90233fa766a7ce4bfb82b03bb306cd6580c15f). Rendered implementation: [bf48e5455933212829f6fe292e2e21e2ca93c6bd](https://github.com/Luke-Bradford/mission-control/commit/bf48e5455933212829f6fe292e2e21e2ca93c6bd). This evidence-only successor changes no product code.
 
 Every image is an actual 1× browser render of production components using fictional API data and a frozen fixture clock. No live hub, crew, provider or observed loop was used. QA image bytes are synthetic layout fixtures. They establish reader geometry, not image authorization or deployment approval.
 
@@ -63,10 +63,29 @@ All states below were also captured before the change in the private full archiv
 
 The clean-source browser block passes six cases covering twelve required geometry/theme views, sixteen state views, eighteen production-page views and twenty-four filled-QA rail views. Real keyboard Enter/Tab moves focus into the dock and back to the rail with a visible outline. The draft, failed-send text and selected context survive collapse/reconnection; the session choice survives real viewport changes and reload. A twenty-message log follows the latest message when opened and preserves a 100 px reading position across collapse. Short windows expose a scrollable summary with a reachable next action.
 
-At the rendered source, the nine-file focused unit block passed 173 tests and the browser block passed six cases. Existing long-crew-row browser regressions passed four cases. Repository lint, workspace types and production build passed after the final correction. The [local check receipts](local-checks.json) retain the clean-commit unit/browser commands, timestamps and outcomes without private machine paths. Full CI remains required on the PR. The independent whole-branch reviewer found no unresolved Important/Critical finding at the rendered source.
+The final focused unit block, existing long-crew-row browser regressions, repository lint, workspace types and production build pass. Local checks are focused; full CI is recorded on the PR. The independent whole-branch reviewer found no unresolved Important/Critical finding at the rendered source.
 
 ## Comparison with the approved prototype and remaining work
 
-The shared 32 px/40 px geometry, named 48 px rail, 380 px expansion, headline/top-three/next-action summary and session/focus/draft behavior follow the approved prototype. Existing full conversation and send behavior remain. Overview KPI/lane/timeline allocation, Agent details and grouped forms remain in #1360, #1361 and #1362.
+The shared 32 px/40 px geometry, named 48 px rail, 380 px expansion, headline/top-three/next-action summary and session/focus/draft behavior follow the approved prototype. Existing full conversation and send behavior remain. Overview KPI/lane/timeline allocation, Agent details and grouped forms remain in #1360, #1361and #1362.
 
 At 1280 with FLIGHT expanded, the existing Overview Work cell clips the End action on both baseline and implementation. The approved gutters leave slightly less width. This known Overview limitation remains with #1360; this gallery does not claim it is fixed. Saved-QA image authentication was verified separately for #1367; the synthetic images here verify layout only.
+
+## Final CI correction and current-main integration
+
+The original CI attempt at `6a519f6b` exposed a real Quota height regression and stale integration
+assertions. The larger shared panel padding is retained. Quota and Machine now determine the
+bottom row's content height, while the activity log has desktop-only size containment and scrolls
+within that row. A 120-event fixture verifies bounded height and reachability on the short screen.
+Mobile layouts retain their previous automatic content sizing.
+
+Run Trace now tests the session-stored expanded rail and current summary controls. Item-panel
+refusal checks target their own alert; CSS checks understand the approved row/control tokens and
+one-value padding shorthand. The first correction pack passed 134 cases. Current-main integration
+then passed 319 cases with three remaining test setup/assertion failures; those three were corrected
+and the 16-case narrow recheck passed. Final exact-source checks and CI are recorded on the PR.
+
+Main integration includes the delivered ticket QA links and Test health backend at `898b8b39`.
+All 82 before/after pairs were regenerated from the corrected product source named above, not
+relabelled from the earlier captures. This gallery replaces the original c88 renders; the original
+CI failure and correction disposition remain in the PR QA record.

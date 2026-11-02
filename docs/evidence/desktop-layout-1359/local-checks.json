@@ -653,7 +653,7 @@
               "durationMs": 53.20545900000002
             },
             {
-              "name": "Header the theme button cycles system → light → dark → system, remembers it and toasts",
+              "name": "Header the theme button cycles system \u2192 light \u2192 dark \u2192 system, remembers it and toasts",
               "status": "passed",
               "durationMs": 9.340541999999914
             },
@@ -1013,6 +1013,47 @@
       ],
       "pathsSanitized": true,
       "artifactLocation": "Private controller archive; SHA256 identifies the unchanged raw JSON receipt."
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm exec vitest run [17 explicitly named shell/QA integration files]",
+      "outcome": "passed",
+      "exitCode": 0,
+      "completedAt": 1793641318343,
+      "receiptSha256": "a538546f631bd88506f6b5b835c7bc940886b8380d34ca6c13e53736c4ad120f",
+      "passed": 322,
+      "failed": 0,
+      "skipped": 0,
+      "files": 17,
+      "scope": "Dock, App, Header, pageRenderCounts, loadFetches, clock, hudTokens, AgentsPanelCss, MapPerformance, ItemPanel, OverviewLayoutCss, doingCss, OverviewClipping.browser, RunTrace.browser, DesktopLayout.browser, TicketPage.browser, TicketQaReports"
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s lint",
+      "outcome": "passed",
+      "exitCode": 0,
+      "completedAt": 1793641320464,
+      "receiptSha256": "41f4e504fdd9ec7b1d5564f5271b315456b3cc08adc211d0d6ea49e4b1203aa0"
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s typecheck",
+      "outcome": "passed",
+      "exitCode": 0,
+      "completedAt": 1793641324468,
+      "receiptSha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e"
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s build",
+      "outcome": "passed",
+      "exitCode": 0,
+      "completedAt": 1793641326963,
+      "receiptSha256": "0573308638d6abfe31872d5a0e562659c8caf13915b2c697d0256975fd9de636"
     }
   ]
 }

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "baselineSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-  "renderedSourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-  "capturedAt": 1793638925175,
+  "renderedSourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+  "capturedAt": 1793641186277,
   "provenance": "Controlled fictional fixtures, actual baseline/final source browser captures. No live hub, crew/model/observed-loop action, GitHub write or real private image authority claim. Common browser-only fixture driver is used for both production versions. These are not live operational screenshots or original mockup approvals.",
   "totals": {
     "cases": 82,
@@ -24,10 +24,7 @@
       "after": "images/desktop-1280x900-light-default-after.png",
       "diff": "images/desktop-1280x900-light-default-diff.png",
       "changedPixels": 262275,
-      "changedPercent": 22.77,
-      "beforeSha256": "60c7baf7ce43d084d730142f84434b92563724b29745f971b1b43bd4ee179773",
-      "afterSha256": "d9d788723b9bd4ff874a041356ce07df9913a418ab2cbd894f9041db72dd2413",
-      "diffSha256": "759156c80dded6df0d5c3319dd35edbf5a1dc9a4e8b3e7be8a29b8489646a459"
+      "changedPercent": 22.77
     },
     {
       "key": "desktop-1280x900-light-expanded",
@@ -40,11 +37,8 @@
       "before": "images/desktop-1280x900-light-expanded-before.png",
       "after": "images/desktop-1280x900-light-expanded-after.png",
       "diff": "images/desktop-1280x900-light-expanded-diff.png",
-      "changedPixels": 243314,
-      "changedPercent": 21.12,
-      "beforeSha256": "d95883b00ddcaf4f85579e2f2c875ed1c9fa09fd829344c62d6f5efa4b9ec7db",
-      "afterSha256": "d0d4bfad379f45bedd40ced6edcff1c62cf6914788be81f63b859e749fa1b38a",
-      "diffSha256": "9ec02b331f051740a9480e0796ae2c1ba2dadbc2de530491650f71f3f3d3370e"
+      "changedPixels": 243316,
+      "changedPercent": 21.12
     },
     {
       "key": "desktop-1440x900-light-default",
@@ -58,10 +52,7 @@
       "after": "images/desktop-1440x900-light-default-after.png",
       "diff": "images/desktop-1440x900-light-default-diff.png",
       "changedPixels": 278441,
-      "changedPercent": 21.48,
-      "beforeSha256": "6d6798c4bccf38da4527a55b1871f3e4a94eb15d99fdeba8113aa6577e788c05",
-      "afterSha256": "10755fac0c888f0a521494c39616b0ca4cfc2017cc0eae54b499c8d95def21de",
-      "diffSha256": "60f6b737b6afba35246405e3c305f002090a76be793dfb2444e0c58adb7cc1c3"
+      "changedPercent": 21.48
     },
     {
       "key": "desktop-1440x900-light-expanded",
@@ -74,11 +65,8 @@
       "before": "images/desktop-1440x900-light-expanded-before.png",
       "after": "images/desktop-1440x900-light-expanded-after.png",
       "diff": "images/desktop-1440x900-light-expanded-diff.png",
-      "changedPixels": 261887,
-      "changedPercent": 20.21,
-      "beforeSha256": "71c1a2d11becaff29f6fcf46ab81b88e1ca3855e9854bc68951d1be92a4fc6b7",
-      "afterSha256": "95a5b8c251b7e79dcfaf73faec24a069950f5f0ee094ae98f6e3fded9118b048",
-      "diffSha256": "300419c66ff542d721e0c782721b415d1bd48d0384bd9d4ed77f45be204da74e"
+      "changedPixels": 261890,
+      "changedPercent": 20.21
     },
     {
       "key": "desktop-1600x1000-light-default",
@@ -92,10 +80,7 @@
       "after": "images/desktop-1600x1000-light-default-after.png",
       "diff": "images/desktop-1600x1000-light-default-diff.png",
       "changedPixels": 446276,
-      "changedPercent": 27.89,
-      "beforeSha256": "f35b919dbe2a6adc56f3b67bf2cb71d2ceba0b8cc266cdda2a257deee1afc2e9",
-      "afterSha256": "b7c1bc608d2d95cffeff388a85b13be9d596841d23bfef0a40fe92c3d9ad198f",
-      "diffSha256": "60b09111bbb79edb5a918ad782b219303c6b6e1bb199d7ea795557500cc464f7"
+      "changedPercent": 27.89
     },
     {
       "key": "desktop-1600x1000-light-expanded",
@@ -108,11 +93,8 @@
       "before": "images/desktop-1600x1000-light-expanded-before.png",
       "after": "images/desktop-1600x1000-light-expanded-after.png",
       "diff": "images/desktop-1600x1000-light-expanded-diff.png",
-      "changedPixels": 399711,
-      "changedPercent": 24.98,
-      "beforeSha256": "e2429f2ba453a11323539c703ffc50ab122d76317680423728d887b1a73df54e",
-      "afterSha256": "3312ea10768973bf37f6b124de349f88b7ae8a821d7daaa9c4e51166cb80eb1c",
-      "diffSha256": "342aef32c79acafb07b692a236ef048b58a9df9ae7d5238b10578f3928b8c45a"
+      "changedPixels": 399710,
+      "changedPercent": 24.98
     },
     {
       "key": "desktop-1920x1080-light-default",
@@ -126,10 +108,7 @@
       "after": "images/desktop-1920x1080-light-default-after.png",
       "diff": "images/desktop-1920x1080-light-default-diff.png",
       "changedPixels": 536507,
-      "changedPercent": 25.87,
-      "beforeSha256": "b356170cf389830f9b4f528b6c61b80f2ff007e66013badad0929a7b5ad9a947",
-      "afterSha256": "9a0f34108499c194135f7910237bd81e0953025c277153c323d206de9930dd51",
-      "diffSha256": "543e9b761b2167733fe9d39dfdfccfc62fa5b88b89eb7b277c7018e3f456f485"
+      "changedPercent": 25.87
     },
     {
       "key": "desktop-1920x1080-light-expanded",
@@ -142,11 +121,8 @@
       "before": "images/desktop-1920x1080-light-expanded-before.png",
       "after": "images/desktop-1920x1080-light-expanded-after.png",
       "diff": "images/desktop-1920x1080-light-expanded-diff.png",
-      "changedPixels": 477827,
-      "changedPercent": 23.04,
-      "beforeSha256": "56bda0c13989034f10502f7c66d10b2b150208758403f684994298e0614a3c48",
-      "afterSha256": "1b2a89d90370bccfdf164476890b8d60d867e16ec2e05910261e422a78833320",
-      "diffSha256": "e1f64192bf6bcd5b8cad935399678aa2f708c97c862fb2ae230cd1aa81dda56f"
+      "changedPixels": 477828,
+      "changedPercent": 23.04
     },
     {
       "key": "desktop-2560x1440-light-default",
@@ -159,11 +135,8 @@
       "before": "images/desktop-2560x1440-light-default-before.png",
       "after": "images/desktop-2560x1440-light-default-after.png",
       "diff": "images/desktop-2560x1440-light-default-diff.png",
-      "changedPixels": 626951,
-      "changedPercent": 17.01,
-      "beforeSha256": "2162792229111f86b588053075a762ac1cb0c9399833c38f0105733e7a2859c1",
-      "afterSha256": "9c80ce01fa2ade8a30d43bb10302fe29f5be07aed3e4fa4b6b27d4b9e42b446a",
-      "diffSha256": "feb0d3825feb37da08d278b64ac0cd269c36c87cb52f4285588e2efca7f18237"
+      "changedPixels": 626960,
+      "changedPercent": 17.01
     },
     {
       "key": "desktop-2560x1440-light-expanded",
@@ -176,11 +149,8 @@
       "before": "images/desktop-2560x1440-light-expanded-before.png",
       "after": "images/desktop-2560x1440-light-expanded-after.png",
       "diff": "images/desktop-2560x1440-light-expanded-diff.png",
-      "changedPixels": 669464,
-      "changedPercent": 18.16,
-      "beforeSha256": "56f09f77dd9294ebbd489fc3e027665337be1c903c34e41c427260194f7061a8",
-      "afterSha256": "f4b8af763fbde213478146acd34a160b7ee86e4a03504d5eadee95a48bd9ae58",
-      "diffSha256": "03c3236c27309a521edb8435e049fd4550db061eace05802b9b7a542dbd11ec6"
+      "changedPixels": 669467,
+      "changedPercent": 18.16
     },
     {
       "key": "desktop-1600x700-light-default",
@@ -194,10 +164,7 @@
       "after": "images/desktop-1600x700-light-default-after.png",
       "diff": "images/desktop-1600x700-light-default-diff.png",
       "changedPixels": 312182,
-      "changedPercent": 27.87,
-      "beforeSha256": "2097eef19fa7701bc8dece631bf60c20e81962dffa53de04f590708efdd804cf",
-      "afterSha256": "eb17238667aa5012a8daf1044a9ead3339b59e457f3aa007daf359419c1d1de2",
-      "diffSha256": "a5e4dd65490681797ce703095f5c4afe8a983d44ebdcf69789a13a0f22af1eb1"
+      "changedPercent": 27.87
     },
     {
       "key": "desktop-1600x700-light-expanded",
@@ -211,10 +178,7 @@
       "after": "images/desktop-1600x700-light-expanded-after.png",
       "diff": "images/desktop-1600x700-light-expanded-diff.png",
       "changedPixels": 330232,
-      "changedPercent": 29.49,
-      "beforeSha256": "566cc4d8d5d2e3b6602106805d940836a884fb73d49c6d5e76b443ac5ababab5",
-      "afterSha256": "9b377e51c2b0dd18142fda2aeb9a46b53b5de44a0593f703210d5f922f26c216",
-      "diffSha256": "817a5e2a780924ce6d260936804ae2df212ca4301165c9c363a5db4831455188"
+      "changedPercent": 29.49
     },
     {
       "key": "page-qa-1600x1000-light",
@@ -228,10 +192,7 @@
       "after": "images/page-qa-1600x1000-light-after.png",
       "diff": "images/page-qa-1600x1000-light-diff.png",
       "changedPixels": 88215,
-      "changedPercent": 5.51,
-      "beforeSha256": "ed708b5df60b10ef587395225290661694dfcaa83a8f8729b31e449e241c5115",
-      "afterSha256": "7b5309556ae7fcd14464f5cb54f04d87f0fc147c3292022eb0299bd0db2f197a",
-      "diffSha256": "0a09b65f3af2eeae0456cfb9caf2e3f2325b662b0eb1a4067f94f8266bec6dbe"
+      "changedPercent": 5.51
     },
     {
       "key": "page-map-1600x1000-light",
@@ -245,10 +206,7 @@
       "after": "images/page-map-1600x1000-light-after.png",
       "diff": "images/page-map-1600x1000-light-diff.png",
       "changedPixels": 106583,
-      "changedPercent": 6.66,
-      "beforeSha256": "6ab996726504b4883a5bb546a9ec5ca60d9d4cd223adb9cc3ef7d4e9f697aade",
-      "afterSha256": "b6fe083ae7262ef529587bac5d35d602d48711831784aeca65dc3cd61d5d5c56",
-      "diffSha256": "42992e7e8924cdc8d15be591ecd3fad152bc883edecc8537c717f70e81e4589f"
+      "changedPercent": 6.66
     },
     {
       "key": "page-setup-1600x1000-light",
@@ -262,10 +220,7 @@
       "after": "images/page-setup-1600x1000-light-after.png",
       "diff": "images/page-setup-1600x1000-light-diff.png",
       "changedPixels": 148416,
-      "changedPercent": 9.28,
-      "beforeSha256": "533fa64977c0e664ef9ffcbfe7a111691f9d7bacff8a3e43ef263a9357fd9e13",
-      "afterSha256": "fed225f473039013338298dbec208da67d75cf136836a26b92bb993e57577189",
-      "diffSha256": "51ace36ba57339da49b021ad684f92f624f11ec7ee929db8cdf1405df71df7c3"
+      "changedPercent": 9.28
     },
     {
       "key": "qa-queue-1280x900-light-expanded",
@@ -280,10 +235,7 @@
       "after": "images/qa-queue-1280x900-light-expanded-after.png",
       "diff": "images/qa-queue-1280x900-light-expanded-diff.png",
       "changedPixels": 266186,
-      "changedPercent": 23.11,
-      "beforeSha256": "85f82149d69ad37799b1db4f3ff3a7bd27d71204108dc56b2e755c66562ee92f",
-      "afterSha256": "85361a8485aff3ad3f924ca6cf70c44913af195b597143a8f264608d70056257",
-      "diffSha256": "6364161f97e20e7a82df4367ae54945f8c30c53fc031a13b8bed58920091c1a8"
+      "changedPercent": 23.11
     },
     {
       "key": "qa-archive-1600x700-light-expanded",
@@ -298,10 +250,7 @@
       "after": "images/qa-archive-1600x700-light-expanded-after.png",
       "diff": "images/qa-archive-1600x700-light-expanded-diff.png",
       "changedPixels": 213625,
-      "changedPercent": 19.07,
-      "beforeSha256": "29ee86a6d1657cd21613f129ada990c93d6497cdaab06e972f90fb3c810c52d3",
-      "afterSha256": "1bbbef6a7be639c54506a01a11d8ae4212b557692dff851fc00875aadaa24630",
-      "diffSha256": "852e87cace0c7d9551c8226889b862f044bbf57a464a63dbce36743fe9925f7e"
+      "changedPercent": 19.07
     },
     {
       "key": "desktop-1280x900-dark-default",
@@ -314,11 +263,8 @@
       "before": "images/desktop-1280x900-dark-default-before.png",
       "after": "images/desktop-1280x900-dark-default-after.png",
       "diff": "images/desktop-1280x900-dark-default-diff.png",
-      "changedPixels": 169008,
-      "changedPercent": 14.67,
-      "beforeSha256": "80882062b0bac38be05a90f8ed0d5bb23f6daa0f3e66de0c8057d168cd2a923c",
-      "afterSha256": "08a1ac449a510d6b14b8972a9aeed81572ce24f2ff60f6bf7ccd955dc1d6a156",
-      "diffSha256": "5334b649939bfade9ad0306a5a58bfb6ed33e265d40cb5de642064852de499b3"
+      "changedPixels": 169007,
+      "changedPercent": 14.67
     },
     {
       "key": "desktop-1280x900-dark-expanded",
@@ -332,10 +278,7 @@
       "after": "images/desktop-1280x900-dark-expanded-after.png",
       "diff": "images/desktop-1280x900-dark-expanded-diff.png",
       "changedPixels": 219508,
-      "changedPercent": 19.05,
-      "beforeSha256": "dbae650571da1713af98bb83f381ff530e33a12a164b5fb555515bc6287a4bd4",
-      "afterSha256": "80438efc36be20cdf6fd7cd2e6344fd00f3853aeb466bb19aab7bb19738507ba",
-      "diffSha256": "45fd31a812927483383c80abe8b9771c295ef16a143c83c8609c2273f66e6820"
+      "changedPercent": 19.05
     },
     {
       "key": "desktop-1440x900-dark-default",
@@ -349,10 +292,7 @@
       "after": "images/desktop-1440x900-dark-default-after.png",
       "diff": "images/desktop-1440x900-dark-default-diff.png",
       "changedPixels": 184725,
-      "changedPercent": 14.25,
-      "beforeSha256": "0b076bd6bfc40f9de50fbc96e0b37d87d84fb4870d3b9a0da2dd7de88ffcb4d9",
-      "afterSha256": "614c1c29cd21a80c33d40f6509c934b0efd77782cd8118576e20cbbc698527a2",
-      "diffSha256": "6f1a21a50cc5eeb15131e1aca0481b62bb536d3a154f97403f07b0e66f1d9a82"
+      "changedPercent": 14.25
     },
     {
       "key": "desktop-1440x900-dark-expanded",
@@ -366,10 +306,7 @@
       "after": "images/desktop-1440x900-dark-expanded-after.png",
       "diff": "images/desktop-1440x900-dark-expanded-diff.png",
       "changedPixels": 237034,
-      "changedPercent": 18.29,
-      "beforeSha256": "633b3dfdb52910555cee2c9a26c9c6447fd9452de918df901fccf16e97559b55",
-      "afterSha256": "2bfdc5f11e24ca1ff47757e8355e0eaf130adc13405e2f23db4fb344e8c8c268",
-      "diffSha256": "8d5fd53eaaa2afd8b5722738cdca45e0659df76672d230eb7b200f2957d1ba6b"
+      "changedPercent": 18.29
     },
     {
       "key": "desktop-1600x1000-dark-default",
@@ -383,10 +320,7 @@
       "after": "images/desktop-1600x1000-dark-default-after.png",
       "diff": "images/desktop-1600x1000-dark-default-diff.png",
       "changedPixels": 267850,
-      "changedPercent": 16.74,
-      "beforeSha256": "5e83f0c59e0d9720f1aed53d627be76a4e041f146757d6c7edcf7d7e0a38964b",
-      "afterSha256": "e225176a8e43c2a4937189918dbc04cfcfa9ba0ff0f8c6890d4bed0bcd374f76",
-      "diffSha256": "e36a2665eb231089bf307ae69340a798e655141c78ce8e01de5710b04976d0da"
+      "changedPercent": 16.74
     },
     {
       "key": "desktop-1600x1000-dark-expanded",
@@ -400,10 +334,7 @@
       "after": "images/desktop-1600x1000-dark-expanded-after.png",
       "diff": "images/desktop-1600x1000-dark-expanded-diff.png",
       "changedPixels": 315428,
-      "changedPercent": 19.71,
-      "beforeSha256": "923ee0e34ebcd05df68576f9b537dd8a995101eb8afd594039e940acb8403646",
-      "afterSha256": "475b06769f860a01b0b2c45dfd0820a18bc71c6cec66f89fac172e575ab30f2a",
-      "diffSha256": "10e28ee2a6f8468fda971a0ae429a517ee35c9bf86f5fb4bb145520e718946a7"
+      "changedPercent": 19.71
     },
     {
       "key": "desktop-1920x1080-dark-default",
@@ -417,10 +348,7 @@
       "after": "images/desktop-1920x1080-dark-default-after.png",
       "diff": "images/desktop-1920x1080-dark-default-diff.png",
       "changedPixels": 304845,
-      "changedPercent": 14.7,
-      "beforeSha256": "b7a2e09a45092a481fadbae9be279285085aab3ec5eb6b0f3478610cd76b9738",
-      "afterSha256": "5b9e23d65fb680aa1762614d1fbe04faa52c18e7dc8ebe9fcd22b4fe30646ed4",
-      "diffSha256": "eca3e25ef9927414a176f3ae86b909f4d7787600ab373bbae6ab1411d9a8cd1e"
+      "changedPercent": 14.7
     },
     {
       "key": "desktop-1920x1080-dark-expanded",
@@ -434,10 +362,7 @@
       "after": "images/desktop-1920x1080-dark-expanded-after.png",
       "diff": "images/desktop-1920x1080-dark-expanded-diff.png",
       "changedPixels": 382651,
-      "changedPercent": 18.45,
-      "beforeSha256": "26c85092bdfd9b9d2168d486a6c1f533165811969e4abc8107242d07c862f386",
-      "afterSha256": "91baddd11e5b1462abda6ef44d07873e794b438d2e161e19f799a059bb5963ed",
-      "diffSha256": "0766c4a05d5428a8b42f8d2ad85bd4d810e7de2c1074c2a07c8424850903f824"
+      "changedPercent": 18.45
     },
     {
       "key": "desktop-2560x1440-dark-default",
@@ -451,10 +376,7 @@
       "after": "images/desktop-2560x1440-dark-default-after.png",
       "diff": "images/desktop-2560x1440-dark-default-diff.png",
       "changedPixels": 505783,
-      "changedPercent": 13.72,
-      "beforeSha256": "638d5b951e24765916ae1f74f8f1c5b553a6961a340805708244d21dca27dab5",
-      "afterSha256": "38eb58430ab35bd85ac2c5b3a6aedb6708f8e528adb8ea372aefd9ccfd8a8e04",
-      "diffSha256": "74aeaa37a309b52d11219823322d2c6233077bb00fbd3c501b6e259ee29c36a1"
+      "changedPercent": 13.72
     },
     {
       "key": "desktop-2560x1440-dark-expanded",
@@ -467,11 +389,8 @@
       "before": "images/desktop-2560x1440-dark-expanded-before.png",
       "after": "images/desktop-2560x1440-dark-expanded-after.png",
       "diff": "images/desktop-2560x1440-dark-expanded-diff.png",
-      "changedPixels": 552340,
-      "changedPercent": 14.98,
-      "beforeSha256": "ec844bbfcfbe299d5d6ecde63eed14d50587c06ef08bddc1e850ba1756a5264d",
-      "afterSha256": "42da5a36e0be5fddf7726da90a22d9635916e4e5bba6cba07fc13a916be485e9",
-      "diffSha256": "069e19b877a4006d543b56d7ea7c770c701900b39f6fcde2aa9f4e73709eb8c2"
+      "changedPixels": 551709,
+      "changedPercent": 14.97
     },
     {
       "key": "desktop-1600x700-dark-default",
@@ -485,10 +404,7 @@
       "after": "images/desktop-1600x700-dark-default-after.png",
       "diff": "images/desktop-1600x700-dark-default-diff.png",
       "changedPixels": 206067,
-      "changedPercent": 18.4,
-      "beforeSha256": "da1337ca1c2c58988b00d37f1661d499be0b02019439a2cca238a9d8b8a33330",
-      "afterSha256": "dfbf4b839ff98f248d966ca55638be7db76deddb76d9b0b50517030a4c373336",
-      "diffSha256": "5cb8902d58e7c2fd02f58d90e798998104353d92fdfb848cdf62164a99a71e54"
+      "changedPercent": 18.4
     },
     {
       "key": "desktop-1600x700-dark-expanded",
@@ -502,10 +418,7 @@
       "after": "images/desktop-1600x700-dark-expanded-after.png",
       "diff": "images/desktop-1600x700-dark-expanded-diff.png",
       "changedPixels": 260250,
-      "changedPercent": 23.24,
-      "beforeSha256": "8bdc7637f55882af69f8b2e2fd4741e18bb325e744d370f5cc945c9fd40ae61b",
-      "afterSha256": "02837afa68429800ec72911d66293e0208f99bc1df8d807a40efc9b59f1d65ea",
-      "diffSha256": "06cd2da8e33d5d8f17f86baa3ac5b2590bafbf160557e890d2d3c03960dde622"
+      "changedPercent": 23.24
     },
     {
       "key": "page-qa-1600x1000-dark",
@@ -519,10 +432,7 @@
       "after": "images/page-qa-1600x1000-dark-after.png",
       "diff": "images/page-qa-1600x1000-dark-diff.png",
       "changedPixels": 46691,
-      "changedPercent": 2.92,
-      "beforeSha256": "335e07323bebf5544d81d80a5491f208a4de45dfba6e3f525c73d93aea32dc46",
-      "afterSha256": "793327fdd5f495ca2ca4ab34a81246b5057d5ff51b37602549be0bb61b6559de",
-      "diffSha256": "096a88706fc9010bb1ff51203d974d66b69e554d2d430be18d7cc1657fb83f8b"
+      "changedPercent": 2.92
     },
     {
       "key": "page-map-1600x1000-dark",
@@ -535,11 +445,8 @@
       "before": "images/page-map-1600x1000-dark-before.png",
       "after": "images/page-map-1600x1000-dark-after.png",
       "diff": "images/page-map-1600x1000-dark-diff.png",
-      "changedPixels": 34741,
-      "changedPercent": 2.17,
-      "beforeSha256": "24da94c0361d40bc603a6846b1b932b1e90a7d903d3d41bad0054f0de0c6882f",
-      "afterSha256": "1c1de33367841f18ac2dc167d1841a50372e91dbdc70f7cbd1e8c3a3105727f0",
-      "diffSha256": "50e9354f9c6499cf7a46176c5521b7ff066b5a27372e7fe1ff4692e84fc77b5f"
+      "changedPixels": 35013,
+      "changedPercent": 2.19
     },
     {
       "key": "page-setup-1600x1000-dark",
@@ -553,10 +460,7 @@
       "after": "images/page-setup-1600x1000-dark-after.png",
       "diff": "images/page-setup-1600x1000-dark-diff.png",
       "changedPixels": 61908,
-      "changedPercent": 3.87,
-      "beforeSha256": "6afb8f08639e71a7b0a646fd0886ed0fac2476eb190c926186b49565a8a61758",
-      "afterSha256": "e67ba8e2b5ad31395b48bfe5fa6cb3c43cb3f3cb52016772ab075024d8f015ac",
-      "diffSha256": "4fea2f22e923b1fce2ddd1efa374fe3d493e0f6a4993782f29a71af02c4bd2c7"
+      "changedPercent": 3.87
     },
     {
       "key": "qa-queue-1280x900-dark-expanded",
@@ -570,11 +474,8 @@
       "before": "images/qa-queue-1280x900-dark-expanded-before.png",
       "after": "images/qa-queue-1280x900-dark-expanded-after.png",
       "diff": "images/qa-queue-1280x900-dark-expanded-diff.png",
-      "changedPixels": 157618,
-      "changedPercent": 13.68,
-      "beforeSha256": "83744c130b3992788aa9b161af9f21c3f8613e859e95d3e7d4d6aaa9f2d1c18b",
-      "afterSha256": "53565bdf52a5ff9b2336771d2c1d490a2ab14dccdecb71c122972ebba2f79fb5",
-      "diffSha256": "4bb903fabe974b761d99a06fffaca7c6e8d5c4643617a50f4c229a8377636b5d"
+      "changedPixels": 157527,
+      "changedPercent": 13.67
     },
     {
       "key": "qa-archive-1600x700-dark-expanded",
@@ -589,10 +490,7 @@
       "after": "images/qa-archive-1600x700-dark-expanded-after.png",
       "diff": "images/qa-archive-1600x700-dark-expanded-diff.png",
       "changedPixels": 144479,
-      "changedPercent": 12.9,
-      "beforeSha256": "677acce00d0d7697cceb2d2bc805877468c72b39ccd009126066c268f785155d",
-      "afterSha256": "3b309fd6085bffd1e4bea5f3b444d43ad62d1410af94a1edbacbe5d5e186f397",
-      "diffSha256": "227b30c332e12aa92a2a43c30586823472fca98b265cf6bd26a204cf09fa195d"
+      "changedPercent": 12.9
     }
   ],
   "alternateStates": [
@@ -737,7 +635,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1280x900-light-default-before.png",
-      "sha256": "60c7baf7ce43d084d730142f84434b92563724b29745f971b1b43bd4ee179773",
+      "sha256": "7dde14b39475d3944fca6824a905c59eb7c878f2d08b2c521729fa2931fc3165",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -748,7 +646,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638861060,
+      "capturedAt": 1793641121821,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -763,7 +661,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1280x900-light-expanded-before.png",
-      "sha256": "d95883b00ddcaf4f85579e2f2c875ed1c9fa09fd829344c62d6f5efa4b9ec7db",
+      "sha256": "29c2dc985ffb7ff69566addcf49523261d7e240e8fcf74bc494c4593672bfe9f",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -774,7 +672,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638861438,
+      "capturedAt": 1793641122235,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -789,7 +687,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1440x900-light-default-before.png",
-      "sha256": "6d6798c4bccf38da4527a55b1871f3e4a94eb15d99fdeba8113aa6577e788c05",
+      "sha256": "31a8b73a3151aab18d580860a1bcdbccac84298472fcb507992c31b80474681d",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -800,7 +698,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638861743,
+      "capturedAt": 1793641122569,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -815,7 +713,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1440x900-light-expanded-before.png",
-      "sha256": "71c1a2d11becaff29f6fcf46ab81b88e1ca3855e9854bc68951d1be92a4fc6b7",
+      "sha256": "b3ca546c9009affbc1e54af0aae90d5e41099ea0f482d6d121c5afe0f78a8536",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -826,7 +724,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638862160,
+      "capturedAt": 1793641123006,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -841,7 +739,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1600x1000-light-default-before.png",
-      "sha256": "f35b919dbe2a6adc56f3b67bf2cb71d2ceba0b8cc266cdda2a257deee1afc2e9",
+      "sha256": "a691c86d63959aa288832ca710469d605e1d2e5625166c6c707c21a937c121f2",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -852,7 +750,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638862482,
+      "capturedAt": 1793641123362,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -867,7 +765,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1600x1000-light-expanded-before.png",
-      "sha256": "e2429f2ba453a11323539c703ffc50ab122d76317680423728d887b1a73df54e",
+      "sha256": "73b9e3af3b454970e16ad99024e530296a7063da815d7fd2d7155df220e870fd",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -878,7 +776,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638862896,
+      "capturedAt": 1793641123792,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -893,7 +791,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1920x1080-light-default-before.png",
-      "sha256": "b356170cf389830f9b4f528b6c61b80f2ff007e66013badad0929a7b5ad9a947",
+      "sha256": "2d56c8daadd8761eb228c6b83a18e677c413335feb96235a5b25eb4968fa7b30",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -904,7 +802,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638863253,
+      "capturedAt": 1793641124114,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -919,7 +817,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1920x1080-light-expanded-before.png",
-      "sha256": "56bda0c13989034f10502f7c66d10b2b150208758403f684994298e0614a3c48",
+      "sha256": "202f039fac60a49591d18c7c70b256013e6473973f982c23f6b72ac3f437af60",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -930,7 +828,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638863679,
+      "capturedAt": 1793641124528,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -945,7 +843,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-2560x1440-light-default-before.png",
-      "sha256": "2162792229111f86b588053075a762ac1cb0c9399833c38f0105733e7a2859c1",
+      "sha256": "06a956be2f150d49a76ee8d0089cd313fe31cc8b85658a00352e2c270928bc49",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -956,7 +854,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638864008,
+      "capturedAt": 1793641124860,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -971,7 +869,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-2560x1440-light-expanded-before.png",
-      "sha256": "56f09f77dd9294ebbd489fc3e027665337be1c903c34e41c427260194f7061a8",
+      "sha256": "33a9916d0e17ed0c834bda8946c7a6d4efc9186e30cca0f3a834c215dabde44e",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -982,7 +880,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638864419,
+      "capturedAt": 1793641125274,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1008,7 +906,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638864725,
+      "capturedAt": 1793641125590,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1023,7 +921,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1600x700-light-expanded-before.png",
-      "sha256": "566cc4d8d5d2e3b6602106805d940836a884fb73d49c6d5e76b443ac5ababab5",
+      "sha256": "9fab5dd57e3a5298407b30613bbfe2e3c2723356d1e5e2314db16e4105aa2f69",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1034,7 +932,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638865121,
+      "capturedAt": 1793641125986,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1048,7 +946,7 @@
       "scenario": "empty",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "1f8f2121c926c36b1ebda7418956a15cbee4908a3cae15755320739cdcf441ca",
+      "sha256": "ceed8d4a5bb39ca990cf5626b57de96ee083bdbe286a56f04cf86335f9d5a573",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1059,7 +957,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638865468,
+      "capturedAt": 1793641126332,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1073,7 +971,7 @@
       "scenario": "one",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "5869f9543c17aedfffa26e6731c9912ecac0d12c9b555f7aebdc5ddb266d9ec0",
+      "sha256": "85a6a5a9e778d1ba2cb3e0472d7ab59b9bbb7a9894c639f4a58ef474e66795a5",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1084,7 +982,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638865856,
+      "capturedAt": 1793641126718,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1098,7 +996,7 @@
       "scenario": "many",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "12310c8c7209bcf98685764da46de1234673418cf85cbd5c09b9ff933c5830ae",
+      "sha256": "3ba5554b399148cafe1bacb126803c3a9113a07ba222e30e9bfd56156e2984cf",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1109,7 +1007,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638866278,
+      "capturedAt": 1793641127169,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1123,7 +1021,7 @@
       "scenario": "long",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "fc02a01aedd19f81187f6901dc00c0937fe85e1289af771cd8b62e4ba5ee85e4",
+      "sha256": "2ddf933b2f4d0d4439d061b1c2b2082899d8b2e6452ac74270f39b3233f7c2fa",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1134,7 +1032,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638866689,
+      "capturedAt": 1793641127587,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1148,7 +1046,7 @@
       "scenario": "loading",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "9e0bc961f63acddc8bf6dee1986a5849767c18d49482040f3237a4cae361990f",
+      "sha256": "0552f5ac93e9c8c64cc4ba1668b1709bc778efd757144d6b48696095400086cd",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1159,7 +1057,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638867054,
+      "capturedAt": 1793641127950,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1173,7 +1071,7 @@
       "scenario": "error",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "c15248261dc9fcad68fbc233b8993e60909b2d2f90f30551d7c293d0bc2ba574",
+      "sha256": "7b47c0d7190eed6f19a9949f58dd92be110a596f362cbe232e1c5c999fccfd78",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1184,7 +1082,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638867403,
+      "capturedAt": 1793641128316,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1198,7 +1096,7 @@
       "scenario": "stale",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "93af4c7ac77a23bf9be16bdd121c22f5e22534f6b52c8050975e2e6b63bfd321",
+      "sha256": "a6effdea6a7a3431119c6253ca290c1c75db4471bd53f79b19eb64f6d0153d54",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1209,7 +1107,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638867805,
+      "capturedAt": 1793641128685,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1223,7 +1121,7 @@
       "scenario": "disconnected",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "9fab5dd57e3a5298407b30613bbfe2e3c2723356d1e5e2314db16e4105aa2f69",
+      "sha256": "4b43669d56443ca6d01ba2cd5f4eecbffeab147ceb17e4cb8b144f41103a847f",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1234,7 +1132,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638868223,
+      "capturedAt": 1793641129069,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1249,7 +1147,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/page-qa-1600x1000-light-before.png",
-      "sha256": "ed708b5df60b10ef587395225290661694dfcaa83a8f8729b31e449e241c5115",
+      "sha256": "3da9cd7e0ca2381f22f367fe55b4ab12c430938bd7302f5241bf4b065c45ddea",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1257,7 +1155,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638868472,
+      "capturedAt": 1793641129332,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1281,7 +1179,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638868754,
+      "capturedAt": 1793641129619,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1296,7 +1194,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/page-map-1600x1000-light-before.png",
-      "sha256": "6ab996726504b4883a5bb546a9ec5ca60d9d4cd223adb9cc3ef7d4e9f697aade",
+      "sha256": "4ccf8a55122b0f29d32325b1719a5137e7788d46798439a0e4e0d76c56a3f249",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1304,7 +1202,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638869065,
+      "capturedAt": 1793641129882,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1318,7 +1216,7 @@
       "scenario": "default",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "63d8390c38452a7c72e9a0200f0f62784cd13ab76d819675d23f7b1355c87707",
+      "sha256": "9cd059990f53b86cf3a8386a25ef2b03b2825ebae68bb9c684d606afce2c241e",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1326,7 +1224,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638869377,
+      "capturedAt": 1793641130193,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1350,7 +1248,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638869682,
+      "capturedAt": 1793641130506,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1364,7 +1262,7 @@
       "scenario": "default",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "6450fa812aa22b9c713c925b5a53cf1e2a988e102e47a8885eead206a85643ed",
+      "sha256": "17013356f6d6bea3682b97eedc4047c3754c20cfdc9664e4d64ef27b3c335e88",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1374,7 +1272,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638869953,
+      "capturedAt": 1793641130784,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1398,7 +1296,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638870286,
+      "capturedAt": 1793641131096,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1423,7 +1321,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638870596,
+      "capturedAt": 1793641131408,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1438,7 +1336,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/page-setup-1600x1000-light-before.png",
-      "sha256": "533fa64977c0e664ef9ffcbfe7a111691f9d7bacff8a3e43ef263a9357fd9e13",
+      "sha256": "aaa611890e42dc19334f5b475ef5eaf23d2c7b76161b1feb8ad7193a5b1e1c8b",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1446,7 +1344,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638870872,
+      "capturedAt": 1793641131702,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1469,7 +1367,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638871213,
+      "capturedAt": 1793641132024,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1485,7 +1383,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/qa-queue-1280x900-light-expanded-before.png",
-      "sha256": "85f82149d69ad37799b1db4f3ff3a7bd27d71204108dc56b2e755c66562ee92f",
+      "sha256": "f1088f393ddfca0fb7bbbcfb4688e5490eac34c1b8562ee435c8b453dff86abd",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -1493,7 +1391,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638871541,
+      "capturedAt": 1793641132357,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1508,7 +1406,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "5d10ef176994173b996c41bc266548389accc1f1d905540bbed733eb068d8ff9",
+      "sha256": "5b8c1a3d1aef6eb03428fb6e1d21970985a67b2689dcf4521e901b030d6cb078",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1516,7 +1414,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638871886,
+      "capturedAt": 1793641132697,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1531,7 +1429,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "5b8c1a3d1aef6eb03428fb6e1d21970985a67b2689dcf4521e901b030d6cb078",
+      "sha256": "5d10ef176994173b996c41bc266548389accc1f1d905540bbed733eb068d8ff9",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1539,7 +1437,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638872217,
+      "capturedAt": 1793641133049,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1562,7 +1460,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638872539,
+      "capturedAt": 1793641133407,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1585,7 +1483,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638872848,
+      "capturedAt": 1793641133740,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1608,7 +1506,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638873156,
+      "capturedAt": 1793641134072,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1631,7 +1529,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638873491,
+      "capturedAt": 1793641134402,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1646,7 +1544,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "27d5e3ffc43da4a9216d3734c8e5e8cd379080344130c498307aa9b3f6a0f094",
+      "sha256": "82c00630c484383ea4bdd15a26467943d9f6e867ba1234ceb1690aeec05d75ca",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1654,7 +1552,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638873816,
+      "capturedAt": 1793641134691,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1669,7 +1567,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "27d5e3ffc43da4a9216d3734c8e5e8cd379080344130c498307aa9b3f6a0f094",
+      "sha256": "1bb1205902b6d1a7f6b290d1eeaddf699c11aa5e25f33c2fc17aaf00b7ab7179",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1677,7 +1575,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638874149,
+      "capturedAt": 1793641135027,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1692,7 +1590,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "51b0f51e460b3fba0008691419ecef3de7542ccc1dbb7b93c1f56b4418513f52",
+      "sha256": "6ab389d47fc52edfdaead1a9fdcc4d293d81124dcefc65d18b03c4b19f27b75d",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1700,7 +1598,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638874475,
+      "capturedAt": 1793641135339,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -1716,7 +1614,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/qa-archive-1600x700-light-expanded-before.png",
-      "sha256": "29ee86a6d1657cd21613f129ada990c93d6497cdaab06e972f90fb3c810c52d3",
+      "sha256": "9249fa838d9a9774a1475acf2729b103c0d98521a8ec017e069644b36cca86c9",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -1724,7 +1622,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638874829,
+      "capturedAt": 1793641135692,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1750,7 +1648,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638875150,
+      "capturedAt": 1793641136005,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1765,7 +1663,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1280x900-dark-expanded-before.png",
-      "sha256": "dbae650571da1713af98bb83f381ff530e33a12a164b5fb555515bc6287a4bd4",
+      "sha256": "7a96796b12510c46956f384685f08f3f5cda72d92c8bc93ffc94f7d5b68b49d7",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -1776,7 +1674,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638875557,
+      "capturedAt": 1793641136435,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1791,7 +1689,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1440x900-dark-default-before.png",
-      "sha256": "0b076bd6bfc40f9de50fbc96e0b37d87d84fb4870d3b9a0da2dd7de88ffcb4d9",
+      "sha256": "f4ba9ab120a0695e9289f0b13da98d6988334c4f47417c568500f7baa68fec7e",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -1802,7 +1700,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638875880,
+      "capturedAt": 1793641136774,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1817,7 +1715,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1440x900-dark-expanded-before.png",
-      "sha256": "633b3dfdb52910555cee2c9a26c9c6447fd9452de918df901fccf16e97559b55",
+      "sha256": "4de33ea2c51b1412a66cf35681203533fc4649b053c96e939bde10006e268711",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -1828,7 +1726,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638876258,
+      "capturedAt": 1793641137171,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1854,7 +1752,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638876581,
+      "capturedAt": 1793641137474,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1880,7 +1778,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638876979,
+      "capturedAt": 1793641137877,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1895,7 +1793,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1920x1080-dark-default-before.png",
-      "sha256": "b7a2e09a45092a481fadbae9be279285085aab3ec5eb6b0f3478610cd76b9738",
+      "sha256": "570da316ae14387065e18f22fe1bae5b45e92e66efcfee19c898cbd29cf198a7",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -1906,7 +1804,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638877282,
+      "capturedAt": 1793641138199,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1921,7 +1819,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-1920x1080-dark-expanded-before.png",
-      "sha256": "26c85092bdfd9b9d2168d486a6c1f533165811969e4abc8107242d07c862f386",
+      "sha256": "e806a40fb727721abf1cba11b2bc6fe368275459eb4e9b1547a6adcd939a9639",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -1932,7 +1830,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638877663,
+      "capturedAt": 1793641138630,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1947,7 +1845,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-2560x1440-dark-default-before.png",
-      "sha256": "638d5b951e24765916ae1f74f8f1c5b553a6961a340805708244d21dca27dab5",
+      "sha256": "dc886bd83c67ceb51494d81c188062ea8872d74ba495cd4dd782ff51945e0091",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -1958,7 +1856,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638877988,
+      "capturedAt": 1793641138976,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -1973,7 +1871,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/desktop-2560x1440-dark-expanded-before.png",
-      "sha256": "ec844bbfcfbe299d5d6ecde63eed14d50587c06ef08bddc1e850ba1756a5264d",
+      "sha256": "72d6bdaf784ebc98fd46355b05dac1011f7bdd873ddbe04cfb0cd2e049c63ca5",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -1984,7 +1882,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638878396,
+      "capturedAt": 1793641139391,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2010,7 +1908,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638878692,
+      "capturedAt": 1793641139705,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2036,7 +1934,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638879108,
+      "capturedAt": 1793641140104,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2050,7 +1948,7 @@
       "scenario": "empty",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "10cbecbef97eff07d37ff16a0443a101261db230878ba71032980d4ede701afb",
+      "sha256": "9ea6ea632bd3be6ca81e7a46e5abace633491e02624b222db37596b642a3f7db",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2061,7 +1959,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638879487,
+      "capturedAt": 1793641140465,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2075,7 +1973,7 @@
       "scenario": "one",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "c2aa3bcbb8296e9a7d87b4c322e9e4f88de2e1a1814ab9d38b6c0ae120726c75",
+      "sha256": "81bae330fe2117e3fad039e8eb7d352729170642fd023a07893e644de494f679",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2086,7 +1984,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638879910,
+      "capturedAt": 1793641140834,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2100,7 +1998,7 @@
       "scenario": "many",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "1025919686d3ee79a7baa3207b1d79e97b6f47aa7b6748eaf693be91375aac9b",
+      "sha256": "d6f65295692cd7bd3f25a498ecd61caabdadb5bda568f1d31cd9b577b11e63dc",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2111,7 +2009,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638880344,
+      "capturedAt": 1793641141235,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2125,7 +2023,7 @@
       "scenario": "long",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "4be7dd3b9b2ebde54c2ecaf9701f2c4517ecbf5e24d17daeb824b1418eaa3b45",
+      "sha256": "9d3444e3d79242e31953e3db8f19a3de6d319524f7c9e823e4fc3e0521afb345",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2136,7 +2034,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638880741,
+      "capturedAt": 1793641141603,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2161,7 +2059,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638881088,
+      "capturedAt": 1793641141950,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2186,7 +2084,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638881454,
+      "capturedAt": 1793641142298,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2200,7 +2098,7 @@
       "scenario": "stale",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "b28bb9ad56172f1a418a7ce81960c9fd0607fcf51ecc2d7034c0ff746081a29f",
+      "sha256": "3500e4d6324861471cfdb92fad41fd49a8fb0ff2b1f96a60c7c0fee50fe39895",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2211,7 +2109,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638881859,
+      "capturedAt": 1793641142683,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2225,7 +2123,7 @@
       "scenario": "disconnected",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "9319dafb3efa23ca41831d9c5a42a03689b1d9ff6be9ec045836c70406852643",
+      "sha256": "a852917c6f9f7493741a9625fac7cc3adb25f0cf4654b690b56ba8793c3f2704",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2236,7 +2134,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638882289,
+      "capturedAt": 1793641143087,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2251,7 +2149,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/page-qa-1600x1000-dark-before.png",
-      "sha256": "335e07323bebf5544d81d80a5491f208a4de45dfba6e3f525c73d93aea32dc46",
+      "sha256": "a86a8b2b0d83947c78dba6995d1e564da2702c5619f93dcf7e006b88e08aa136",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2259,7 +2157,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638882570,
+      "capturedAt": 1793641143369,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2273,7 +2171,7 @@
       "scenario": "default",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "942653bfa83e1191c69259b92c0b1c3ff7932ed5cec5e53a7951598fe7571377",
+      "sha256": "d40f93d39c6db081a4aaca6f692afcdfd41af02d0c135b7bafea81e6070d66fe",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2283,7 +2181,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638882854,
+      "capturedAt": 1793641143686,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2298,7 +2196,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/page-map-1600x1000-dark-before.png",
-      "sha256": "24da94c0361d40bc603a6846b1b932b1e90a7d903d3d41bad0054f0de0c6882f",
+      "sha256": "d023b79b33ac37d379864083ebbbe621b3413074096e70f41b1119185a1a5356",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2306,7 +2204,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638883119,
+      "capturedAt": 1793641143949,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2320,7 +2218,7 @@
       "scenario": "default",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "d92ee3fb4c01d6631d357845a161bedd5c8d52fc4b7597d1e760e4d56c10a96a",
+      "sha256": "b1f45bab5d49ab4b928f2e18a353dd3b18287b83612ec3346636a18c3a60e141",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2328,7 +2226,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638883407,
+      "capturedAt": 1793641144262,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2352,7 +2250,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638883685,
+      "capturedAt": 1793641144542,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2376,7 +2274,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638883954,
+      "capturedAt": 1793641144813,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2390,7 +2288,7 @@
       "scenario": "default",
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "527ef163729bb18e33a71787d54b6faa18d031d1f42afa605bbaa51ffec8deed",
+      "sha256": "0a50e3f84a0d7992451f3fec1eafb21f6c11b2b856554d18fcf7c7c28921e217",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2400,7 +2298,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638884268,
+      "capturedAt": 1793641145164,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2425,7 +2323,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638884581,
+      "capturedAt": 1793641145477,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2448,7 +2346,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638884856,
+      "capturedAt": 1793641145752,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2463,7 +2361,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "e50bd89f1879cf54ea3f17adc18c91dad038c83dc2345cf95c25f294892da145",
+      "sha256": "ed5cc50638b036a04adfd7ea81050e16f13e31ad5355370e9dd94063dc6efb70",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -2471,7 +2369,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638885183,
+      "capturedAt": 1793641146060,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2487,7 +2385,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/qa-queue-1280x900-dark-expanded-before.png",
-      "sha256": "83744c130b3992788aa9b161af9f21c3f8613e859e95d3e7d4d6aaa9f2d1c18b",
+      "sha256": "ed5cc50638b036a04adfd7ea81050e16f13e31ad5355370e9dd94063dc6efb70",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -2495,7 +2393,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638885498,
+      "capturedAt": 1793641146394,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2510,7 +2408,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "572de46108836d0901b9315b9221a0624cd687494a33325bc62e2bdadf4f7c22",
+      "sha256": "4849688458fe5fbaf700b9d8e918bfb348f0835740eb3022b4ba9798e6b2ad2c",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2518,7 +2416,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638885834,
+      "capturedAt": 1793641146781,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2541,7 +2439,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638886186,
+      "capturedAt": 1793641147133,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2556,7 +2454,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "f4e438de6469ca4a58524ab8813afbec42120d8cb628868a60df99cef875f3b2",
+      "sha256": "15383df7074f797ad312a3a4e750730476397fa5ce32b9a27faa8ed2ece91a17",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2564,7 +2462,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638886510,
+      "capturedAt": 1793641147477,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2587,7 +2485,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638886847,
+      "capturedAt": 1793641147828,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2602,7 +2500,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "6b88959e12af58c5327de5fb0457f887d5dfa2cbb62c674f3cb6b2eca28427fb",
+      "sha256": "18d26d8bb58447751c6eec59aadbf48da467b96526e1d207906b655fb27e947d",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -2610,7 +2508,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638887176,
+      "capturedAt": 1793641148139,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2633,7 +2531,7 @@
         "mainWidth": 1256
       },
       "pageErrors": [],
-      "capturedAt": 1793638887491,
+      "capturedAt": 1793641148438,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2648,7 +2546,7 @@
       "qa": true,
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
-      "sha256": "33a1794b0738a517bac061bcfa361edfd107b7bb723dc161a8dbf1ebc091db82",
+      "sha256": "8ddbc478e716c878b06c4492e5aea1c5190d47c1aceace1eadead0c8319fd3bc",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2656,7 +2554,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638887832,
+      "capturedAt": 1793641148792,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2679,7 +2577,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638888150,
+      "capturedAt": 1793641149125,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2702,7 +2600,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638888491,
+      "capturedAt": 1793641149458,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -2718,7 +2616,7 @@
       "version": "before",
       "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
       "file": "images/qa-archive-1600x700-dark-expanded-before.png",
-      "sha256": "677acce00d0d7697cceb2d2bc805877468c72b39ccd009126066c268f785155d",
+      "sha256": "0d0c908f30e458b8cac94a922759e2d2c2136b0aed63ec56234408c14847f616",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2726,7 +2624,7 @@
         "mainWidth": 1576
       },
       "pageErrors": [],
-      "capturedAt": 1793638888808,
+      "capturedAt": 1793641149773,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2739,9 +2637,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1280x900-light-default-after.png",
-      "sha256": "d9d788723b9bd4ff874a041356ce07df9913a418ab2cbd894f9041db72dd2413",
+      "sha256": "058d9a124340871d015f825ec6df03a735f13241c86f1367ac29b9a5ba6bade2",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -2752,7 +2650,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638890143,
+      "capturedAt": 1793641150989,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2765,9 +2663,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1280x900-light-expanded-after.png",
-      "sha256": "d0d4bfad379f45bedd40ced6edcff1c62cf6914788be81f63b859e749fa1b38a",
+      "sha256": "9ceea60b142663908fcc256a5040caf94de435e94550aee9dde19d735eb4847f",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -2778,7 +2676,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638890522,
+      "capturedAt": 1793641151402,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2791,7 +2689,7 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1440x900-light-default-after.png",
       "sha256": "10755fac0c888f0a521494c39616b0ca4cfc2017cc0eae54b499c8d95def21de",
       "metrics": {
@@ -2804,7 +2702,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638890829,
+      "capturedAt": 1793641151722,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2817,9 +2715,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1440x900-light-expanded-after.png",
-      "sha256": "95a5b8c251b7e79dcfaf73faec24a069950f5f0ee094ae98f6e3fded9118b048",
+      "sha256": "b98a7837c8eea5d4531cd511c1137391db32087e33497770f94667df7986966d",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -2830,7 +2728,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638891195,
+      "capturedAt": 1793641152141,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2843,9 +2741,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x1000-light-default-after.png",
-      "sha256": "b7c1bc608d2d95cffeff388a85b13be9d596841d23bfef0a40fe92c3d9ad198f",
+      "sha256": "a36d4bcf9a58286e92f493e9c316fad30180397b4e681a001f4bef225ee53f36",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2856,7 +2754,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638891514,
+      "capturedAt": 1793641152481,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2869,9 +2767,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x1000-light-expanded-after.png",
-      "sha256": "3312ea10768973bf37f6b124de349f88b7ae8a821d7daaa9c4e51166cb80eb1c",
+      "sha256": "665cfc8e4029c7f4ec366cb77a72ed65c8406aecddff0669fe49d764bd5d0988",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -2882,7 +2780,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638891887,
+      "capturedAt": 1793641152892,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2895,9 +2793,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1920x1080-light-default-after.png",
-      "sha256": "9a0f34108499c194135f7910237bd81e0953025c277153c323d206de9930dd51",
+      "sha256": "d765a85b90f7093af4ba1763c880b0fcb123dd6936fa48b181eda3f1e678bcf5",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -2908,7 +2806,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638892216,
+      "capturedAt": 1793641153214,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2921,7 +2819,7 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1920x1080-light-expanded-after.png",
       "sha256": "1b2a89d90370bccfdf164476890b8d60d867e16ec2e05910261e422a78833320",
       "metrics": {
@@ -2934,7 +2832,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638892606,
+      "capturedAt": 1793641153595,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2947,9 +2845,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-2560x1440-light-default-after.png",
-      "sha256": "9c80ce01fa2ade8a30d43bb10302fe29f5be07aed3e4fa4b6b27d4b9e42b446a",
+      "sha256": "91ddb3a9fe5012a4e937c8e54575e42a1b60da0cddaaaf5d751afe707856cc10",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -2960,7 +2858,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638892951,
+      "capturedAt": 1793641153945,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2973,9 +2871,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-2560x1440-light-expanded-after.png",
-      "sha256": "f4b8af763fbde213478146acd34a160b7ee86e4a03504d5eadee95a48bd9ae58",
+      "sha256": "14884b65dcdcafb015af6677818ae0740f97ca91773a67152c3e353002ef6d6a",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -2986,7 +2884,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638893313,
+      "capturedAt": 1793641154277,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -2999,9 +2897,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x700-light-default-after.png",
-      "sha256": "eb17238667aa5012a8daf1044a9ead3339b59e457f3aa007daf359419c1d1de2",
+      "sha256": "bf225cc4d9eb121721f8fe9d076fe198b19ce55bd19824bb89ead36a81055136",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3012,7 +2910,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638893621,
+      "capturedAt": 1793641154604,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3025,9 +2923,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x700-light-expanded-after.png",
-      "sha256": "9b377e51c2b0dd18142fda2aeb9a46b53b5de44a0593f703210d5f922f26c216",
+      "sha256": "5e4300691efe134313853336183156f68dde2791287d7382f75e3dd5b6f3f714",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3038,7 +2936,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638893971,
+      "capturedAt": 1793641154970,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3051,7 +2949,7 @@
       "path": "/",
       "scenario": "empty",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-empty-1600x700-light-after.png",
       "sha256": "721f86cd2c931584c668c016cb7f2ec20caf28ba6a0b7dd7084fc5396754de94",
       "metrics": {
@@ -3064,7 +2962,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638894321,
+      "capturedAt": 1793641155333,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3077,9 +2975,9 @@
       "path": "/",
       "scenario": "one",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-one-1600x700-light-after.png",
-      "sha256": "b32cc8dfe33541e9ba5b009afbb30d0bccc6241e27abd04570e0c7c2f60af7f4",
+      "sha256": "afb77cf8dbe86c7a1567825f7a2ea0a4d0ba082aaca6e3c945b6f9f479c137fa",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3090,7 +2988,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638894660,
+      "capturedAt": 1793641155681,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3103,7 +3001,7 @@
       "path": "/",
       "scenario": "many",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-many-1600x700-light-after.png",
       "sha256": "4af93b0f211425877f8caf3c64f4041ec172b9e1fa73a71585dc303535fd4093",
       "metrics": {
@@ -3116,7 +3014,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638895112,
+      "capturedAt": 1793641156102,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3129,7 +3027,7 @@
       "path": "/",
       "scenario": "long",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-long-1600x700-light-after.png",
       "sha256": "175356b35f362a6516fe6970fd8b001ee576c669a61ee7be88e5cb2b9536d790",
       "metrics": {
@@ -3142,7 +3040,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638895525,
+      "capturedAt": 1793641156490,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3155,9 +3053,9 @@
       "path": "/",
       "scenario": "loading",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-loading-1600x700-light-after.png",
-      "sha256": "2636a56f018f605df8df03a554d64ade72c6f756fc8fa89c35eee648c92961b9",
+      "sha256": "d388b9d5c7cfa0b4d1c6038c6aabd7a26fefa6bd50d138c222c12c60b0431744",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3168,7 +3066,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638895872,
+      "capturedAt": 1793641156850,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3181,9 +3079,9 @@
       "path": "/",
       "scenario": "error",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-error-1600x700-light-after.png",
-      "sha256": "71ca1f64d04df09d94c369e8bccc9d6f9274af3ae37ffeda8eaf22221889137c",
+      "sha256": "5eeac9b39c222754bd2c20140e9425639b17370ef60f3e64ef4b8b69a8f07117",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3194,7 +3092,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638896222,
+      "capturedAt": 1793641157198,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3207,9 +3105,9 @@
       "path": "/",
       "scenario": "stale",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-stale-1600x700-light-after.png",
-      "sha256": "99d64be9189d0f76114811184921c342da134b7c1b20c9df40c6fb72e1bf7ca7",
+      "sha256": "b9af3bdd6544a137bc431fc028d8d9e08a7fae79573cfd65895ed6de2b06e6d1",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3220,7 +3118,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638896573,
+      "capturedAt": 1793641157571,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3233,9 +3131,9 @@
       "path": "/",
       "scenario": "disconnected",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-disconnected-1600x700-light-after.png",
-      "sha256": "36b511e6cfaf329aa504e962d471cc131c33a96e8242ec7c1fd396c2eb195191",
+      "sha256": "c3182ceb47a282e88369727c9d883c4bb06024df0b8fde76eec7131e6b2e3efe",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3246,7 +3144,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638896920,
+      "capturedAt": 1793641157922,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3259,9 +3157,9 @@
       "path": "/qa",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-qa-1600x1000-light-after.png",
-      "sha256": "7b5309556ae7fcd14464f5cb54f04d87f0fc147c3292022eb0299bd0db2f197a",
+      "sha256": "b58596730818b205368cde71aca32073f4360bec506becf052e0f77cbbec16a7",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3271,7 +3169,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638897223,
+      "capturedAt": 1793641158217,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3284,7 +3182,7 @@
       "path": "/audit",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "a1f7889b7da955412a9ab345a515bb9953eed41311d0d215e0153ff63f2a3cda",
       "metrics": {
         "docWidth": 1600,
@@ -3295,7 +3193,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638897521,
+      "capturedAt": 1793641158503,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3308,9 +3206,9 @@
       "path": "/map/shop-app",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-map-1600x1000-light-after.png",
-      "sha256": "b6fe083ae7262ef529587bac5d35d602d48711831784aeca65dc3cd61d5d5c56",
+      "sha256": "d26bb5a5c0011f24a3250b073b6f7222be5cfa5d347808f3afc0ac7a5438a58b",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3320,7 +3218,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638897804,
+      "capturedAt": 1793641158761,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3333,8 +3231,8 @@
       "path": "/comms",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "ba52abce4d94534b3d55eb4a7179435147fe55c1d63b740e62e9d0307261bdaa",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "be4a3dc74c0992278c43fe29fcab949b0931ca3c1dd41ea2084eb961494f043e",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3342,7 +3240,7 @@
         "mainWidth": 1552
       },
       "pageErrors": [],
-      "capturedAt": 1793638898131,
+      "capturedAt": 1793641159074,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3355,8 +3253,8 @@
       "path": "/telemetry",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "5d41f32645c8fe8687d6c1e1d17258b40997781272d87344582fe128868a75d2",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "ef5c1819a1fe42db02bfb55f4fe3f6dd8261a8dbf78bb01498b8452610ef5192",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3366,7 +3264,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638898415,
+      "capturedAt": 1793641159395,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3379,7 +3277,7 @@
       "path": "/board",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "c46e15a10bbd2c88c0910d8f713044003df32f9eca9242ce5367aeb850130d0a",
       "metrics": {
         "docWidth": 1600,
@@ -3390,7 +3288,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638898688,
+      "capturedAt": 1793641159667,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3403,8 +3301,8 @@
       "path": "/agent/guido-1",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "8c834fb622eae8937fa075866b1b36a9ba95d810bdf7a97d81f5d2ddb469a5b3",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "fd0601feca6bcebb874a99f35202f823e657c7c4b902434f2e1b711ef6168807",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3414,7 +3312,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638898986,
+      "capturedAt": 1793641159980,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3427,7 +3325,7 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "d2e5d48011721e6f20138735bbdf6c20a9624d80bb6c4a7d1ba97d77bb4a5df8",
       "metrics": {
         "docWidth": 1600,
@@ -3439,7 +3337,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638899300,
+      "capturedAt": 1793641160295,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3452,9 +3350,9 @@
       "path": "/setup/sessions",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-setup-1600x1000-light-after.png",
-      "sha256": "fed225f473039013338298dbec208da67d75cf136836a26b92bb993e57577189",
+      "sha256": "3e127eeee57c8677ce62cb7b75000ace99b5398f53380a14697d6686dae989a5",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3464,7 +3362,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638899587,
+      "capturedAt": 1793641160566,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3478,8 +3376,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "f7d0d50f202edfe33cb03fedfc95aad906544b279e3f47611bdab1ac8e6eaf4b",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "14d68dc55132018d597f0c8fd7ab439d649d899c922634a717a79f232c05d40d",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -3489,7 +3387,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638899914,
+      "capturedAt": 1793641160871,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3503,9 +3401,9 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/qa-queue-1280x900-light-expanded-after.png",
-      "sha256": "85361a8485aff3ad3f924ca6cf70c44913af195b597143a8f264608d70056257",
+      "sha256": "98f110b6f251498de6e504da89ee315ff400e3defd9213ac5fabcc07fef57901",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -3515,7 +3413,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638900325,
+      "capturedAt": 1793641161235,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3529,7 +3427,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "c8f6b7fb0c61b8c2eba4171486c823a52482232e2f681124ad73d2b59034d784",
       "metrics": {
         "docWidth": 1600,
@@ -3540,7 +3438,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638900703,
+      "capturedAt": 1793641161583,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3554,8 +3452,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "4289c29fd887f137766ecba7093a7464aec70eeb7fe3a5bd692e06dde97387ef",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "37c32ba12f5f6050661f70af362336f29ae89a93a86ac9d2153025c7095e817a",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3565,7 +3463,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638901146,
+      "capturedAt": 1793641162044,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3579,7 +3477,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "ff1b35d10703d35b0ad9ab06560cecc79f68fa84b428f5eeeda77281b8e5df75",
       "metrics": {
         "docWidth": 1600,
@@ -3590,7 +3488,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638901478,
+      "capturedAt": 1793641162392,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3604,8 +3502,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "ec199784f119f348a1387b6b9b951512c08358535933a352f1c85cb6ad5853bc",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "794568a10154afdab90e72c6c51e72bcee25641726d954d14bb15673ecaf4e41",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3615,7 +3513,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638901945,
+      "capturedAt": 1793641162808,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3629,7 +3527,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "308da061d09d00e9987d3fbbfa66d86d1663091d5ab76fc49d06224718adaf45",
       "metrics": {
         "docWidth": 1280,
@@ -3640,7 +3538,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638902293,
+      "capturedAt": 1793641163155,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3654,7 +3552,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "b6ede203e94841af2d424ce4307afaae47857d2a6e39a414e7bed5d682274be5",
       "metrics": {
         "docWidth": 1280,
@@ -3665,7 +3563,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638902692,
+      "capturedAt": 1793641163555,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3679,7 +3577,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "d2ffdb60ba8c3b7ee5ef7d8071c5a3d0dac58435345874429595459dc69d6b32",
       "metrics": {
         "docWidth": 1600,
@@ -3690,7 +3588,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638903032,
+      "capturedAt": 1793641163890,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3704,8 +3602,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "826a3440dbe743b7e535e0aaaf92a78e8044b22a36f0845220dc20fb0bda5997",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "bf5f841bc7383a80bd8fde89a96236bef83be4ac4a4b1797ff4fbf0baad9d529",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3715,7 +3613,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638903410,
+      "capturedAt": 1793641164330,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3729,7 +3627,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "3cd3c1bfc445123e2941995a43ac9002a572a1682fec442a648c17fc9bcced4b",
       "metrics": {
         "docWidth": 1600,
@@ -3740,7 +3638,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638903722,
+      "capturedAt": 1793641164671,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -3754,9 +3652,9 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/qa-archive-1600x700-light-expanded-after.png",
-      "sha256": "1bbbef6a7be639c54506a01a11d8ae4212b557692dff851fc00875aadaa24630",
+      "sha256": "0ee705c577db66a817dca0d767fe903e3d6497610d90cd12fb149e504a83af4f",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3766,7 +3664,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638904071,
+      "capturedAt": 1793641165068,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3779,9 +3677,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1280x900-dark-default-after.png",
-      "sha256": "08a1ac449a510d6b14b8972a9aeed81572ce24f2ff60f6bf7ccd955dc1d6a156",
+      "sha256": "874cd9908285cd493112519ef6e88f93804cb360527c6c2a866cd1e6b48a82f7",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -3792,7 +3690,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638904396,
+      "capturedAt": 1793641165421,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3805,9 +3703,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1280x900-dark-expanded-after.png",
-      "sha256": "80438efc36be20cdf6fd7cd2e6344fd00f3853aeb466bb19aab7bb19738507ba",
+      "sha256": "117f3bf91a8bcd19550ed9f1e6c990f4fb5647b277a6bef99db4cd27ef8b8191",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -3818,7 +3716,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638904757,
+      "capturedAt": 1793641165790,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3831,9 +3729,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1440x900-dark-default-after.png",
-      "sha256": "614c1c29cd21a80c33d40f6509c934b0efd77782cd8118576e20cbbc698527a2",
+      "sha256": "41c08ad8dcd13bcdf22b513be1d517eeb8038c45bb517c2c826bd97a3bf3c631",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -3844,7 +3742,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638905064,
+      "capturedAt": 1793641166125,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3857,9 +3755,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1440x900-dark-expanded-after.png",
-      "sha256": "2bfdc5f11e24ca1ff47757e8355e0eaf130adc13405e2f23db4fb344e8c8c268",
+      "sha256": "24ce7e9628b93d28081a2cdea913ee155f2ede492ec207827f4ba70ec0137c0e",
       "metrics": {
         "docWidth": 1440,
         "width": 1440,
@@ -3870,7 +3768,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638905445,
+      "capturedAt": 1793641166488,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3883,9 +3781,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x1000-dark-default-after.png",
-      "sha256": "e225176a8e43c2a4937189918dbc04cfcfa9ba0ff0f8c6890d4bed0bcd374f76",
+      "sha256": "e7bc7a3d1635cb538e08bd465f4bdf4425934c9ae88d93548b91a35319996cdd",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3896,7 +3794,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638905746,
+      "capturedAt": 1793641166796,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3909,9 +3807,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x1000-dark-expanded-after.png",
-      "sha256": "475b06769f860a01b0b2c45dfd0820a18bc71c6cec66f89fac172e575ab30f2a",
+      "sha256": "a6d8bf4d24ce2a2a6fe743d2b9730c023da5c62f70fc0b67df208ecae0f080e4",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -3922,7 +3820,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638906118,
+      "capturedAt": 1793641167179,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3935,9 +3833,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1920x1080-dark-default-after.png",
-      "sha256": "5b9e23d65fb680aa1762614d1fbe04faa52c18e7dc8ebe9fcd22b4fe30646ed4",
+      "sha256": "5cd6bd25316322d1ffec1074f7f32d68233d4aff33ccd0ab81011639f963a428",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -3948,7 +3846,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638906438,
+      "capturedAt": 1793641167500,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3961,9 +3859,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1920x1080-dark-expanded-after.png",
-      "sha256": "91baddd11e5b1462abda6ef44d07873e794b438d2e161e19f799a059bb5963ed",
+      "sha256": "2986e01539c501b95392e57fb458328b7a3358745d9e2dfeaafee3ef91e580b1",
       "metrics": {
         "docWidth": 1920,
         "width": 1920,
@@ -3974,7 +3872,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638906834,
+      "capturedAt": 1793641167881,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -3987,9 +3885,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-2560x1440-dark-default-after.png",
-      "sha256": "38eb58430ab35bd85ac2c5b3a6aedb6708f8e528adb8ea372aefd9ccfd8a8e04",
+      "sha256": "dce46243f160a9b78593c481813b432348d2841780dacd24e369858bf7fab427",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -4000,7 +3898,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638907166,
+      "capturedAt": 1793641168229,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4013,9 +3911,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-2560x1440-dark-expanded-after.png",
-      "sha256": "42da5a36e0be5fddf7726da90a22d9635916e4e5bba6cba07fc13a916be485e9",
+      "sha256": "ec1905ded2821b2c44be1ff76a64902d5adc383e64d1a6140e88792917e8cd4f",
       "metrics": {
         "docWidth": 2560,
         "width": 2560,
@@ -4026,7 +3924,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638907499,
+      "capturedAt": 1793641168579,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4039,9 +3937,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x700-dark-default-after.png",
-      "sha256": "dfbf4b839ff98f248d966ca55638be7db76deddb76d9b0b50517030a4c373336",
+      "sha256": "88a9216a61b37dc38ab9751eb0714f2a1a2139243c6155c8833b151e00876dbb",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4052,7 +3950,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638907806,
+      "capturedAt": 1793641168925,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4065,9 +3963,9 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/desktop-1600x700-dark-expanded-after.png",
-      "sha256": "02837afa68429800ec72911d66293e0208f99bc1df8d807a40efc9b59f1d65ea",
+      "sha256": "87bb45f3b56097ea4e2399e6e7dd8036cb239d16af6de8b009560c0def5f9b20",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4078,7 +3976,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638908173,
+      "capturedAt": 1793641169315,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4091,9 +3989,9 @@
       "path": "/",
       "scenario": "empty",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-empty-1600x700-dark-after.png",
-      "sha256": "a00daddd10facafb819891bad09250f39bd23883e731dcc6de177f0a50ff83df",
+      "sha256": "7507255e2a0e0a97784384e5948823834ff480816d4c94cd0a871270a271548d",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4104,7 +4002,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638908538,
+      "capturedAt": 1793641169667,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4117,9 +4015,9 @@
       "path": "/",
       "scenario": "one",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-one-1600x700-dark-after.png",
-      "sha256": "3a10cf96e0eaaf2258fb07bb59aba23dbc865867ed68a49731028a54484bca8c",
+      "sha256": "303d06d0945ade34fad0c81bea9d07b8a76c9a3a5e27cdcae17318fe0bcbc15a",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4130,7 +4028,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638908886,
+      "capturedAt": 1793641170009,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4143,9 +4041,9 @@
       "path": "/",
       "scenario": "many",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-many-1600x700-dark-after.png",
-      "sha256": "0ab686414fac9e54d9265dedfda2567b69afc767f6512434e6da5004cf591285",
+      "sha256": "67e40ef194cac5733080e3969c94b227cca78ad2cfb4c823ceb545932cca1a0a",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4156,7 +4054,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638909322,
+      "capturedAt": 1793641170417,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4169,9 +4067,9 @@
       "path": "/",
       "scenario": "long",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-long-1600x700-dark-after.png",
-      "sha256": "a702136e06745e9bfd6f7fbf230df9235c0cd516e29614777c9b6baf068305a2",
+      "sha256": "2050509014bb7d80a79f1284ef91319825ab0477f2d3722d471540e4a5c11593",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4182,7 +4080,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638909712,
+      "capturedAt": 1793641170806,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4195,9 +4093,9 @@
       "path": "/",
       "scenario": "loading",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-loading-1600x700-dark-after.png",
-      "sha256": "359170915b9a266444c746eeed3c773ef79e3f43067b528c0057203ebab2337f",
+      "sha256": "6eced6525ec0b966475d6b4dad9ad78179156091f71a307a8177e2909ff67cb7",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4208,7 +4106,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638910071,
+      "capturedAt": 1793641171168,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4221,9 +4119,9 @@
       "path": "/",
       "scenario": "error",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-error-1600x700-dark-after.png",
-      "sha256": "7bf9e9656988fab2f4cde0e6af156e6db2ac0522723a8e1fc00f919db3270700",
+      "sha256": "cbc4d77f489b5534122edc77faa781f3157dad90509eae9eebe22f0ff174e360",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4234,7 +4132,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638910421,
+      "capturedAt": 1793641171534,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4247,9 +4145,9 @@
       "path": "/",
       "scenario": "stale",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-stale-1600x700-dark-after.png",
-      "sha256": "941d814026ef3a5b13da84f1cbf456edbeafeb639c76cf73e9ee1e0362a5b650",
+      "sha256": "613cd88391733bd973c704e934dadd359eb85c9b1a060f7b76fe8c69fc7f668b",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4260,7 +4158,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638910820,
+      "capturedAt": 1793641171885,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4273,9 +4171,9 @@
       "path": "/",
       "scenario": "disconnected",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/state-disconnected-1600x700-dark-after.png",
-      "sha256": "fd8794ff9af9b4f2f9a82d22e38005b380c4e0a2b132a5012d5eeb1e490b4f9c",
+      "sha256": "f7c40b791d48e261f3174a5f2210cac241d1421e5b76f85159e77511827553f7",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4286,7 +4184,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638911198,
+      "capturedAt": 1793641172251,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4299,9 +4197,9 @@
       "path": "/qa",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-qa-1600x1000-dark-after.png",
-      "sha256": "793327fdd5f495ca2ca4ab34a81246b5057d5ff51b37602549be0bb61b6559de",
+      "sha256": "006decd87ab2dd383d84e74556ef30f1f5e626a62c71c4157d89bf69845d7f74",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4311,7 +4209,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638911489,
+      "capturedAt": 1793641172535,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4324,7 +4222,7 @@
       "path": "/audit",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "de91288df9ce6d36ba730b3bd0cc8b84c93f2f3b10406457a48154490eb85897",
       "metrics": {
         "docWidth": 1600,
@@ -4335,7 +4233,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638911802,
+      "capturedAt": 1793641172835,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4348,9 +4246,9 @@
       "path": "/map/shop-app",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-map-1600x1000-dark-after.png",
-      "sha256": "1c1de33367841f18ac2dc167d1841a50372e91dbdc70f7cbd1e8c3a3105727f0",
+      "sha256": "e4dec45d110661a9556fd1d5dfd81e85dfe2d418a18943f8094038d0def6be32",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4360,7 +4258,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638912087,
+      "capturedAt": 1793641173100,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4373,8 +4271,8 @@
       "path": "/comms",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "f8c0036f36d42a47639b48ed388a672eb795a38c11ad824a88a8210ddb5cb2bb",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "c248057802ac2804bef317082b3b61659bda0f79596e327a79aaf2f637f926ee",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4382,7 +4280,7 @@
         "mainWidth": 1552
       },
       "pageErrors": [],
-      "capturedAt": 1793638912415,
+      "capturedAt": 1793641173428,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4395,8 +4293,8 @@
       "path": "/telemetry",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "b876d0589d29e881ed8f3588e4d8c071c408f64cdff85745fe4feb5b3f7899d1",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "a621aa25ebae5b2fea7563e65e29b742a21dc1582477dbe812bf43250197f165",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4406,7 +4304,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638912709,
+      "capturedAt": 1793641173721,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4419,8 +4317,8 @@
       "path": "/board",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "532560ce250090a391ffea99347e13d065ca07c066d5f6463a0c11e87858db5d",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "23765d814e312ef7df95b84dd8273f8147db6bcc61e519bed28025203f34cdd3",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4430,7 +4328,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638912989,
+      "capturedAt": 1793641174000,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4443,8 +4341,8 @@
       "path": "/agent/guido-1",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "217509e863812e939ff624a24cb639d18b4c73903fe880f0df304e90ca5c7f1a",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "46cbd173fcb293e42193cd508da4cdda8a5dcdd8c2f498513f839c2633a94871",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4454,7 +4352,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638913299,
+      "capturedAt": 1793641174298,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4467,8 +4365,8 @@
       "path": "/",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "cd1c265dec2e66b09801c3853ceaf0fa9d85cc93e36c232bd54f60d0c94d8a8f",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "d303115b15f56f9ba46ea21bda9011ef3c8f57748707022be68931d0f3e20f38",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4479,7 +4377,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638913652,
+      "capturedAt": 1793641174630,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4492,9 +4390,9 @@
       "path": "/setup/sessions",
       "scenario": "default",
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/page-setup-1600x1000-dark-after.png",
-      "sha256": "e67ba8e2b5ad31395b48bfe5fa6cb3c43cb3f3cb52016772ab075024d8f015ac",
+      "sha256": "c74d49241bed504d183d332293e18c332aa00009c9a3becf650ea349eeed7a4c",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4504,7 +4402,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638913934,
+      "capturedAt": 1793641174917,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4518,8 +4416,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "4e4db1e9f4f86624221d1978b5accfcd13de565895e1635f764a74d595531a98",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "b8f86a44b98d4f63418eb3b25f24ecae6ce8cc6b08a49531b680f2fbcc3ac9ad",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -4529,7 +4427,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638914257,
+      "capturedAt": 1793641175296,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4543,9 +4441,9 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/qa-queue-1280x900-dark-expanded-after.png",
-      "sha256": "53565bdf52a5ff9b2336771d2c1d490a2ab14dccdecb71c122972ebba2f79fb5",
+      "sha256": "6f8e0830fe60a6f07fff49c709f47c7be39dd81c26e836108444fe4213318869",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -4555,7 +4453,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638914657,
+      "capturedAt": 1793641175742,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     },
@@ -4569,8 +4467,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "26ef79479ee6ad5123025ca97d65b9fe567d40a2b551534be67ab795cd557481",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "df85bcda81dc671fa7f5e0a8140afbbb4022d9ce9608cf4b7713c36907a73c13",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4580,7 +4478,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638915003,
+      "capturedAt": 1793641176116,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4594,8 +4492,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "7e7b3a0e95c01a77ae052e9880673ae03872ef1e26cb02d3e63bbca9333e07a3",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "d71f755d1277f2d7519b8b5fd9730c0e0ddc360d52c5ecb3eb4ae656d7e2279a",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4605,7 +4503,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638915433,
+      "capturedAt": 1793641176579,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4619,8 +4517,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "c289a215784bc402b84ae7e19751517e2e57d9208a71280da0a243e1dcca63ab",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "1ef7f9f7dbf33b76206153582709f95a5f5b7a515e8c792e3931c8f5c9bf39e6",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4630,7 +4528,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638915764,
+      "capturedAt": 1793641176947,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4644,8 +4542,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "3fe6cb369c7dccfccf960e1b0289c5f0e31ce66680f152f351f72bf0079b37f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "ff538ff006083f5141b517f542ccd8fca0b751e0b13e01f54387a34f96c5bae3",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4655,7 +4553,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638916178,
+      "capturedAt": 1793641177425,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4669,7 +4567,7 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "sha256": "3f639781537bf55e18750b2aaf165d9ff2c664549ebd1f2291ef953cd14496aa",
       "metrics": {
         "docWidth": 1280,
@@ -4680,7 +4578,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638916503,
+      "capturedAt": 1793641177757,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4694,8 +4592,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "14eb85ceb9204f16460ce67b0779c93502fddfb1a51c70711f579cb9a77a2ae6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "347d1911e30c12d116d96f64bb1c9632dc427e463cb347676cb4b1e46061e2ab",
       "metrics": {
         "docWidth": 1280,
         "width": 1280,
@@ -4705,7 +4603,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638916910,
+      "capturedAt": 1793641178187,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4719,8 +4617,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "0c94241abcc52f35a9f860584676dca21860a2224bf1710d47043716c4136df7",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "c1464e1a2eb815ebe4998ba7781d418ab395e26e8f5da202be401d4f7b25f2c0",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4730,7 +4628,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638917251,
+      "capturedAt": 1793641178546,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4744,8 +4642,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "978953fa133c6a102f8fe2b64b19e5998c3262e3eddefb18bb0fef6fb45ae656",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "1bd1bec08b3032fc11fabf03ff8ad55cbffa67d02f4e1e94591144aa1ff90200",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4755,7 +4653,7 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638917664,
+      "capturedAt": 1793641178926,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4769,8 +4667,8 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
-      "sha256": "1ad240004be23d8b9cac0d7504f26af91930bd1a9ec98198978dc88e18359244",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "sha256": "5c497ea947f4a06a011adf9b887bfbbfdaa8d78d285213ab2bf8beaad38352d9",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4780,7 +4678,7 @@
         "collapsed": true
       },
       "pageErrors": [],
-      "capturedAt": 1793638917992,
+      "capturedAt": 1793641179291,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": false
     },
@@ -4794,9 +4692,9 @@
       "scenario": "default",
       "qa": true,
       "version": "after",
-      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "file": "images/qa-archive-1600x700-dark-expanded-after.png",
-      "sha256": "3b309fd6085bffd1e4bea5f3b444d43ad62d1410af94a1edbacbe5d5e186f397",
+      "sha256": "520842ebedda691e859ebba6383eee23bab48cfefc1181c77334a9cf685a8fd1",
       "metrics": {
         "docWidth": 1600,
         "width": 1600,
@@ -4806,15 +4704,15 @@
         "collapsed": false
       },
       "pageErrors": [],
-      "capturedAt": 1793638918410,
+      "capturedAt": 1793641179687,
       "provenance": "Controlled fictional API fixture, frozen fixture clock, production App and CSS, 1x browser. QA asset bytes deliberately synthetic; not live-data or server-auth proof.",
       "retainedInGallery": true
     }
   ],
   "limitations": [
-    "Full 82-pair images remain in the private controller capture archive; this gallery retains all required geometry pairs plus new-sitewide/filled-QA examples and all alternate-state afters.",
-    "1280px expanded Overview End action is already clipped on baseline2b; the approved gutters narrow it slightly further. Existing Overview redesign ticket #1360 owns the Work-cell controls. This is not presented as fixed here.",
-    "Overview KPI/lane/timeline allocation, Agent redesign and grouped forms remain separate #1360/#1361/#1362 outcomes.",
+    "Full82-pair images remain in the private controller capture archive; this gallery retains all required geometry pairs plus new-sitewide/filled-QA examples and all alternate-state afters.",
+    "1280px expanded Overview End action is already clipped on baseline2b; the approved gutters narrow it slightly further. Existing Overview redesign ticket#1360 owns the Work-cell controls. This is not presented as fixed here.",
+    "Overview KPI/lane/timeline allocation, Agent redesign and grouped forms remain separate#1360/#1361/#1362 outcomes.",
     "Saved-QA PNG bytes are deliberately synthetic layout fixtures; no server-authentication or live-data image proof is claimed here."
   ]
 }
