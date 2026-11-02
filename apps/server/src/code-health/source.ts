@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { CodeHealthFinding, CodeHealthReviewRound } from "@mc/core";
 import { MAP_COUPLING_PR_FILES_MAX } from "../map/history-rules.ts";
+import { gitFileMetrics } from "./git-store.ts";
 import { datedPrFiles, reviewedFileMembership } from "./risk.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
@@ -13,7 +14,8 @@ export type CodeHealthEvidenceKind =
   | "ci"
   | "durations"
   | "merged-files"
-  | "reviewed-files";
+  | "reviewed-files"
+  | "git-numstats";
 
 /** Revisions track relevant source writes, including writes from another SQLite connection. */
 export function installCodeHealthRevisions(db: Db): void {
@@ -31,6 +33,7 @@ export function installCodeHealthRevisions(db: Db): void {
     ["pr_history", "direct"],
     ["pr_files", "direct"],
     ["code_health_file_memberships", "direct"],
+    ["code_health_git_sources", "direct"],
     ["map_cache", "global"],
   ] as const;
   for (const [table, scope] of tables) {
@@ -197,6 +200,7 @@ export function codeHealthEvidenceSource(
     otherFile?: string;
     category?: string;
     pr?: number;
+    at?: number;
   },
 ): Row[] {
   if (
@@ -209,6 +213,37 @@ export function codeHealthEvidenceSource(
   )
     throw new Error("Invalid code-health evidence page");
   const args = [query.repoId, query.from, query.until, query.limit + 1, query.offset];
+  if (query.kind === "git-numstats" && !query.checkout) return [];
+  if (query.kind === "git-numstats" && query.checkout) {
+    const metrics = gitFileMetrics(
+      db,
+      query.repoId,
+      query.checkout,
+      query.from,
+      query.until,
+      query.at ?? Date.now(),
+    );
+    return metrics.rows
+      .flatMap<Row>((row) =>
+        row.commit
+          ? row.commit.changes
+              .filter(
+                (change) =>
+                  !query.file || change.path === query.file || change.previousPath === query.file,
+              )
+              .map((change) => ({
+                pr: row.pr,
+                mergedAt: row.mergedAt,
+                sha: row.commit?.sha,
+                committedAt: row.commit?.committedAt,
+                ...change,
+              }))
+          : query.file
+            ? []
+            : [{ pr: row.pr, mergedAt: row.mergedAt, sha: null, available: false }],
+      )
+      .slice(query.offset, query.offset + query.limit + 1);
+  }
   if (query.kind === "merged-files") {
     return datedPrFiles(db, query.repoId, query.from, query.until)
       .filter(

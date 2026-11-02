@@ -55,9 +55,11 @@ export function recordRiskMembership(
     kind: MembershipKind;
     files: readonly string[];
     declaredFiles: number | null;
+    excludedFiles?: readonly string[];
     at: number;
   },
 ) {
+  const inputPaths = new Set(input.files);
   if (
     !/^[a-f0-9]{40,64}$/i.test(input.sha) ||
     !Number.isSafeInteger(input.pr) ||
@@ -65,7 +67,10 @@ export function recordRiskMembership(
     input.at < 0 ||
     input.pr < 1 ||
     input.files.length > RISK_MEMBERSHIP_MAX ||
-    !input.files.every(riskPath)
+    !input.files.every(riskPath) ||
+    (input.excludedFiles !== undefined &&
+      (!input.excludedFiles.every(riskPath) ||
+        input.excludedFiles.some((path) => !inputPaths.has(path))))
   )
     throw Error("Invalid code-health file membership");
   const files = [...new Set(input.files)].sort(),
@@ -74,7 +79,12 @@ export function recordRiskMembership(
       input.declaredFiles !== null &&
       input.declaredFiles >= 0 &&
       input.declaredFiles === files.length;
-  const payload = JSON.stringify({ files, declaredFiles: input.declaredFiles, complete });
+  const payload = JSON.stringify({
+    files,
+    excludedFiles: [...new Set(input.excludedFiles ?? [])].sort(),
+    declaredFiles: input.declaredFiles,
+    complete,
+  });
   if (payload.length > 16 * 1024 * 1024)
     throw Error("Code-health file membership exceeds its bounded limit");
   db.prepare(
@@ -86,6 +96,7 @@ export interface DatedPrFiles {
   sha: string | null;
   mergedAt: number;
   collectedAt: number | null;
+  excludedFiles: string[];
   declaredFiles: number | null;
   files: string[];
   complete: boolean;
@@ -119,8 +130,16 @@ function membership(db: Db, repoId: string, pr: number, sha: unknown, kind: Memb
       ? value.declaredFiles
       : null;
   const files = [...new Set(value.files as string[])];
+  const filePaths = new Set(files);
+  const excludedFiles = "excludedFiles" in value ? value.excludedFiles : [];
+  if (
+    !Array.isArray(excludedFiles) ||
+    !excludedFiles.every((path) => riskPath(path) && filePaths.has(path))
+  )
+    throw Error("Invalid excluded file provenance");
   return {
     files,
+    excludedFiles: excludedFiles as string[],
     declaredFiles: declared,
     complete: declared !== null && declared === files.length,
     bytes: Number(row.bytes),
@@ -174,6 +193,7 @@ export function datedPrFiles(db: Db, repoId: string, from: number, until: number
       collectedAt: selected?.collectedAt ?? null,
       declaredFiles: selected?.declaredFiles ?? null,
       files: selected?.files ?? [],
+      excludedFiles: selected?.excludedFiles ?? [],
       complete: selected?.complete ?? false,
       source: merge?.complete
         ? "git-merge"
@@ -193,7 +213,10 @@ export function aggregateDatedRisk(prs: readonly DatedPrFiles[]) {
   let pairLimit = false,
     excludedBroadPrs = 0;
   for (const pr of prs) {
-    const paths = [...new Set(pr.files.filter(riskFile))].sort();
+    const excluded = new Set(pr.excludedFiles);
+    const paths = [
+      ...new Set(pr.files.filter((path) => riskFile(path) && !excluded.has(path))),
+    ].sort();
     for (const path of paths) {
       const members = touches.get(path) ?? new Set<number>();
       members.add(pr.pr);

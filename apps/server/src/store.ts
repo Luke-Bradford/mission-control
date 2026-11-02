@@ -141,6 +141,14 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 import {
+  failGitFileSource,
+  gitFileMetrics,
+  gitFileSource,
+  installGitFileSources,
+  markGitFileChecked,
+  recordGitFileSource,
+} from "./code-health/git-store.ts";
+import {
   installRecommendations,
   linkRecommendation,
   type Mutation,
@@ -1240,6 +1248,7 @@ export class Store {
     this.migrate();
     this.backfillAuditHistory();
     installRiskMemberships(this.db);
+    installGitFileSources(this.db);
     installRecommendations(this.db);
     installCodeHealthRevisions(this.db);
   }
@@ -1370,6 +1379,26 @@ export class Store {
 
   codeHealthDatedRisk(repoId: string, from: number, until: number) {
     return aggregateDatedRisk(datedPrFiles(this.db, repoId, from, until));
+  }
+  codeHealthGitSource(repoId: string, checkout: string) {
+    return gitFileSource(this.db, repoId, checkout);
+  }
+  recordCodeHealthGitSource(
+    repoId: string,
+    checkout: string,
+    source: Parameters<typeof recordGitFileSource>[3],
+    at: number,
+  ) {
+    this.transaction(() => recordGitFileSource(this.db, repoId, checkout, source, at));
+  }
+  markCodeHealthGitChecked(repoId: string, checkout: string, sha: string, at: number) {
+    markGitFileChecked(this.db, repoId, checkout, sha, at);
+  }
+  failCodeHealthGitSource(repoId: string, checkout: string, sha: string | null, at: number) {
+    failGitFileSource(this.db, repoId, checkout, sha, at);
+  }
+  codeHealthGitMetrics(repoId: string, checkout: string, from: number, until: number, at: number) {
+    return gitFileMetrics(this.db, repoId, checkout, from, until, at);
   }
   codeHealthReviewedFiles(repoId: string, from: number, until: number) {
     return reviewedFileMembership(this.db, repoId, from, until);

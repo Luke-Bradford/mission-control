@@ -364,6 +364,7 @@ export class CodeHealthReader {
       offset,
       limit,
       checkout: this.checkout(repoId),
+      at: this.now(),
     });
     const more = rows.length > limit;
     const atLimit = offset + limit >= 20_000;
