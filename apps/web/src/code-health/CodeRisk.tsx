@@ -1,5 +1,6 @@
 import type { CodeHealthCoverage, CodeHealthEvidenceRef, CodeHealthView } from "@mc/core";
 import { useMemo, useState } from "react";
+import { percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 
 type Risk = Extract<CodeHealthView["data"], { tab: "risk" }>;
@@ -328,7 +329,7 @@ export function CodeRisk({
                         className="ch-number"
                         title={`${row.sharedPrs} of ${row.lessFrequentlyChangedFilePrs} eligible PRs`}
                       >
-                        {row.sharePercent.toFixed(1)}%
+                        {percent(row.sharePercent, 1)}
                       </td>
                     </tr>
                   ))}
