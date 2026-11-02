@@ -5646,6 +5646,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        // This note is another breaker-recovery route. Preserve the same independent operator
+        // authority as /flight/runaway/lift, including decoded attention keys.
+        if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && flightActor(req) !== null)
+          return reply
+            .code(403)
+            .send({ error: "This action belongs to the operator or independent controller." });
         // dismissing the runaway breaker's flag lifts the breaker, so the flag cannot go while it holds
         if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && liftRunaway(store, bus, now()))
           return { dismissed: key };
