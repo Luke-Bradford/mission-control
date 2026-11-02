@@ -75,6 +75,7 @@ const comms = (i: number) => ({
 });
 
 const api = {
+  "/api/crew/pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [

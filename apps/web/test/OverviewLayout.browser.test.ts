@@ -53,6 +53,7 @@ const accounts = [
 ];
 
 const api = {
+  "/api/crew/pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [stage("ready", 5), stage("building", 7), stage("review", 0), stage("merged", 4)],

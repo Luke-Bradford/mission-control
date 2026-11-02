@@ -215,6 +215,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           },
         ]),
     ),
+    "/api/crew/pause": null,
     "/api/config": config,
     "/api/crew?shape=summary": { rows, firstRunToday: NOW - 60 * MIN },
     "/api/attention": attention,
