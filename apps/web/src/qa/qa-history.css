@@ -1,3 +1,7 @@
+.qa-history {
+  height: auto;
+  align-content: start;
+}
 .qa-navigation {
   display: flex;
   gap: var(--sp-2);

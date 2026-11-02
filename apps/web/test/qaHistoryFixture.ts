@@ -1,33 +1,53 @@
 import type { QaHistoryEntry, QaHistoryPage, QaNativeHistory } from "@mc/core";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
-const r = qaReportFixture();
-export function qaHistoryFixture(count = 3): QaHistoryPage {
+/** Each index row and its linked detail share the same fictional repo/PR/head/reviewer. */
+export function qaHistorySavedReport(index = 0) {
+  const r = qaReportFixture();
+  if (index === 0) return r;
+  const id = (index + 1).toString(16).padStart(64, "0");
+  const headSha = (index + 1).toString(16).padStart(8, "0").repeat(5);
+  const prNumber = r.prNumber + index;
   return {
-    entries: Array.from(
-      { length: count },
-      (_, i): QaHistoryEntry => ({
-        key: i % 2 ? `n:${i + 1}` : `r:${(i + 1).toString(16).padStart(64, "0")}`,
-        kind: i % 2 ? "native" : "report",
-        source: i % 2 ? "native" : "controller",
-        repoId: "mission-control",
-        prNumber: r.prNumber + i,
-        headSha: (i + 1).toString(16).padStart(40, "a"),
-        title: i % 2 ? `Native review · round ${i + 1}` : r.prTitle,
-        reviewer: { id: `reviewer-${i}`, label: i % 2 ? "RETRO-2" : "Independent reviewer" },
+    ...r,
+    id,
+    headSha,
+    prNumber,
+    prUrl: `https://github.com/o/mc/pull/${prNumber}`,
+    reviewer: { id: `reviewer-${index}`, label: "Independent reviewer" },
+    ci: { ...r.ci, headSha },
+    permalink: `/qa?repo=${r.repoId}&pr=${prNumber}&report=${id}`,
+  };
+}
+export function qaHistoryFixture(count = 3): QaHistoryPage {
+  const r = qaReportFixture();
+  return {
+    entries: Array.from({ length: count }, (_, i): QaHistoryEntry => {
+      const report = qaHistorySavedReport(i);
+      const native = i % 2 === 1;
+      return {
+        key: native ? `n:${i + 1}` : `r:${report.id}`,
+        kind: native ? "native" : "report",
+        source: native ? "native" : "controller",
+        repoId: report.repoId,
+        prNumber: report.prNumber,
+        headSha: report.headSha,
+        title: native ? `Native review · round ${i + 1}` : report.prTitle,
+        reviewer: native ? { id: `retro-${i + 1}`, label: `RETRO-${i + 1}` } : report.reviewer,
         reviewedAt: i === 1 ? null : r.reviewedAt,
         recordedAt: r.registeredAt - i * 1000,
-        state: i === 1 ? "failed" : "saved",
-        verdict: i === 1 ? null : r.verdict,
-        evidence: i % 2 ? "legacy" : "complete",
-        ci: i % 2 ? "unavailable" : "passing",
-        visual: i % 2 ? "unknown" : "required",
-        pairCount: i % 2 ? 0 : 4,
-        screenshotCount: i % 2 ? 1 : 0,
-        permalink:
-          i % 2 ? `/qa?view=history&native=${i + 1}&identity=${"d".repeat(64)}` : r.permalink,
-      }),
-    ),
+        state: native ? (i === 1 ? "failed" : "reported") : "saved",
+        verdict: i === 1 ? null : report.verdict,
+        evidence: native ? "legacy" : "complete",
+        ci: native ? "unavailable" : "passing",
+        visual: native ? "unknown" : "required",
+        pairCount: native ? 0 : report.visual.pairs.length,
+        screenshotCount: native ? 1 : 0,
+        permalink: native
+          ? `/qa?view=history&native=${i + 1}&identity=${"d".repeat(64)}`
+          : report.permalink,
+      };
+    }),
     repositories: [{ id: "mission-control" }, { id: "sample" }],
     limit: 50,
     nextCursor: count === 50 ? "fixture-next-cursor" : null,
@@ -36,39 +56,49 @@ export function qaHistoryFixture(count = 3): QaHistoryPage {
     ],
   };
 }
-export function nativeQaFixture(): QaNativeHistory {
-  const entry = qaHistoryFixture(2).entries[1];
+export function nativeQaFixture(index = 1): QaNativeHistory {
+  const entry = qaHistoryFixture(index + 1).entries[index];
+  if (entry.kind !== "native") throw new Error("Choose a native fixture entry");
   return {
     entry,
-    prUrl: "https://github.com/o/mc/pull/1012",
+    prUrl: `https://github.com/o/mc/pull/${entry.prNumber}`,
     headUrl: `https://github.com/o/mc/commit/${entry.headSha}`,
     review: {
-      id: 2,
-      authorRunId: "author-2",
+      id: index + 1,
+      authorRunId: `author-${index + 1}`,
       repoId: entry.repoId,
       seatId: entry.reviewer.id,
       prNumber: entry.prNumber,
       sha: entry.headSha,
       epoch: 1,
       attempt: 1,
-      round: 2,
-      state: "failed",
-      runId: "review-2",
-      verdict: null,
-      summary: null,
+      round: index + 1,
+      state: entry.state === "failed" ? "failed" : "reported",
+      runId: `review-${index + 1}`,
+      verdict: entry.verdict,
+      summary: entry.verdict ? "Original fictional review summary." : null,
       blocking: 0,
       minor: 0,
-      failure: "No verdict recorded before the review ended.",
+      failure: entry.verdict ? null : "No verdict recorded before the review ended.",
       createdAt: entry.recordedAt - 1000,
       startedAt: entry.recordedAt - 500,
       endedAt: entry.recordedAt,
     },
     findings: [],
     coverage: [],
-    tests: [{ command: "pnpm test", file: null, passed: 2, failed: 1, skipped: 0, duration: 24 }],
+    tests: [
+      {
+        command: "pnpm test",
+        file: null,
+        passed: entry.verdict ? 3 : 2,
+        failed: entry.verdict ? 0 : 1,
+        skipped: 0,
+        duration: 24,
+      },
+    ],
     screenshots: [
       {
-        id: "fixture-shot",
+        id: "f".repeat(32),
         label: "Recorded browser check",
         width: 1600,
         theme: "dark",
@@ -80,4 +110,15 @@ export function nativeQaFixture(): QaNativeHistory {
       "Test counts are reviewer-reported. Recorded screenshots may have expired.",
     ],
   };
+}
+export function qaHistoryApi(count = 3): Record<string, unknown> {
+  const page = qaHistoryFixture(count);
+  const api: Record<string, unknown> = { "/api/qa/history?limit=50": page };
+  for (let i = 0; i < count; i++) {
+    if (page.entries[i].kind === "report") {
+      const report = qaHistorySavedReport(i);
+      api[`/api/qa-reports/${report.id}`] = report;
+    } else api[`/api/qa/history/native/${i + 1}?identity=${"d".repeat(64)}`] = nativeQaFixture(i);
+  }
+  return api;
 }

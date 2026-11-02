@@ -22,7 +22,15 @@ window.fetch = (input, init) => {
     return Promise.resolve(
       new Response(JSON.stringify({ token: "synthetic-desktop-fixture-key" }), { status: 200 }),
     );
-  if (/^\/api\/qa-report-assets\/[de]{64}$/.test(path)) {
+  const nativeHistoryImage = path === `/api/qa/review-shots/${"f".repeat(32)}`;
+  if (
+    nativeHistoryImage &&
+    new Headers(init?.headers).get("x-mc-operator") !== "synthetic-desktop-fixture-key"
+  )
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "Fixture operator token required" }), { status: 401 }),
+    );
+  if (/^\/api\/qa-report-assets\/[de]{64}$/.test(path) || nativeHistoryImage) {
     const png = Uint8Array.from(
       atob(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVEsAAAAASUVORK5CYII=",

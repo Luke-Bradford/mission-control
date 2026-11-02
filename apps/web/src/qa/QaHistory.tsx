@@ -137,7 +137,7 @@ export function QaHistory() {
                   </colgroup>
                   <thead>
                     <tr>
-                      <th scope="col">PR and reviewed head</th>
+                      <th scope="col">PR and commit</th>
                       <th scope="col">Reviewer and review time</th>
                       <th scope="col">Recorded verdict</th>
                       <th scope="col">CI and evidence</th>
@@ -299,8 +299,8 @@ export function NativeQaHistory({ id, identity }: { id: string; identity: string
                   GitHub PR
                 </ExternalLink>
                 {record.headUrl && (
-                  <ExternalLink url={record.headUrl} label="Open reviewed commit on GitHub">
-                    Exact reviewed commit
+                  <ExternalLink url={record.headUrl} label="Open exact commit on GitHub">
+                    Exact commit
                   </ExternalLink>
                 )}
               </div>

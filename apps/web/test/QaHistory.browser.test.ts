@@ -2,8 +2,8 @@
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { nativeQaFixture, qaHistoryFixture } from "./qaHistoryFixture.ts";
-import { qaReportFixture } from "./qaReportFixture.ts";
+import { nativeQaFixture, qaHistoryApi, qaHistoryFixture } from "./qaHistoryFixture.ts";
+import { qaReportApi, qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
 describeRendered("QA history in the application shell", () => {
@@ -47,7 +47,19 @@ describeRendered("QA history in the application shell", () => {
                     client: el.clientWidth,
                   }),
                 );
+                const title = document
+                  .querySelector(".qa-history > header")
+                  ?.getBoundingClientRect();
+                const filters = document
+                  .querySelector(".qa-history > .qa-history-toolbar")
+                  ?.getBoundingClientRect();
+                const panel = document
+                  .querySelector(".qa-history > .panel")
+                  ?.getBoundingClientRect();
+                if (!title || !filters || !panel) throw new Error("History layout regions missing");
                 return {
+                  headerFilterGap: filters.top - title.bottom,
+                  filterTableGap: panel.top - filters.bottom,
                   width: document.documentElement.scrollWidth,
                   viewport: innerWidth,
                   table: area.scrollHeight > area.clientHeight,
@@ -57,6 +69,10 @@ describeRendered("QA history in the application shell", () => {
                   mainHeight: main.clientHeight,
                 };
               }, null);
+              expect(facts.headerFilterGap).toBeGreaterThanOrEqual(0);
+              expect(facts.headerFilterGap).toBeLessThanOrEqual(24);
+              expect(facts.filterTableGap).toBeGreaterThanOrEqual(0);
+              expect(facts.filterTableGap).toBeLessThanOrEqual(24);
               expect(facts.width).toBeLessThanOrEqual(width);
               expect(facts.table).toBe(true);
               expect(facts.tab).toBe(0);
@@ -142,6 +158,7 @@ describeRendered("QA history in the application shell", () => {
         search: `?path=${encodeURIComponent("/qa?view=history")}`,
         api: {
           ...desktopFixture().api,
+          ...qaHistoryApi(),
           "/api/qa/history?limit=50": f,
           [`/api/qa-reports/${r.id}`]: r,
           [`/api/qa/history/native/2?identity=${"d".repeat(64)}`]: nativeQaFixture(),
@@ -154,6 +171,9 @@ describeRendered("QA history in the application shell", () => {
         }, null);
         await page.press("Enter");
         await page.boxes("article.qa-report");
+        expect(
+          await page.evaluate(() => document.querySelector("article.qa-report")?.textContent, null),
+        ).toContain(f.entries[0].headSha);
         expect(
           await page.evaluate(() => document.querySelectorAll(".uat-accept").length, null),
         ).toBe(0);
@@ -170,6 +190,19 @@ describeRendered("QA history in the application shell", () => {
             null,
           ),
         ).toMatchObject({ images: 0 });
+        await page.click(".qa-history-native figure button");
+        await page.boxes(".qa-history-native img");
+        const image = await page.evaluate(async () => {
+          const image = document.querySelector<HTMLImageElement>(".qa-history-native img");
+          if (!image) throw new Error("Requested fixture screenshot missing");
+          await image.decode();
+          return {
+            data: image.src.startsWith("data:image/png;base64,"),
+            width: image.naturalWidth,
+          };
+        }, null);
+        expect(image).toEqual({ data: true, width: 1 });
+
         expect(page.errors()).toEqual([]);
       } finally {
         await page.close();
@@ -218,6 +251,101 @@ describeRendered("QA history in the application shell", () => {
             await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth, null),
           ).toBe(true);
           expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+  it(
+    "keeps Current and filled saved reports reachable below persistent navigation at short height",
+    async () => {
+      for (const colorScheme of ["light", "dark"] as const)
+        for (const expanded of [false, true])
+          for (const archived of [false, true]) {
+            const report = qaReportFixture();
+            const page = await renderAt({
+              page: "test/desktopBrowser.html",
+              width: 1600,
+              height: 700,
+              colorScheme,
+              search: `?path=${encodeURIComponent(archived ? report.permalink : "/qa")}`,
+              api: { ...desktopFixture().api, ...qaReportApi(3) },
+            });
+            try {
+              await page.boxes("article.qa-report");
+              if (expanded) await page.click("#dock .dockrail button");
+              const before = await page.evaluate(() => {
+                const items = [
+                  ...document.querySelectorAll<HTMLElement>(
+                    "main a[href], main button:not(:disabled), main textarea:not(:disabled), main summary, main input:not(:disabled)",
+                  ),
+                ].filter((e) => e.getBoundingClientRect().height > 0);
+                const last = items.at(-1);
+                if (!last) throw new Error("Last interactive content missing");
+                last.focus();
+                return last.textContent || last.getAttribute("aria-label") || last.tagName;
+              }, null);
+              await page.press("Shift+Tab");
+              await page.press("Tab");
+              const after = await page.evaluate(() => {
+                const active = document.activeElement as HTMLElement,
+                  rect = active.getBoundingClientRect(),
+                  main = document.querySelector("main") as HTMLElement,
+                  area = main.getBoundingClientRect();
+                return {
+                  text: active.textContent || active.getAttribute("aria-label") || active.tagName,
+                  visible: rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1,
+                  nav: document.querySelectorAll(".qa-navigation").length,
+                  documentWidth: document.documentElement.scrollWidth,
+                };
+              }, null);
+              expect(after.text).toBe(before);
+              expect(after.visible).toBe(true);
+              expect(after.nav).toBe(1);
+              expect(after.documentWidth).toBeLessThanOrEqual(1600);
+              expect(page.errors()).toEqual([]);
+            } finally {
+              await page.close();
+            }
+          }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps a short history next to its heading and filters",
+    async () => {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme,
+          search: `?path=${encodeURIComponent("/qa?view=history")}`,
+          api: { ...desktopFixture().api, ...qaHistoryApi(3) },
+        });
+        try {
+          await page.boxes(".qa-history-table");
+          await page.click("#dock .dockrail button");
+          const flow = await page.evaluate(() => {
+            const heading = document.querySelector(".qa-history > header")?.getBoundingClientRect(),
+              filters = document
+                .querySelector(".qa-history > .qa-history-toolbar")
+                ?.getBoundingClientRect(),
+              panel = document.querySelector(".qa-history > .panel")?.getBoundingClientRect(),
+              page = document.querySelector(".qa-history")?.getBoundingClientRect();
+            if (!heading || !filters || !panel || !page) throw new Error("History regions missing");
+            return {
+              headingGap: filters.top - heading.bottom,
+              tableGap: panel.top - filters.bottom,
+              height: page.height,
+            };
+          }, null);
+          expect(flow.headingGap).toBeLessThanOrEqual(24);
+          expect(flow.tableGap).toBeLessThanOrEqual(24);
+          expect(flow.height).toBeLessThan(700);
         } finally {
           await page.close();
         }

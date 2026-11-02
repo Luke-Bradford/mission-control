@@ -1,5 +1,7 @@
+import { OPERATOR_HEADER } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { forgetOperatorToken } from "../src/api.ts";
 import { hub, streamStatus } from "../src/data.ts";
 import { QaReadiness } from "../src/pages/QaReadiness.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -7,6 +9,7 @@ import { nativeQaFixture, qaHistoryFixture } from "./qaHistoryFixture.ts";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
 beforeEach(() => {
+  forgetOperatorToken();
   hub.clear();
   window.history.replaceState(null, "", "/qa?view=history");
   streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: Date.now() });
@@ -129,4 +132,29 @@ it("rejects empty report references without loading the current queue", () => {
   render(<QaReadiness />);
   expect(screen.getByRole("alert").textContent).toContain("does not match");
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it("requests native images with operator auth only on demand and names pruned bytes", async () => {
+  window.history.replaceState(null, "", `/qa?view=history&native=2&identity=${"d".repeat(64)}`);
+  const fetch = stubFetch({
+    [`/api/qa/history/native/2?identity=${"d".repeat(64)}`]: nativeQaFixture(),
+    "/api/operator/bootstrap": { token: "fictional-history-key" },
+    [`/api/qa/review-shots/${"f".repeat(32)}`]: () => {
+      return { status: 404, body: { error: "not found" } };
+    },
+  });
+  render(<QaReadiness />);
+  await screen.findByRole("button", { name: "Load recorded screenshot" });
+  expect(fetch.mock.calls.map((c) => String(c[0]))).not.toContain("/api/operator/bootstrap");
+  fireEvent.click(screen.getByRole("button", { name: "Load recorded screenshot" }));
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    expect.stringContaining("original bytes may have expired"),
+  );
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.getByRole("button", { name: "Retry screenshot" })).toBeTruthy();
+  const imageCall = fetch.mock.calls.find(
+    ([path]) => path === `/api/qa/review-shots/${"f".repeat(32)}`,
+  );
+  expect(new Headers(imageCall?.[1]?.headers).get(OPERATOR_HEADER)).toBe("fictional-history-key");
 });
