@@ -12,6 +12,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
+import type { RecommendationRecord } from "./recommendations.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
@@ -26,6 +27,8 @@ interface EvidenceQuery {
   reference: CodeHealthEvidenceRef;
   sha?: string;
   file?: string;
+  category?: string;
+  pr?: number;
 }
 
 export { CodeHealthReadError } from "./error.ts";
@@ -170,7 +173,7 @@ export class CodeHealthReader {
       );
       if (tab === "overview") {
         const recommendations = this.store
-          .codeHealthRecommendations(repoId)
+          .codeHealthRecommendations(repoId, at)
           .filter(
             (row) =>
               row.active &&
@@ -195,7 +198,7 @@ export class CodeHealthReader {
           tab,
           recommendations: recommendations
             .slice(0, 3)
-            .map((row) => ({ ...row, evidence: [...evidence] })),
+            .map((row) => this.recommendationEvidence(row, revision)),
           review,
         };
       } else data = { tab, review };
@@ -315,6 +318,73 @@ export class CodeHealthReader {
     }
     this.cache.set(key, { revision, expires: at + CACHE_MS, value });
     return structuredClone(value);
+  }
+
+  private recommendationEvidence(
+    row: RecommendationRecord,
+    revision: string,
+  ): RecommendationRecord {
+    const scope = row.scope;
+    if (!scope) return { ...row, evidence: [] };
+    const coverage: CodeHealthCoverage = {
+      state: scope.observedFrom === null ? "empty" : "available",
+      requestedWindow: "30d",
+      from: scope.from,
+      until: scope.until,
+      observedFrom: scope.observedFrom,
+      observedUntil: scope.observedUntil,
+      collectedAt: scope.observedUntil,
+      analysedSha: null,
+      source: "reported 30-day recommendation cohort",
+      complete: false,
+      note: "Conservative fixed-30-day triage, independent of the selected dashboard window. Coverage describes the observed cohort; this query is narrowed to the recommendation's PR or category/file. Earlier unobserved periods are not zero.",
+    };
+    const { file, category, pr, from, until } = scope;
+    return {
+      ...row,
+      evidence: [
+        this.reference(
+          {
+            repoId: row.repoId,
+            revision,
+            from,
+            until,
+            file,
+            category,
+            pr,
+            kind: row.rule === "recurring-correction" ? "findings" : "review-rounds",
+          },
+          row.rule === "recurring-correction"
+            ? "Recurring correction evidence · 30d"
+            : "Repeated review rounds · 30d",
+          "Reported rows in the recommendation's own 30-day window, filtered to its category/file or PR.",
+          coverage,
+        ),
+      ],
+    };
+  }
+
+  recommendation(repoId: string, id: string) {
+    this.repo(repoId);
+    return this.store.codeHealthSnapshot(() => {
+      const row = this.store.codeHealthRecommendation(repoId, id);
+      if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation");
+      return this.recommendationEvidence(row, this.store.codeHealthRevision(repoId));
+    });
+  }
+
+  recommendationHistory(repoId: string, offset: number) {
+    this.repo(repoId);
+    return this.store.codeHealthSnapshot(() => {
+      const page = this.store.codeHealthRecommendationPage(repoId, offset),
+        revision = this.store.codeHealthRevision(repoId);
+      return {
+        ...page,
+        recommendations: page.recommendations
+          .filter((row): row is RecommendationRecord => row !== null)
+          .map((row) => this.recommendationEvidence(row, revision)),
+      };
+    });
   }
 
   /** References are issued for this reader's bounded snapshots, never arbitrary SQL or paths. */

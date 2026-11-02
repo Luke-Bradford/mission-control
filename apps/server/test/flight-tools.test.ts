@@ -4285,12 +4285,14 @@ describe("create_ticket", () => {
     readImpl = (n) => card(n, { status: "" });
     let creates = 0,
       failProject = true;
-    ghImpl = async (a) =>
-      a[1] === "list"
-        ? { code: 0, stdout: "[]", stderr: "" }
-        : a[1] === "create"
-          ? (creates++, { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" })
-          : { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
+    ghImpl = async (a) => {
+      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      if (a[1] === "create") {
+        creates++;
+        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
+      }
+      return { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
+    };
     expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
     expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toBe(
       "https://github.com/o/mc/issues/42",
@@ -4325,13 +4327,47 @@ describe("create_ticket", () => {
       return { code: 0, stdout: "", stderr: "" };
     };
     expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
-      "Recovered existing",
-    );
+    expect(
+      (
+        await call(
+          "create_ticket",
+          C({ recommendationId, title: "Rephrased title", body: `${BODY}Updated phrasing` }),
+        )
+      ).text,
+    ).toContain("Recovered existing");
     expect(creates).toBe(1);
     expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toContain(
       "issues/42",
     );
+  });
+  it("fails closed after an ambiguous creation with no visible marker", async () => {
+    const recommendationId = acceptedRecommendation();
+    let creates = 0;
+    ghImpl = async (a) => {
+      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      creates++;
+      return { code: 1, stdout: "", stderr: "response lost" };
+    };
+    await call("create_ticket", C({ recommendationId }));
+    const retry = await call("create_ticket", C({ recommendationId, title: "Changed title" }));
+    expect(retry.isError).toBe(true);
+    expect(retry.text).toContain("uncertain outcome");
+    expect(creates).toBe(1);
+  });
+  it("counts partial project-recovery writes before a failed board read", async () => {
+    const recommendationId = acceptedRecommendation();
+    store.linkCodeHealthRecommendation(
+      "mc",
+      recommendationId,
+      "https://github.com/o/mc/issues/42",
+      "flight-1",
+      NOW,
+    );
+    readImpl = () => null;
+    ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
+    for (let i = 0; i < 6; i++) await call("create_ticket", C({ recommendationId }));
+    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(5);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(5);
   });
   it("refuses an unaccepted or foreign recommendation before GitHub reads", async () => {
     store.refreshCodeHealthRecommendations("mc", NOW);

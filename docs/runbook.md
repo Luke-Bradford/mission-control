@@ -27,7 +27,9 @@ Overview shows at most three ranked open proposals. Conservative rules use repor
 review evidence. Dated file touches and ordered test results remain collection proposals until
 those sources exist. Refresh materialises derived proposal rows in the local database; it never
 changes a decision, starts a seat, files a ticket or applies code or rules. Expired proposals become
-inactive, while decisions and accepted metric baselines remain durable.
+inactive, while decisions and accepted metric baselines remain durable. Each proposal carries
+its own fixed-30-day query and observed coverage, including category/file or PR filters.
+Changing the dashboard window cannot substitute a shorter cohort for that evidence.
 
 Read retained records with `GET /api/code-health/recommendations?repo=<id>&cursor=0`.
 Pages hold at most 50 records. Both history and decisions require the operator token.
@@ -43,7 +45,10 @@ FLIGHT. FLIGHT reads the recommendation, then uses its existing authorised `crea
 path with `recommendationId`. That path retains engine, role, secret, breaker and Away checks.
 It records the issue link before project updates, so a project failure cannot create another
 issue on retry. The same call finishes a failed board handoff and preserves an existing card
-status. A matching body marker recovers an issue whose creation response was lost. Config/rule
+status. A stable body marker recovers an issue whose creation response was lost, even after rephrasing.
+The creation attempt is recorded before calling GitHub. If its outcome is uncertain and no
+marker is found in the bounded issue list, the handoff stays pending for inspection; the
+service does not risk a second issue. Partial recovery writes count toward the runaway breaker. Config/rule
 changes still need their existing proposal and approval paths. No recommendation action
 applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
 

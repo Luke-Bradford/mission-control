@@ -271,6 +271,158 @@ describe("durable code-health decisions", () => {
       await app.close();
     }
   });
+  it("keeps 30-day recommendation evidence independent of selected dashboard range", async () => {
+    review(1, 10, 3);
+    db.prepare("UPDATE reviews SET ended_at=? WHERE id=1").run(NOW - 15 * 86400000);
+    const app = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      operatorToken: TOKEN,
+      now: () => NOW,
+    });
+    const headers = { "x-mc-operator": TOKEN };
+    try {
+      for (const window of ["7d", "90d"]) {
+        const view = (
+          await app.inject({ url: `/api/code-health?repo=sample&window=${window}`, headers })
+        ).json();
+        const row = view.data.recommendations.find(
+          (r: { rule: string }) => r.rule === "repeated-rounds",
+        );
+        expect(row.evidence[0].coverage.requestedWindow).toBe("30d");
+        const page = (
+          await app.inject({
+            url: `/api/code-health/evidence/${row.evidence[0].id}?repo=sample`,
+            headers,
+          })
+        ).json();
+        expect(page.rows.map((r: { pr: number }) => r.pr)).toEqual([10]);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+  it("narrows recurring-correction evidence to the actual category/file", async () => {
+    review(1, 10);
+    review(2, 11);
+    finding(1, 0);
+    finding(1, 1);
+    finding(2, 0);
+    finding(2, 1, "src/other.ts");
+    finding(2, 2, "src/example.ts", "correctness");
+    const app = buildApp({
+        config,
+        store,
+        bus: new ChangeBus(),
+        operatorToken: TOKEN,
+        now: () => NOW,
+      }),
+      headers = { "x-mc-operator": TOKEN };
+    try {
+      const view = (
+        await app.inject({ url: "/api/code-health?repo=sample&window=7d", headers })
+      ).json();
+      const row = view.data.recommendations.find(
+        (r: { rule: string }) => r.rule === "recurring-correction",
+      );
+      const page = (
+        await app.inject({
+          url: `/api/code-health/evidence/${row.evidence[0].id}?repo=sample`,
+          headers,
+        })
+      ).json();
+      expect(page.rows).toHaveLength(3);
+      expect(
+        page.rows.every(
+          (r: { file: string; category: string }) =>
+            r.file === "src/example.ts" && r.category === "spec",
+        ),
+      ).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+  it("finds current proposals behind more than 200 newer inactive history rows", async () => {
+    review(1, 10, 3);
+    const row = proposal();
+    const insert = db.prepare(
+      "INSERT INTO code_health_recommendations(id,repo_id,proposal,active,created_at,updated_at)VALUES(?,'sample',?,0,?,?)",
+    );
+    for (let i = 0; i < 210; i++)
+      insert.run(
+        `history-${i}`,
+        JSON.stringify({ ...row, id: `history-${i}` }),
+        NOW + i + 1,
+        NOW + i + 1,
+      );
+    const app = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      operatorToken: TOKEN,
+      now: () => NOW,
+    });
+    try {
+      const view = (
+        await app.inject({
+          url: "/api/code-health?repo=sample",
+          headers: { "x-mc-operator": TOKEN },
+        })
+      ).json();
+      expect(
+        view.data.recommendations.some((r: { rule: string }) => r.rule === "repeated-rounds"),
+      ).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+  it("replays a successful HTTP assessment after its own source revision changes", async () => {
+    let at = NOW;
+    review(1, 10, 3);
+    const row = proposal(),
+      acceptedRequest = request(row, { action: "accept", owner: "owner", reviewAt: NOW + 10 });
+    store.decideCodeHealthRecommendation("sample", row.id, acceptedRequest, "operator", NOW);
+    const app = buildApp({
+        config,
+        store,
+        bus: new ChangeBus(),
+        operatorToken: TOKEN,
+        now: () => at,
+      }),
+      headers = { "x-mc-operator": TOKEN };
+    try {
+      at = NOW + 20;
+      const view = (await app.inject({ url: "/api/code-health?repo=sample", headers })).json(),
+        current = present(store.codeHealthRecommendation("sample", row.id));
+      const payload = request(current, {
+          action: "assess",
+          outcome: "paid-off",
+          reason: "Observed improvement",
+          comparison: "Compared with saved metric baseline",
+          evidenceId: view.evidence[0].id,
+        }),
+        url = `/api/code-health/recommendations/${row.id}?repo=sample`;
+      const first = await app.inject({ method: "POST", url, headers, payload });
+      expect(first.statusCode).toBe(200);
+      const retry = await app.inject({ method: "POST", url, headers, payload });
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual(first.json());
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url,
+            headers,
+            payload: { ...payload, basis: "conflicting retry" },
+          })
+        ).statusCode,
+      ).toBe(409);
+      expect(first.json().state.assessment).toContain("\nComparison");
+    } finally {
+      await app.close();
+    }
+  });
   it("protects HTTP decisions, fails closed on secret-provider failure and validates issued assessment evidence", async () => {
     const row = proposal();
     let fail = false;

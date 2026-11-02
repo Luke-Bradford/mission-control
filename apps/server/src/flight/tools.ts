@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * FLIGHT's mc tools. Each is hidden from every seat whose role does not grant it (`modes: []`,
  * `grantable: ["read-only"]`) and re-checks the run and the seat's loop on every call, so a token
@@ -1973,13 +1974,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const stopped = breakerRefusal();
       if (stopped) return stopped;
       let existingWork: string | null = null,
-        workReady = false;
+        workReady = false,
+        workAttempt = false;
       if (recommendationId) {
         const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
         if (recommendation?.state.kind !== "accepted")
           return fail("Code-health work requires an accepted recommendation in this repo.");
         existingWork = recommendation.linkedWork;
         workReady = recommendation.workReady;
+        workAttempt = recommendation.workAttempt !== null;
       }
       const at = now();
       const cwd = crewDir(deps.dbPath);
@@ -2001,6 +2004,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           failed("project item-add", added);
           return fail(notOnProjectText(ref));
         }
+        if (recovered)
+          record(now(), {
+            kind: "ticket",
+            ref,
+            about: `${ref}: recommendation project handoff`,
+            decision: "Retried project item-add for existing accepted work.",
+            basis,
+          });
         // a draft repo's board is never written: moveCard would answer ok and change nothing
         if (repo.autonomy !== "merge") {
           if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
@@ -2077,8 +2088,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           (row) =>
             row &&
             typeof row.body === "string" &&
-            row.body === body &&
-            row.title === title &&
+            row.body.split(/\r?\n/).includes(marker) &&
             Number.isSafeInteger(row.number) &&
             row.number > 0,
         );
@@ -2088,6 +2098,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return finish(linked.number, url, true);
         }
       }
+      if (recommendationId && workAttempt)
+        return fail(
+          "An earlier issue creation has an uncertain outcome. No matching recommendation marker was found in the bounded issue list. Inspect GitHub and the audit before resolving this handoff; no second issue was created.",
+        );
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
@@ -2097,6 +2111,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!checked?.ok) return fail(createFieldOptionText(checked?.reason ?? ""));
       }
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+      if (recommendationId) {
+        store.beginCodeHealthWork(
+          repo.id,
+          recommendationId,
+          createHash("sha256")
+            .update(JSON.stringify({ title, body, labels: [...labels].sort(), fields }))
+            .digest("hex"),
+          at,
+        );
+        record(at, {
+          kind: "ticket",
+          ref: recommendationId,
+          about: `Code health ${repo.id}: issue creation attempt`,
+          decision: "Attempting accepted recommendation work through create_ticket.",
+          basis,
+        });
+      }
       const created = await deps.gh(
         [
           "issue",

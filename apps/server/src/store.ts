@@ -1235,8 +1235,8 @@ export class Store {
     installCodeHealthRevisions(this.db);
   }
 
-  codeHealthRecommendations(repoId: string) {
-    return recommendationRows(this.db, repoId);
+  codeHealthRecommendations(repoId: string, openAt?: number) {
+    return recommendationRows(this.db, repoId, openAt);
   }
   codeHealthRecommendationPage(repoId: string, offset: number) {
     const rows = this.db
@@ -1265,6 +1265,15 @@ export class Store {
         )
         .run(at, repoId, ...ids);
     });
+  }
+  codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
+        )
+        .get(repoId, requestId) !== undefined
+    );
   }
   decideCodeHealthRecommendation(
     repoId: string,
@@ -1334,6 +1343,13 @@ export class Store {
     });
   }
 
+  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number) {
+    this.db
+      .prepare(
+        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL",
+      )
+      .run(JSON.stringify({ fingerprint, at }), repoId, id);
+  }
   completeCodeHealthWork(repoId: string, id: string) {
     this.db
       .prepare(

@@ -4133,7 +4133,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         reply.header("cache-control", "no-store");
         try {
           return await codeHealthOutput(
-            store.codeHealthRecommendationPage(query.data.repo, Number(query.data.cursor)),
+            codeHealth.recommendationHistory(query.data.repo, Number(query.data.cursor)),
           );
         } catch (error) {
           return codeHealthFailure(error, reply);
@@ -4161,7 +4161,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply.code(400).send({
               error: "Decision contains unsafe text or credentials. Remove it before retrying.",
             });
-          if (body.data.change.action === "assess")
+          if (
+            body.data.change.action === "assess" &&
+            !store.codeHealthDecisionRecorded(query.data.repo, body.data.requestId)
+          )
             codeHealth.evidence(query.data.repo, body.data.change.evidenceId, undefined);
           const result = store.decideCodeHealthRecommendation(
             query.data.repo,

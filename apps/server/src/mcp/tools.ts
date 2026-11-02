@@ -2838,7 +2838,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             }),
           ]);
           const value = parsed.data.recommendation
-            ? store.codeHealthRecommendation(live.run.repoId, parsed.data.recommendation)
+            ? codeHealth.recommendation(live.run.repoId, parsed.data.recommendation)
             : parsed.data.evidence
               ? codeHealth.evidence(live.run.repoId, parsed.data.evidence, parsed.data.cursor)
               : codeHealth.read(live.run.repoId, parsed.data.window, parsed.data.tab);

@@ -10,15 +10,30 @@ import type { Store } from "../store.ts";
 import { CodeHealthReadError } from "./error.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
-type Proposal = Omit<CodeHealthRecommendation, "createdAt" | "updatedAt" | "state" | "evidence">;
+export interface RecommendationScope {
+  from: number;
+  until: number;
+  file?: string;
+  category?: string;
+  pr?: number;
+  observedFrom: number | null;
+  observedUntil: number | null;
+}
+type Proposal = Omit<CodeHealthRecommendation, "createdAt" | "updatedAt" | "state" | "evidence"> & {
+  scope: RecommendationScope | null;
+};
 export interface RecommendationRecord extends CodeHealthRecommendation {
+  scope: RecommendationScope | null;
   baseline: {
     fingerprint: string;
     target: CodeHealthRecommendation["target"];
     acceptedAt: number;
+    observation: string;
+    scope: RecommendationScope | null;
   } | null;
   active: boolean;
   workReady: boolean;
+  workAttempt: { fingerprint: string; at: number } | null;
   owner: string | null;
   reviewAt: number | null;
   linkedWork: string | null;
@@ -27,7 +42,7 @@ export function installRecommendations(db: Db) {
   db.exec(`CREATE TABLE IF NOT EXISTS code_health_recommendations (
     id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, proposal TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT '{"kind":"proposed"}', baseline TEXT,
-    active INTEGER NOT NULL DEFAULT 1, work_ready INTEGER NOT NULL DEFAULT 0, owner TEXT, review_at INTEGER, linked_work TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    active INTEGER NOT NULL DEFAULT 1, work_ready INTEGER NOT NULL DEFAULT 0, work_attempt TEXT, owner TEXT, review_at INTEGER, linked_work TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   ); CREATE INDEX IF NOT EXISTS code_health_recommendations_repo ON code_health_recommendations(repo_id);
   CREATE TABLE IF NOT EXISTS code_health_recommendation_requests (
     repo_id TEXT NOT NULL, request_id TEXT NOT NULL, payload TEXT NOT NULL, response TEXT NOT NULL,
@@ -40,6 +55,7 @@ function decode(row: Record<string, unknown>): RecommendationRecord {
     state: JSON.parse(String(row.state)),
     active: row.active === 1,
     workReady: row.work_ready === 1,
+    workAttempt: row.work_attempt === null ? null : JSON.parse(String(row.work_attempt)),
     baseline: row.baseline === null ? null : JSON.parse(String(row.baseline)),
     owner: row.owner as string | null,
     reviewAt: row.review_at as number | null,
@@ -49,13 +65,13 @@ function decode(row: Record<string, unknown>): RecommendationRecord {
     evidence: [],
   };
 }
-export function recommendationRows(db: Db, repo: string): RecommendationRecord[] {
+export function recommendationRows(db: Db, repo: string, openAt?: number): RecommendationRecord[] {
   return (
     db
       .prepare(
-        "SELECT * FROM code_health_recommendations WHERE repo_id=? ORDER BY updated_at DESC,id LIMIT 200",
+        `SELECT * FROM code_health_recommendations WHERE repo_id=? ${openAt === undefined ? "" : "AND active=1 AND (json_extract(state,'$.kind')='proposed' OR (json_extract(state,'$.kind')='snoozed' AND json_extract(state,'$.until')<=?))"} ORDER BY updated_at DESC,id LIMIT 200`,
       )
-      .all(repo) as Record<string, unknown>[]
+      .all(repo, ...(openAt === undefined ? [] : [openAt])) as Record<string, unknown>[]
   ).map(decode);
 }
 export function recommendationRow(db: Db, repo: string, id: string): RecommendationRecord | null {
@@ -137,7 +153,13 @@ export function mutateRecommendation(
       throw new CodeHealthReadError(400, "Metric review date must be in the future.");
     row.owner = change.owner;
     row.reviewAt = change.reviewAt;
-    row.baseline = { fingerprint: row.evidenceFingerprint, target: row.target, acceptedAt: at };
+    row.baseline = {
+      observation: row.observation,
+      scope: row.scope,
+      fingerprint: row.evidenceFingerprint,
+      target: row.target,
+      acceptedAt: at,
+    };
     state = {
       kind: "accepted",
       owner: change.owner,
@@ -217,12 +239,25 @@ export function recommendationProposals(store: Store, repoId: string, at: number
     metric: string,
     baseline: number | null,
     uncertainty: string,
+    scope: Omit<
+      RecommendationScope,
+      "from" | "until" | "observedFrom" | "observedUntil"
+    > | null = null,
   ) {
     proposals.push({
       id: `chr_${hash([repoId, rule, CODE_HEALTH_RULES.version, subject])}`,
       repoId,
       rule,
       ruleVersion: CODE_HEALTH_RULES.version,
+      scope: scope
+        ? {
+            ...scope,
+            from: at - 30 * 86400000,
+            until: at,
+            observedFrom: source.observedFrom,
+            observedUntil: source.observedUntil,
+          }
+        : null,
       evidenceFingerprint: hash(observations),
       observation,
       proposal,
@@ -259,6 +294,7 @@ export function recommendationProposals(store: Store, repoId: string, at: number
         "distinct findings in this category/file per 30 days",
         rows.length,
         "Reported findings are review observations, not confirmed production defects. Carry lineage may be unknown.",
+        { file, category },
       );
     }
   const prs = new Map<number, { round: number; reviews: typeof source.reviews }>();
@@ -279,6 +315,7 @@ export function recommendationProposals(store: Store, repoId: string, at: number
         "maximum reported review round for this PR",
         group.round,
         "Recent cohorts are provisional; round counts do not establish a production defect.",
+        { pr },
       );
   add(
     "collection",
@@ -291,5 +328,11 @@ export function recommendationProposals(store: Store, repoId: string, at: number
     "Unordered mixed job outcomes are candidates only; no flaky-test rate or size-change trend is inferred.",
   );
   const collection = proposals.pop();
+  proposals.sort(
+    (a, b) =>
+      (a.rule === b.rule ? 0 : a.rule === "recurring-correction" ? -1 : 1) ||
+      (b.target.baseline ?? 0) - (a.target.baseline ?? 0) ||
+      a.id.localeCompare(b.id),
+  );
   return [...proposals.slice(0, 199), ...(collection ? [collection] : [])];
 }
