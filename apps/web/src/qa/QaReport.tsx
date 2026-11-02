@@ -232,6 +232,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
   const figure = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [failedLink, setFailedLink] = useState<string>();
   const [loaded, setLoaded] = useState<{ id: string; url?: string; error?: boolean }>();
   useEffect(() => {
     if (!assetId || !figure.current) return;
@@ -270,7 +271,13 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [assetId, visible, loadKey]);
-  const url = assetId ? (loaded?.id === loadKey ? loaded?.url : undefined) : target;
+  const url = assetId
+    ? loaded?.id === loadKey
+      ? loaded?.url
+      : undefined
+    : failedLink === target
+      ? undefined
+      : target;
   return (
     <figure ref={figure}>
       <figcaption>
@@ -281,12 +288,29 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
       </figcaption>
       {url ? (
         <a href={url} target="_blank" rel="noopener noreferrer">
-          <img src={url} alt={label} loading="lazy" referrerPolicy="no-referrer" />
+          <img
+            src={url}
+            alt={label}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => {
+              if (assetId && loadKey) setLoaded({ id: loadKey, error: true });
+              else if (target) setFailedLink(target);
+            }}
+          />
         </a>
       ) : (
         <p>
           {!target ? (
             "Image link unavailable."
+          ) : failedLink === target ? (
+            <>
+              <span>The linked image could not be loaded.</span>{" "}
+              <EvidenceLink url={image.sourceUrl ?? target}>Open image source</EvidenceLink>{" "}
+              <button type="button" onClick={() => setFailedLink(undefined)}>
+                Retry linked image · {label}
+              </button>
+            </>
           ) : loaded?.id === loadKey && loaded?.error ? (
             <>
               <span>The retained image could not be loaded.</span>{" "}
@@ -585,7 +609,7 @@ export const QaReportRead = memo(function QaReportRead({
             {r.limitations.map((s) => (
               <li key={s}>{s}</li>
             ))}
-            {!r.limitations.length && <li>Coverage limitations were not recorded.</li>}
+            {!r.limitations.length && <li>No limitations reported in this version.</li>}
           </ul>
         </Panel>
       </div>
@@ -636,7 +660,7 @@ export const QaReportRead = memo(function QaReportRead({
                 {f.basis && <p>{f.basis}</p>}
               </li>
             ))}
-            {!r.followUps.length && <li>No follow-up disposition was recorded.</li>}
+            {!r.followUps.length && <li>No follow-ups reported in this version.</li>}
           </ul>
         </div>
       </Panel>

@@ -133,6 +133,26 @@ afterEach(() => {
 });
 
 describe("durable QA report archive", () => {
+  it("renders immutable GitHub PNG page references through a raw endpoint and retains the source", async () => {
+    const page = `https://github.com/example/sample/blob/${SHA}/docs/after.png`;
+    const image = {
+      url: page,
+      source: "controlled-fixture" as const,
+      provenance: "Controlled render from the named commit.",
+    };
+    const { report } = await service().importController(
+      input({
+        visual: {
+          applicability: "required",
+          pairs: [{ label: "Fixture", before: image, after: image }],
+        },
+      }),
+    );
+    expect(report.visual.pairs[0]?.after).toMatchObject({
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+      sourceUrl: page,
+    });
+  });
   it("imports a merged PR without inventing a Run/review and retains exact source/time/CI", async () => {
     const reports = service();
     const { report, created } = await reports.importController(input());
@@ -377,6 +397,30 @@ describe("durable QA report archive", () => {
     db.close();
     store = new Store(path);
     expect(service().read(report.id)).toEqual(report);
+    const next = store.requestReview({
+      authorRunId: "next-author",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 8,
+      sha: BASE,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW + 1,
+    });
+    if (!next) throw new Error("next review missing");
+    expect(next).toBeGreaterThan(id);
+    expect(store.qaReportForReview(next)).toBeNull();
+    store.setReviewState(next, ["queued"], "running", { at: NOW + 2, runId: "retro:next" });
+    const nextRow = store.review(next);
+    if (!nextRow) throw new Error("next review missing");
+    head = BASE;
+    const nextReport = await service().prepareNative(nextRow, details, NOW + 3);
+    expect(
+      store.recordFindings(next, "retro:next", { ...details, at: NOW + 3, qaReport: nextReport }),
+    ).toBe(true);
+    expect(store.qaReportForReview(id)?.prNumber).toBe(7);
+    expect(store.qaReportForReview(next)?.prNumber).toBe(8);
   });
 
   it("requires visual pairs for known native web changes despite a supplied N/A reason", async () => {

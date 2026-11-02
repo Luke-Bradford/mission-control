@@ -1,9 +1,20 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { QaReportRead, qaEvidenceUrl } from "../src/qa/QaReport.tsx";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
 afterEach(cleanup);
+it("makes a failed linked image explicit and preserves its source and retry", () => {
+  render(<QaReportRead report={qaReportFixture()} />);
+  const before = screen.getByRole("img", { name: /Before · Overview/ });
+  fireEvent.error(before);
+  expect(screen.getByText("The linked image could not be loaded.")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Open image source" }).getAttribute("href")).toBe(
+    "https://evidence.example/before.png",
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Retry linked image · Before/ }));
+  expect(screen.getByRole("img", { name: /Before · Overview/ })).toBeTruthy();
+});
 it("retains a permanent exact-head record and distinguishes receipts from reported counts", () => {
   const report = qaReportFixture();
   render(<QaReportRead report={report} archived />);

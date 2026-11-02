@@ -4813,9 +4813,13 @@ export class Store {
   requestReview(r: ReviewRequest): number | null {
     const res = this.db
       .prepare(
-        `INSERT OR IGNORE INTO reviews (author_run_id, repo_id, seat_id, pr_number, sha, epoch,
+        // Archived reports outlive reviews. Allocate above both tables so history pruning cannot
+        // reuse an archived review's identity. The allocation and insertion are one SQLite write.
+        `INSERT OR IGNORE INTO reviews (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch,
            attempt, round, state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+         SELECT MAX(last_id) + 1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?
+         FROM (SELECT COALESCE(MAX(id), 0) AS last_id FROM reviews
+           UNION ALL SELECT COALESCE(MAX(native_review_id), 0) FROM qa_reports)`,
       )
       .run(r.authorRunId, r.repoId, r.seatId, r.prNumber, r.sha, r.epoch, r.attempt, r.round, r.at);
     if (res.changes === 1)

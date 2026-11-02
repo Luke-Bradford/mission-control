@@ -609,6 +609,16 @@ export function createQaReports(i: {
             "QA images need same-repo immutable commit PNG links and capture provenance.",
           );
       }
+      // GitHub blob pages contain HTML. Persist a PNG endpoint for rendering and keep the page
+      // link as provenance. All original targets, including sourceUrl, were validated above.
+      for (const image of images) {
+        const url = new URL(image.url);
+        if (url.hostname === "github.com") {
+          image.sourceUrl ??= image.url;
+          const parts = url.pathname.split("/");
+          image.url = `https://raw.githubusercontent.com/${parts.slice(1, 3).join("/")}/${parts.slice(4).join("/")}`;
+        }
+      }
       const result = await i.gh(["api", `repos/${repo.github}/pulls/${input.prNumber}`], {
         cwd: i.cwd,
         timeoutMs: 5000,
@@ -651,7 +661,7 @@ export function createQaReports(i: {
         const portable = input.visual?.pairs
           .map((pair) => pair[kind])
           .find((source) => source?.sha256 !== undefined && source.sha256 === image.sha256);
-        return portable ? { ...image, sourceUrl: portable.url } : image;
+        return portable ? { ...image, sourceUrl: portable.sourceUrl ?? portable.url } : image;
       };
       const localPairs = retained.pairs.map((pair) => ({
         ...pair,
