@@ -4,14 +4,14 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: var(--sp-3);
   overflow-wrap: anywhere;
 }
 .ticket-qa ul {
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 .ticket-qa p {
-  margin: 4px 0 0;
+  margin: var(--sp-1) 0 0;
 }
 .ticket-qa-link {
   display: inline-flex;

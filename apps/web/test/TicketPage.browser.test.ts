@@ -60,7 +60,23 @@ const qaPr = {
 const SCENARIOS = {
   empty: ticket(0),
   many: ticket(50),
-  closedQa: { ...ticket(0), state: "closed", linkedPullRequests: [qaPr] },
+  closedQa: {
+    ...ticket(0),
+    state: "closed",
+    linkedPullRequests: [qaPr],
+    prs: [
+      {
+        ...qaPr,
+        branch: "feature/cache",
+        isDraft: false,
+        headSha: "a".repeat(40),
+        createdAt: 1000,
+        mergedAt: 2000,
+        rounds: [],
+        ci: [],
+      },
+    ],
+  },
 };
 
 describeRendered("The ticket page in a browser", () => {
@@ -107,12 +123,13 @@ describeRendered("The ticket page in a browser", () => {
               sums.every((b) => b.height >= 24 && b.width >= 24),
               `${label} targets`,
             ).toBe(true);
-          } else {
+          } else if (name === "empty") {
             await page.box(".tk-timeline .muted"); // the empty line is shown
           }
           if (name === "closedQa") {
             const link = await page.box(".ticket-qa-link");
             expect(link.height).toBeGreaterThanOrEqual(24);
+            expect((await page.box(".tk-prs a")).height).toBeGreaterThanOrEqual(24);
             expect((await page.reachable(".ticket-qa-link", ".tk-form .pb")).every(Boolean)).toBe(
               true,
             );

@@ -518,3 +518,11 @@ it("retains live closing PR identities when local PR collection has not caught u
     },
   ]);
 });
+
+it("both ticket readers retain secondary closingIssues links within the configured repo", async () => {
+  store.upsertPullRequests("shop-app", [pr(31, { ticket: "shop-app#8", closingIssues: [7] })], NOW);
+  const board = await read("/api/boards/shop-app/items/7");
+  const history = await read("/api/tickets/shop-app/7");
+  expect(board.json().pullRequests.map((p: { number: number }) => p.number)).toEqual([31]);
+  expect(history.json().prs.map((p: { number: number }) => p.number)).toEqual([31]);
+});

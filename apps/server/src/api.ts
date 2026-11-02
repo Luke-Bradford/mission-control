@@ -3445,7 +3445,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const ticket = await fetchTicket(repo, n, await githubGql(), config.repos);
             if (ticket) {
               const linked = new Set(ticket.pullRequests.map((pr) => pr.url));
-              for (const pr of store.pullRequestsOnTicket(repo.id, `${repo.id}#${n}`)) {
+              for (const pr of store.pullRequestsClosingTicket(repo.id, n)) {
                 if (!linked.has(pr.url)) {
                   ticket.pullRequests.push({
                     number: pr.number,

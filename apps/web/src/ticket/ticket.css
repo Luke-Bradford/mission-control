@@ -1,4 +1,11 @@
 /* ticket page */
+.tk-prs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 24px;
+}
+
 #page-ticket {
   display: flex;
   flex-direction: column;
