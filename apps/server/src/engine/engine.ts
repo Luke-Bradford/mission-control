@@ -621,7 +621,7 @@ export function createEngine(deps: EngineDeps): Engine {
       loop === undefined ||
       loop.phase === "parked" ||
       !seatKnown(run.agentId) ||
-      pausedSeat(store, run.agentId) ||
+      pausedSeat(store, run.agentId, run.id) ||
       flightHeld(run) ||
       seat === undefined ||
       accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
@@ -1229,7 +1229,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const sent = await supervisor.send(run.id, key, text);
     // a paused seat reads it when it resumes: the verdict is recorded all the same
-    if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId)) return false;
+    if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
     // delivered by the line above: not again from the inbox
     if (stored !== null && (sent === "sent" || sent === "dup"))
@@ -1497,7 +1497,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "take-next": {
         // not while the seat holds another run (a merged PR found after the run was stopped)
         const holds = supervisor.seat(run.agentId)?.runId ?? null;
-        if (!pausedSeat(store, run.agentId) && (holds === null || holds === run.id))
+        if (!pausedSeat(store, run.agentId, null) && (holds === null || holds === run.id))
           await deps.takeNext(run.agentId);
         return;
       }
@@ -1583,7 +1583,10 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         kickAside(run.agentId, run.id);
         // the freed seat takes its next ticket now, unless rework is due back on it first
-        if (!pausedSeat(store, run.agentId) && wakeDueAsideRun(store, run.agentId) === undefined) {
+        if (
+          !pausedSeat(store, run.agentId, null) &&
+          wakeDueAsideRun(store, run.agentId) === undefined
+        ) {
           deps.takeNext(run.agentId).catch((e: unknown) => {
             log(
               `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -1593,7 +1596,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "wake": {
-        if (pausedSeat(store, run.agentId)) return;
+        if (pausedSeat(store, run.agentId, run.id)) return;
         const accountId = seatConfig(run.agentId)?.accountId;
         if (
           accountId !== undefined &&
@@ -1943,7 +1946,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
-    if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId)) return;
+    if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id)) return;
     const at = now();
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
@@ -2252,7 +2255,9 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(
       seats
         .filter((s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build")
-        .filter((s) => !pausedSeat(store, s.id) && seatMayTake(store, s.id, maxOpenRunsOf(config)))
+        .filter(
+          (s) => !pausedSeat(store, s.id, null) && seatMayTake(store, s.id, maxOpenRunsOf(config)),
+        )
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
             log(`take ${s.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -2576,7 +2581,7 @@ export function createEngine(deps: EngineDeps): Engine {
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
-      if (pausedSeat(store, seat.id)) continue;
+      if (pausedSeat(store, seat.id, null)) continue;
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
@@ -2600,7 +2605,7 @@ export function createEngine(deps: EngineDeps): Engine {
           current === undefined ||
           current.retiring ||
           seatUnavailable(current) ||
-          pausedSeat(store, seat.id)
+          pausedSeat(store, seat.id, null)
         )
           break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
@@ -2830,7 +2835,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return refuse("not-parked");
-        if (pausedSeat(store, run.agentId)) return refuse("held");
+        if (pausedSeat(store, run.agentId, run.id)) return refuse("held");
         const kind = loop.parked?.kind;
         if (
           run.endedAt !== null ||

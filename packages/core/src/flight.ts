@@ -528,7 +528,7 @@ export const smallNoPlanText = (ref: string, size: string): string =>
   `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
-  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. It is not started while its PR is open. A ticket that lists files outside the seat's area in a Paths: line is started only with paths: you approve those files, a logged decision, and only this run may write them.";
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. It is not started while its PR is open. A ticket that lists files outside the seat's area in a Paths: line is started only with paths: you approve those files, a logged decision, and only this run may write them. If a crew pause holds the seat, only the actual started run gets an exception; other tickets still wait.";
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;

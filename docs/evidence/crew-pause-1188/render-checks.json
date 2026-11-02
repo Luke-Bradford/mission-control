@@ -1,0 +1,680 @@
+{
+  "scope": "Controlled fictional fixture, actual production CrewPauseControl and stylesheet. The same current harness, API fixtures and shared client infrastructure wrap both component versions. No live hub, database, operator pause, crew process, provider or observed loop is accessed or changed.",
+  "before": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+  "after": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+  "afterDirty": "",
+  "sourceFiles": [
+    {
+      "file": "apps/web/src/components/CrewPause.tsx",
+      "before": "37b28fb90c2a84900d61e92701b9fa65285acce4997d9e04e27e370f5cfdf6ec",
+      "after": "2d6182662c79e550c891c83ab5bc1ed54b91ead2a6ed56738dd57284ddb9299f"
+    },
+    {
+      "file": "apps/web/src/components/CrewPause.css",
+      "before": "f1ff7499bc931c0745a58e0a2d86c573747ff4dc385b26f7c3857e264279ac4f",
+      "after": "8d212b3c4a4ab6f0fe0a271b75363d085be3dde88f41b8f2319c7b4932a53a8d"
+    }
+  ],
+  "fixtureAt": 1793620800000,
+  "fixtureHash": "f04f88fcbf32b69f0d210511f595e75614eda399100657404308fe5f9eee3167",
+  "errors": [],
+  "writes": [],
+  "captures": [
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "at": 1793644457512,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1280x900-light-before.png",
+      "facts": {
+        "pageWidth": 1280,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "at": 1793644457809,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1280x900-light-after.png",
+      "facts": {
+        "pageWidth": 1280,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "at": 1793644458119,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1280x900-dark-before.png",
+      "facts": {
+        "pageWidth": 1280,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "at": 1793644458468,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1280x900-dark-after.png",
+      "facts": {
+        "pageWidth": 1280,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1600,
+      "height": 1000,
+      "theme": "light",
+      "at": 1793644458778,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x1000-light-before.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      },
+      "regionFile": "pause-panel-1600x1000-light-before.png",
+      "regionScope": "visible crew-pause form region, top scroll position; not full-page evidence"
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1600,
+      "height": 1000,
+      "theme": "light",
+      "at": 1793644459167,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x1000-light-after.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      },
+      "regionFile": "pause-panel-1600x1000-light-after.png",
+      "regionScope": "visible crew-pause form region, top scroll position; not full-page evidence"
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1600,
+      "height": 1000,
+      "theme": "dark",
+      "at": 1793644459531,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x1000-dark-before.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      },
+      "regionFile": "pause-panel-1600x1000-dark-before.png",
+      "regionScope": "visible crew-pause form region, top scroll position; not full-page evidence"
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1600,
+      "height": 1000,
+      "theme": "dark",
+      "at": 1793644459915,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x1000-dark-after.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      },
+      "regionFile": "pause-panel-1600x1000-dark-after.png",
+      "regionScope": "visible crew-pause form region, top scroll position; not full-page evidence"
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1920,
+      "height": 1080,
+      "theme": "light",
+      "at": 1793644460302,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1920x1080-light-before.png",
+      "facts": {
+        "pageWidth": 1920,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1920,
+      "height": 1080,
+      "theme": "light",
+      "at": 1793644460601,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1920x1080-light-after.png",
+      "facts": {
+        "pageWidth": 1920,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1920,
+      "height": 1080,
+      "theme": "dark",
+      "at": 1793644460919,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1920x1080-dark-before.png",
+      "facts": {
+        "pageWidth": 1920,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1920,
+      "height": 1080,
+      "theme": "dark",
+      "at": 1793644461243,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1920x1080-dark-after.png",
+      "facts": {
+        "pageWidth": 1920,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1600,
+      "height": 700,
+      "theme": "light",
+      "at": 1793644461551,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x700-light-before.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1600,
+      "height": 700,
+      "theme": "light",
+      "at": 1793644461849,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x700-light-after.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "before",
+      "source": "15205ba0ff7cb3bbf8bae316ae9f2c5517d66b41",
+      "width": 1600,
+      "height": 700,
+      "theme": "dark",
+      "at": 1793644462147,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x700-dark-before.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": null,
+        "targets": [
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "side": "after",
+      "source": "d55f5bcd6767fa8e90fa2c65d6d7d80ff41afbdb",
+      "width": 1600,
+      "height": 700,
+      "theme": "dark",
+      "at": 1793644462461,
+      "scope": "viewport, controlled fixture with crew-pause form open",
+      "file": "pause-1600x700-dark-after.png",
+      "facts": {
+        "pageWidth": 1600,
+        "width": 298,
+        "scrollWidth": 298,
+        "audit": "Paused by operator · 2026-11-02 11:59:00 UTCRun exceptionsFLIGHT let guido-1 continueRun guido-1:20261102-1200002026-11-02 12:00:00 UTCReason for this exceptionFinish the approved current run onlyEach exception ends with its run. Other tickets still wait.",
+        "targets": [
+          {
+            "tag": "SUMMARY",
+            "width": 274,
+            "height": 24
+          },
+          {
+            "tag": "INPUT",
+            "width": 226.796875,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "width": 24,
+            "height": 24
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          },
+          {
+            "tag": "BUTTON",
+            "width": 274,
+            "height": 30
+          }
+        ]
+      }
+    }
+  ]
+}

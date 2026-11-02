@@ -14,7 +14,7 @@ class StubEventSource {
 
 beforeEach(() => {
   vi.stubGlobal("EventSource", StubEventSource);
-  stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG });
+  stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG, "/api/settings/crew-pause": null });
 });
 
 afterEach(() => {
@@ -202,7 +202,7 @@ describe("App", () => {
     act(() => {
       fireEvent.keyDown(document.body, { key: "i" });
     });
-    expect(screen.getByRole("status").textContent).toBe("Open an agent to interrupt it.");
+    expect(screen.getByText("Open an agent to interrupt it.").getAttribute("role")).toBe("status");
   });
 
   it("the footer carries the key hints, Setup included, and no sample-data chip", () => {
