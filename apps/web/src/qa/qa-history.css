@@ -28,6 +28,9 @@
   gap: var(--sp-3);
   align-items: center;
 }
+.qa-history-toolbar > button {
+  align-self: flex-end;
+}
 .qa-history-toolbar label {
   display: flex;
   gap: var(--sp-2);

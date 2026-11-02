@@ -337,7 +337,15 @@ describeRendered("QA history in the application shell", () => {
               panel = document.querySelector(".qa-history > .panel")?.getBoundingClientRect(),
               page = document.querySelector(".qa-history")?.getBoundingClientRect();
             if (!heading || !filters || !panel || !page) throw new Error("History regions missing");
+            const select = document
+              .querySelector(".qa-history > .qa-history-toolbar select")
+              ?.getBoundingClientRect();
+            const refresh = document
+              .querySelector(".qa-history > .qa-history-toolbar > button")
+              ?.getBoundingClientRect();
+            if (!select || !refresh) throw new Error("History filters missing");
             return {
+              controlsBottomDifference: Math.abs(select.bottom - refresh.bottom),
               headingGap: filters.top - heading.bottom,
               tableGap: panel.top - filters.bottom,
               height: page.height,
@@ -346,6 +354,7 @@ describeRendered("QA history in the application shell", () => {
           expect(flow.headingGap).toBeLessThanOrEqual(24);
           expect(flow.tableGap).toBeLessThanOrEqual(24);
           expect(flow.height).toBeLessThan(700);
+          expect(flow.controlsBottomDifference).toBeLessThanOrEqual(1);
         } finally {
           await page.close();
         }

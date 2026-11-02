@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiReviewImage } from "../api.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, streamStatus, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { followLink, navigate, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
@@ -75,8 +76,8 @@ export function QaHistory() {
       </header>
       {!connected && (
         <p className="uat-banner" role="status">
-          Disconnected from the hub. Showing only history already loaded; reconnect to fetch other
-          pages.
+          Disconnected from the hub’s updates. History may be stale; other pages or images may be
+          unavailable.
         </p>
       )}
       <div className="qa-history-toolbar">
@@ -225,7 +226,7 @@ function HistoryRow({ entry }: { entry: QaHistoryEntry }) {
             ? "not applicable · reason in report"
             : entry.kind === "native"
               ? `${entry.screenshotCount} recorded · availability unknown`
-              : `${entry.pairCount} pairs · ${entry.screenshotCount} other · ${entry.visual}`}
+              : `${plural(entry.pairCount, "pair")} · ${entry.screenshotCount} other · ${entry.visual}`}
         </span>
       </td>
       <td>
