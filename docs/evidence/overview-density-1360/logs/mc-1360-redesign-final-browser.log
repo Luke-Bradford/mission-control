@@ -1,0 +1,62 @@
+
+ RUN  v3.2.7 [controller]/codex-overview-density
+
+ ❯ |web| test/OverviewDensity.browser.test.ts (7 tests | 1 failed) 37805ms
+   ✓ Approved Overview hierarchy > settles known context, full allowance and recorded timeline sources in the delivered App  1256ms
+   × Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize 411ms
+     → expected false to be true // Object.is equality
+   ✓ Approved Overview hierarchy > preserves nine configured seats and two observed loops through the real session filter  1129ms
+   ✓ Approved Overview hierarchy > keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open  3731ms
+   ✓ Approved Overview hierarchy > opens complete shortened content with the keyboard using actual read-only detail routes  13456ms
+   ✓ Approved Overview hierarchy > keeps the settled full-App hierarchy and all row controls reachable at every required viewport  9284ms
+   ✓ Approved Overview hierarchy > keeps empty, one, fifty, long and collection states honest without losing keyboard routes  7313ms
+ ✓ |web| test/OverviewLayout.browser.test.ts (6 tests) 5038ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1280 wide, light  761ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1600 wide, light  555ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1920 wide, light  895ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1280 wide, dark  531ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1600 wide, dark  516ms
+   ✓ Overview v2 layout in a browser > lays out as the mockup at 1920 wide, dark  537ms
+ ✓ |web| test/OverviewClipping.browser.test.ts (6 tests) 3982ms
+   ✓ Overview panels keep headers readable and content reachable > at 1280x1000, light  597ms
+   ✓ Overview panels keep headers readable and content reachable > at 1280x1000, dark  382ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x1000, light  392ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x1000, dark  386ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x700, light, the page scrolls and every Board link is reachable  506ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x700, dark, the page scrolls and every Board link is reachable  502ms
+ ✓ |web| test/OverviewCrewTable.browser.test.ts (4 tests) 2840ms
+   ✓ Overview Crew table with very long text, rendered > keeps every cell inside its own row at 1100px  577ms
+   ✓ Overview Crew table with very long text, rendered > keeps every cell inside its own row at 1280px  346ms
+   ✓ Overview Crew table with very long text, rendered > keeps every cell inside its own row at 1366px  342ms
+   ✓ Overview Crew table with very long text, rendered > keeps every cell inside its own row at 1600px  333ms
+ ✓ |web| test/Overview.browser.test.ts (3 tests) 2512ms
+   ✓ Overview transcript footprint in a browser > fits at 1366 wide and records a screenshot  586ms
+   ✓ Overview transcript footprint in a browser > fits at 1600 wide and records a screenshot  348ms
+   ✓ Overview transcript footprint in a browser > fits at 1920 wide and records a screenshot  352ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewDensity.browser.test.ts > Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/OverviewDensity.browser.test.ts:272:13
+    270|               return !!region && region.scrollTop > 0;
+    271|             }, undefined),
+    272|           ).toBe(true);
+       |             ^
+    273|           await capture(page, `history-subcent-${scheme}`);
+    274|           await page.evaluate(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 25 passed (26)
+   Start at  22:30:44
+   Duration  54.40s (transform 200ms, setup 584ms, collect 871ms, tests 52.18s, environment 0ms, prepare 141ms)

@@ -1,0 +1,395 @@
+$ biome check . && node --experimental-strip-types scripts/check-core-cycles.ts
+apps/server/src/code-health/size-source.ts:77:73 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    75 │   const shas = [...new Set(entries.map((entry) => entry.sha))];
+    76 │   const data = shas.length
+  > 77 │     ? await (deps.blobs ?? readBlobs)([...base, "cat-file", "--batch"], shas.join("\n") + "\n")
+       │                                                                         ^^^^^^^^^^^^^^^^^^^^^^
+    78 │     : Buffer.alloc(0);
+    79 │   if (data.length > SIZE_BLOB_BYTES_MAX) throw Error("Size blob output limit");
+
+  i Unsafe fix: Use a template literal.
+
+     75  75 │     const shas = [...new Set(entries.map((entry) => entry.sha))];
+     76  76 │     const data = shas.length
+     77     │ - ····?·await·(deps.blobs·??·readBlobs)([...base,·"cat-file",·"--batch"],·shas.join("\n")·+·"\n")
+         77 │ + ····?·await·(deps.blobs·??·readBlobs)([...base,·"cat-file",·"--batch"],·`${shas.join("\n")}\n`)
+     78  78 │       : Buffer.alloc(0);
+     79  79 │     if (data.length > SIZE_BLOB_BYTES_MAX) throw Error("Size blob output limit");
+
+
+apps/server/src/qa-reports.ts:558:26 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    556 │         throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
+    557 │       }
+  > 558 │       const sourcePath = `/` + repo.github + `/pull/${input.prNumber}`;
+        │                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    559 │       if (
+    560 │         source.origin !== "https://github.com" ||
+
+  i Unsafe fix: Use a template literal.
+
+     556  556 │           throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
+     557  557 │         }
+     558      │ - ······const·sourcePath·=·`/`·+·repo.github·+·`/pull/${input.prNumber}`;
+          558 │ + ······const·sourcePath·=·`/${repo.github}/pull/${input.prNumber}`;
+     559  559 │         if (
+     560  560 │           source.origin !== "https://github.com" ||
+
+
+apps/server/test/code-health-git.test.ts:92:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    90 │     writeFileSync(
+    91 │       join(checkout, "new.ts"),
+  > 92 │       readFileSync(join(checkout, "new.ts"), "utf8") + "export const extra = true;\n",
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    93 │     );
+    94 │     writeFileSync(join(checkout, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+
+  i Unsafe fix: Use a template literal.
+
+     90  90 │       writeFileSync(
+     91  91 │         join(checkout, "new.ts"),
+     92     │ - ······readFileSync(join(checkout,·"new.ts"),·"utf8")·+·"export·const·extra·=·true;\n",
+         92 │ + ······`${readFileSync(join(checkout,·"new.ts"),·"utf8")}export·const·extra·=·true;\n`,
+     93  93 │       );
+     94  94 │       writeFileSync(join(checkout, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+
+
+apps/server/test/code-health-git.test.ts:248:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    246 │     });
+    247 │     for (const output of [
+  > 248 │       header + "1\t0\t\0old.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    249 │       header + "1\t0\t../outside.ts\0",
+    250 │       header + header,
+
+  i Unsafe fix: Use a template literal.
+
+    246 246 │       });
+    247 247 │       for (const output of [
+    248     │ - ······header·+·"1\t0\t\0old.ts\0",
+        248 │ + ······`${header}1\t0\t\0old.ts\0`,
+    249 249 │         header + "1\t0\t../outside.ts\0",
+    250 250 │         header + header,
+
+
+apps/server/test/code-health-git.test.ts:249:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    247 │     for (const output of [
+    248 │       header + "1\t0\t\0old.ts\0",
+  > 249 │       header + "1\t0\t../outside.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    250 │       header + header,
+    251 │       header + "-\t1\ta.ts\0",
+
+  i Unsafe fix: Use a template literal.
+
+    247 247 │       for (const output of [
+    248 248 │         header + "1\t0\t\0old.ts\0",
+    249     │ - ······header·+·"1\t0\t../outside.ts\0",
+        249 │ + ······`${header}1\t0\t../outside.ts\0`,
+    250 250 │         header + header,
+    251 251 │         header + "-\t1\ta.ts\0",
+
+
+apps/server/test/code-health-git.test.ts:251:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    249 │       header + "1\t0\t../outside.ts\0",
+    250 │       header + header,
+  > 251 │       header + "-\t1\ta.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^
+    252 │     ])
+    253 │       expect(() => parseGitFileLog(output)).toThrow();
+
+  i Unsafe fix: Use a template literal.
+
+    249 249 │         header + "1\t0\t../outside.ts\0",
+    250 250 │         header + header,
+    251     │ - ······header·+·"-\t1\ta.ts\0",
+        251 │ + ······`${header}-\t1\ta.ts\0`,
+    252 252 │       ])
+    253 253 │         expect(() => parseGitFileLog(output)).toThrow();
+
+
+apps/server/src/api.ts:67:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+
+    65 │   flightShellBreakerWrite,
+    66 │   flightShellWrite,
+  > 67 │   flightTicketWrites,
+       │   ^^^^^^^^^^^^^^^^^^^
+  > 68 │   fullAt5h,
+        ...
+  > 76 │   GUARD_HOOK_EVENTS,
+  > 77 │   GUARD_RULES,
+       │   ^^^^^^^^^^^
+    78 │   GUARD_WINDOW_DAYS,
+    79 │   type GuardHitsView,
+
+  i Unused imports might be the result of an incomplete refactoring.
+
+  i Unsafe fix: Remove the unused imports.
+
+      65   65 │     flightShellBreakerWrite,
+      66   66 │     flightShellWrite,
+      67      │ - ··flightTicketWrites,
+      68   67 │     fullAt5h,
+      69   68 │     GITHUB_RATE_SETTING,
+    ········· │
+      75   74 │     GUARD_HITS_LIMIT,
+      76   75 │     GUARD_HOOK_EVENTS,
+      77      │ - ··GUARD_RULES,
+      78   76 │     GUARD_WINDOW_DAYS,
+      79   77 │     type GuardHitsView,
+
+
+apps/server/src/api.ts:274:40 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+
+    272 │ import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+    273 │ import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
+  > 274 │ import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
+        │                                        ^^^^^^^^^^^
+    275 │ import {
+    276 │   flightBriefView,
+
+  i Unused imports might be the result of an incomplete refactoring.
+
+  i Unsafe fix: Remove the unused imports.
+
+    274 │ import·{·liftRunaway,·noteFlightWrite,·runawayTrip·}·from·"./flight/runaway.ts";
+        │                                        ------------
+
+apps/server/src/api.ts:284:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+
+    282 │ import {
+    283 │   FLIGHT_APPROVAL_MAX_MS,
+  > 284 │   findApproval,
+        │   ^^^^^^^^^^^^^
+  > 285 │   grantApproval,
+  > 286 │   useApproval,
+        │   ^^^^^^^^^^^
+    287 │ } from "./flight-approvals.ts";
+    288 │ import { seatFocus } from "./focus.ts";
+
+  i Unused imports might be the result of an incomplete refactoring.
+
+  i Unsafe fix: Remove the unused imports.
+
+     282  282 │   import {
+     283  283 │     FLIGHT_APPROVAL_MAX_MS,
+     284      │ - ··findApproval,
+     285  284 │     grantApproval,
+     286      │ - ··useApproval,
+     287  285 │   } from "./flight-approvals.ts";
+     288  286 │   import { seatFocus } from "./focus.ts";
+
+
+apps/server/src/external-reviews.ts:293:25 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    291 │                         repo.github,
+    292 │                         manifest,
+  > 293 │                         deps.evidence!.baseUrl,
+        │                         ^^^^^^^^^^^^^^
+    294 │                       ),
+    295 │                   };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    291 291 │                           repo.github,
+    292 292 │                           manifest,
+    293     │ - ························deps.evidence!.baseUrl,
+        293 │ + ························deps.evidence?.baseUrl,
+    294 294 │                         ),
+    295 295 │                     };
+
+
+apps/server/src/flight/external-merge.ts:44:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━
+
+  ! Change to an optional chain.
+
+    42 │   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
+    43 │   const sha = cached?.headSha;
+  > 44 │   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    45 │     return fail("No open external PR in this merge workspace.");
+    46 │   if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+
+  i Unsafe fix: Change to an optional chain.
+
+     42  42 │     const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
+     43  43 │     const sha = cached?.headSha;
+     44     │ - ··if·(!cached·||·cached.state·!==·"open"·||·!sha·||·repo.autonomy·!==·"merge")
+         44 │ + ··if·(cached?.state·!==·"open"·||·!sha·||·repo.autonomy·!==·"merge")
+     45  45 │       return fail("No open external PR in this merge workspace.");
+     46  46 │     if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+
+
+apps/server/src/flight/tools.ts:245:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+
+    243 │   RECALL_DESCRIPTION,
+    244 │   REMEMBER_DESCRIPTION,
+  > 245 │   type RepoId,
+        │   ^^^^^^^^^^^
+    246 │   type RepoRules,
+    247 │   RUN_ID_NEEDS_UNPARK,
+
+  i Unused imports might be the result of an incomplete refactoring.
+
+  i Unsafe fix: Remove the unused imports.
+
+     243  243 │     RECALL_DESCRIPTION,
+     244  244 │     REMEMBER_DESCRIPTION,
+     245      │ - ··type·RepoId,
+     246  245 │     type RepoRules,
+     247  246 │     RUN_ID_NEEDS_UNPARK,
+
+
+apps/server/src/qa-reports.ts:352:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+
+    350 │       missing.push("Before/after evidence or a visual applicability reason is missing.");
+    351 │     if (
+  > 352 │       base.visual.manifest &&
+        │       ^^^^^^^^^^^^^^^^^^^^^^^
+  > 353 │       base.visual.manifest.pairs.some(
+         ...
+  > 360 │           ),
+  > 361 │       )
+        │       ^
+    362 │     )
+    363 │       missing.push("Some native before/after images were unavailable for retention.");
+
+  i Unsafe fix: Change to an optional chain.
+
+     350  350 │         missing.push("Before/after evidence or a visual applicability reason is missing.");
+     351  351 │       if (
+     352      │ - ······base.visual.manifest·&&
+     353      │ - ······base.visual.manifest.pairs.some(
+          352 │ + ······base.visual.manifest?.pairs.some(
+     354  353 │           (pair) =>
+     355  354 │             !base.visual.pairs.some(
+
+
+apps/server/test/external-merge.test.ts:149:11 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    147 │   const deps = {
+    148 │     config,
+  > 149 │     repo: config.repos[0]!,
+        │           ^^^^^^^^^^^^^^^^
+    150 │     store,
+    151 │     bus,
+
+
+apps/server/test/external-merge.test.ts:189:29 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    187 │     async (failure) => {
+    188 │       const h = harness();
+  > 189 │       if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+        │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    190 │       if (failure === "review") {
+    191 │         const id = store.reviewsOfPr("sample", 7)[0]!.id;
+
+
+apps/server/test/external-merge.test.ts:191:20 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    189 │       if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+    190 │       if (failure === "review") {
+  > 191 │         const id = store.reviewsOfPr("sample", 7)[0]!.id;
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    192 │         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
+    193 │       }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    189 189 │         if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+    190 190 │         if (failure === "review") {
+    191     │ - ········const·id·=·store.reviewsOfPr("sample",·7)[0]!.id;
+        191 │ + ········const·id·=·store.reviewsOfPr("sample",·7)[0]?.id;
+    192 192 │           store.setReviewState(id, ["reported"], "superseded", { at: 4 });
+    193 193 │         }
+
+
+apps/server/test/external-reviews.test.ts:65:20 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    63 │   const gh: GhRunner = vi.fn(async (args, options) => {
+    64 │     if (args.includes("POST")) {
+  > 65 │       const path = args[args.indexOf("POST") + 1]!;
+       │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    66 │       const body = JSON.parse(options.input ?? "{}");
+    67 │       writes.push({ path, body });
+
+
+apps/server/test/external-reviews.test.ts:170:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    168 │     const service = createExternalReviews(h.deps);
+    169 │     await service.sync();
+  > 170 │     const old = store.reviewsIn(["queued"])[0]!;
+        │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    171 │     store.upsertPullRequests("sample", [pr({ headSha: NEXT })], 2);
+    172 │     h.current({
+
+
+apps/server/test/external-reviews.test.ts:219:19 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    217 │       const service = createExternalReviews(deps);
+    218 │       await service.sync();
+  > 219 │       const row = store.reviewsIn(["queued"])[0]!;
+        │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    220 │       store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    221 │       expect(
+
+
+packages/core/test/runtime.test.ts:100:33 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     98 │       expect(args).not.toContain(flag);
+     99 │     expect(args[args.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+  > 100 │     const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+        │                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    101 │     expect(settings.sandbox).toEqual({ enabled: false });
+    102 │     expect(settings.hooks.PreToolUse).toHaveLength(1);
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 54.
+Checked 1099 files in 744ms. No fixes applied.
+Found 67 warnings.
+Found 7 infos.
+Core imports: 59 modules, no cycles.
