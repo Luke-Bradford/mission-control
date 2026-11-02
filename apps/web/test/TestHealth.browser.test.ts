@@ -51,8 +51,33 @@ describeRendered("Test health measured layout", () => {
                   width: innerWidth,
                   documentWidth: document.documentElement.scrollWidth,
                   bottom: document.querySelector(".code-health")?.getBoundingClientRect().bottom,
+                  workAreaBottom: document.querySelector("main")?.getBoundingClientRect().bottom,
+                  workAreaHeight: document.querySelector("main")?.clientHeight,
+                  workAreaContentHeight: document.querySelector("main")?.scrollHeight,
+                  footerBottom: document.querySelector(".ch-footer")?.getBoundingClientRect()
+                    .bottom,
+                  firstDurationBottom: document
+                    .querySelector(".ch-test-durations tbody tr")
+                    ?.getBoundingClientRect().bottom,
+                  durationViewportBottom: document
+                    .querySelector(".ch-test-durations")
+                    ?.getBoundingClientRect().bottom,
+                  clippedNumbers: [
+                    ...document.querySelectorAll(".ch-test-scroll td.ch-number"),
+                  ].filter((element) => element.scrollWidth > element.clientWidth).length,
+                  clippedHeaders: [...document.querySelectorAll(".ch-test-scroll thead th")].filter(
+                    (element) => element.scrollWidth > element.clientWidth,
+                  ).length,
+                  durationUnitTransform: getComputedStyle(
+                    document.querySelector(
+                      ".ch-test-durations thead th:nth-child(2)",
+                    ) as HTMLElement,
+                  ).textTransform,
                   header: document.querySelector(".ch-heading")?.getBoundingClientRect().top,
                   dockWidth: document.querySelector("#dock")?.getBoundingClientRect().width,
+                  identityTransform: getComputedStyle(
+                    document.querySelector(".ch-test-disruption tbody th") as HTMLElement,
+                  ).textTransform,
                   small: [
                     ...document.querySelectorAll(
                       ".code-health button,.code-health a[href],.code-health select,.code-health summary",
@@ -67,8 +92,21 @@ describeRendered("Test health measured layout", () => {
               expect(metrics.documentWidth).toBeLessThanOrEqual(width);
               expect(metrics.small).toBe(0);
               expect(metrics.dockWidth).toBe(rail === "collapsed" ? 48 : 380);
-              if (width === 1600 && height === 1000)
+              expect(metrics.identityTransform).toBe("none");
+              expect(metrics.clippedNumbers).toBe(0);
+              expect(metrics.clippedHeaders).toBe(0);
+              expect(metrics.durationUnitTransform).toBe("none");
+              if (width === 1600 && height === 1000) {
                 expect(metrics.bottom).toBeLessThanOrEqual(1000);
+                expect(
+                  metrics.workAreaContentHeight,
+                  JSON.stringify({ width, height, rail, colorScheme, metrics }),
+                ).toBeLessThanOrEqual(metrics.workAreaHeight ?? 0);
+                expect(metrics.footerBottom).toBeLessThanOrEqual(metrics.workAreaBottom ?? 0);
+                expect(metrics.firstDurationBottom).toBeLessThanOrEqual(
+                  metrics.durationViewportBottom ?? 0,
+                );
+              }
               expect(
                 (await page.reachable(".ch-test button,.ch-test summary")).every(Boolean),
               ).toBe(true);

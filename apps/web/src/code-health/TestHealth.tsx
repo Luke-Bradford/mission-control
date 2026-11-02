@@ -128,6 +128,11 @@ export function TestHealth({
               aria-label="Ranked test disruption"
             >
               <table>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                </colgroup>
                 <caption>
                   Bar scale: 0–{count(maxFailed)} failed attempts. Percentages describe the observed
                   executed cohort, never job snapshots. Select a test for its full identity and
@@ -217,6 +222,11 @@ export function TestHealth({
                 aria-label="Documented test durations"
               >
                 <table>
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                  </colgroup>
                   <caption>
                     Sorted by p95. Values describe samples, not a performance budget or trend.
                   </caption>

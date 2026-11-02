@@ -150,7 +150,10 @@ export function CodeHealth() {
     heading.current?.focus();
   };
   return (
-    <section id="page-audit" className="code-health">
+    <section
+      id="page-audit"
+      className={tab === "test" ? "code-health ch-test-page" : "code-health"}
+    >
       <div className="ch-heading">
         <div>
           <h1 ref={heading} tabIndex={-1}>
