@@ -4378,7 +4378,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const known = await codeHealthImportSecrets();
             const result = store.importCodeHealthTestReport(
               parsed.data,
-              config.operator.id,
+              flightActor(req)?.seatId ?? config.operator.id,
               now(),
               known,
             );
@@ -4407,7 +4407,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             const result = store.linkCodeHealthTestQa(
               body.data,
-              config.operator.id,
+              flightActor(req)?.seatId ?? config.operator.id,
               now(),
               await codeHealthImportSecrets(),
             );
