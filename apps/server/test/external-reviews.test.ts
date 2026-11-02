@@ -325,11 +325,20 @@ describe("external PR review subjects", () => {
     const service = createExternalReviews(h.deps);
     await service.sync();
     const row = store.reviewsIn(["queued"])[0]!;
-    store.setReviewState(row.id, ["queued"], "failed", { at: 101 });
+    store.setReviewState(row.id, ["queued"], "failed", {
+      at: 101,
+      failure: "Reviewer ended without a report.",
+    });
     await service.sync();
     await service.sync();
     expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
     expect(h.writes.at(-1)?.body).toMatchObject({ state: "failure" });
+    expect(reviewCheckFor(store, "sample", 102)(pr())).toEqual({
+      kind: "held",
+      by: "hub",
+      reason: "Reviewer ended without a report.",
+    });
+    expect(store.reviewsIn(["queued"])).toHaveLength(0);
   });
 
   it("stops queue/status writes if the engine stops during the fresh read", async () => {

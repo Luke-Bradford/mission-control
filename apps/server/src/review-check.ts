@@ -5,6 +5,7 @@ import {
   type ReviewRow,
   reviewCheckOf,
 } from "@mc/core";
+import { isExternalReview } from "./external-reviews.ts";
 import type { Store } from "./store.ts";
 
 /**
@@ -34,6 +35,14 @@ export function reviewCheckFor(
     });
     const last = rows.findLast((r) => r.state !== "superseded");
     if (last === undefined) return null;
+    // Crew failures can retry through the author loop. External failures remain terminal.
+    if (isExternalReview(last) && last.state === "failed")
+      return {
+        kind: "held",
+        by: "hub",
+        reason:
+          last.failure ?? "The QA review did not complete. Push a new head for another review.",
+      };
     // each review seat serves its own oldest queued row: the queue is the seat's, not the repo's
     const ahead = waiting
       .filter((r) => r.seatId === last.seatId)
