@@ -11,7 +11,7 @@ import {
 import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
-import { useNow, useSecondWhile, useTz } from "../clock.ts";
+import { useNow, useSecond, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -452,6 +452,55 @@ function StateAge({ since }: { since: number }) {
   );
 }
 
+/** Native tooltips live on stable cells; only their observed lock-wait text needs a clock. */
+function LockWaitTitleClock({
+  row,
+  lock,
+  label,
+  target,
+}: {
+  row: Crew["rows"][number];
+  lock: TestLockState | undefined;
+  label: string;
+  target: RefObject<HTMLSpanElement | null>;
+}) {
+  const now = useSecond();
+  const title = row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now);
+  useEffect(() => {
+    if (target.current && title) {
+      target.current.title = title;
+      target.current.setAttribute("aria-label", `${label} · ${title}`);
+    }
+  }, [label, target, title]);
+  return null;
+}
+
+function identityTitleAt(row: Crew["rows"][number], lock: TestLockState | undefined, now: number) {
+  return [
+    modelLine(row),
+    ...(row.asideRuns ?? []).map((aside) => {
+      const wait = waitText(aside.loop, callSign(row), lockSince(lock, aside.runId), now);
+      return `${SET_ASIDE_LABEL}: ${aside.ticket ?? DASH} ${aside.ticketTitle ?? ""} · ${aside.loop.text}${wait ? ` · ${wait}` : ""}`;
+    }),
+  ].join("\n");
+}
+
+function AsideWaitTitleClock({
+  row,
+  lock,
+  target,
+}: {
+  row: Crew["rows"][number];
+  lock: TestLockState | undefined;
+  target: RefObject<HTMLSpanElement | null>;
+}) {
+  const title = identityTitleAt(row, lock, useSecond());
+  useEffect(() => {
+    if (target.current) target.current.title = title;
+  }, [target, title]);
+  return null;
+}
+
 function AgentRow({
   row,
   items,
@@ -468,6 +517,8 @@ function AgentRow({
   lock: TestLockState | undefined;
 }) {
   const rowElement = useRef<HTMLDivElement>(null);
+  const stateElement = useRef<HTMLSpanElement>(null);
+  const identityElement = useRef<HTMLSpanElement>(null);
   const mine = seatItems(row, items);
   const now = Date.now();
   const repoPrs = useReviewPrs(row ?? undefined);
@@ -501,14 +552,12 @@ function AgentRow({
           : (status.reason ?? statusLabel);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
-  const aside = row.asideRuns ?? [];
-  const identityTitle = [
-    modelLine(row),
-    ...aside.map((a) => {
-      const wait = waitText(a.loop, callSign(row), lockSince(lock, a.runId), now);
-      return `${SET_ASIDE_LABEL}: ${a.ticket ?? DASH} ${a.ticketTitle ?? ""} · ${a.loop.text}${wait ? ` · ${wait}` : ""}`;
-    }),
-  ].join("\n");
+  const stateWaits =
+    !queued && !row.crewPause && row.loop?.wait === "lock" && lockSince(lock, row.run?.id) !== null;
+  const asideWaits = (row.asideRuns ?? []).some(
+    (aside) => aside.loop.wait === "lock" && lockSince(lock, aside.runId) !== null,
+  );
+  const identityTitle = identityTitleAt(row, lock, now);
   const roleLabel =
     row.kind === "crew"
       ? `${roleTitle ?? row.role} · ${row.mode}`
@@ -529,7 +578,8 @@ function AgentRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity" title={identityTitle}>
+      <span ref={identityElement} role="cell" className="agent-identity" title={identityTitle}>
+        {asideWaits && <AsideWaitTitleClock row={row} lock={lock} target={identityElement} />}
         <a
           className="rowlink"
           title={callSign(row)}
@@ -548,11 +598,15 @@ function AgentRow({
         </span>
       </span>
       <span
+        ref={stateElement}
         role="cell"
         className="state-cell"
         title={statusTitle}
         aria-label={statusTitle ? `${statusLabel} · ${statusTitle}` : statusLabel}
       >
+        {stateWaits && (
+          <LockWaitTitleClock row={row} lock={lock} label={statusLabel} target={stateElement} />
+        )}
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
