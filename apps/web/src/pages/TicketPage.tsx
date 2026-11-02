@@ -2,11 +2,13 @@ import type { TicketEvent, TicketHistory } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
+import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { TicketQaReports } from "../qa/TicketQaReports.tsx";
 import { boardPath, followLink } from "../router.ts";
 import {
   eventLine,
@@ -40,7 +42,9 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
       {(e.kind === "comms" || e.kind === "decision") && (
         <details className="tk-more">
           <summary>Full text</summary>
-          <p className="tk-text">{e.kind === "comms" ? e.text : `${e.decision}\n${e.basis}`}</p>
+          <p className="tk-text">
+            <MentionText text={e.kind === "comms" ? e.text : `${e.decision}\n${e.basis}`} />
+          </p>
         </details>
       )}
       {findings.length > 0 && (
@@ -166,6 +170,15 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
             {t.githubError && (
               <p className="warn-t s">{`GitHub could not be reached: ${t.githubError}`}</p>
             )}
+            <h3>QA reports</h3>
+            <TicketQaReports
+              prs={[
+                ...t.prs,
+                ...(t.linkedPullRequests ?? []).filter(
+                  (pr) => !t.prs.some((local) => local.url === pr.url),
+                ),
+              ]}
+            />
             <h3>Outcome</h3>
             {t.outcome ? (
               <p className="tk-text">{t.outcome}</p>
@@ -196,7 +209,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
                 <ul className="tk-prs" aria-label="Pull requests">
                   {t.prs.map((p) => (
                     <li key={p.number}>
-                      <span className="mono">{`PR #${p.number}`}</span> {p.title}{" "}
+                      <ExternalLink url={p.url}>{`PR #${p.number}`}</ExternalLink> {p.title}{" "}
                       <Pill tone="plain">{p.isDraft ? "Draft" : p.state}</Pill>
                     </li>
                   ))}

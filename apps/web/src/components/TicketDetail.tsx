@@ -17,6 +17,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { githubHref, githubRepoOfUrl } from "../links.ts";
+import { TicketQaReports } from "../qa/TicketQaReports.tsx";
 import { agentPath, boardPath, followLink } from "../router.ts";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -175,6 +176,11 @@ export function TicketDetail({
             {agent && <AgentOnIt agent={agent} />}
             {title !== undefined && (t || item) && !closed && (
               <StartSeat repoId={repoId} number={number} title={title} />
+            )}
+            {t && (
+              <Section title="QA reports">
+                <TicketQaReports prs={t.pullRequests} />
+              </Section>
             )}
             {t && t.body.trim() !== "" && (
               <Section title="Description">

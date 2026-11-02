@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import { ticketQaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "ticket-page-shots");
@@ -49,7 +50,34 @@ const ticket = (n: number) => ({
   timeline: events(n),
   nextBefore: null,
 });
-const SCENARIOS = { empty: ticket(0), many: ticket(50) };
+const qaPr = {
+  number: 40,
+  title: "Delivered cache",
+  url: "https://github.com/octo-org/shop-app/pull/40",
+  state: "merged",
+  repoId: "shop-app",
+};
+const SCENARIOS = {
+  empty: ticket(0),
+  many: ticket(50),
+  closedQa: {
+    ...ticket(0),
+    state: "closed",
+    linkedPullRequests: [qaPr],
+    prs: [
+      {
+        ...qaPr,
+        branch: "feature/cache",
+        isDraft: false,
+        headSha: "a".repeat(40),
+        createdAt: 1000,
+        mergedAt: 2000,
+        rounds: [],
+        ci: [],
+      },
+    ],
+  },
+};
 
 describeRendered("The ticket page in a browser", () => {
   it.each(SIZES)(
@@ -65,7 +93,13 @@ describeRendered("The ticket page in a browser", () => {
             colorScheme,
             api: {
               "/api/tickets/shop-app/3349": body,
-              "/api/config": { operator: { timezone: "UTC" }, repos: [] },
+              "/api/config": {
+                operator: { timezone: "UTC" },
+                repos: [{ id: "shop-app", github: "octo-org/shop-app" }],
+              },
+              "/api/qa-reports?repoId=shop-app&prNumber=40": {
+                reports: [ticketQaReportFixture()],
+              },
             },
           });
           const label = `${name} ${colorScheme}`;
@@ -89,8 +123,17 @@ describeRendered("The ticket page in a browser", () => {
               sums.every((b) => b.height >= 24 && b.width >= 24),
               `${label} targets`,
             ).toBe(true);
-          } else {
+          } else if (name === "empty") {
             await page.box(".tk-timeline .muted"); // the empty line is shown
+          }
+          if (name === "closedQa") {
+            const link = await page.box(".ticket-qa-link");
+            expect(link.height).toBeGreaterThanOrEqual(24);
+            expect((await page.box(".tk-prs a")).height).toBeGreaterThanOrEqual(24);
+            expect((await page.reachable(".ticket-qa-link", ".tk-form .pb")).every(Boolean)).toBe(
+              true,
+            );
+            expect((await page.unclipped(".ticket-qa")).every(Boolean)).toBe(true);
           }
           const form = await page.box(".tk-form");
           const line = await page.box(".tk-timeline");

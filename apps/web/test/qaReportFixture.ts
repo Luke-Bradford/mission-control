@@ -1,4 +1,4 @@
-import { type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
+import { type QaReport, qaReportPermalink, REVIEW_CHECK_IDS } from "@mc/core";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 
 export function qaReportFixture(): QaReport {
@@ -108,5 +108,18 @@ export function qaReportApi(count = 3) {
     [`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${r.headSha}`]: { reports: [r] },
     "/api/qa-reports?repoId=mission-control&prNumber=1011": { reports: [r] },
     [`/api/qa-reports/${r.id}`]: r,
+  };
+}
+
+/** A report for the shared ticket fixture, with matching PR and repository provenance. */
+export function ticketQaReportFixture(): QaReport {
+  const r = qaReportFixture();
+  return {
+    ...r,
+    repoId: "shop-app",
+    github: "octo-org/shop-app",
+    prNumber: 40,
+    prUrl: "https://github.com/octo-org/shop-app/pull/40",
+    permalink: qaReportPermalink("shop-app", 40, r.id),
   };
 }
