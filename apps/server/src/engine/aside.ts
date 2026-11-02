@@ -1,4 +1,5 @@
-import { carriedFrom, fixKey, type Run, reviewFor } from "@mc/core";
+import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core";
+import { readCrewPause } from "../crew-pause.ts";
 import type { Store } from "../store.ts";
 
 /**
@@ -46,24 +47,26 @@ export function asideWakeDue(store: Store, run: Run): boolean {
 const isDisplaced = (store: Store, run: Run): boolean =>
   run.loop?.phase === "working" && store.runPush(run.id) === null;
 
+/** Only a run eligible under its own pause state may displace or hold up another run. */
+function unpausedAsideRuns(store: Store, seatId: string): Run[] {
+  const pause = readCrewPause(store);
+  return store
+    .asideRuns()
+    .filter((run) => run.agentId === seatId && !seatIsPaused(pause, seatId, run.id));
+}
+
 /**
  * The seat's aside run that is due back, if any: rework on a run with a PR first, oldest first;
  * a run displaced mid-build comes back after all of that.
  */
 export function wakeDueAsideRun(store: Store, seatId: string): Run | undefined {
-  const due = store.asideRuns().filter((r) => r.agentId === seatId && asideWakeDue(store, r));
+  const due = unpausedAsideRuns(store, seatId).filter((r) => asideWakeDue(store, r));
   return due.find((r) => !isDisplaced(store, r)) ?? due[0];
 }
 
 /** Whether another run of the seat has rework due, so the run being built gives way to it. */
 export function reworkDueBesides(store: Store, run: Run): boolean {
-  return store
-    .asideRuns()
-    .some(
-      (r) =>
-        r.agentId === run.agentId &&
-        r.id !== run.id &&
-        !isDisplaced(store, r) &&
-        asideWakeDue(store, r),
-    );
+  return unpausedAsideRuns(store, run.agentId).some(
+    (r) => r.id !== run.id && !isDisplaced(store, r) && asideWakeDue(store, r),
+  );
 }

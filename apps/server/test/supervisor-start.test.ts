@@ -527,6 +527,59 @@ describe("startRun profiles", () => {
 });
 
 describe("startRun", () => {
+  it("paused older rework does not block starting the actual run granted a pause exception", async () => {
+    const { sup } = make();
+    sup.start();
+    const older = "guido-1:older-rework";
+    store.upsertRun({
+      id: older,
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "older",
+      model: "haiku",
+      branch: "feature/41-older",
+      ticket: "mc#41",
+      ticketTitle: "Older rework",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/older", wake: true } },
+    });
+    const pause = { seats: "all" as const, reason: "Hold other work", at: 1, by: "operator" };
+    writeCrewPause(store, pause, 1);
+    const result = await sup.startRun("guido-1", 42, {
+      beforeLaunch: (run) => {
+        writeCrewPause(
+          store,
+          pauseWithout(pause, "guido-1", {
+            runId: run.id,
+            by: "FLIGHT",
+            at: 2,
+            reason: "Finish this ticket only",
+          }),
+          2,
+          undefined,
+          "FLIGHT",
+        );
+      },
+    });
+    expect(pausedSeat(store, "guido-1", result.runId)).toBeNull();
+    expect(pausedSeat(store, "guido-1", older)?.reason).toBe("Hold other work");
+    await until(() => expect(userLines()).toHaveLength(1));
+    await sup.endRunByEngine(result.runId);
+    writeCrewPause(store, null, 3);
+    const error = await refusal(sup.startRun("guido-1", 42));
+    expect(error.status).toBe(409);
+    expect(error.message).toContain("mc#41");
+    expect(store.run(older)?.loop?.aside?.wake).toBe(true);
+  });
+
   it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
     const { sup } = make();
     sup.start();

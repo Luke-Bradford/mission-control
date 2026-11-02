@@ -7207,6 +7207,52 @@ describe("the engine runs reviews", () => {
       expect(h.taken).toHaveLength(takesBefore);
     });
 
+    it("paused rework never displaces the only run with a pause exception", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 8);
+      const pause = pauseWithout(
+        { seats: "all", reason: "Hold other work", at: clock, by: "operator" },
+        SEAT,
+        { runId: b, by: "FLIGHT", at: clock, reason: "Finish B only" },
+      );
+      writeCrewPause(store, pause, clock);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([RUN]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+      expect(store.run(b)?.loop?.aside ?? null).toBeNull();
+      expect(h.wakes).toEqual([]);
+      expect(JSON.parse(store.getSetting("crew.paused") ?? "null")).toEqual(pause);
+    });
+
+    it("paused older rework does not block waking a younger run with a pause exception", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 8);
+      store.setRunLoop(b, {
+        ...NEW_LOOP,
+        phase: "working",
+        aside: { worktree: "/w/b", wake: true },
+      });
+      seatIdle(null);
+      const pause = pauseWithout(
+        { seats: "all", reason: "Hold other work", at: clock, by: "operator" },
+        SEAT,
+        { runId: b, by: "FLIGHT", at: clock, reason: "Finish B only" },
+      );
+      writeCrewPause(store, pause, clock);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(b);
+      expect(h.wakes).toEqual([b]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+      expect(store.run(b)?.loop?.aside).toBeNull();
+      expect(asideRun()).not.toBeNull();
+      expect(JSON.parse(store.getSetting("crew.paused") ?? "null")).toEqual(pause);
+    });
+
     describe("a run stopped on someone else's call", () => {
       const WAIT_AT_LIMIT = { kind: "review", reason: "review limit", ended: false };
       /** A younger run of the seat with findings waiting, set aside in review. */

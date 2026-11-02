@@ -110,6 +110,7 @@ let fetchFn: ReturnType<typeof stubFetch>;
 function load(over: Record<string, unknown> = {}) {
   fetchFn = stubFetch({
     "/api/config": CFG,
+    "/api/settings/crew-pause": null,
     "/api/crew?shape=summary": CREW,
     "/api/limits": LIMITS,
     "/api/health": HEALTH,
@@ -455,9 +456,9 @@ describe("Setup tabs", () => {
       "/api/crew/status": { enabled: false, note: "crew lock held by pid 123" },
     });
     at("sessions");
-    expect((await screen.findByRole("status")).textContent).toBe(
-      "Crew is off: crew lock held by pid 123",
-    );
+    expect(
+      (await screen.findByText("Crew is off: crew lock held by pid 123")).getAttribute("role"),
+    ).toBe("status");
   });
 
   it("Sessions: crew off without a note says so plainly", async () => {
@@ -1380,7 +1381,9 @@ describe("Setup tabs", () => {
         "POST /api/config/reload": () => ({ status: 409, body: { error: "crew is off" } }),
       });
       fireEvent.click(screen.getByRole("button", { name: "Reload config.yaml" }));
-      expect((await screen.findByRole("alert")).textContent).toBe(refusedText("crew is off"));
+      expect((await screen.findByText(refusedText("crew is off"))).getAttribute("role")).toBe(
+        "alert",
+      );
     });
 
     it("config.yaml state", async () => {
@@ -1388,7 +1391,9 @@ describe("Setup tabs", () => {
         "/api/crew/changes": { ...CHANGES, error: "bad yaml", restartNeeded: ["loops"] },
         "POST /api/config/reload": () => ({ status: 200, body: { ...CHANGES, applied: [] } }),
       });
-      expect((await screen.findByRole("alert")).textContent).toBe(loadErrorText("bad yaml"));
+      expect((await screen.findByText(loadErrorText("bad yaml"))).getAttribute("role")).toBe(
+        "alert",
+      );
       expect(screen.getByText(restartText(["loops"]))).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Reload config.yaml" }));
       await waitFor(() => expect(toastText()).toBe(RELOADED));
@@ -1633,7 +1638,9 @@ describe("Setup › Repos & seats cards", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
     fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("origin does not match");
+    expect(
+      (await within(screen.getByLabelText("Add repo")).findByRole("alert")).textContent,
+    ).toContain("origin does not match");
     expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/onboard")).toBe(false);
   });
 
@@ -1727,7 +1734,9 @@ describe("Setup › Repos & seats cards", () => {
     await screen.findByText(/Project board verified/);
     fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "crew" } });
     fireEvent.click(screen.getByRole("button", { name: "Add repo" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("could not write config.yaml");
+    expect(
+      (await within(screen.getByLabelText("Add repo")).findByRole("alert")).textContent,
+    ).toContain("could not write config.yaml");
     expect(fetchFn.mock.calls.filter(([path]) => path === "/api/repos/onboard")).toHaveLength(1);
     expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos")).toBe(false);
     expect(fetchFn.mock.calls.some(([path]) => path === "/api/crew/sessions")).toBe(false);

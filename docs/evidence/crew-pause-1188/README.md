@@ -51,7 +51,7 @@ Separate browser regressions cover empty, one, 50 long exception rows and the un
 The long-list cases check scrolling, reachable controls and no horizontal clipping.
 Component cases cover owner/time, reasons, legacy entries, expiry refresh, loading, empty, error and stale-read write refusal.
 
-## Local check receipts
+## Initial local check receipts
 
 The final panel/browser, lint, typecheck, build and capture pack ran after merging current main `15205ba0`.
 The backend cases ran before that web-only merge; it changed no server/core source or test files.
@@ -76,6 +76,40 @@ No full local suite ran, under the controller's explicit limit. Full CI remains 
 
 Stores in server tests are isolated temporary databases. Supervisor tests use fake CLI processes.
 No paid or live seat was started or resumed.
+
+## Review correction and CI fixture repair
+
+The fresh review found that paused older rework could displace a run with the sole active exception.
+It could then prevent that eligible run from waking or starting because the paused run retained priority.
+The correction filters both shared contender selectors by each contender's own run-specific pause state.
+Raw rework detection remains unchanged. No pause scope, owner or grant is changed by selection.
+Once the pause clears, the older rework regains its normal priority.
+
+Three new regressions were run against the unchanged selectors at `6eaf7ab7`, with the new tests present.
+All three failed for the reported behavior: B was displaced, its wake list stayed empty, and start refused it for paused A.
+After the correction, those same cases passed. The separate supervisor project also reran the actual grant and no-op hook cases.
+The [red reproduction output](red-reproducer.txt) preserves the original assertions, exception and timings.
+
+| Bounded correction check | Observed result | Wall time |
+| --- | --- | --- |
+| Engine red reproduction | 2 failed as expected; 446 unrelated skipped | 1.45s |
+| Supervisor red reproduction | 1 failed as expected; 196 unrelated skipped | 1.30s |
+| Engine green reproduction | 2 passed; 446 unrelated skipped | 1.37s |
+| Supervisor priority and launch boundary | 3 passed; 194 unrelated skipped | 2.87s |
+| Related engine aside and pause cases | 34 passed; 414 unrelated skipped | 3.92s |
+| App, Overview and Setup test files | 282 passed | 4.64s |
+| Final correction workspace types and lint | Passed | Separate sequential commands |
+
+The [initial web-core CI job](https://github.com/Luke-Bradford/mission-control/actions/runs/41502011452/job/125471598887)
+at `6eaf7ab7` reported 7 failed and 5,425 passed tests.
+The seven failures queried a page-wide status or alert, or omitted the pause endpoint fixture.
+App, Overview and Setup now provide an explicit successful `null` pause response.
+Assertions identify their intended toast, crew status or form error and still check its semantic role.
+The 282-case repair run above includes every affected case. This is local evidence; new-head CI remains a separate gate.
+
+The correction changes server selection logic and tests only. Production web source is byte-identical to photographed `d55f5bcd`.
+The existing capture source and timestamps remain accurate; no new rendered-behavior claim or capture is added.
+All correction checks ran sequentially, at most three workers. No full local suite or live action ran.
 
 ## Limits and follow-up
 
