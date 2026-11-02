@@ -5,7 +5,8 @@ import type {
   CodeHealthView,
   ConfigView,
 } from "@mc/core";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { OPERATOR_HEADER } from "@mc/core";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
@@ -13,6 +14,7 @@ import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { hub, streamStatus } from "../src/data.ts";
 import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { stubFetch } from "./fetchStub.ts";
+import { testHealthFixture } from "./testHealthFixtures.ts";
 
 const NOW = Date.UTC(2026, 10, 2, 12),
   ID = `chr_${"a".repeat(32)}`;
@@ -155,6 +157,101 @@ it("fetches only the selected tab and uses keyboard tab navigation", async () =>
     "true",
   );
   expect(fetch.mock.calls.some(([url]) => url.includes("tab=review"))).toBe(true);
+});
+it("loads Test health on demand and pages explicit exact-head attempts through authenticated evidence", async () => {
+  const fixture = testHealthFixture(NOW);
+  const evidencePath = "/api/code-health/evidence/ch_test_ordered?repo=sample&cursor=";
+  const firstPage = fixture.api[`${evidencePath}0`] as {
+    reference: CodeHealthEvidenceRef;
+    rows: Record<string, unknown>[];
+  };
+  const orderedRows = Array.from({ length: 60 }, (_, i) => ({
+    ...firstPage.rows[0],
+    attemptId: `ordered-${i}`,
+    state: i ? "passed" : "failed",
+    executionOrder: i,
+    executionOrderStatus: "explicit",
+    completedAt: NOW - 60000 + i * 1000,
+  }));
+  for (const cursor of [0, 50])
+    fixture.api[`${evidencePath}${cursor}`] = {
+      reference: firstPage.reference,
+      rows: orderedRows.slice(cursor, cursor + 50),
+      nextCursor: cursor ? null : "50",
+      truncated: false,
+    };
+  // Supply the modified responses after constructing the explicit multipage cohort.
+  const fetch = setup(fixture.api);
+  render(<CodeHealth />);
+  await screen.findByRole("tab", { name: "Test health" });
+  await screen.findByText("Inspect planning and corrections before extending the same work.");
+  expect(fetch.mock.calls.some(([url]) => url.includes("tab=test"))).toBe(false);
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "End" });
+  await screen.findByRole("region", { name: "Ranked test disruption" });
+  fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+  await waitFor(() =>
+    expect(fetch.mock.calls.some(([url]) => url.includes("window=7d&tab=test"))).toBe(true),
+  );
+  await screen.findByRole("button", { name: fixture.data.disruption[0].label });
+  const opener = screen.getByRole("button", { name: fixture.data.disruption[0].label });
+  opener.focus();
+  fireEvent.click(opener);
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText(/execution 0/);
+  const first = within(dialog).getByText(/Record 1 · test-0/);
+  fireEvent.click(first);
+  const firstDetails = first.closest("details");
+  if (!firstDetails) throw new Error("Attempt details missing");
+  expect(
+    within(firstDetails)
+      .getByRole("link", { name: "Open exact head aaaaaaaa" })
+      .getAttribute("href"),
+  ).toBe(`https://github.com/example/sample/commit/${"a".repeat(40)}`);
+  expect(
+    within(firstDetails).getByRole("link", { name: "Open workflow result" }).getAttribute("href"),
+  ).toBe("https://github.com/example/sample/actions/runs/1234/job/5678");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Next 50 rows" }));
+  await within(dialog).findByText(/execution 50/);
+  expect(within(dialog).queryByText(/execution 0$/)).toBeNull();
+  const request = fetch.mock.calls.find(
+    ([url]) => url.includes("ch_test_ordered") && url.includes("cursor=50"),
+  );
+  expect(new Headers(request?.[1]?.headers).get(OPERATOR_HEADER)).toBe("fictional-operator-token");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(document.activeElement).toBe(opener));
+  expect(screen.getByRole("tab", { name: "Test health" }).getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")).toBe("true");
+});
+it("keeps uncertain retry positions and original QA/spec provenance distinct", async () => {
+  const fixture = testHealthFixture(NOW);
+  const page = fixture.api["/api/code-health/evidence/ch_test_ordered?repo=sample&cursor=0"] as {
+    rows: Record<string, unknown>[];
+  };
+  page.rows[0].executionOrderStatus = "tied";
+  setup(fixture.api);
+  render(<CodeHealth />);
+  await screen.findByRole("tab", { name: "Test health" });
+  fireEvent.click(screen.getByRole("tab", { name: "Test health" }));
+  fireEvent.click(await screen.findByRole("button", { name: fixture.data.disruption[0].label }));
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText(/retry order uncertain \(tied\)/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("button", { name: "test-0" }));
+  const qa = await screen.findByRole("dialog");
+  const row = await within(qa).findByText(/Record 1 · test-0/);
+  fireEvent.click(row);
+  const qaDetails = row.closest("details");
+  if (!qaDetails) throw new Error("QA details missing");
+  expect(within(qaDetails).getByText("reviewer-0")).toBeTruthy();
+  expect(within(qaDetails).getByText("operator-fixture")).toBeTruthy();
+  expect(within(qaDetails).getByText(/docs\/drafts.md: retained drafts/)).toBeTruthy();
+  expect(
+    within(qaDetails)
+      .getByRole("link", { name: "Open code at reviewed head" })
+      .getAttribute("href"),
+  ).toBe(`https://github.com/example/sample/blob/${"a".repeat(40)}/tests/account-0.test.ts#L12`);
 });
 it("keeps disconnected decisions disabled through range changes", async () => {
   setup();

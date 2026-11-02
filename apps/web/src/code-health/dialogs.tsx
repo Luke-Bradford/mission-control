@@ -24,6 +24,23 @@ interface EvidencePage {
   nextCursor: string | null;
   truncated: boolean;
 }
+const testEvidenceLabels: Record<string, string> = {
+  testId: "Stable test ID",
+  headSha: "Exact head",
+  attemptId: "Attempt ID",
+  runAttempt: "Workflow run attempt",
+  executionOrder: "Execution position",
+  executionOrderStatus: "Retry order",
+  workflowRun: "Workflow run",
+  jobRun: "Job run",
+  durationMs: "Duration (ms)",
+  completedAt: "Completed at",
+  reportCompletedAt: "Report completed at",
+  importedAt: "Imported at",
+  actor: "Recorded by",
+  reviewer: "Original reviewer",
+  specEvidence: "Code/spec rationale",
+};
 function HealthDialog({
   title,
   onClose,
@@ -211,23 +228,38 @@ export function EvidenceDialog({
           <div className="ch-evidence-rows">
             {page.rows.map((row, i) => (
               <details
-                key={`${cursor}-${row.findingId ?? row.reviewId ?? row.observationId ?? row.commandRecordId ?? row.path ?? JSON.stringify(row)}`}
+                key={`${cursor}-${row.attemptId ?? row.id ?? row.findingId ?? row.reviewId ?? row.observationId ?? row.commandRecordId ?? row.path ?? JSON.stringify(row)}`}
                 className="ch-evidence-item"
               >
                 <summary>
                   {typeof row.pr === "number" ? `PR ${row.pr}` : `Record ${Number(cursor) + i + 1}`}{" "}
-                  · {String(row.file ?? row.job ?? row.state ?? row.reviewId ?? "Evidence")}
+                  ·{" "}
+                  {String(
+                    row.testId ?? row.file ?? row.job ?? row.state ?? row.reviewId ?? "Evidence",
+                  )}
+                  {typeof row.attemptId === "string" && (
+                    <>
+                      {" "}
+                      · {String(row.state)} ·{" "}
+                      {row.executionOrderStatus === "explicit"
+                        ? `run attempt ${String(row.runAttempt)}, execution ${String(row.executionOrder)}`
+                        : `retry order uncertain (${String(row.executionOrderStatus ?? "missing")})`}
+                    </>
+                  )}
                 </summary>
                 <dl>
                   {Object.entries(row).map(([key, value]) => (
                     <div key={key}>
-                      <dt>{label(key)}</dt>
+                      <dt>{testEvidenceLabels[key] ?? label(key)}</dt>
                       <dd>
                         {value === null
                           ? "—"
-                          : typeof value === "object"
-                            ? JSON.stringify(value)
-                            : String(value)}
+                          : typeof value === "number" &&
+                              ["completedAt", "reportCompletedAt", "importedAt", "at"].includes(key)
+                            ? new Date(value).toISOString()
+                            : typeof value === "object"
+                              ? JSON.stringify(value)
+                              : String(value)}
                       </dd>
                     </div>
                   ))}
@@ -253,6 +285,40 @@ export function EvidenceDialog({
                     Open snapshot commit {row.sha.slice(0, 8)}
                   </a>
                 )}
+                {github &&
+                  typeof row.headSha === "string" &&
+                  /^[a-f0-9]{40}$/i.test(row.headSha) && (
+                    <div className="ch-actions">
+                      <a
+                        href={`https://github.com/${github}/commit/${row.headSha}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open exact head {row.headSha.slice(0, 8)}
+                      </a>
+                      {typeof row.file === "string" &&
+                        row.file.length > 0 &&
+                        !row.file.startsWith("/") &&
+                        !row.file.split("/").some((part) => part === ".." || part === ".") && (
+                          <a
+                            href={`https://github.com/${github}/blob/${row.headSha}/${row.file.split("/").map(encodeURIComponent).join("/")}${typeof row.line === "number" && Number.isSafeInteger(row.line) && row.line > 0 ? `#L${row.line}` : ""}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open code at reviewed head
+                          </a>
+                        )}
+                      {typeof row.workflowRun === "string" && /^\d+$/.test(row.workflowRun) && (
+                        <a
+                          href={`https://github.com/${github}/actions/runs/${row.workflowRun}${typeof row.jobRun === "string" && /^\d+$/.test(row.jobRun) ? `/job/${row.jobRun}` : ""}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open workflow result
+                        </a>
+                      )}
+                    </div>
+                  )}
                 {typeof row.url === "string" && row.url.startsWith("https://github.com/") && (
                   <a href={row.url} target="_blank" rel="noreferrer">
                     Open source result
