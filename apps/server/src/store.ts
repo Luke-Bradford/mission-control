@@ -1343,12 +1343,13 @@ export class Store {
     });
   }
 
-  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number) {
-    this.db
+  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number): boolean {
+    const result = this.db
       .prepare(
-        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL",
+        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL AND json_extract(state,'$.kind')='accepted'",
       )
       .run(JSON.stringify({ fingerprint, at }), repoId, id);
+    return Number(result.changes) === 1;
   }
   completeCodeHealthWork(repoId: string, id: string) {
     this.db

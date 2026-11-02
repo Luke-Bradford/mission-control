@@ -1978,8 +1978,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         workAttempt = false;
       if (recommendationId) {
         const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
-        if (recommendation?.state.kind !== "accepted")
-          return fail("Code-health work requires an accepted recommendation in this repo.");
+        if (
+          !recommendation ||
+          !(
+            recommendation.state.kind === "accepted" ||
+            ((recommendation.state.kind === "paid-off" ||
+              recommendation.state.kind === "no-effect") &&
+              recommendation.workAttempt)
+          )
+        )
+          return fail(
+            "Code-health work requires an accepted recommendation in this repo, or recovery of its existing creation attempt.",
+          );
         existingWork = recommendation.linkedWork;
         workReady = recommendation.workReady;
         workAttempt = recommendation.workAttempt !== null;
@@ -1994,6 +2004,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       };
       const finish = async (issue: number, url: string, recovered = false): Promise<Result> => {
         const ref = `${repo.id}#${issue}`;
+        const stoppedByDecision = () =>
+          recommendationId &&
+          store.codeHealthRecommendation(repo.id, recommendationId)?.state.kind !== "accepted";
+        const decisionStop = () => ({
+          text: `Existing issue ${url} is linked. The recommendation was assessed; stopped before further board changes.`,
+        });
+        if (stoppedByDecision()) return decisionStop();
         const [owner = ""] = repo.github.split("/");
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const added = await deps.gh(
@@ -2012,6 +2029,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             decision: "Retried project item-add for existing accepted work.",
             basis,
           });
+        if (stoppedByDecision()) return decisionStop();
         // a draft repo's board is never written: moveCard would answer ok and change nothing
         if (repo.autonomy !== "merge") {
           if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
@@ -2027,6 +2045,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             return fail(createdFieldsFailedText(ref));
           }
         }
+        if (stoppedByDecision()) return decisionStop();
         if (recovered && deps.board.read) {
           const card = await deps.board.read(repo.id, issue).catch(() => null);
           if (!card)
@@ -2040,6 +2059,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             };
           }
         }
+        if (stoppedByDecision()) return decisionStop();
         const moved = await deps.board.move({
           runId: ctx.runId,
           repoId: repo.id,
@@ -2054,7 +2074,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         };
       };
       if (existingWork) {
-        if (workReady) return { text: `Accepted recommendation already links ${existingWork}.` };
+        if (
+          workReady ||
+          store.codeHealthRecommendation(repo.id, recommendationId ?? "")?.state.kind !== "accepted"
+        )
+          return { text: `Accepted recommendation already links ${existingWork}.` };
         const prefix = `https://github.com/${repo.github}/issues/`,
           number = existingWork.slice(prefix.length);
         if (!existingWork.startsWith(prefix) || !/^[1-9][0-9]*$/.test(number))
@@ -2112,7 +2136,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       }
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       if (recommendationId) {
-        store.beginCodeHealthWork(
+        const claimed = store.beginCodeHealthWork(
           repo.id,
           recommendationId,
           createHash("sha256")
@@ -2120,6 +2144,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             .digest("hex"),
           at,
         );
+        if (!claimed)
+          return fail(
+            "Recommendation changed before issue creation. Refresh its decision; no new issue was created.",
+          );
         record(at, {
           kind: "ticket",
           ref: recommendationId,

@@ -215,11 +215,20 @@ export function mutateRecommendation(
 }
 export function linkRecommendation(db: Db, repo: string, id: string, link: string, at: number) {
   const row = recommendationRow(db, repo, id);
-  if (row?.state.kind !== "accepted")
-    throw new CodeHealthReadError(409, "Recommendation must be accepted before linking work.");
+  if (
+    !row ||
+    !(
+      row.state.kind === "accepted" ||
+      ((row.state.kind === "paid-off" || row.state.kind === "no-effect") && row.workAttempt)
+    )
+  )
+    throw new CodeHealthReadError(
+      409,
+      "Recommendation must be accepted, or have an existing creation attempt, before linking work.",
+    );
   if (row.linkedWork && row.linkedWork !== link)
     throw new CodeHealthReadError(409, "Recommendation already links different work.");
-  row.state = { ...row.state, linkedWork: link };
+  if (row.state.kind === "accepted") row.state = { ...row.state, linkedWork: link };
   db.prepare(
     "UPDATE code_health_recommendations SET linked_work=?,state=?,updated_at=? WHERE repo_id=? AND id=?",
   ).run(link, JSON.stringify(row.state), Math.max(at, row.updatedAt + 1), repo, id);
