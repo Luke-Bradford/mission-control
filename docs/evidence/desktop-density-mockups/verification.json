@@ -1,0 +1,722 @@
+[
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 1323,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 1170,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 900,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 1323,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 1170,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1440,
+      "height": 900,
+      "docWidth": 1440,
+      "docHeight": 900,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1080,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1920,
+      "height": 1080,
+      "docWidth": 1920,
+      "docHeight": 1080,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 2560,
+      "height": 1440
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 2560,
+      "height": 1440,
+      "docWidth": 2560,
+      "docHeight": 1440,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "open"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 1323,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 1170,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 900,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 1323,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 1170,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1280,
+      "height": 900,
+      "docWidth": 1280,
+      "docHeight": 900,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1000,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1600,
+      "height": 1000
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 1000,
+      "docWidth": 1600,
+      "docHeight": 1000,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "light",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 837,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "overview-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 1235,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "agent-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 1186,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 0,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  },
+  {
+    "file": "setup-sessions-density",
+    "viewport": {
+      "width": 1600,
+      "height": 700
+    },
+    "theme": "dark",
+    "metrics": {
+      "width": 1600,
+      "height": 700,
+      "docWidth": 1600,
+      "docHeight": 837,
+      "small": 0,
+      "smallControls": 0,
+      "crewRows": 11,
+      "crewContained": true,
+      "dock": "closed"
+    },
+    "errors": []
+  }
+]
