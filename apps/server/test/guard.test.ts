@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  DEFAULT_REPO_RULES,
+  FLIGHT_RUNAWAY,
   GUARD_BODY_LIMIT,
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
@@ -33,6 +35,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { runawayTrip } from "../src/flight/runaway.ts";
+import { grantApproval } from "../src/flight-approvals.ts";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
@@ -450,6 +454,299 @@ describe("POST /api/guard/check", () => {
   const reason = (body: string) =>
     (JSON.parse(body) as { hookSpecificOutput: { permissionDecisionReason: string } })
       .hookSpecificOutput.permissionDecisionReason;
+
+  describe("FLIGHT's full profile (#1214)", () => {
+    let tokF: string;
+    let flight: FastifyInstance;
+    beforeEach(async () => {
+      tokF = tokens.issue("flight-1", "run-f");
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "a",
+        model: "haiku",
+        area: [],
+      });
+      flight = await build({ config: cfg });
+    });
+    afterEach(async () => {
+      await flight.close();
+    });
+    const shell = () => store.flightDecisions(0, 50).filter((d) => d.kind === "shell");
+    const complete = async (id: string, command: string, exit = 0) => {
+      const before = await check(tokF, { ...bash(id, command), cwd: "/repo" }, flight);
+      if (before.body === "{}")
+        await check(
+          tokF,
+          {
+            ...post(id, exit === 0 ? "PostToolUse" : "PostToolUseFailure"),
+            tool_input: { command },
+            cwd: "/repo",
+            exit_code: exit,
+          },
+          flight,
+        );
+      return before;
+    };
+    const grant = (rule: "merge-push" | "repo-rules", scope: string) =>
+      grantApproval(store, { rule, scope, until: NOW + 60_000, reason: "controller said so" }, NOW);
+
+    it("checks the actual Git branch and only protects CLAUDE.md's Mission Control section", async () => {
+      const repo = join(dir, "flight-repo");
+      execFileSync("git", ["init", "--initial-branch=feature/work", repo]);
+      const command = "git commit -m example";
+      expect((await check(tokF, { ...bash("branch1", command), cwd: repo }, flight)).body).toBe(
+        "{}",
+      );
+      execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: repo });
+      expect(
+        reason((await check(tokF, { ...bash("branch2", command), cwd: repo }, flight)).body),
+      ).toContain("main");
+      const path = join(repo, "CLAUDE.md");
+      writeFileSync(
+        path,
+        "# Guidance\nKeep it clear.\n\n## Mission Control\n```yaml\nmc:\n  needs: [size]\n```\n",
+      );
+      expect(
+        (
+          await check(
+            tokF,
+            pre("prose", "Edit", {
+              file_path: path,
+              old_string: "Keep it clear.",
+              new_string: "Keep it concise.",
+            }),
+            flight,
+          )
+        ).body,
+      ).toBe("{}");
+      expect(
+        reason(
+          (
+            await check(
+              tokF,
+              pre("floor", "Edit", {
+                file_path: path,
+                old_string: "needs: [size]",
+                new_string: "needs: []",
+              }),
+              flight,
+            )
+          ).body,
+        ),
+      ).toContain("Mission Control");
+    });
+
+    it("lets FLIGHT's shell write and records each write as a shell decision", async () => {
+      expect((await check(tokF, bash("f1", "gh pr close 12"), flight)).body).toBe("{}");
+      expect(shell()).toEqual([]);
+      await check(
+        tokF,
+        { ...post("f1"), tool_input: { command: "gh pr close 12" }, cwd: "/repo", exit_code: 0 },
+        flight,
+      );
+      expect((await check(tokF, bash("f2", "gh pr view 12"), flight)).body).toBe("{}");
+      expect(shell()).toEqual([
+        expect.objectContaining({
+          about: "gh pr close 12",
+          seatId: "flight-1",
+          targetRunId: "run-f",
+          decision: "Shell completed; exit 0; cwd /repo",
+        }),
+      ]);
+    });
+
+    it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        expect((await complete(`r${i}`, "gh pr close 12")).body).toBe("{}");
+      expect(runawayTrip(store)).not.toBeNull();
+      const held = await check(tokF, bash("r-next", "gh pr close 13"), flight);
+      expect(reason(held.body)).toContain("runaway breaker");
+      // a read still runs
+      expect((await check(tokF, bash("r-read", "git status"), flight)).body).toBe("{}");
+    });
+
+    it.each([
+      "git fetch origin",
+      'sqlite3 -readonly mc.sqlite "select 1"',
+      "find . -name x",
+      "gh -R o/r pr view 12",
+      'sqlite3 -readonly mc.sqlite "select id from runs where started_at > 0"',
+      "gh pr list --json number --jq '.[] | select(.number > 5)'",
+      "gh search issues stuck",
+      "gh project item-list 1 --owner o",
+    ])("does not count %s toward the breaker", async (cmd) => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        await check(tokF, bash(`q${i}`, cmd), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
+    it("does not count a quoted > inside a shell wrapper", async () => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+        await check(tokF, bash(`j${i}`, `bash -c "jq '.a > 1' f"`), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
+    it.each([
+      "bash -c 'echo x > f'",
+      "eval 'echo x > f'",
+      "bash -c 'echo x | tee f'",
+      "cp input /outside/file",
+      "mv /outside/source inside",
+      "rm /outside/file",
+      "touch /outside/file",
+      "sed -i s/a/b/ /outside/file",
+      "sort -o /outside/file input",
+      "curl -o /outside/file https://example.test",
+    ])("counts %s toward the breaker, and a tripped breaker refuses it", async (cmd) => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await complete(`w${i}`, cmd);
+      expect(shell()).toHaveLength(FLIGHT_RUNAWAY.sameActionLimit);
+      expect(runawayTrip(store)).not.toBeNull();
+      expect(reason((await check(tokF, bash("w-next", cmd), flight)).body)).toContain(
+        "runaway breaker",
+      );
+    });
+
+    it("does not count a read toward the breaker", async () => {
+      for (let i = 0; i < 8; i++) await check(tokF, bash(`g${i}`, "gh pr view 12"), flight);
+      expect(runawayTrip(store)).toBeNull();
+    });
+
+    it("redacts a secret from the recorded command", async () => {
+      const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
+      await complete("f1", `curl -X POST -H "Authorization: Bearer ${token}" http://h`);
+      expect(shell()).toHaveLength(1);
+      expect(JSON.stringify(shell())).not.toContain(token);
+    });
+
+    it("refuses the repo's rules, names the rule, and leaves a guard hit", async () => {
+      const r = await check(tokF, bash("f1", "git push origin main"), flight);
+      expect(reason(r.body)).toContain(GUARD_RULES["merge-push"]);
+      expect(store.guardHits(0).map((h) => h.rule)).toEqual(["merge-push"]);
+      expect(shell()).toEqual([]);
+    });
+
+    it("lets one matching call through on a recorded approval, then refuses again", async () => {
+      const command = "git push origin main";
+      grant("merge-push", command);
+      expect((await check(tokF, bash("f1", command), flight)).body).toBe("{}");
+      expect(store.flightDecisions(0, 50).find((d) => d.kind === "approval")).toMatchObject({
+        basis: "controller said so",
+        seatId: "flight-1",
+      });
+      expect(reason((await check(tokF, bash("f2", command), flight)).body)).toContain(
+        GUARD_RULES["merge-push"],
+      );
+    });
+
+    it("takes a repo-rules approval for a file path, and not for another", async () => {
+      const file = "/w/.github/workflows/ci.yml";
+      grant("repo-rules", file);
+      const other = await check(
+        tokF,
+        pre("f1", "Write", { file_path: "/w/.github/CODEOWNERS" }),
+        flight,
+      );
+      expect(reason(other.body)).toContain(GUARD_RULES["repo-rules"]);
+      expect((await check(tokF, pre("f2", "Write", { file_path: file }), flight)).body).toBe("{}");
+    });
+
+    describe("always_ask tickets and the board", () => {
+      let ask: FastifyInstance;
+      beforeEach(async () => {
+        const cfg = config();
+        cfg.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "a",
+          model: "haiku",
+          area: [],
+        });
+        const item = (n: number, labels: string[]) => ({
+          repoId: "dev",
+          issueNumber: n,
+          title: `T${n}`,
+          status: "Ready",
+          state: "planned",
+          labels,
+          priority: null,
+          updatedAt: NOW,
+          url: "u",
+          stage: null,
+          owner: null,
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: NOW,
+          itemId: `I${n}`,
+          projectId: "P1",
+        });
+        store.replaceBoard("dev", [item(7, ["approval:x"]), item(8, [])] as never);
+        ask = await build({
+          config: cfg,
+          repoRules: async () => ({ ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] }),
+        });
+      });
+      afterEach(async () => {
+        await ask.close();
+      });
+
+      it("refuses an edit or close of an always_ask ticket, and allows an ordinary one", async () => {
+        for (const [i, command] of [
+          "gh issue edit 7 --add-label x",
+          "gh issue close 7",
+          "gh issue view 8 && gh issue close 7",
+          "gh issue close -c done 7",
+          "gh api -X PATCH repos/o/r/issues/7 -f state=closed",
+          "gh -R o/r issue close 7",
+          "gh issue edit -R o/r 7 --add-label x",
+          "gh issue edit 8 7 --add-label x",
+        ].entries()) {
+          const r = await check(tokF, bash(`a${i}`, command), ask);
+          expect(reason(r.body)).toContain("always_ask");
+        }
+        expect((await check(tokF, bash("ok", "gh issue edit 8 --add-label x"), ask)).body).toBe(
+          "{}",
+        );
+        expect((await check(tokF, bash("rd", "gh issue view 7"), ask)).body).toBe("{}");
+      });
+
+      it("allows controller shell commands without a per-command allowlist", async () => {
+        const r = await check(tokF, bash("u1", "gh issue edit --add-label x"), ask);
+        expect(r.body).toBe("{}");
+      });
+
+      it("allows controller project writes through the shell", async () => {
+        const r = await check(tokF, bash("p1", "gh project item-edit --id X --field-id Y"), ask);
+        expect(r.body).toBe("{}");
+      });
+
+      it("refuses a ticket edit when the repo's rules cannot be read", async () => {
+        // `flight` was built with no rules reader
+        const r = await check(tokF, bash("b1", "gh issue edit 8 --add-label x"), flight);
+        expect(reason(r.body)).toContain("could not be read");
+      });
+    });
+
+    it("allows reading the controller credential file without an approval", async () => {
+      expect((await check(tokF, bash("f1", "cat /data/operator-token"), flight)).body).toBe("{}");
+    });
+
+    it("keeps a writer seat sandboxed and its denials unchanged, approval or not", async () => {
+      grant("merge-push", "git push origin main");
+      const r = await check(tokA, bash("w1", "git push origin main"));
+      expect(reason(r.body)).toContain(GUARD_RULES["git-write"]);
+      expect(reason((await check(tokA, bash("w2", "curl http://x"))).body)).toContain(
+        GUARD_RULES.network,
+      );
+      expect(shell()).toEqual([]);
+    });
+  });
 
   describe("a Stop with the run's report missing", () => {
     const stop = { hook_event_name: "Stop" };
@@ -1013,7 +1310,7 @@ describe("POST /api/guard/check", () => {
   it.each([
     [{ ...bash("t1", "ls"), hook_event_name: "PermissionDenied" }],
     [{ ...bash("t1", "ls"), extra: 1 }],
-    [{ ...bash("t1", "ls"), tool_input: { command: "ls", content: "x" } }],
+    [{ ...bash("t1", "ls"), tool_input: { command: "ls", content: 123 } }],
     [{ hook_event_name: "PreToolUse", tool_name: "Bash" }],
     [{ ...bash("t1", "ls"), tool_input: { command: 5 } }],
   ])("answers a body it cannot read with 400 { error }", async (body) => {
@@ -1101,6 +1398,7 @@ describe("POST /api/guard/check", () => {
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });
@@ -1199,6 +1497,7 @@ describe("hookMain", () => {
           hook_event_name: "PreToolUse",
           tool_name: "Bash",
           tool_use_id: "toolu_1",
+          cwd: "/w",
           tool_input: { command: "ls" },
         }),
       },
@@ -1273,6 +1572,7 @@ describe("hookMain", () => {
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
       tool_use_id: "toolu_1",
+      cwd: "/w",
       tool_input: { command: "pnpm -s test", run_in_background: true, timeout: 5 },
     });
   });
@@ -1322,7 +1622,7 @@ describe("hookMain", () => {
     expect(JSON.parse(posts[0]?.body ?? "").tool_input).toEqual({ file_path: "/w/big.txt" });
   });
 
-  it("sends a Post event without the tool's input or response", async () => {
+  it("sends bounded Bash post metadata without raw tool output", async () => {
     const stdin = stdinFor({
       hook_event_name: "PostToolUse",
       tool_response: { stdout: "y".repeat(2 * 1024 * 1024) },
@@ -1336,6 +1636,9 @@ describe("hookMain", () => {
       hook_event_name: "PostToolUse",
       tool_name: "Bash",
       tool_use_id: "toolu_1",
+      cwd: "/w",
+      exit_code: 0,
+      tool_input: { command: "ls" },
     });
   });
 

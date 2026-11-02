@@ -53,6 +53,9 @@ const completeItem = (scenario, itemId, type) => {
       type,
       status: "completed",
       ...(scenario.exitCode === undefined ? {} : { exitCode: scenario.exitCode }),
+      ...(scenario.command === undefined
+        ? {}
+        : { command: scenario.command, cwd: scenario.cwd ?? process.cwd() }),
     },
   });
   if (!scenario.holdTurn) endTurn(scenario.failed ? "failed" : "completed");
@@ -115,6 +118,7 @@ rl.on("line", (line) => {
       sandbox: { type: "workspaceWrite", networkAccess: false },
       instructionSources: [],
     };
+    if (params.sandbox === "danger-full-access") result.sandbox = { type: "dangerFullAccess" };
     if (configured.legacyPermissionProfile) {
       result.permissionProfile = result.activePermissionProfile;
       delete result.activePermissionProfile;

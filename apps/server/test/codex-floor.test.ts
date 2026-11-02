@@ -107,6 +107,24 @@ describe.skipIf(installedCodex === null)("Codex seat profile under the real code
 });
 
 describe("codexSeatConfig", () => {
+  it("gives FLIGHT full filesystem and network authority without changing the standard profile", () => {
+    const config = codexSeatConfig(
+      sandboxInput,
+      "read-only",
+      "http://127.0.0.1:7420/mcp",
+      "/tmp/flight",
+      true,
+    );
+    expect(config).toContain('sandbox_mode = "danger-full-access"');
+    expect(config).not.toContain("approval_policy");
+    expect(config).toContain('web_search = "live"');
+    expect(config).toContain('inherit = "all"');
+    expect(config).toContain("ignore_default_excludes = true");
+    expect(config).toContain('exclude = ["MC_SEAT_TOKEN"]');
+    expect(config).not.toContain("default_permissions");
+    expect(config).not.toContain("filesystem");
+    expect(config).not.toContain("TOKEN_VALUE");
+  });
   const url = "http://127.0.0.1:7420/mcp";
   const tmp = "/tmp/claude-501/seat-1";
 

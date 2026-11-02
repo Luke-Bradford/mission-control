@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CrewGitError, crewGit, crewGitBytes } from "../src/runtime/git.ts";
+import { CrewGitError, crewGit, crewGitBytes, SAFE_CONFIG } from "../src/runtime/git.ts";
 
 let dir: string;
 let clone: string;
@@ -48,6 +48,18 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const common = () => join(clone, ".git");
+
+describe("SAFE_CONFIG", () => {
+  it("keeps hooks and the filesystem monitor off, and the ext:: transport (it runs a command) disabled", () => {
+    expect(SAFE_CONFIG.slice(0, 4)).toEqual([
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "core.fsmonitor=",
+    ]);
+    expect(SAFE_CONFIG).toEqual(expect.arrayContaining(["-c", "protocol.ext.allow=never"]));
+  });
+});
 
 describe("crewGit", () => {
   it("ignores replace refs: an object reads as itself, not as what a seat replaced it with", async () => {

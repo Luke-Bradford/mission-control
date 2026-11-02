@@ -70,6 +70,8 @@ import { createExternalReviews, readExternalSubject } from "./external-reviews.t
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
+import { operatorCall } from "./flight/operator-call.ts";
+import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
@@ -150,7 +152,7 @@ export async function main(): Promise<void> {
   const hubRoot = findHubRoot();
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
-  const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
+  const operatorToken = newOperatorToken(); // per boot; FLIGHT alone also receives it in memory
   writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
   markHubStarted(hubStartedAt);
@@ -463,6 +465,11 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    flightEnvironment: async () => ({
+      GH_TOKEN: await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      MC_HUB: `http://${HOST}:${port}`,
+      MC_OPERATOR_TOKEN: operatorToken,
+    }),
     config,
     store,
     bus,
@@ -745,8 +752,21 @@ export async function main(): Promise<void> {
   // FLIGHT's HUD screenshots are kept under the private data dir, for a week.
   const hudShots = hudShotStore(join(dirname(dbPath), "hud-screenshots"));
 
+  const branchTidy = createBranchTidy({
+    config,
+    store,
+    gh,
+    dbPath,
+    inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+    log: (line) => log(line),
+  });
+  // set once the app exists: `mc operator` calls its routes in process
+  let hubApp: ReturnType<typeof buildApp> | null = null;
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    operator: operatorCall(() => hubApp, operatorToken),
+    tidy: createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() }),
     hudShots,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
@@ -911,10 +931,12 @@ export async function main(): Promise<void> {
     updater,
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
     ...crewGuardDeps(config, tokens, lock, store),
+    repoRules: engineRules,
     checks: checkRecorder,
     mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],
   });
+  hubApp = app;
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
@@ -1004,14 +1026,7 @@ export async function main(): Promise<void> {
   }
   // Branch tidying writes to GitHub, so it runs wherever the engine does.
   if (engineOn) {
-    const tidy = createBranchTidy({
-      config,
-      store,
-      gh,
-      dbPath,
-      inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
-      log,
-    });
+    const tidy = branchTidy;
     const quietly = (what: string, run: () => Promise<string[]>) => () => {
       run().catch((e: unknown) => {
         log(`branch tidy: ${what} failed: ${e instanceof Error ? e.message : String(e)}`);

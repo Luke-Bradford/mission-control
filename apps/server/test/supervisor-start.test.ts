@@ -2486,10 +2486,12 @@ describe("repo guidance at launch", () => {
     const allowedAt = argv.indexOf("--allowedTools");
     const deniedAt = argv.indexOf("--disallowedTools");
     const promptAt = argv.indexOf("--append-system-prompt-file");
+    // FLIGHT's full profile (#1214) names no tools and denies none
     return {
-      tools: argv[argv.indexOf("--tools") + 1],
-      allowed: argv.slice(allowedAt + 1, deniedAt),
-      denied: argv.slice(deniedAt + 1, promptAt),
+      tools: argv.includes("--tools") ? argv[argv.indexOf("--tools") + 1] : null,
+      allowed:
+        allowedAt === -1 ? [] : argv.slice(allowedAt + 1, deniedAt === -1 ? promptAt : deniedAt),
+      denied: deniedAt === -1 ? [] : argv.slice(deniedAt + 1, promptAt),
     };
   };
   const launches = () => recorded().filter((line) => Array.isArray(line.argv));
@@ -2590,6 +2592,34 @@ describe("repo guidance at launch", () => {
         "# Mission Control work guidance (advice, not rules)",
       );
   });
+
+  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const argv = launches()[0]?.argv as string[];
+    for (const flag of ["--restricted", "--tools", "--allowedTools", "--disallowedTools"])
+      expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
+    expect(settings.sandbox).toEqual({ enabled: false });
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+  });
+
+  it("lets FLIGHT's git use the operator's config and credentials, with hooks and fsmonitor still off", async () => {
+    const { sup } = make({ extraSeat: FLIGHT });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const env = launches()[0]?.env as Record<string, string>;
+    expect(env.GIT_CONFIG_GLOBAL).toBeUndefined();
+    expect(env.GIT_CONFIG_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_ATTR_NOSYSTEM).toBeUndefined();
+    expect(env.GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+    expect(env.GIT_CONFIG_KEY_1).toBe("core.hooksPath");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("/dev/null");
+  });
 });
 
 // A real child's handshake can take seconds on a loaded machine. These waits fit inside the
@@ -2638,6 +2668,69 @@ import(${JSON.stringify(fixture)});
   }
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
+
+  it("starts Codex FLIGHT with full authority, retains the approval floor and audits completed writes", async () => {
+    const { sup, cfg } = codex({ command: "gh pr close 7", exitCode: 0 });
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await untilCodex(() =>
+      expect(store.flightDecisions(0, 50).some((decision) => decision.kind === "shell")).toBe(true),
+    );
+    const start = recorded().find((message) => message.method === "thread/start");
+    expect(start.params.sandbox).toBe("danger-full-access");
+    expect(start.params.approvalPolicy).toBe("untrusted");
+    expect(store.flightDecisions(0, 50).filter((decision) => decision.kind === "shell")).toEqual([
+      expect.objectContaining({
+        seatId: "flight-1",
+        about: "gh pr close 7",
+        decision: expect.stringContaining("exit 0; cwd"),
+      }),
+    ]);
+  });
+
+  it("lets Codex FLIGHT read the operator credential helper while normal Codex seats cannot", async () => {
+    const { sup, cfg } = codex();
+    const home = join(dir, "home");
+    writeFileSync(join(home, ".gitconfig"), "[credential]\n\thelper = fixture-operator-helper\n");
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    sup.start();
+    await sup.startRun("guido-1", 7);
+    await untilCodex(() =>
+      expect(recorded().filter((message) => message.type === "spawn")).toHaveLength(1),
+    );
+    const normal = recorded().find((message) => message.type === "spawn");
+    await sup.startWatch("flight-1");
+    await untilCodex(() =>
+      expect(recorded().filter((message) => message.type === "spawn")).toHaveLength(2),
+    );
+    const full = recorded().filter((message) => message.type === "spawn")[1];
+    const helper = (spawn: { env: Record<string, string>; cwd: string }) =>
+      spawnSync("git", ["config", "--global", "--get", "credential.helper"], {
+        env: spawn.env,
+        cwd: spawn.cwd,
+        encoding: "utf8",
+      });
+    expect(normal.env.HOME).toBe(home);
+    expect(normal.env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    expect(helper(normal).stdout.trim()).toBe("");
+    for (const key of ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM"])
+      expect(full.env[key]).toBeUndefined();
+    expect(helper(full)).toMatchObject({ status: 0, stdout: "fixture-operator-helper\n" });
+    expect(full.env.GIT_CONFIG_VALUE_1).toBe("/dev/null");
+  });
 
   it("gives Codex FLIGHT guidance only, without changing its prompt or tool grants", async () => {
     const flight: CrewSeatConfig = {

@@ -36,7 +36,15 @@ export const timedOut = (e: unknown): boolean =>
   (e as { killed?: unknown } | null)?.killed === true;
 
 /** Applied before every subcommand: no hooks, no fsmonitor daemon. */
-export const SAFE_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor="];
+export const SAFE_CONFIG = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=",
+  // the ext:: transport runs a command: no config under home may switch it on for the hub's git
+  "-c",
+  "protocol.ext.allow=never",
+];
 
 export interface CrewGitOptions {
   /** Input for fixed batch commands such as cat-file. */

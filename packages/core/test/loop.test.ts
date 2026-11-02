@@ -2609,6 +2609,29 @@ describe("merge workspace", () => {
     expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
   });
 
+  it.each(["CLAUDE.md", ".github/workflows/ci.yml"])(
+    "a controller's approval for the head lets FLIGHT clear %s, and the engine merge it (#1214)",
+    (path) => {
+      const base = merge(
+        { flightPowers: "superuser", floorApproved: true },
+        {
+          touches: { sha: SHA, paths: [path] },
+          gate: gateOf({ missionControlChanged: path === "CLAUDE.md" }),
+        },
+      );
+      const held = reconcile(base);
+      expect(held.loop.awaitingFlight).toBe(SHA);
+      expect(kindsOf(held.actions)).not.toContain("merge");
+      const cleared = { ...base.loop, flightClearedSha: SHA };
+      expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
+      // without the approval the same clearance still merges nothing
+      expect(
+        kindsOf(reconcile({ ...base, floorApproved: false, loop: cleared }).actions),
+      ).not.toContain("merge");
+      expect(reconcile({ ...base, floorApproved: false }).loop.awaitingFlight).toBeNull();
+    },
+  );
+
   it("holds Mission Control block changes on a standard repo with no hard-rule touches", () => {
     const unchanged = merge(
       { flightPowers: "standard" },
