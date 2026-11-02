@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import type {
   AuditRunKind,
   AuditView,
@@ -47,8 +48,12 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-store-"));
   store = new Store(join(dir, "mc.sqlite"));
 });
-afterEach(() => {
+afterEach(async () => {
+  store.close();
   rmSync(dir, { recursive: true, force: true });
+  // Synchronous SQLite cases can starve Vitest's worker RPC for over a minute on CI.
+  // Let pending reporting replies run between cases; retain every assertion and timeout.
+  await yieldToEventLoop();
 });
 
 const run = (over: Partial<Run> = {}): Run => ({
