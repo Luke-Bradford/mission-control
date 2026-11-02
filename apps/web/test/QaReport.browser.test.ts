@@ -89,6 +89,9 @@ describeRendered("Accountable QA report", () => {
         origin: "reviewer-reported",
         outcome: "unknown",
       }));
+      r.visual.pairs[0].label = "Long affected page name with retained evidence "
+        .repeat(7)
+        .slice(0, 300);
       api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${r.headSha}`] = {
         reports: [r],
       };
@@ -110,6 +113,16 @@ describeRendered("Accountable QA report", () => {
         }, null),
       ).toBe(true);
       expect(await page.unclipped("article.qa-report .panel")).not.toContain(false);
+      await page.evaluate(() => {
+        document.querySelector("article.qa-report .uat-pair")?.scrollIntoView();
+        document
+          .querySelector("article.qa-report .uat-pair img")
+          ?.dispatchEvent(new Event("error"));
+      }, null);
+      const retries = await page.boxes("article.qa-report .uat-pair button");
+      expect(retries.every((box) => box.height >= 24 && box.width >= 24)).toBe(true);
+      expect(await page.unclipped("article.qa-report .uat-pair button")).not.toContain(false);
+      expect(await page.reachable("article.qa-report .uat-pair button")).not.toContain(false);
       await page.close();
 
       r.headSha = "d".repeat(40);

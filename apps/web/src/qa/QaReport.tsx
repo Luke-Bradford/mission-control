@@ -233,7 +233,12 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
   const [visible, setVisible] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [failedLink, setFailedLink] = useState<string>();
-  const [loaded, setLoaded] = useState<{ id: string; url?: string; error?: boolean }>();
+  const [loaded, setLoaded] = useState<{
+    id: string;
+    url?: string;
+    data?: string;
+    error?: boolean;
+  }>();
   useEffect(() => {
     if (!assetId || !figure.current) return;
     if (typeof IntersectionObserver === "undefined") {
@@ -257,17 +262,37 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
     if (!assetId || !loadKey || !visible) return;
     let active = true;
     let objectUrl: string | undefined;
+    let reader: FileReader | undefined;
     void apiQaReportImage(assetId)
-      .then((blob) => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(blob);
-        setLoaded({ id: loadKey, url: objectUrl });
+      .then(
+        (blob) =>
+          new Promise<string>((resolve, reject) => {
+            if (!active) {
+              resolve("");
+              return;
+            }
+            // The served HUD permits self/data images. Keep a blob only for opening the full image;
+            // the image itself uses the same data-URL transport as existing private review shots.
+            objectUrl = URL.createObjectURL(blob);
+            reader = new FileReader();
+            reader.onload = () =>
+              typeof reader?.result === "string"
+                ? resolve(reader.result)
+                : reject(new Error("Image could not be read."));
+            reader.onerror = () => reject(new Error("Image could not be read."));
+            reader.onabort = () => reject(new Error("Image read ended."));
+            reader.readAsDataURL(blob);
+          }),
+      )
+      .then((data) => {
+        if (active) setLoaded({ id: loadKey, url: objectUrl, data });
       })
       .catch(() => {
         if (active) setLoaded({ id: loadKey, error: true });
       });
     return () => {
       active = false;
+      if (reader?.readyState === FileReader.LOADING) reader.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [assetId, visible, loadKey]);
@@ -278,6 +303,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
     : failedLink === target
       ? undefined
       : target;
+  const source = assetId ? (loaded?.id === loadKey ? loaded?.data : undefined) : url;
   return (
     <figure ref={figure}>
       <figcaption>
@@ -286,10 +312,10 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
           {shortSha(image.commitSha ?? "")} · {image.source.replaceAll("-", " ")}
         </span>
       </figcaption>
-      {url ? (
+      {url && source ? (
         <a href={url} target="_blank" rel="noopener noreferrer">
           <img
-            src={url}
+            src={source}
             alt={label}
             loading="lazy"
             referrerPolicy="no-referrer"
@@ -307,8 +333,12 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
             <>
               <span>The linked image could not be loaded.</span>{" "}
               <EvidenceLink url={image.sourceUrl ?? target}>Open image source</EvidenceLink>{" "}
-              <button type="button" onClick={() => setFailedLink(undefined)}>
-                Retry linked image · {label}
+              <button
+                type="button"
+                aria-label={`Retry linked image · ${label}`}
+                onClick={() => setFailedLink(undefined)}
+              >
+                Retry image
               </button>
             </>
           ) : loaded?.id === loadKey && loaded?.error ? (
@@ -316,12 +346,13 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
               <span>The retained image could not be loaded.</span>{" "}
               <button
                 type="button"
+                aria-label={`Retry image · ${label}`}
                 onClick={() => {
                   setLoaded(undefined);
                   setAttempt((a) => a + 1);
                 }}
               >
-                Retry image · {label}
+                Retry image
               </button>
             </>
           ) : (

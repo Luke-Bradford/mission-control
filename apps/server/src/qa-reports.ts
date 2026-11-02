@@ -1,6 +1,6 @@
 /** Immutable QA JSON and retained assets. Reads never reconstruct an approval from current state. */
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   EVIDENCE_KINDS,
@@ -34,6 +34,8 @@ import type { Store } from "./store.ts";
 
 export const QA_REPORT_BODY_LIMIT = 256 * 1024;
 const SHA = /^[a-f0-9]{40}$/;
+const IMAGE_BYTES_MAX = 8 * 1024 * 1024;
+const REPORT_IMAGE_BYTES_MAX = 64 * 1024 * 1024;
 export const QA_REPORT_ID = /^[a-f0-9]{64}$/;
 const text = (max = 4000) =>
   z
@@ -215,7 +217,7 @@ export function createQaReports(i: {
   }
   function retain(png: Buffer, known: readonly string[]): string {
     if (
-      png.length > 8_000_000 ||
+      png.length > IMAGE_BYTES_MAX ||
       png.length < 8 ||
       !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
     )
@@ -523,6 +525,7 @@ export function createQaReports(i: {
       );
     },
     async importController(raw) {
+      const imageDeadline = Date.now() + 60_000;
       const parsed = QaReportImportSchema.safeParse(raw);
       if (!parsed.success)
         throw new QaReportError(
@@ -591,6 +594,27 @@ export function createQaReports(i: {
             : url.hostname === "github.com" && ["blob", "raw"].includes(parts[3] ?? "")
               ? 4
               : -1;
+        let canonicalPath = false;
+        try {
+          const path = parts.slice(shaAt + 1);
+          canonicalPath =
+            path.length > 0 &&
+            path.every((part) => {
+              const decoded = decodeURIComponent(part);
+              return (
+                decoded !== "." &&
+                decoded !== ".." &&
+                decoded.length > 0 &&
+                !/[\\/]/.test(decoded) &&
+                [...decoded].every(
+                  (char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127,
+                ) &&
+                encodeURIComponent(decoded) === part
+              );
+            });
+        } catch {
+          /* Refuse malformed percent encoding. */
+        }
         if (
           url.protocol !== "https:" ||
           url.username ||
@@ -602,6 +626,8 @@ export function createQaReports(i: {
           shaAt < 0 ||
           !SHA.test(parts[shaAt] ?? "") ||
           !url.pathname.endsWith(".png") ||
+          url.href !== image.url ||
+          !canonicalPath ||
           !image.provenance
         )
           throw new QaReportError(
@@ -669,27 +695,170 @@ export function createQaReports(i: {
         after: linked(pair.after, "after"),
         ...(pair.diff ? { diff: linked(pair.diff, "diff") } : {}),
       }));
-      const retainedHashes = new Set(
-        localPairs
-          .flatMap((pair) => [pair.before.sha256, pair.after.sha256, pair.diff?.sha256])
-          .filter(Boolean),
+      const retainedByHash = new Map(
+        localPairs.flatMap((pair) =>
+          [pair.before, pair.after, ...(pair.diff ? [pair.diff] : [])].flatMap((image) =>
+            image.sha256 ? [[image.sha256, image] as const] : [],
+          ),
+        ),
       );
-      const portableNotes = localPairs.length
-        ? images
-            .filter((image) => !image.sha256 || !retainedHashes.has(image.sha256))
-            .map((image) => `Portable Git PNG reference (not locally retained): ${image.url}`)
-        : [];
+      let imageBytes = [...retainedByHash.keys()].reduce(
+        (total, hash) => total + statSync(join(assetsDir, `${hash}.png`)).size,
+        0,
+      );
+      const imageFailure = () =>
+        new QaReportError(
+          400,
+          "QA report not saved: a bounded immutable Git PNG could not be retained. Check its path, hash and repository access.",
+        );
+      if (imageBytes > REPORT_IMAGE_BYTES_MAX) throw imageFailure();
+      const fetched = new Map<string, { url: string; sha256: string }>();
+      const readGit = async (endpoint: string, maxBuffer: number) => {
+        const remaining = imageDeadline - Date.now();
+        if (remaining <= 0) throw imageFailure();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const result = await Promise.race([
+            i.gh(
+              [
+                "api",
+                endpoint,
+                "--method",
+                "GET",
+                "-H",
+                endpoint.includes("/git/blobs/")
+                  ? "Accept: application/vnd.github+json"
+                  : "Accept: application/vnd.github.object+json",
+              ],
+              {
+                cwd: i.cwd,
+                timeoutMs: Math.min(5000, remaining),
+                maxBuffer,
+              },
+            ),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(imageFailure()), Math.min(5000, remaining));
+            }),
+          ]);
+          if (result.code !== 0 || Buffer.byteLength(result.stdout) > maxBuffer)
+            throw imageFailure();
+          const parsed: unknown = JSON.parse(result.stdout);
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+            throw imageFailure();
+          return parsed as Record<string, unknown>;
+        } catch {
+          throw imageFailure();
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      };
+      const archiveImage = async (image: QaImageRef): Promise<QaImageRef> => {
+        const cached = fetched.get(image.url);
+        if (cached) {
+          if (image.sha256 && image.sha256 !== cached.sha256) throw imageFailure();
+          return { ...image, ...cached, sourceUrl: image.sourceUrl ?? image.url };
+        }
+        const local = image.sha256 ? retainedByHash.get(image.sha256) : undefined;
+        if (local?.sha256) {
+          const saved = { url: local.url, sha256: local.sha256 };
+          fetched.set(image.url, saved);
+          return { ...image, ...saved, sourceUrl: image.sourceUrl ?? image.url };
+        }
+        const url = new URL(image.url),
+          parts = url.pathname.split("/");
+        // Every input is already normalized and validated against this configured repository.
+        const commitSha = parts[3] as string;
+        const path = parts
+          .slice(4)
+          .map((part) => decodeURIComponent(part))
+          .join("/");
+        const endpoint = `repos/${repo.github}/contents/${parts.slice(4).join("/")}?ref=${commitSha}`;
+        const metadata = await readGit(endpoint, 2 * 1024 * 1024);
+        const size = metadata.size,
+          blobSha = metadata.sha;
+        if (
+          metadata.type !== "file" ||
+          metadata.path !== path ||
+          metadata.submodule_git_url != null ||
+          metadata.target != null ||
+          typeof size !== "number" ||
+          !Number.isSafeInteger(size) ||
+          size < 8 ||
+          size > IMAGE_BYTES_MAX ||
+          typeof blobSha !== "string" ||
+          !SHA.test(blobSha) ||
+          imageBytes + size > REPORT_IMAGE_BYTES_MAX
+        )
+          throw imageFailure();
+        let content = metadata;
+        if (metadata.encoding === "none" && metadata.content === "") {
+          content = await readGit(
+            `repos/${repo.github}/git/blobs/${blobSha}`,
+            Math.ceil(IMAGE_BYTES_MAX * 1.4) + 64 * 1024,
+          );
+          if (content.sha !== blobSha || content.size !== size) throw imageFailure();
+        } else if (size > 1024 * 1024) throw imageFailure();
+        if (content.encoding !== "base64" || typeof content.content !== "string")
+          throw imageFailure();
+        const encoded = content.content.replace(/[\r\n]/g, "");
+        if (
+          encoded.length % 4 !== 0 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) ||
+          encoded.length > Math.ceil(IMAGE_BYTES_MAX / 3) * 4
+        )
+          throw imageFailure();
+        const png = Buffer.from(encoded, "base64");
+        if (
+          png.length !== size ||
+          png.toString("base64") !== encoded ||
+          createHash("sha1").update(`blob ${size}\0`).update(png).digest("hex") !== blobSha
+        )
+          throw imageFailure();
+        const hash = createHash("sha256").update(png).digest("hex");
+        if (image.sha256 && image.sha256 !== hash) throw imageFailure();
+        retain(png, known);
+        const saved = { url: `/api/qa-report-assets/${hash}`, sha256: hash };
+        fetched.set(image.url, saved);
+        if (!retainedByHash.has(hash)) imageBytes += size;
+        retainedByHash.set(hash, { ...image, ...saved });
+        return { ...image, ...saved, sourceUrl: image.sourceUrl ?? image.url };
+      };
+      const portablePairs: QaVisualEvidence["pairs"] = [];
+      for (const pair of input.visual?.pairs ?? []) {
+        const saved = {
+          ...pair,
+          before: await archiveImage(pair.before),
+          after: await archiveImage(pair.after),
+          ...(pair.diff ? { diff: await archiveImage(pair.diff) } : {}),
+        };
+        if (
+          !localPairs.some(
+            (local) =>
+              local.before.sha256 === saved.before.sha256 &&
+              local.after.sha256 === saved.after.sha256 &&
+              (!saved.diff || local.diff?.sha256 === saved.diff.sha256),
+          )
+        )
+          portablePairs.push(saved);
+      }
+      const screenshots: NonNullable<QaVisualEvidence["screenshots"]> = [];
+      for (const shot of input.visual?.screenshots ?? [])
+        screenshots.push({ ...(await archiveImage(shot)), label: shot.label });
       const importVisual: QaVisualEvidence = retained.manifest
         ? {
             ...retained,
             applicability: "required",
             ...(input.visual?.reason ? { reason: input.visual.reason } : {}),
-            pairs: localPairs.length ? localPairs : (input.visual?.pairs ?? []),
-            screenshots: input.visual?.screenshots ?? [],
+            pairs: [...localPairs, ...portablePairs],
+            screenshots,
           }
         : retained.applicability === "required"
-          ? { ...input.visual, applicability: "required", pairs: input.visual?.pairs ?? [] }
-          : (input.visual ?? { applicability: "unknown", pairs: [] });
+          ? { ...input.visual, applicability: "required", pairs: portablePairs, screenshots }
+          : {
+              ...(input.visual ?? { applicability: "unknown" }),
+              pairs: portablePairs,
+              screenshots,
+            };
       const report = finish(
         {
           schemaVersion: 1,
@@ -713,7 +882,7 @@ export function createQaReports(i: {
           resolutions: input.resolutions ?? [],
           tests: input.tests ?? [],
           ci,
-          limitations: [...(input.limitations ?? []), ...portableNotes],
+          limitations: input.limitations ?? [],
           followUps: input.followUps ?? [],
           visual: importVisual,
         },

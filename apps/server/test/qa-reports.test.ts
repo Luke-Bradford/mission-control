@@ -36,8 +36,42 @@ let known: string[];
 let scanFails: boolean;
 let ciFails: boolean;
 let calls: string[][];
+let gitPng: Buffer;
+let gitPatch: Record<string, unknown>;
+let gitFails: boolean;
 const gh: GhRunner = async (args) => {
   calls.push(args);
+  if (args[0] === "api" && args[1]?.includes("/contents/")) {
+    const path = decodeURIComponent(args[1].split("/contents/")[1]?.split("?ref=")[0] ?? "");
+    const sha = createHash("sha1").update(`blob ${gitPng.length}\0`).update(gitPng).digest("hex");
+    return {
+      code: gitFails ? 1 : 0,
+      stdout: JSON.stringify({
+        type: "file",
+        path,
+        size: gitPng.length,
+        sha,
+        encoding: gitPng.length > 1024 * 1024 ? "none" : "base64",
+        content: gitPng.length > 1024 * 1024 ? "" : gitPng.toString("base64"),
+        ...gitPatch,
+      }),
+      stderr: "private fixture failure",
+    };
+  }
+  if (args[0] === "api" && args[1]?.includes("/git/blobs/")) {
+    const sha = createHash("sha1").update(`blob ${gitPng.length}\0`).update(gitPng).digest("hex");
+    return {
+      code: gitFails ? 1 : 0,
+      stdout: JSON.stringify({
+        sha,
+        size: gitPng.length,
+        encoding: "base64",
+        content: gitPng.toString("base64"),
+        ...gitPatch,
+      }),
+      stderr: "private fixture failure",
+    };
+  }
   if (args[0] === "api")
     return {
       code: 0,
@@ -68,11 +102,11 @@ const gh: GhRunner = async (args) => {
     stderr: "",
   };
 };
-const service = () =>
+const service = (runner: GhRunner = gh) =>
   createQaReports({
     store,
     config,
-    gh,
+    gh: runner,
     cwd: dir,
     assetsDir: join(dir, "assets"),
     evidence: prEvidenceStore(join(dir, "evidence")),
@@ -126,6 +160,9 @@ beforeEach(() => {
   scanFails = false;
   ciFails = false;
   calls = [];
+  gitPng = PNG;
+  gitPatch = {};
+  gitFails = false;
 });
 afterEach(() => {
   store.close();
@@ -133,12 +170,13 @@ afterEach(() => {
 });
 
 describe("durable QA report archive", () => {
-  it("renders immutable GitHub PNG page references through a raw endpoint and retains the source", async () => {
+  it("retains immutable GitHub PNGs locally, deduplicates reads and preserves capture/source provenance", async () => {
     const page = `https://github.com/example/sample/blob/${SHA}/docs/after.png`;
     const image = {
       url: page,
       source: "controlled-fixture" as const,
       provenance: "Controlled render from the named commit.",
+      commitSha: BASE,
     };
     const { report } = await service().importController(
       input({
@@ -148,11 +186,209 @@ describe("durable QA report archive", () => {
         },
       }),
     );
+    const hash = createHash("sha256").update(PNG).digest("hex");
     expect(report.visual.pairs[0]?.after).toMatchObject({
-      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+      url: `/api/qa-report-assets/${hash}`,
       sourceUrl: page,
+      sha256: hash,
+      commitSha: BASE,
+      source: "controlled-fixture",
+      provenance: image.provenance,
     });
+    expect(service().asset(hash)).toEqual(PNG);
+    expect(calls.filter((args) => args[1]?.includes("/contents/"))).toEqual([
+      [
+        "api",
+        `repos/example/sample/contents/docs/after.png?ref=${SHA}`,
+        "--method",
+        "GET",
+        "-H",
+        "Accept: application/vnd.github.object+json",
+      ],
+    ]);
+    expect(calls.some((args) => args[1]?.includes("/git/blobs/"))).toBe(false);
   });
+  it("retains a larger PNG through the same-repository blob identity and archives extra screenshots", async () => {
+    gitPng = Buffer.concat([PNG, Buffer.alloc(1024 * 1024)]);
+    const url = `https://raw.githubusercontent.com/example/sample/${SHA}/docs/large.png`;
+    const hash = createHash("sha256").update(gitPng).digest("hex");
+    const { report } = await service().importController(
+      input({
+        visual: {
+          applicability: "required",
+          pairs: [],
+          screenshots: [
+            {
+              label: "Large fixture",
+              url,
+              sha256: hash,
+              source: "controller-link",
+              provenance: "Controlled output retained at this commit.",
+            },
+          ],
+        },
+      }),
+    );
+    expect(report.visual.screenshots?.[0]).toMatchObject({
+      url: `/api/qa-report-assets/${hash}`,
+      sourceUrl: url,
+      sha256: hash,
+    });
+    expect(service().asset(hash)).toEqual(gitPng);
+    expect(calls.filter((args) => args[1]?.includes("/git/blobs/"))).toHaveLength(1);
+    expect(calls.every((args) => !args.includes("POST") && !args.includes("PATCH"))).toBe(true);
+  });
+  it.each<[string, Record<string, unknown>, string | undefined]>([
+    ["wrong hash", {}, "f".repeat(64)],
+    ["wrong path", { path: "docs/something-else.png" }, undefined],
+    ["oversize", { size: 8 * 1024 * 1024 + 1 }, undefined],
+    ["directory", { type: "dir" }, undefined],
+    ["invalid encoding", { encoding: "utf-8" }, undefined],
+    ["forged blob identity", { sha: "f".repeat(40) }, undefined],
+  ])("refuses %s without saving a report", async (_name, patch, sha256) => {
+    gitPatch = patch;
+    const image = {
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+      source: "controller-link" as const,
+      provenance: "Controlled fixture render.",
+      ...(sha256 ? { sha256 } : {}),
+    };
+    await expect(
+      service().importController(
+        input({
+          visual: {
+            applicability: "required",
+            pairs: [{ label: "Fixture", before: image, after: image }],
+          },
+        }),
+      ),
+    ).rejects.toThrow("could not be retained");
+    expect(service().list("sample", 7)).toEqual([]);
+  });
+  it("rejects failed Git reads generically without retaining a false-complete report", async () => {
+    gitFails = true;
+    const image = {
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+      source: "controller-link" as const,
+      provenance: "Controlled fixture render.",
+    };
+    await expect(
+      service().importController(
+        input({
+          visual: {
+            applicability: "required",
+            pairs: [{ label: "Fixture", before: image, after: image }],
+          },
+        }),
+      ),
+    ).rejects.toThrow("could not be retained");
+    expect(service().list("sample", 7)).toEqual([]);
+  });
+  it("bounds a stalled Git image read independently of the runner", async () => {
+    vi.useFakeTimers();
+    let started: () => void = () => {};
+    const reading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const runner: GhRunner = async (args, opts) => {
+      if (!args[1]?.includes("/contents/")) return gh(args, opts);
+      expect(opts.timeoutMs).toBe(5000);
+      expect(opts.maxBuffer).toBe(2 * 1024 * 1024);
+      started();
+      return new Promise(() => {});
+    };
+    const image = {
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+      source: "controller-link" as const,
+      provenance: "Controlled fixture render.",
+    };
+    try {
+      const refused = expect(
+        service(runner).importController(
+          input({
+            visual: {
+              applicability: "required",
+              pairs: [{ label: "Fixture", before: image, after: image }],
+            },
+          }),
+        ),
+      ).rejects.toThrow("could not be retained");
+      await reading;
+      await vi.advanceTimersByTimeAsync(5000);
+      await refused;
+      expect(service().list("sample", 7)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("stops sequential Git reads at the overall import deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const runner: GhRunner = async (args, opts) => {
+      if (args[1]?.includes("/contents/")) vi.setSystemTime(Date.now() + 5000);
+      return gh(args, opts);
+    };
+    const screenshots = Array.from({ length: 13 }, (_, index) => ({
+      label: `Fixture ${index}`,
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/image-${index}.png`,
+      source: "controlled-fixture" as const,
+      provenance: "Sequential deadline fixture.",
+    }));
+    try {
+      await expect(
+        service(runner).importController(
+          input({ visual: { applicability: "required", pairs: [], screenshots } }),
+        ),
+      ).rejects.toThrow("could not be retained");
+      expect(calls.filter((args) => args[1]?.includes("/contents/"))).toHaveLength(12);
+      expect(service().list("sample", 7)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("enforces the total retained-byte budget before reading a ninth full-size blob", async () => {
+    gitPng = Buffer.concat([PNG, Buffer.alloc(8 * 1024 * 1024 - PNG.length)]);
+    let files = 0;
+    const runner: GhRunner = async (args, opts) => {
+      if (args[1]?.includes("/contents/")) gitPng[gitPng.length - 1] = ++files;
+      return gh(args, opts);
+    };
+    const screenshots = Array.from({ length: 9 }, (_, index) => ({
+      label: `Fixture ${index}`,
+      url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/image-${index}.png`,
+      source: "controlled-fixture" as const,
+      provenance: "Synthetic byte-budget boundary fixture.",
+    }));
+    await expect(
+      service(runner).importController(
+        input({ visual: { applicability: "required", pairs: [], screenshots } }),
+      ),
+    ).rejects.toThrow("could not be retained");
+    expect(calls.filter((args) => args[1]?.includes("/contents/"))).toHaveLength(9);
+    expect(calls.filter((args) => args[1]?.includes("/git/blobs/"))).toHaveLength(8);
+    expect(service().list("sample", 7)).toEqual([]);
+  });
+  it.each(["docs//after.png", "docs/%2Fafter.png", "docs/../after.png", "docs/%2e%2e/after.png"])(
+    "refuses noncanonical Git paths before requesting any bytes: %s",
+    async (path) => {
+      const image = {
+        url: `https://raw.githubusercontent.com/example/sample/${SHA}/${path}`,
+        source: "controller-link" as const,
+        provenance: "Controlled fixture render.",
+      };
+      await expect(
+        service().importController(
+          input({
+            visual: {
+              applicability: "required",
+              pairs: [{ label: "Fixture", before: image, after: image }],
+            },
+          }),
+        ),
+      ).rejects.toThrow("same-repo immutable");
+      expect(calls).toEqual([]);
+    },
+  );
   it("imports a merged PR without inventing a Run/review and retains exact source/time/CI", async () => {
     const reports = service();
     const { report, created } = await reports.importController(input());
@@ -291,6 +527,9 @@ describe("durable QA report archive", () => {
     expect(report.visual.pairs[0]?.before.sourceUrl).toBe(reference("before").url);
     expect(report.visual.pairs[0]?.after.sourceUrl).toBe(reference("after").url);
     expect(report.visual.pairs[0]?.after.source).toBe("controlled-fixture");
+    expect(
+      calls.some((args) => args[1]?.includes("/contents/") || args[1]?.includes("/git/blobs/")),
+    ).toBe(false);
     const image = report.visual.pairs[0]?.after;
     if (!image?.sha256) throw new Error("retained image missing");
     expect(statSync(join(dir, "assets")).mode & 0o777).toBe(0o700);
