@@ -61,23 +61,14 @@ describe("Pipeline", () => {
     render(<PipelinePanel />);
 
     const readyLane = await screen.findByRole("region", { name: "Ready" });
-    // Two whole cards show and the Board link counts every other ticket; expanding shows the loaded ones in place.
-    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(2);
-    expect(
-      within(readyLane).getByRole("link", { name: "+8 · open Board ›" }).getAttribute("href"),
-    ).toBe("/board?stage=ready");
-    fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
-    expect(within(readyLane).getAllByRole("link")).toHaveLength(10);
-    expect(
-      within(readyLane).getByRole("link", { name: "+2 · open Board ›" }).getAttribute("href"),
-    ).toBe("/board?stage=ready");
+    // Overview is a bounded summary: one real example, with every omission counted.
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(1);
+    expect(within(readyLane).getByText("+9 more")).toBeTruthy();
+    expect(within(readyLane).queryByRole("button")).toBeNull();
     expect(within(readyLane).getByRole("link", { name: "Ready" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
-    fireEvent.click(within(readyLane).getByRole("button", { name: "Show less, Ready" }));
-    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(2);
-    fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
+    expect(within(readyLane).getAllByText("INCO")).toHaveLength(1);
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--seat-4)",
     );
@@ -89,7 +80,8 @@ describe("Pipeline", () => {
 
     const progressLane = screen.getByRole("region", { name: "Building · checks" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
-    expect(within(progressLane).getByText("Checked ticket")).toBeTruthy();
+    expect(within(progressLane).queryByText("Checked ticket")).toBeNull();
+    expect(within(progressLane).getByText("+1 more")).toBeTruthy();
     expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(
       "/board?stage=progress",
     );

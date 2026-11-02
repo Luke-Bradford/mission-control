@@ -115,8 +115,8 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
       const rowBoxes = await page.boxes("#agentsList .trow:not(.head)");
       const cellBoxes = await page.boxes("#agentsList .trow:not(.head) > [role=cell]");
       expect(rowBoxes.length).toBeGreaterThanOrEqual(3);
-      const rowHeight = rowBoxes[0].height;
-      for (const row of rowBoxes) expect(row.height).toBeCloseTo(rowHeight, 0);
+      // Ordinary rows use the shared density; exceptional action content can grow to stay usable.
+      for (const row of rowBoxes) expect(row.height).toBeGreaterThanOrEqual(32);
       // every cell sits inside some row's box, so nothing spills over a neighbour
       for (const [i, cell] of cellBoxes.entries()) {
         const row = rowBoxes.find((r) => cell.y >= r.y - 0.5 && cell.y < r.y + r.height);
@@ -199,44 +199,9 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
         for (const o of buttons.slice(i + 1))
           expect(b.x + b.width, `button ${i} clear of the next`).toBeLessThanOrEqual(o.x + 0.5);
       }
-      // Agent, State and Work (with its Needs controls) lay their content on one visual line
-      const stacked = await page.evaluate(
-        () =>
-          [
-            ...document.querySelectorAll<HTMLElement>(
-              "#agentsList .trow:not(.head) :is(.agent-identity, .state-cell, .work-cell)",
-            ),
-          ]
-            .filter((cell) => {
-              const leaves = [...cell.querySelectorAll<HTMLElement>("*")]
-                .filter((el) => el.children.length === 0)
-                .map((el) => el.getBoundingClientRect())
-                .filter((r) => r.width > 0 && r.height > 0);
-              if (leaves.length < 2) return false;
-              return (
-                Math.max(...leaves.map((r) => r.top)) >= Math.min(...leaves.map((r) => r.bottom))
-              );
-            })
-            .map((cell) => cell.className),
-        undefined,
-      );
-      expect(stacked).toEqual([]);
-      // free text is cut on one line with an ellipsis, not wrapped
-      const wrapped = await page.evaluate(
-        () =>
-          [...document.querySelectorAll<HTMLElement>("#agentsList .trow:not(.head) .ellip")]
-            .filter((el) => {
-              const s = getComputedStyle(el);
-              return (
-                s.whiteSpace !== "nowrap" ||
-                s.overflow !== "hidden" ||
-                s.textOverflow !== "ellipsis"
-              );
-            })
-            .map((el) => el.className),
-        undefined,
-      );
-      expect(wrapped).toEqual([]);
+      // Free text may shorten, while all operator controls remain whole and reachable.
+      expect(await page.unclipped("#agentsList .need button")).not.toContain(false);
+      expect(await page.reachable("#agentsList .need button", "#agentsList")).not.toContain(false);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

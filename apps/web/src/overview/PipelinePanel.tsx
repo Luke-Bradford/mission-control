@@ -1,6 +1,5 @@
 import type { Crew, OverviewSummary, PipelineStage } from "@mc/core";
-import { type CSSProperties, useState } from "react";
-import { Toggle } from "../components/Expandable.tsx";
+import type { CSSProperties } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
@@ -30,9 +29,8 @@ export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["
   merged: ["merged"],
 };
 
-/** The hub sends this many cards per stage; the lane shows the first few and expands in place. */
-const VISIBLE_CARDS = 8;
-const COLLAPSED_CARDS = 2;
+/** A compact summary keeps one measured example; its heading opens the complete Board lane. */
+const COLLAPSED_CARDS = 1;
 
 /** Where a pipeline card leads: the ticket's panel on the Board. One place to change it. */
 /**
@@ -66,10 +64,19 @@ export function PipelinePanel() {
   const [session] = useSession();
   const { data, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   return (
-    <Panel id="pipelineP" title="Pipeline">
-      {error && <p className="pb crit-t">{error.message}</p>}
+    <Panel
+      id="pipelineP"
+      title="Pipeline"
+      sub="Current ticket lanes · open Board for the complete lane"
+    >
+      {error && (
+        <p role="status" className="pb crit-t">
+          {data
+            ? "Pipeline refresh failed. Showing the last received lanes."
+            : "Pipeline could not load."}
+        </p>
+      )}
 
       <div className="pipeline-grid pb scroll" aria-busy={!data && !error}>
         {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
@@ -83,9 +90,7 @@ export function PipelinePanel() {
               total + (data?.pipeline?.find((candidate) => candidate.stage === stage)?.count ?? 0),
             0,
           );
-          const loaded = stageCards.slice(0, VISIBLE_CARDS);
-          const open = expanded.has(key);
-          const cards = open ? loaded : loaded.slice(0, COLLAPSED_CARDS);
+          const cards = stageCards.slice(0, COLLAPSED_CARDS);
           // Everything not drawn is counted, hidden loaded cards included.
           const more = count - cards.length;
           const stageHref = `/board?stage=${key}`;
@@ -102,10 +107,19 @@ export function PipelinePanel() {
                   {label}
                 </a>
                 <span className="num">{data ? count : "—"}</span>
+                {more > 0 && (
+                  <span
+                    className="pipeline-omitted s muted"
+                    title={`${more} additional tickets; open the lane heading to inspect them on Board`}
+                  >
+                    +{more} more
+                  </span>
+                )}
               </h3>
+              {collapsed && <p className="pipeline-empty s muted">Observed empty</p>}
               {!data &&
                 !error &&
-                Array.from({ length: VISIBLE_CARDS }, (_, i) => (
+                Array.from({ length: COLLAPSED_CARDS }, (_, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: identical loading placeholders
                   <div className="pipeline-chip pipeline-skeleton" key={i} aria-hidden="true">
                     <span className="kpi-skeleton" />
@@ -137,32 +151,6 @@ export function PipelinePanel() {
                   </a>
                 );
               })}
-              {(loaded.length > COLLAPSED_CARDS || more > 0) && (
-                <div className="pipeline-foot">
-                  {loaded.length > COLLAPSED_CARDS && (
-                    <Toggle
-                      on={open}
-                      of={label}
-                      onClick={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev);
-                          if (!next.delete(key)) next.add(key);
-                          return next;
-                        })
-                      }
-                    />
-                  )}
-                  {more > 0 && (
-                    <a
-                      className="pipeline-more mono xs"
-                      href={stageHref}
-                      onClick={(e) => followLink(e, stageHref)}
-                    >
-                      +{more} · open Board ›
-                    </a>
-                  )}
-                </div>
-              )}
             </section>
           );
         })}

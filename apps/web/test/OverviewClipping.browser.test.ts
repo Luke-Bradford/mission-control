@@ -118,7 +118,7 @@ const api = {
 };
 
 /** Panels whose body is a list that scrolls with a visible scrollbar. Every other panel shows all of its content. */
-const SCROLLING_PANELS = ["agentsP", "timelineP", "actP"];
+const SCROLLING_PANELS = ["agentsP", "timelineP", "actP", "overviewNextP"];
 
 /** Geometry and screenshots must describe the populated fixture, never its loading skeleton. */
 async function settled(page: RenderedPage) {

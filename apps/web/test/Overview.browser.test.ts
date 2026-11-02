@@ -57,7 +57,7 @@ describeRendered("Overview transcript footprint in a browser", () => {
           () => document.querySelector<HTMLElement>("#machP .transcript-footprint")?.title,
           undefined,
         ),
-      ).toBe("fao-1 8.0 MB · 3 files");
+      ).toBe("fao-1 8.0 MiB · 3 files");
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

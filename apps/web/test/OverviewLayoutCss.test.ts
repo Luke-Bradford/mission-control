@@ -16,7 +16,6 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
-    expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: calc(var(--sp-1) / -2)");
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
     for (const selector of [
       String.raw`\.comms-actions button,\n\.comms-react-set button`,
@@ -56,107 +55,57 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
 
-  it("caps content-sized rows and gives unused height to the Live log", () => {
-    expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
-    expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
+  it("keeps the approved groups content-sized and bounds the roster and evidence lists", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain(
-      "grid-template-rows: max-content minmax(160px, 1fr) max-content minmax(280px, max-content)",
+      "grid-template-rows: max-content max-content max-content minmax(280px, max-content)",
     );
-    // Crew beside Timeline: 31% for the Timeline, 34% at 1280 and under, 27% at 1920 and over.
     expect(rule(String.raw`\.overview-work`)).toContain(
-      "grid-template-columns: minmax(0, 1fr) 31%",
+      "grid-template-columns: minmax(960px, 1.6fr) minmax(320px, 1fr)",
     );
-    expect(css).toMatch(
-      /@media \(max-width: 1280px\) \{\s*\.overview-work \{\s*grid-template-columns: minmax\(0, 1fr\) 34%/,
-    );
-    expect(css).toMatch(
-      /@media \(min-width: 1920px\) \{\s*\.overview-work \{\s*grid-template-columns: minmax\(0, 1fr\) 27%/,
-    );
-    // Live log, Machine and Quota in one row.
+    expect(css).toContain("@container overview (max-width: 1280px)");
     expect(rule(String.raw`\.ov`)).toContain(
-      "grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr)",
+      "grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr) minmax(300px, 1fr)",
     );
     expect(rule("#agentsList")).toContain("overflow-y: auto");
-    expect(rule("#agentsList")).toContain("overflow-x: hidden");
-    expect(rule(String.raw`\.scroll`)).toContain("min-height: 0");
-    expect(rule(String.raw`\.scroll`)).toContain("overflow: auto");
-    expect(rule(String.raw`\.ov > \.col > \.panel > \.pb`)).toContain("overflow: auto");
+    expect(rule("#agentsList")).toContain("overflow-x: auto");
+    expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");
+    expect(rule(String.raw`\.overview-lane-scroll`)).toContain("max-height: 160px");
+    expect(rule(String.raw`\.overview-next`)).toContain("max-height: 320px");
   });
 
-  it("keeps eight full-width graphs and five compact Pipeline lanes at dock widths", () => {
+  it("uses eight compact KPI tiles and five content-sized Pipeline summaries", () => {
     expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
-    expect(rule(String.raw`\.overview-kpis`)).toContain("gap: var(--sp-3)");
-    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
-    expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
     expect(rule(String.raw`\.pipeline-grid`)).toContain("display: flex");
-    expect(rule(String.raw`\.pipeline-stage`)).toContain("flex: 1 1 0");
-    expect(rule(String.raw`\.pipeline-stage\.empty`)).toContain("flex: 0 0 112px");
+    expect(rule(String.raw`\.pipeline-stage.empty`)).toContain("flex: 0 0 112px");
     expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
-    expect(css).not.toContain("@container overview (width < 1100px)");
-    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
-    expect(rule(String.raw`#machP \.resrow \.spark`)).toContain("width: 100%");
+    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 760px");
   });
 
-  it("shares available Timeline height equally between lanes within 19–28px", () => {
-    const lanes = rule(String.raw`\.overview-lanes`);
-    expect(lanes).toContain("--lane-min: 19px");
-    expect(lanes).toContain("--lane-max: 28px");
-    expect(lanes).toContain("repeat(var(--lane-count), minmax(var(--lane-min), 1fr))");
-    expect(lanes).toContain("min-height: calc(var(--lane-count) * var(--lane-min))");
-    expect(lanes).toContain("max-height: calc(var(--lane-count) * var(--lane-max))");
+  it("keeps measured Timeline spans labelled and tool instants distinct", () => {
+    expect(rule(String.raw`\.overview-lane-scroll`)).toContain("max-height: 160px");
+    expect(rule(String.raw`\.overview-span span`)).toContain("padding-inline: var(--sp-1)");
+    expect(rule(String.raw`\.overview-instant`)).toContain("position: absolute");
     expect(rule(String.raw`\.timeline-body`)).toContain("flex-direction: column");
-    expect(rule("#timelineP")).toContain("align-self: start");
-    expect(rule(String.raw`\.overview-track`)).toContain("height: 100%");
-    expect(rule(String.raw`\.overview-span`)).toContain("height: var(--sub)");
-    expect(rule(String.raw`\.overview-span\.k-turn`)).toContain("top: calc(50% - var(--sub) / 2)");
   });
 
-  it("keeps all four sub-tracks inside the track at the shortest lane", () => {
-    const px = (block: string, name: string) =>
-      Number(block.match(new RegExp(`${name}: ([\\d.]+)px`))?.[1]);
-    const laneMin = px(rule(String.raw`\.overview-lanes`), "--lane-min");
-    const track = rule(String.raw`\.overview-track`);
-    const sub = px(track, "--sub");
-    const gap = px(track, "--sub-gap");
-    const top = (kind: string) =>
-      rule(String.raw`\.overview-span\.k-${kind}`).match(/top: calc\((.*)\);/)?.[1] ?? "";
-    // The offsets as hud.css writes them, evaluated at the shortest lane (50% = half of it).
-    expect(top("turn")).toBe("50% - var(--sub) / 2");
-    expect(top("checks")).toBe("50% - 1.5 * var(--sub) - var(--sub-gap)");
-    expect(top("review")).toBe("50% - 2.5 * var(--sub) - 2 * var(--sub-gap)");
-    expect(top("lock")).toBe("50% + var(--sub) / 2 + var(--sub-gap)");
-    const half = laneMin / 2;
-    const tops = {
-      turn: half - sub / 2,
-      checks: half - 1.5 * sub - gap,
-      review: half - 2.5 * sub - 2 * gap,
-      lock: half + sub / 2 + gap,
-    };
-    for (const [kind, at] of Object.entries(tops)) {
-      expect(at, kind).toBeGreaterThanOrEqual(0);
-      expect(at + sub, kind).toBeLessThanOrEqual(laneMin);
-    }
-  });
-
-  it("aligns Machine labels, fixed-height charts and values on shared columns", () => {
-    const row = rule("#machP .resrow");
-    expect(row).toContain("grid-template-columns: 56px minmax(24px, 1fr) 128px");
-    expect(row).toContain("align-items: center");
+  it("aligns Machine labels, fixed-height charts and right-aligned values", () => {
+    expect(rule(String.raw`\.overview-side #machP \.resrow`)).toContain(
+      "grid-template-columns: 64px minmax(32px, 1fr) minmax(120px, auto)",
+    );
     expect(rule("#machP .machine-chart")).toContain("height: 24px");
-    expect(rule("#machP .ph")).toContain("flex-wrap: nowrap");
-    expect(rule("#timelineP .ph")).toContain("flex-wrap: nowrap");
+    expect(rule(String.raw`\.overview-side #machP \.resrow > \.num`)).toContain(
+      "text-align: right",
+    );
   });
 
-  it("wraps KPI labels without ellipses and keeps Crew rows to the system row", () => {
+  it("wraps KPI labels and allows exceptional Work controls to grow past a shared row", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
-    expect(label).toContain("font-size: var(--fs-s)");
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
     const row = rule(String.raw`#agentsList \.trow`);
-    // The shared row token switches between compact and comfortable density.
-    expect(row).toContain("height: var(--table-row)");
-    expect(row).not.toMatch(/\bheight: \d+px/);
+    expect(row).toContain("min-height: var(--table-row)");
+    expect(row).toContain("height: auto");
   });
 
   it("uses the approved header spacing while keeping narrow wrapping", () => {

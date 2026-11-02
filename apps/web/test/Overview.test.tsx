@@ -215,10 +215,10 @@ describe("Overview panels", () => {
     stub();
     const { container } = render(<Overview />);
     expect(container.querySelector(".overview-work > #agentsP")).toBeTruthy();
-    expect(container.querySelector(".overview-work > #timelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-work > .overview-side > #timelineP")).toBeTruthy();
     expect(container.querySelector(".overview-grid > #pipelineP")).toBeTruthy();
     expect(container.querySelector(".ov > #actP")).toBeTruthy();
-    expect(container.querySelector(".ov > .col > #machP")).toBeTruthy();
+    expect(container.querySelector(".overview-work > .overview-side > #machP")).toBeTruthy();
     expect(container.querySelector(".ov > .col > #quotaP")).toBeTruthy();
     for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
@@ -291,7 +291,9 @@ describe("Agents panel", () => {
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
-    const line = await screen.findByRole("status");
+    const line = await within(container.querySelector("#agentsP") as HTMLElement).findByRole(
+      "status",
+    );
     expect(line.textContent).toBe("Crew off");
     expect(line.title).toBe("crew lock held by pid 123");
     expect(container.querySelector("#agentsP .ph")?.contains(line)).toBe(true);
@@ -1466,9 +1468,9 @@ describe("Machine panel", () => {
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await within(mach).findByText("Transcripts");
-    expect(row.parentElement?.textContent).toContain("12.3 MB");
+    expect(row.parentElement?.textContent).toContain("12.3 MiB");
     expect(row.parentElement?.textContent).toContain("oldest 3 h ago");
-    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MB · 3 files");
+    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MiB · 3 files");
   });
 
   it("leaves out the transcript footprint when the server has none", async () => {
@@ -1484,10 +1486,10 @@ describe("Machine panel", () => {
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
-    expect(mach.textContent).toContain("every 2 s");
-    expect(mach.textContent).toContain("37% of 16 threads");
-    expect(mach.textContent).toContain("20.5 of 64 GB");
-    expect(mach.textContent).toContain("412 GB free");
+    expect(mach.textContent).toContain("Host sample at");
+    expect(mach.textContent).toContain("37% · 16 threads");
+    expect(mach.textContent).toContain("20.5 of 64 GiB");
+    expect(mach.textContent).toContain("412 GiB free");
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (3)",
     );
@@ -1555,10 +1557,10 @@ describe("Machine panel", () => {
     });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toContain("Swap");
-    expect(swap.textContent).toContain("3.5 GB (5% of RAM)");
+    expect(swap.textContent).toContain("3.5 GiB (5% of RAM)");
     // The bar fills against physical RAM (3.5 of 64 GB), not the 8 GB swap file.
     expect(swap.querySelector<HTMLElement>(".stack i")?.style.width).toBe("5.5%");
     expect(mach.querySelector(".capwarn")).toBeNull();
@@ -1568,7 +1570,7 @@ describe("Machine panel", () => {
     stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toBe("Swap—");
   });
@@ -1594,7 +1596,7 @@ describe("Machine panel", () => {
     stub({ machine: sample({ cpuPct: null, cores: 0, agents: null, memUsedBytes: null }) });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
     expect(cpu.querySelectorAll(".stack i").length).toBe(0);
     expect(cpu.textContent).toContain("—");
@@ -1906,14 +1908,14 @@ describe("Activity panel", () => {
     );
     const { container } = render(<Overview />);
     fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-    await screen.findByText("Original decision");
     const list = container.querySelector("#actList") as HTMLElement;
+    await within(list).findByText("Original decision");
     const node = list.querySelector(".arow");
     list.scrollTop = 80;
     fireEvent.scroll(list);
     current = [{ ...current[0], text: "Updated decision" }];
     act(() => hub.refetchAll());
-    await screen.findByText("Updated decision");
+    await within(list).findByText("Updated decision");
     expect(list.querySelector(".arow")).toBe(node);
     expect(list.scrollTop).toBe(80);
   });
@@ -1939,13 +1941,14 @@ describe("Activity panel", () => {
     });
     const { container } = render(<Overview />);
     fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-    await screen.findByText("Pick a layout");
+    const activity = container.querySelector("#actP") as HTMLElement;
+    await within(activity).findByText("Pick a layout");
     // a session on another repo hides nothing waiting on the operator
     act(() => setSession("shop-app-session"));
     const rows = () => container.querySelectorAll("#actList .arow");
     await waitFor(() => expect(rows()).toHaveLength(2));
-    expect(screen.getByText("PR #9 · You: review")).toBeTruthy();
-    expect(screen.queryByText("FLIGHT's to settle")).toBeNull();
+    expect(within(activity).getByText("PR #9 · You: review")).toBeTruthy();
+    expect(within(activity).queryByText("FLIGHT's to settle")).toBeNull();
     act(() => setSession(SESSION_ALL));
   });
 
@@ -2732,7 +2735,7 @@ it("holds the configured roster, Timeline lanes and five Pipeline lanes while da
   expect(container.querySelectorAll(".crew-skeleton")).toHaveLength(7);
   expect(container.querySelectorAll(".overview-lane")).toHaveLength(8);
   expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
-  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(40);
+  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(5);
   expect(container.querySelector("#agentsList")?.getAttribute("aria-busy")).toBe("true");
   await act(async () => {
     for (const finish of release) finish();

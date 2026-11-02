@@ -4,17 +4,17 @@ import { readStyles } from "./styles.ts";
 const css = readStyles();
 it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(
-    /\.overview-grid \{[^}]*grid-template-rows: max-content minmax\(160px, 1fr\) max-content minmax\(280px, max-content\)/,
+    /\.overview-grid \{[^}]*grid-template-rows: max-content max-content max-content minmax\(280px, max-content\)/,
   );
   expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow-y: auto/);
-  // Machine and Quota are the Live log's neighbours, each in a column of its own.
+  // Next actions and Quota join the bounded Live log.
   expect(css).toMatch(/\.ov > \.col \{\s*display: contents/);
   expect(css).toMatch(/\.overview-grid > \*,[\s\S]*?\.ov > \.panel \{[\s\S]*?overflow: hidden/);
   expect(css).toMatch(/\.ov > \.col > \.panel > \.pb \{\s*min-height: 0;\s*overflow: auto/);
   expect(css).toMatch(/\.panel > \.pb\.scroll \{\s*flex: 1 1 auto/);
 });
 
-it("keeps seven compact columns with needs beside the work title on one line", () => {
+it("keeps seven compact columns and preserves inline needs controls", () => {
   expect(css).toMatch(
     /#agentsList \.trow \{[^}]*padding: 0 var\(--sp-2\);[^}]*grid-template-rows: minmax\(0, 1fr\)/,
   );
@@ -31,7 +31,7 @@ it("keeps seven compact columns with needs beside the work title on one line", (
 
 it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*grid-template-columns: 190px 118px minmax\(220px, 1fr\) 128px 56px 64px 64px/,
+    /#agentsList \.trow \{[^}]*grid-template-columns: 148px 88px minmax\(260px, 1fr\) 96px 56px 64px 64px/,
   );
   expect(css).toMatch(/#agentsList \.ticket-cell \{[^}]*overflow: hidden/);
 });
@@ -43,7 +43,7 @@ it("keeps State pills and their age from shrinking", () => {
 });
 
 it("drops token graphs before tightening columns with FLIGHT open", () => {
-  expect(css).toMatch(/#agentsList \.trow\s*\{[^}]*min-width: 0/);
+  expect(css).toMatch(/#agentsList \.trow\s*\{[^}]*min-width: 760px/);
   expect(css).toContain("@container agents (width < 1000px)");
   expect(css).toContain("@container agents (width < 900px)");
   expect(css).toMatch(

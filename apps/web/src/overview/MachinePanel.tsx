@@ -2,7 +2,7 @@ import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { bytes, percent, plural, rel, swapOfRam } from "../fmt.ts";
+import { bytes, hhmm, percent, plural, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
@@ -15,6 +15,8 @@ const DASH = "—";
 const NO_SAMPLE = "No machine sample yet";
 const AGENTS_COLOUR = "var(--fg-2)";
 const OTHER_COLOUR = "var(--line-2)";
+/** The shared byte formatter divides by 1024; name the binary unit on this measured panel. */
+const binaryBytes = (value: number) => bytes(value).replace(/\b([KMG])B$/, "$1iB");
 
 interface Seg {
   pct: number;
@@ -177,7 +179,8 @@ function AgentSlots({ view }: { view: MachineView }) {
 
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
-  const view = useResource<MachineView>(RESOURCES.machine).data;
+  const source = useResource<MachineView>(RESOURCES.machine);
+  const view = source.data;
   const overview = useResource<OverviewSummary>(RESOURCES.overview());
   const now = useNow();
   const tz = useTz();
@@ -186,17 +189,44 @@ export function MachinePanel() {
   const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
+  const diskHistory = (summary?.machine?.disk ?? []).filter(
+    (value): value is number => value !== null,
+  );
+  const measuredHistory = [
+    summary?.machine?.cpu,
+    summary?.machine?.mem,
+    summary?.machine?.disk,
+  ].some((values) => values?.some((value) => value !== null));
 
   return (
-    <Panel id="machP" title="Machine" sub="every 2 s">
+    <Panel
+      id="machP"
+      title="Machine"
+      sub={m && tz ? `Host sample at ${hhmm(m.at, tz)}` : "Host resources · latest sample"}
+    >
       <div className="pb">
+        {source.error && (
+          <p role="status" className="s warn-t">
+            {m
+              ? "Machine refresh failed. Showing the last sample."
+              : "Machine sample could not load."}
+          </p>
+        )}
+        {!m && !source.error && (
+          <p className="s muted">{source.loading ? "Loading machine sample…" : NO_SAMPLE}</p>
+        )}
         <div
           className="res"
           title={`Claude/Codex processes (${m?.agents ? m.agents.count : DASH}) · other apps`}
         >
           <div className="resrow">
-            <span className="s fg2">CPU</span>
-            {summary?.machine?.cpu?.length ? (
+            <span
+              className="s fg2"
+              title="Total host CPU, normalized across logical threads. Scale 0–100%."
+            >
+              CPU
+            </span>
+            {summary?.machine?.cpu?.some((value) => value !== null) ? (
               <MachineAreaChart
                 label="CPU history"
                 values={summary.machine.cpu}
@@ -227,7 +257,7 @@ export function MachinePanel() {
               {u.cpu === null ? DASH : percent(u.cpu)}
               <span className="muted">
                 {" "}
-                of{" "}
+                ·{" "}
                 <span title={u.cores === null ? "Core count not read" : undefined}>
                   {u.cores ?? DASH}
                 </span>{" "}
@@ -237,7 +267,7 @@ export function MachinePanel() {
           </div>
           <div className="resrow">
             <span className="s fg2">Memory</span>
-            {summary?.machine?.mem?.length ? (
+            {summary?.machine?.mem?.some((value) => value !== null) ? (
               <MachineAreaChart
                 label="Memory history"
                 values={summary.machine.mem}
@@ -265,7 +295,7 @@ export function MachinePanel() {
               {u.memUsed === null ? DASH : (u.memUsed / GIB).toFixed(1)}
               <span className="muted">
                 {" "}
-                of {u.memTotal === null ? DASH : Math.round(u.memTotal / GIB)} GB
+                of {u.memTotal === null ? DASH : Math.round(u.memTotal / GIB)} GiB
               </span>
             </span>
           </div>
@@ -280,14 +310,16 @@ export function MachinePanel() {
               className="num s"
               title={none ?? (u.swapUsed === null ? "Not measured" : undefined)}
             >
-              {swapOfRam(u.swapUsed, u.memTotal)}
+              {u.swapUsed === null
+                ? DASH
+                : `${(u.swapUsed / GIB).toFixed(1)} GiB${u.memTotal ? ` (${percent((100 * u.swapUsed) / u.memTotal)} of RAM)` : ""}`}
             </span>
           </div>
           <div className="resrow">
             <span className="s fg2">Disk</span>
-            {summary?.machine?.disk?.length ? (
+            {summary?.machine?.disk?.some((value) => value !== null) ? (
               <MachineAreaChart
-                label="Disk history · GB free"
+                label="Disk history · GiB free"
                 values={summary.machine.disk}
                 color="var(--fg-2)"
                 live={live}
@@ -302,7 +334,7 @@ export function MachinePanel() {
               />
             )}
             <span className="num s" title={none}>
-              {u.diskFree === null ? DASH : `${Math.round(u.diskFree / GIB)} GB`}
+              {u.diskFree === null ? DASH : `${Math.round(u.diskFree / GIB)} GiB`}
               <span className="muted"> free</span>
             </span>
           </div>
@@ -322,14 +354,14 @@ export function MachinePanel() {
                 view.transcripts.seats.length === 0
                   ? "No transcripts"
                   : view.transcripts.seats
-                      .map((seat) => `${seat.seatId} ${bytes(seat.bytes)} · ${seat.files} files`)
+                      .map((seat) => `${seat.seatId} ${binaryBytes(seat.bytes)} · ${seat.files} files`)
                       .join("\n")
               }
             >
               <span className="s fg2">Transcripts</span>
               <span />
               <span className="num s">
-                {bytes(view.transcripts.totalBytes)}
+                {binaryBytes(view.transcripts.totalBytes)}
                 {view.transcripts.oldestAt !== null && tz && (
                   <span className="muted"> · oldest {rel(view.transcripts.oldestAt, now, tz)}</span>
                 )}
@@ -338,6 +370,11 @@ export function MachinePanel() {
           )}
           <LockBox />
         </div>
+        <p className="machine-window s muted">
+          {measuredHistory
+            ? `History: 30 complete minutes · CPU and memory 0–100%${diskHistory.length ? ` · disk 0–${Math.max(1, ...diskHistory).toFixed(0)} GiB free` : " · disk history not collected"}.`
+            : "History not collected · current sample only. Bars begin at zero; CPU and memory show percent used, disk shows percent used."}
+        </p>
       </div>
     </Panel>
   );

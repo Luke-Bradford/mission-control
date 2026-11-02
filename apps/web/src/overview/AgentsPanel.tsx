@@ -8,7 +8,7 @@ import {
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
-import type { ReactNode } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecondWhile, useTz } from "../clock.ts";
@@ -47,7 +47,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
-import { toggleDock } from "../shell/overlays.ts";
+import { openDockChat } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
@@ -72,6 +72,26 @@ function WorkCell({
   const prNumber =
     row?.reviewing?.prNumber ?? row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
   const current = row && isCurrentWork(row);
+  // The server supplies the oldest current-head queued review and its actual hold reason.
+  // A paused seat alone is never enough to infer that a review is queued.
+  if (row?.queuedReview && !row.reviewing) {
+    const queued = row.queuedReview;
+    return (
+      <span
+        role="cell"
+        className="ellip s ticket-cell work-cell"
+        title={`Queued review: ${queued.repoId}#${queued.prNumber} · ${queued.reason}`}
+      >
+        <span className="ellip">
+          <RepoRef repoId={queued.repoId} number={queued.prNumber} kind="pr" bare />
+          {" · "}
+          {queued.reason}
+        </span>
+        {note}
+        {actions}
+      </span>
+    );
+  }
   if (!current) {
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
       .filter(Boolean)
@@ -124,21 +144,23 @@ function WorkCell({
   return (
     <span role="cell" className="ellip s ticket-cell work-cell" title={text}>
       {(row?.ticket || prNumber || !note) && (
-        <span className="ellip">
-          {row?.ticket && <TicketRef ticket={row.ticket} bare />}
-          {prNumber && row && (
-            <>
-              {row.ticket && " · "}
-              <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
-            </>
-          )}
+        <span className="work-summary">
+          <span className="work-refs">
+            {row?.ticket && <TicketRef ticket={row.ticket} bare />}
+            {prNumber && row && (
+              <>
+                {row.ticket && " · "}
+                <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
+              </>
+            )}
+            {!row?.ticket && !prNumber && DASH}
+          </span>
           {(row?.ticket || prNumber) && title && (
-            <>
-              {" "}
-              · <span>{title}</span>
-            </>
+            <span className="ellip" title={title}>
+              {" · "}
+              <span>{title}</span>
+            </span>
           )}
-          {!row?.ticket && !prNumber && DASH}
         </span>
       )}
       {note ?? (
@@ -174,7 +196,6 @@ const showsSeconds = (row: Crew["rows"][number] | null, lock: TestLockState | un
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
   row,
-  now: coarseNow,
   tz,
   configPending,
   selected,
@@ -185,13 +206,12 @@ function FlightRow({
   row: Crew["rows"][number] | null;
   configPending: boolean;
   selected: boolean;
-  now: number;
   tz: string | null;
   items: AttentionItem[];
   max: number;
   lock: TestLockState | undefined;
 }) {
-  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
+  const now = useSecondWhile(showsSeconds(row, lock), useNow());
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
@@ -229,7 +249,7 @@ function FlightRow({
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
   const needs = row ? needLine(row, items, now, lock) : [];
-  const go = () => toggleDock(true);
+  const go = openDockChat;
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign button is the keyboard route
     // biome-ignore lint/a11y/useFocusableInteractive: the call-sign button provides keyboard access
@@ -381,11 +401,61 @@ function AgentNeeds({
   );
 }
 
+/** Clocks update the measured cells, leaving the roster structure and static controls alone. */
+function AgentWork({
+  row,
+  items,
+  lock,
+  tz,
+  rowElement,
+  rowTitle,
+}: {
+  row: Crew["rows"][number];
+  items: AttentionItem[];
+  lock: TestLockState | undefined;
+  tz: string | null;
+  rowElement: RefObject<HTMLDivElement | null>;
+  rowTitle?: string;
+}) {
+  const now = useSecondWhile(showsSeconds(row, lock), useNow());
+  const prs = useReviewPrs(row);
+  const doing = doingLine(row, now, tz, prs);
+  // The native row tooltip belongs to this clock cell too. Updating its attribute keeps tool
+  // durations current without rebuilding the row's controls or the roster on every second.
+  useEffect(() => {
+    if (rowElement.current) rowElement.current.title = rowTitle ?? doing;
+  }, [doing, rowElement, rowTitle]);
+  return (
+    <WorkCell
+      row={row}
+      doing={doing}
+      note={
+        needLine(row, items, now, lock).length ? (
+          <AgentNeeds row={row} items={items} now={now} lock={lock} />
+        ) : undefined
+      }
+      actions={<ReviewParkSeatActions row={row} />}
+    />
+  );
+}
+
+function AgentMeasurements({ row, max }: { row: Crew["rows"][number]; max: number }) {
+  return <AgentActivity row={row} now={useNow()} max={max} />;
+}
+
+function StateAge({ since }: { since: number }) {
+  const now = useNow();
+  return (
+    <span role="cell" className="num xs">
+      {since > 0 ? elapsed(now - since) : DASH}
+    </span>
+  );
+}
+
 function AgentRow({
   row,
   items,
   max,
-  now: coarseNow,
   tz,
   selected,
   lock,
@@ -393,14 +463,13 @@ function AgentRow({
   row: Crew["rows"][number];
   items: AttentionItem[];
   max: number;
-  now: number;
   tz: string | null;
   selected: boolean;
   lock: TestLockState | undefined;
 }) {
+  const rowElement = useRef<HTMLDivElement>(null);
   const mine = seatItems(row, items);
-  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
-  const needs = needLine(row, items, now, lock);
+  const now = Date.now();
   const repoPrs = useReviewPrs(row ?? undefined);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
@@ -410,21 +479,26 @@ function AgentRow({
   const go = () => navigate(agentPath(row.id));
   const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
   const status = seatStatus(row);
-  const statusLabel = row.crewPause
-    ? status.label
-    : lockSince(lock, row.run?.id) !== null
-      ? "Watching"
-      : status.label === "Free" && crewStatus?.enabled === false
-        ? "Idle"
-        : status.label;
-  const statusTitle = row.crewPause
-    ? status.reason
-    : lockSince(lock, row.run?.id) !== null
-      ? (row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)) ||
-        "Waiting on test lock"
-      : status.label === "Free" && crewStatus?.enabled === false
-        ? "Crew is paused"
-        : (status.reason ?? statusLabel);
+  const queued = row.queuedReview && !row.reviewing;
+  const statusLabel = queued
+    ? "Queued"
+    : row.crewPause
+      ? status.label
+      : lockSince(lock, row.run?.id) !== null
+        ? "Watching"
+        : status.label === "Free" && crewStatus?.enabled === false
+          ? "Idle"
+          : status.label;
+  const statusTitle = queued
+    ? row.queuedReview?.reason
+    : row.crewPause
+      ? status.reason
+      : lockSince(lock, row.run?.id) !== null
+        ? (row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)) ||
+          "Waiting on test lock"
+        : status.label === "Free" && crewStatus?.enabled === false
+          ? "Crew is paused"
+          : (status.reason ?? statusLabel);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const aside = row.asideRuns ?? [];
@@ -446,6 +520,7 @@ function AgentRow({
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign link is the keyboard route
     // biome-ignore lint/a11y/useFocusableInteractive: the call-sign link provides keyboard access
     <div
+      ref={rowElement}
       role="row"
       className={cls.filter(Boolean).join(" ")}
       title={status.label === "Free" && crewStatus?.enabled === false ? "Crew is paused" : doing}
@@ -472,27 +547,32 @@ function AgentRow({
             : row.loopKind}
         </span>
       </span>
-      <span role="cell" className="state-cell" title={statusTitle}>
+      <span
+        role="cell"
+        className="state-cell"
+        title={statusTitle}
+        aria-label={statusTitle ? `${statusLabel} · ${statusTitle}` : statusLabel}
+      >
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
       </span>
-      <WorkCell
+      <AgentWork
         row={row}
-        doing={doing}
-        note={
-          needs.length ? <AgentNeeds row={row} items={items} now={now} lock={lock} /> : undefined
+        items={items}
+        lock={lock}
+        tz={tz}
+        rowElement={rowElement}
+        rowTitle={
+          status.label === "Free" && crewStatus?.enabled === false ? "Crew is paused" : undefined
         }
-        actions={<ReviewParkSeatActions row={row} />}
       />
-      <AgentActivity row={row} now={now} max={max} />
+      <AgentMeasurements row={row} max={max} />
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={contextPct(row)} />
       </span>
-      <span role="cell" className="num xs">
-        {row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
-      </span>
+      <StateAge since={row.stateSince} />
     </div>
   );
 }
@@ -525,7 +605,8 @@ export function AgentsPanel() {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
   const tz = useTz();
-  const now = useNow();
+  // Reorder on source changes, not clock ticks. Each row owns its time-dependent text.
+  const now = Date.now();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);
@@ -566,6 +647,9 @@ export function AgentsPanel() {
             </span>
           ) : null}
           <CrewOff compact />
+          <span title="FLIGHT first; then needs attention, running (most tokens in the last 10 minutes first), waiting, idle and stopped. Ties follow configured order.">
+            · attention first ↓
+          </span>
         </>
       }
       actions={
@@ -582,7 +666,19 @@ export function AgentsPanel() {
         </>
       }
     >
-      <div role="table" aria-label="Crew" id="agentsList" aria-busy={!crew.data && !crew.error}>
+      {crew.error && crew.data && (
+        <p role="status" className="pb warn-t">
+          Crew refresh failed. Showing the last received rows.
+        </p>
+      )}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded roster supports keyboard scrolling. */}
+      <div
+        role="table"
+        tabIndex={0}
+        aria-label="Crew"
+        id="agentsList"
+        aria-busy={!crew.data && !crew.error}
+      >
         {/* biome-ignore lint/a11y/useFocusableInteractive: table headers have no interaction */}
         <div className="trow head" role="row">
           {COLUMNS.map((label) => (
@@ -602,7 +698,6 @@ export function AgentsPanel() {
           configPending={!config && !configRes.error}
           items={items}
           max={max}
-          now={now}
           tz={tz}
           lock={lock}
         />
@@ -612,13 +707,17 @@ export function AgentsPanel() {
             row={row}
             items={items}
             max={max}
-            now={now}
             tz={tz}
             selected={row.id === selected}
             lock={lock}
           />
         ))}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}
+        {seatRows?.length === 0 && !flight && (
+          <p className="pb">
+            No crew seats are configured in this session. Add its first agent in Setup.
+          </p>
+        )}
         {!rows &&
           !crew.error &&
           placeholders.map((agent) => (
