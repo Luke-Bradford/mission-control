@@ -1636,7 +1636,9 @@ describe("Account quota panel", () => {
     const rows = quota.querySelectorAll(".quotarow");
     expect(rows[0]?.textContent).toContain("read 9 min ago");
     expect(rows[0]?.textContent).toContain("read 4 min ago");
-    expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toContain("read just now");
+    const codex = rows[1] as HTMLElement;
+    expect(codex.textContent).toContain("read just now");
+    expect(within(codex).getByTitle(/codex-main 7d:.*read just now/)).toBeTruthy();
   });
 
   it("shows the last successful quota and collector note while rate limited", async () => {
