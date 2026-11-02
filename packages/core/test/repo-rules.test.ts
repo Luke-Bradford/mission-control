@@ -7,6 +7,7 @@ import {
   dependsOn,
   effectiveHardRules,
   eligibleToStart,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   inLane,
   otherLaneText,
@@ -77,6 +78,21 @@ describe("DEFAULT_REPO_RULES", () => {
       ".github/**",
       "config.example.yaml",
     ]);
+  });
+
+  it("keeps full-profile self-approval paths separate from the default repo catalogue", () => {
+    for (const path of [
+      "apps/server/src/api.ts",
+      "apps/server/src/main.ts",
+      "apps/server/src/flight-approvals.ts",
+      "apps/server/src/external-pr-control.ts",
+      "packages/core/src/flight-access.ts",
+    ]) {
+      expect(FLIGHT_CONTROLLER_CHECK_PATHS).toContain(path);
+      expect(DEFAULT_HARD_RULES).not.toContain(path);
+    }
+    expect(FLIGHT_CONTROLLER_CHECK_PATHS).toContain("roles/FLIGHT.md");
+    expect(FLIGHT_CONTROLLER_CHECK_PATHS).toContain(".claude/skills/flight-ops/**");
   });
 
   it("effectiveHardRules adds the defaults on a superuser repo only", () => {

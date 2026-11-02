@@ -50,6 +50,7 @@ import {
   controllerCheckFailText,
   controllerCheckParkText,
   controllerCheckUnreadableText,
+  crewProfileOf,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -60,7 +61,7 @@ import {
   evidenceNoteKey,
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
-  FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   fillLoopText,
   fixCommsText,
   fixKey,
@@ -606,9 +607,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return (
       loop.touches?.sha === sha &&
       loop.touches.paths.some((path) =>
-        [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"].some(
-          (pattern) => globMatches(pattern, path, true),
-        ),
+        FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
       )
     );
   }
@@ -2008,10 +2007,29 @@ export function createEngine(deps: EngineDeps): Engine {
         log(`${runId}: could not read the merge gate: ${g.text}`);
       }
     }
+    const fullFlight = config.crew?.sessions.some(
+      (session) =>
+        session.repoId === run.repoId &&
+        session.seats.some(
+          (seat) => crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full",
+        ),
+    );
+    // The full-profile self-approval floor belongs to that runtime, not the global repo defaults.
+    const classifiedRules =
+      rules === null
+        ? null
+        : [
+            ...new Set([
+              ...effectiveHardRules(rules, flightPowers),
+              ...(fullFlight ? FLIGHT_CONTROLLER_CHECK_PATHS : []),
+            ]),
+          ];
     const hardRulesHash =
       rules === null
         ? null
-        : createHash("sha256").update(JSON.stringify(rules.hardRules)).digest("hex");
+        : createHash("sha256")
+            .update(JSON.stringify(fullFlight ? classifiedRules : rules.hardRules))
+            .digest("hex");
     if (
       run.endedAt === null &&
       pushed !== null &&
@@ -2020,13 +2038,9 @@ export function createEngine(deps: EngineDeps): Engine {
         input.touches.hardRulesHash !== hardRulesHash)
     ) {
       input.touches = null; // unreadable rules must not reuse the old clearance
-      if (rules !== null) {
+      if (classifiedRules !== null) {
         try {
-          const paths = await publisher.hardRuleTouches(
-            run,
-            pushed.sha,
-            effectiveHardRules(rules, flightPowers),
-          );
+          const paths = await publisher.hardRuleTouches(run, pushed.sha, classifiedRules);
           input.touches = {
             sha: pushed.sha,
             paths,
@@ -2861,7 +2875,7 @@ export function createEngine(deps: EngineDeps): Engine {
             const paths = await publisher.hardRuleTouches(
               run,
               pushed.sha,
-              FLIGHT_FLOOR_ENFORCING_PATHS,
+              FLIGHT_CONTROLLER_CHECK_PATHS,
             );
             if (paths.length === 0) return refuse("wrong-action");
             const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
@@ -2884,7 +2898,7 @@ export function createEngine(deps: EngineDeps): Engine {
               const paths = await publisher.hardRuleTouches(
                 run,
                 pushed.sha,
-                FLIGHT_FLOOR_ENFORCING_PATHS,
+                FLIGHT_CONTROLLER_CHECK_PATHS,
               );
               if (paths.length > 0) return refuse("floor-enforced");
             }

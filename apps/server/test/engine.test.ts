@@ -5380,45 +5380,64 @@ describe("the engine runs reviews", () => {
       expect(h.gateReads.slice(1).every((g) => g.known)).toBe(true);
     });
 
-    it("requests an independent check before FLIGHT clearance, accepts the operator API verdict, then merges", async () => {
-      need(config.repos[0]).flightPowers = "superuser";
-      h.touches = ["apps/server/src/flight/tools.ts"];
-      h.gate = { ...need(h.gate), strays: [] };
-      await gateOpen();
-      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
-      expect(h.steps).toEqual([]);
-      expect(loopOf().controllerCheck).toEqual({ sha: SHA, from: "review", pass: false });
-      expect(await h.engine.clearFlight(RUN, SHA)).toBe(false);
-      const app = buildApp({
-        config,
-        store,
-        bus: new ChangeBus(),
-        engine: h.engine,
-        operatorToken: "fixture-operator",
-        now: () => clock,
-        supervisor: { status: () => ({ enabled: true, note: null }) } as Supervisor,
-      });
-      try {
-        const post = (sha: string) =>
-          app.inject({
-            method: "POST",
-            url: `/api/runs/${encodeURIComponent(RUN)}/controller-check`,
-            headers: { "x-mc-operator": "fixture-operator" },
-            payload: { verdict: "pass", sha },
-          });
-        expect((await post(SHA_B)).statusCode).toBe(409);
-        expect((await post(SHA)).statusCode).toBe(200);
-        expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
-        expect(loopOf().awaitingFlight).toBe(SHA);
-        expect(h.steps).not.toContain("merge");
-      } finally {
-        await app.close();
-      }
-      expect(await h.engine.clearFlight(RUN)).toBe(true);
-      expect(h.steps).toContain("merge");
-    });
+    it.each([
+      "apps/server/src/flight/tools.ts",
+      "apps/server/src/api.ts",
+      "packages/core/src/flight-access.ts",
+    ])(
+      "requests an independent check before FLIGHT clearance for %s, accepts the operator API verdict, then merges",
+      async (path) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        need(config.crew?.sessions[0]).seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+        h.touches = [path];
+        h.gate = { ...need(h.gate), strays: [] };
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+        expect(
+          h.hardRuleLists.some((rules) =>
+            rules.some((pattern) => globMatches(pattern, path, true)),
+          ),
+        ).toBe(true);
+        expect(h.steps).toEqual([]);
+        expect(loopOf().controllerCheck).toEqual({ sha: SHA, from: "review", pass: false });
+        expect(await h.engine.clearFlight(RUN, SHA)).toBe(false);
+        const app = buildApp({
+          config,
+          store,
+          bus: new ChangeBus(),
+          engine: h.engine,
+          operatorToken: "fixture-operator",
+          now: () => clock,
+          supervisor: { status: () => ({ enabled: true, note: null }) } as Supervisor,
+        });
+        try {
+          const post = (sha: string) =>
+            app.inject({
+              method: "POST",
+              url: `/api/runs/${encodeURIComponent(RUN)}/controller-check`,
+              headers: { "x-mc-operator": "fixture-operator" },
+              payload: { verdict: "pass", sha },
+            });
+          expect((await post(SHA_B)).statusCode).toBe(409);
+          expect((await post(SHA)).statusCode).toBe(200);
+          expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
+          expect(loopOf().awaitingFlight).toBe(SHA);
+          expect(h.steps).not.toContain("merge");
+        } finally {
+          await app.close();
+        }
+        expect(await h.engine.clearFlight(RUN)).toBe(true);
+        expect(h.steps).toContain("merge");
+      },
+    );
 
-    it.each(["apps/web/src/x.ts", "apps/server/src/guard/x.ts"])(
+    it.each(["apps/web/src/x.ts", "apps/server/src/guard/x.ts", "apps/server/src/api.ts"])(
       "accept keeps RETRO independent on %s",
       async (path) => {
         need(config.repos[0]).flightPowers = "superuser";
@@ -5436,6 +5455,12 @@ describe("the engine runs reviews", () => {
           action: "accept",
         });
         expect(accepted).toBe(path.startsWith("apps/web"));
+        if (!accepted)
+          expect(
+            h.hardRuleLists.some((rules) =>
+              rules.some((pattern) => globMatches(pattern, path, true)),
+            ),
+          ).toBe(true);
         if (accepted) {
           expect(loopOf().reviewWaivedSha).toBe(SHA);
           expect(h.statusCalls.at(-1)).toMatchObject({

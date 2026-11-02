@@ -59,7 +59,7 @@ import {
   effectiveHardRules,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
-  FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -4721,11 +4721,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (
             flightActor(req) &&
             run.loop.touches?.paths.some((path) =>
-              [
-                ...FLIGHT_FLOOR_ENFORCING_PATHS,
-                "roles/FLIGHT.md",
-                ".claude/skills/flight-ops/**",
-              ].some((pattern) => globMatches(pattern, path, true)),
+              FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
             )
           )
             return reply.code(403).send({
@@ -4822,7 +4818,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return false;
         }
       };
-      // Reader: docs/runbook.md#flight-full-access (controller PRs have no author run).
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (controller PRs have no author run).
       api.post<{ Params: { repoId: string; number: string } }>(
         "/prs/:repoId/:number/controller-check",
         async (req, reply) => {
@@ -4854,6 +4850,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (external PR merge holds).
       api.post<{ Params: { repoId: string; number: string } }>(
         "/prs/:repoId/:number/merge-hold",
         async (req, reply) => {

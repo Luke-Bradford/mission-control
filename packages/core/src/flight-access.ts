@@ -4,6 +4,20 @@
  * floor; none of these lists is a cap on how often FLIGHT acts.
  */
 import { API_PREFIX } from "./mcp.ts";
+import { FLIGHT_FLOOR_ENFORCING_PATHS } from "./rule-paths.ts";
+
+/** Full-profile FLIGHT cannot approve changes to its own authority; independent current-head evidence is required.
+ * This workflow floor is separate from each repository's configured/default hard-rule catalogue. */
+export const FLIGHT_CONTROLLER_CHECK_PATHS: readonly string[] = Object.freeze([
+  ...FLIGHT_FLOOR_ENFORCING_PATHS,
+  "roles/FLIGHT.md",
+  ".claude/skills/flight-ops/**",
+  "apps/server/src/api.ts",
+  "apps/server/src/main.ts",
+  "apps/server/src/flight-approvals.ts",
+  "apps/server/src/external-pr-control.ts",
+  "packages/core/src/flight-access.ts",
+]);
 
 /** The operator routes `mc operator` may POST to; `:id` and `:key` match one path segment. */
 export const FLIGHT_OPERATOR_ROUTES: readonly string[] = [

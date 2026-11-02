@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
   effectiveHardRules,
-  FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   globMatches,
   REVIEW_STATUS_CONTEXT,
@@ -224,14 +224,8 @@ export async function mergeExternalPr(i: {
       uatAccepted: current?.uatAccepted ?? false,
       controllerRequired:
         tickets.some((ticket) => ticketControllerCheck(ticket) !== null) ||
-        matches(
-          [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"],
-          paths,
-        ),
-      protectedController: matches(
-        [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"],
-        paths,
-      ),
+        matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
+      protectedController: matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
       controllerPassed: current?.controllerPassed ?? false,
       note: current?.note ?? null,
     };

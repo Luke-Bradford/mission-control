@@ -100,9 +100,9 @@ import {
   FLIGHT_CI_LOG_MAX,
   FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
   FLIGHT_CLOSE_SEARCH_LIMIT,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_DECISION_MAX,
   FLIGHT_FIELD_MAX,
-  FLIGHT_FLOOR_ENFORCING_PATHS,
   FLIGHT_GH_PATH_MAX,
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
@@ -3396,9 +3396,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return fail("No awaiting-flight run PR in your lane.");
         const sha = run.loop.awaitingFlight;
         const protectsFlight = run.loop.touches?.paths.some((path) =>
-          [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"].some(
-            (pattern) => globMatches(pattern, path, true),
-          ),
+          FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
         );
         if (
           protectsFlight &&
