@@ -8,9 +8,107 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--panel-head-y) var(--sp-4);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
+}
+
+.dock .dh h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.dockrail {
+  padding: var(--sp-2) 0;
+}
+.dockrail button {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  padding: var(--sp-2) 0;
+  white-space: normal;
+}
+.dockrail-name {
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+.dockrail-caption {
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+}
+.dock.collapsed .panel {
+  height: 100%;
+}
+.dock-summary {
+  flex: none;
+  max-height: 52%;
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: var(--sp-3);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.dock-summary-state:empty {
+  display: none;
+}
+.dock-summary-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.dock-summary h3 {
+  margin: 0;
+  font: 600 var(--fs-s) / var(--lh-s) var(--sans);
+}
+.dock-headline summary {
+  cursor: pointer;
+  min-height: 24px;
+}
+.dock-headline summary > span:first-child {
+  overflow-wrap: anywhere;
+}
+.dock-headline summary > span:last-child {
+  display: block;
+}
+.dock-headline p {
+  margin-top: var(--sp-2);
+  overflow-wrap: anywhere;
+}
+.dock-summary-item {
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.dock-summary-item > .row {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.dock-item-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin: var(--sp-1) 0;
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+}
+.dock-next {
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-2);
+}
+.dock-next button {
+  white-space: normal;
+  text-align: left;
+}
+.dock-next a {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+}
+.dock-summary button {
+  min-height: 24px;
 }
 
 .dock .dh .meta {
@@ -102,7 +200,7 @@
 /* Folded: the title row and the waiting count only; the conversation stays mounted so unread
    replies still count. */
 .dock.collapsed .dockbody,
-.dock.collapsed .dh .meta {
+.dock.collapsed .dh {
   display: none;
 }
 

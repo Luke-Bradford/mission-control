@@ -26,6 +26,7 @@ function memoryStorage(): Storage {
 // shadows jsdom's; each test gets a fresh working one instead.
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
+  vi.stubGlobal("sessionStorage", memoryStorage());
 });
 
 // Vitest globals are off, so Testing Library cannot register its own cleanup.

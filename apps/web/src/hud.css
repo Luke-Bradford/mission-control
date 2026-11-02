@@ -85,6 +85,24 @@
   --sp-7: 48px;
   --r: 3px;
   --r-s: 2px;
+  --shell-gutter: var(--sp-4);
+  --table-row: var(--sp-6);
+  --table-cell-y: 0px;
+  --panel-head-y: var(--sp-2);
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --shell-gutter: var(--sp-5);
+  }
+}
+
+@media (min-width: 2200px) {
+  :root {
+    --table-row: 40px;
+    --table-cell-y: var(--sp-1);
+    --panel-head-y: var(--sp-3);
+  }
 }
 
 @media (prefers-color-scheme: light) {
@@ -262,6 +280,12 @@ p {
   margin: 0;
 }
 
+/* Supporting copy never inherits the browser's sub-12px small-text multiplier. */
+small {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
 a {
   color: var(--accent);
 }
@@ -362,6 +386,12 @@ textarea {
   border-radius: var(--r-s);
   padding: var(--sp-1) var(--sp-2);
   min-width: 0;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  min-height: var(--sp-6);
 }
 
 select {
@@ -722,10 +752,14 @@ select {
   flex: 1;
   min-height: 0;
   width: 100%;
-  padding: var(--sp-3);
+  padding: var(--shell-gutter);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
-  gap: var(--sp-3);
+  gap: var(--shell-gutter);
+}
+
+.app.dock-collapsed .shell:not(.shell-full) {
+  grid-template-columns: minmax(0, 1fr) var(--sp-7);
 }
 
 .app.dock-hidden .shell {
@@ -780,7 +814,7 @@ main > section {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--panel-head-y) var(--sp-4);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   color: var(--fg-2);
@@ -797,7 +831,9 @@ main > section {
 }
 
 .ph h2 {
-  font: inherit;
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* Column heads read as instrument labels everywhere (sizes and colours stay with the table rules). */
@@ -808,7 +844,7 @@ th {
 }
 
 .pb {
-  padding: var(--sp-1) var(--sp-3) var(--sp-3);
+  padding: var(--sp-4);
   min-width: 0;
 }
 
@@ -863,9 +899,19 @@ table {
 th,
 td {
   text-align: left;
-  padding: var(--sp-1) var(--sp-2) var(--sp-1) 0;
+  padding: var(--table-cell-y) var(--sp-2) var(--table-cell-y) 0;
   border-top: 1px solid var(--line);
   white-space: nowrap;
+}
+
+tr {
+  height: var(--table-row);
+}
+
+/* The roster's shared grid rows use the same density as semantic tables. */
+.app .trow {
+  min-height: var(--table-row);
+  padding-block: var(--table-cell-y);
 }
 
 th {

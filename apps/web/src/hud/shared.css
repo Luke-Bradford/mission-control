@@ -138,7 +138,7 @@
 }
 
 #agentsP .ph {
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--panel-head-y) var(--sp-4);
   flex-wrap: nowrap;
 }
 
@@ -208,18 +208,18 @@
 }
 
 #machP .ph {
-  padding: var(--sp-2) var(--sp-2);
+  padding: var(--panel-head-y) var(--sp-4);
   flex-wrap: nowrap;
 }
 
 #quotaP .ph {
-  padding: var(--sp-2) var(--sp-2);
+  padding: var(--panel-head-y) var(--sp-4);
   flex-wrap: nowrap;
 }
 
 #machP .pb,
 #quotaP .pb {
-  padding: 0 var(--sp-2) var(--sp-2);
+  padding: var(--sp-4);
 }
 
 #machP .lock {

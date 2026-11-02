@@ -1,8 +1,8 @@
 # Desktop density plan for operator approval
 
-Stage 2 of #1193, following the [desktop research](2026-11-01-hud-density.md) and its 240-image gallery in PR #1341. The operator saw the report before this proposal. This plan has not been approved. 
+Stage 2 of #1193, following the [desktop research](2026-11-01-hud-density.md) and its 240-image gallery in PR #1341. The operator approved this plan in PR #1351. The separate mockups in [PR #1353](https://github.com/Luke-Bradford/mission-control/pull/1353) were approved on 2 November 2026: “Approve the mockups for implementation”.
 
-Plan approval permits the mockup stage. The mockup then needs separate approval before build tickets.
+Implementation follows in #1359 (shell/FLIGHT), #1360 (Overview), #1361 (Agent) and #1362 (forms). Historical mockup screenshots remain in their gallery.
 
 ## The decision
 

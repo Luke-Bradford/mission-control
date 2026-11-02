@@ -130,30 +130,33 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Keys and lamps" })).toBeTruthy();
   });
 
-  it("opens FLIGHT in Comms from Setup without changing the unmounted dock state", async () => {
-    act(() => toggleDock(false));
+  it("expands the site-wide FLIGHT rail from Setup without leaving the form page", async () => {
     const { container } = at("/setup");
     await waitFor(() => expect(container.querySelector("#page-setup")).not.toBeNull());
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
     });
-    expect(window.location.pathname).toBe("/comms");
-    await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
+    expect(window.location.pathname).toBe("/setup");
+    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
     expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    // On Comms, FLIGHT is already open: f must not toggle a dock that is not mounted.
+    // Comms owns the full conversation and does not alter the rail choice.
+    act(() => {
+      navigate("/comms");
+    });
+    await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
       navigate("/");
     });
     await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
     expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
-      "false",
+      "true",
     );
   });
 
-  it("g then m opens the Map full width, where f opens FLIGHT in Comms like Setup", async () => {
+  it("keeps Map navigation and its site-wide FLIGHT rail separate", async () => {
     act(() => toggleDock(true));
     const { container } = at("/");
     act(() => {
@@ -162,23 +165,24 @@ describe("App", () => {
     });
     expect(window.location.pathname).toMatch(/^\/map/);
     await waitFor(() => expect(container.querySelector("#page-map")).not.toBeNull());
-    expect(container.querySelector(".shell.shell-full")).not.toBeNull();
-    expect(container.querySelector(".dock")).toBeNull();
+    expect(container.querySelector(".shell.shell-full")).toBeNull();
+    expect(container.querySelector(".dock")).not.toBeNull();
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
     });
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname).toMatch(/^\/map/);
+    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
   });
 
   it("starts the dock collapsed on the Board and expands it on click", async () => {
-    localStorage.removeItem("mc-dock-collapsed");
+    sessionStorage.removeItem("mc-dock-collapsed");
     act(() => toggleDock(true));
     const { container } = at("/board");
     await waitFor(() => expect(container.querySelector("#page-board")).not.toBeNull());
     expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
     expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
-    localStorage.removeItem("mc-dock-collapsed");
+    sessionStorage.removeItem("mc-dock-collapsed");
   });
 
   it("hides the dock on the FLIGHT page, which says what it would, and f opens FLIGHT in Comms", async () => {

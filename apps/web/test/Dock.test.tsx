@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
-import { hub } from "../src/data.ts";
+import { hub, streamStatus } from "../src/data.ts";
 import * as conversation from "../src/flight/conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../src/flight/flightTypes.ts";
 import { NEEDS_YOU_PATH } from "../src/router.ts";
@@ -10,6 +10,7 @@ import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { installKeys } from "../src/shell/keys.ts";
 import {
   openItem,
+  resetOverlays,
   toggleDock,
   useBuildStatus,
   useFlightUnread,
@@ -18,6 +19,7 @@ import {
 import { DOCK_COLLAPSED_KEY, DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
 import { readStyles } from "./styles.ts";
 
 const noop = () => {};
@@ -25,10 +27,10 @@ let off: () => void;
 let breakpointListeners: (() => void)[] = [];
 
 /** `matchMedia` for a window at least (or less than) 1200px wide. */
-function stubWidth(wide: boolean) {
+function stubWidth(wide: boolean, roomy = false) {
   breakpointListeners = [];
   vi.stubGlobal("matchMedia", (q: string) => ({
-    matches: wide,
+    matches: q === "(min-width: 2200px)" ? roomy : wide,
     media: q,
     addEventListener: (_: string, fn: () => void) => breakpointListeners.push(fn),
     removeEventListener: noop,
@@ -42,11 +44,13 @@ const esc = () =>
   });
 
 beforeEach(() => {
+  streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
   stubFetch({
     "/api/attention": [],
     "/api/escalations": [],
     "/api/crew?shape=summary": { rows: [] },
     "/api/flight": { seat: null, decisions: [] },
+    "/api/flight/summary": flightSummary(),
   });
   off = installKeys({
     navigate: noop,
@@ -93,7 +97,7 @@ describe("Dock content", () => {
     expect(dock.querySelector(".dh")?.textContent).toContain("FLIGHT");
     expect(dock.querySelectorAll(".rt")).toHaveLength(1);
     expect(dock.querySelector(".rt")?.textContent).toBe(" · Head agent");
-    expect(container.querySelector("#dockWaiting")).toBeNull();
+    expect(container.querySelector("#dockWaiting")?.textContent).toContain("Nothing is waiting");
     expect(container.querySelector("#dockMsgs")?.children.length).toBe(0);
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
     expect(input.disabled).toBe(true);
@@ -127,10 +131,75 @@ describe("Dock content", () => {
 });
 
 describe("Dock on a wide screen", () => {
+  it("focuses the expanded heading and returns to the rail without losing a failed draft or selection", async () => {
+    stubWidth(true);
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }),
+      },
+    );
+    const { container } = render(<Dock />);
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(document.activeElement?.id).toBe("dockHeading");
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "Keep this decision context" } });
+    act(() => openItem("selected-ticket"));
+    fireEvent.submit(container.querySelector("#dockForm") as HTMLFormElement);
+    await screen.findByText("seat busy");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(screen.getByLabelText("Message FLIGHT")).toBe(input);
+    expect(input.value).toBe("Keep this decision context");
+    expect(screen.getByText("seat busy")).toBeTruthy();
+    expect(window.location.search).toContain("selected-ticket");
+    await act(async () => {
+      streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW });
+      hub.refetchAll();
+    });
+    await act(async () =>
+      streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: NOW }),
+    );
+    expect(screen.getByLabelText("Message FLIGHT")).toBe(input);
+    expect(input.value).toBe("Keep this decision context");
+    expect(screen.getByText("seat busy")).toBeTruthy();
+  });
+
+  it("starts open above 2200px and preserves an explicit session choice after remount", () => {
+    stubWidth(true, true);
+    const first = render(<Dock />);
+    expect(dockEl(first.container)?.classList.contains("collapsed")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    first.unmount();
+    resetOverlays();
+    const second = render(<Dock />);
+    expect(dockEl(second.container)?.classList.contains("collapsed")).toBe(true);
+    expect(sessionStorage.getItem(DOCK_COLLAPSED_KEY)).toBe("true");
+    expect(localStorage.getItem(DOCK_COLLAPSED_KEY)).toBeNull();
+  });
+
+  it("keeps the rail usable when session storage is unavailable", () => {
+    stubWidth(true);
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => {
+        throw Error("blocked");
+      },
+      setItem: () => {
+        throw Error("blocked");
+      },
+    });
+    const { container } = render(<Dock />);
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
+  });
   it("starts collapsed to its title row, expands on click, and remembers the choice", () => {
     stubWidth(true);
     const { container } = render(<Dock />);
-    const toggle = screen.getByRole("button", { name: "Expand" });
+    const toggle = screen.getByRole("button", { name: /Expand FLIGHT/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
     fireEvent.click(toggle);
@@ -138,7 +207,7 @@ describe("Dock on a wide screen", () => {
       "true",
     );
     expect(dockEl(container)?.classList.contains("collapsed")).toBe(false);
-    expect(localStorage.getItem(DOCK_COLLAPSED_KEY)).toBe("false");
+    expect(sessionStorage.getItem(DOCK_COLLAPSED_KEY)).toBe("false");
   });
 
   it("is shown by default; Hide hides it and remembers, showing again remembers that", () => {
@@ -147,15 +216,15 @@ describe("Dock on a wide screen", () => {
     expect(dockEl(container)?.hidden).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Hide" }));
     expect(dockEl(container)?.hidden).toBe(true);
-    expect(localStorage.getItem(DOCK_KEY)).toBe("false");
+    expect(sessionStorage.getItem(DOCK_KEY)).toBe("false");
     act(() => toggleDock());
     expect(dockEl(container)?.hidden).toBe(false);
-    expect(localStorage.getItem(DOCK_KEY)).toBe("true");
+    expect(sessionStorage.getItem(DOCK_KEY)).toBe("true");
   });
 
   it("starts hidden when it was hidden last time", () => {
     stubWidth(true);
-    localStorage.setItem(DOCK_KEY, "false");
+    sessionStorage.setItem(DOCK_KEY, "false");
     const { container } = render(<Dock />);
     expect(dockEl(container)?.hidden).toBe(true);
   });
@@ -190,10 +259,10 @@ describe("Dock on a narrow screen", () => {
     act(() => toggleDock());
     expect(dockEl(container)?.hidden).toBe(false);
     expect(screen.getByTestId("dock-scrim")).toBeTruthy();
-    expect(localStorage.getItem(DOCK_KEY)).toBeNull();
+    expect(sessionStorage.getItem(DOCK_KEY)).toBeNull();
     esc();
     expect(dockEl(container)?.hidden).toBe(true);
-    expect(localStorage.getItem(DOCK_KEY)).toBeNull();
+    expect(sessionStorage.getItem(DOCK_KEY)).toBeNull();
   });
 
   it("closes when the scrim or Hide is pressed", () => {
@@ -306,6 +375,7 @@ function stubFlight(view: FlightView, extra: Record<string, unknown> = {}) {
     "/api/crew?shape=summary": { rows: [] },
     "/api/config": CONFIG,
     "/api/flight": view,
+    "/api/flight/summary": flightSummary(),
     "/api/agents/flight-1/stream?limit=20": STREAM,
     ...extra,
   });
@@ -482,6 +552,66 @@ describe("Waiting on you", () => {
   const ask = (over: Parameters<typeof item>[0] = {}) =>
     item({ kind: "decision", text: "Which?", brief: brief(), ...over });
 
+  it("bounds a fifty-item summary to the highest three and does not open for a new item", async () => {
+    stubWidth(true);
+    let asks = Array.from({ length: 49 }, (_, index) =>
+      ask({ key: `question-${index}`, kind: "question", text: `Question ${index}` }),
+    );
+    asks.push(
+      ask({
+        key: "urgent",
+        kind: "stalled",
+        text: "No output: the current check needs attention.",
+      }),
+    );
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/attention": () => ({ status: 200, body: asks }) },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(screen.getAllByTestId("waiting-ask")).toHaveLength(3));
+    expect(screen.getAllByTestId("waiting-ask")[0].textContent).toContain("No output");
+    expect(screen.getByRole("button", { name: "View all 50 waiting items" })).toBeTruthy();
+    asks = [...asks, ask({ key: "new", text: "A new decision" })];
+    await act(async () => {
+      hub.refetch("/api/attention");
+    });
+    await screen.findByRole("button", { name: /Expand FLIGHT: 51 waiting on you/ });
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
+  });
+
+  it("names stale and disconnected cached summaries and lets a failed refresh retry", async () => {
+    let failed = false;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/flight/summary": () =>
+          failed
+            ? { status: 503, body: { error: "unavailable" } }
+            : {
+                status: 200,
+                body: flightSummary({
+                  headline: "The reviewed work awaits a decision.",
+                  headlineAgeMin: 95,
+                }),
+              },
+      },
+    );
+    act(() => streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW }));
+    render(<Dock />);
+    await screen.findByText("Stale headline · 95 min old");
+    expect(screen.getByText("Disconnected")).toBeTruthy();
+    failed = true;
+    await act(async () => {
+      hub.refetch("/api/flight/summary");
+    });
+    await screen.findByRole("button", { name: "Retry summary" });
+    expect(screen.getByText("The reviewed work awaits a decision.")).toBeTruthy();
+    failed = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry summary" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry summary" })).toBeNull());
+  });
+
   it("shows the whole Needs-you set, most urgent first, with Open on each", async () => {
     function Probe() {
       return <span data-testid="item">{useItem() ?? "none"}</span>;
@@ -532,7 +662,7 @@ describe("Waiting on you", () => {
     const [row] = await screen.findAllByTestId("waiting-ask");
     expect(row?.textContent).toContain("FLIGHT");
     expect(row?.textContent).not.toContain("Blocked");
-    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Show them" }));
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /^Open:/ }));
     expect(window.location.pathname + window.location.hash).toBe(NEEDS_YOU_PATH);
   });
 
@@ -568,11 +698,11 @@ describe("Waiting on you", () => {
     }
   });
 
-  it("shows no band with nothing to wait on", async () => {
+  it("names the empty waiting set", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
-    expect(container.querySelector("#dockWaiting")).toBeNull();
+    expect(container.querySelector("#dockWaiting")?.textContent).toContain("Nothing is waiting");
   });
 });
 
@@ -772,7 +902,7 @@ describe("the conversation", () => {
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
     }
-    localStorage.setItem(DOCK_COLLAPSED_KEY, "false");
+    sessionStorage.setItem(DOCK_COLLAPSED_KEY, "false");
     const { container } = render(
       <>
         <Unread />
@@ -821,7 +951,7 @@ describe("the conversation", () => {
       hub.refetch("/api/agents/flight-1/stream?limit=20");
     });
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("0"));
   });
 

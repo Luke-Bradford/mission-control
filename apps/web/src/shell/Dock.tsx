@@ -31,10 +31,18 @@ import {
 } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { DOCK_COLLAPSED_KEY, readBool, writeBool } from "../storage.ts";
 import { BuildChips } from "./buildStatus.tsx";
+import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
-import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
+import {
+  openItem,
+  setDockCollapsed,
+  setFlightUnread,
+  toggleDock,
+  trapTab,
+  useDock,
+  useReturnFocus,
+} from "./overlays.ts";
 import "./Dock.css";
 import { hhmm, percent } from "../fmt.ts";
 
@@ -198,7 +206,8 @@ export function FlightChat({
   const stream = olderEvents.stream;
   const tz = useTz();
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const attentionResource = useResource<AttentionItem[]>(RESOURCES.attention);
+  const attention = attentionResource.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const asks = useMemo(() => sortNeeds(needsYouItems(attention)), [attention]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
@@ -259,7 +268,15 @@ export function FlightChat({
 
   return (
     <>
-      {asks.length > 0 && (
+      {where === "dock" && (
+        <DockSummary
+          asks={asks}
+          attention={attentionResource}
+          crew={crew}
+          canMessage={seat?.live === true}
+        />
+      )}
+      {where !== "dock" && asks.length > 0 && (
         <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
           <div className="dwh">Waiting on you · {asks.length}</div>
           {asks.map((i) => {
@@ -328,27 +345,8 @@ const failNote = (e: unknown): string => {
   return errorNote(error) ?? error.message;
 };
 
-/**
- * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
- * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
- */
-export function Dock() {
-  const { visible, wide, toggle } = useDock();
-  const hide = useRef<HTMLButtonElement>(null);
-  const drawer = visible && !wide;
-  // The column starts folded to its title row; the drawer is opened to be read, so never folds.
-  const [folded, setFolded] = useState(() => readBool(DOCK_COLLAPSED_KEY, true));
-  const collapsed = wide && folded;
-  const waiting = useNeedsYou().length;
-  const fold = () => {
-    writeBool(DOCK_COLLAPSED_KEY, !folded);
-    setFolded(!folded);
-  };
-  useReturnFocus(drawer);
-  useEffect(() => {
-    if (drawer) hide.current?.focus();
-  }, [drawer]);
-  const flight = useResource<FlightView>(RESOURCES.flight).data;
+/** Clock-dependent metadata stays separate from the summary, rail and mounted composer. */
+function DockMeta({ flight }: { flight: FlightView | undefined }) {
   const seat = flight?.seat ?? null;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const row = crew?.rows.find((r) => r.id === seat?.id);
@@ -356,6 +354,44 @@ export function Dock() {
   const ctx = row ? contextPct(row) : null;
   const now = useNow();
   const tz = useTz();
+  return (
+    <div className="meta">
+      {flight === undefined
+        ? "Loading…"
+        : seat
+          ? [
+              row?.accountId,
+              seat.model,
+              seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
+              ctx !== null && `context ${percent(ctx)}`,
+              row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : FLIGHT_NO_SEAT}
+    </div>
+  );
+}
+
+/**
+ * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
+ * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
+ */
+export function Dock() {
+  const { visible, wide, collapsed, toggle } = useDock();
+  const hide = useRef<HTMLButtonElement>(null);
+  const rail = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const drawer = visible && !wide;
+  const waitingItems = useResource<AttentionItem[]>(RESOURCES.attention);
+  const waiting = useNeedsYou().length;
+  const fold = () => setDockCollapsed(!collapsed);
+  useReturnFocus(drawer);
+  useEffect(() => {
+    if (drawer) hide.current?.focus();
+  }, [drawer]);
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const [busy, setBusy] = useState(false);
@@ -370,6 +406,12 @@ export function Dock() {
   const [seenReply, setSeenReply] = useState<string | null | undefined>(undefined);
   // A folded dock hides its replies, so they stay unread until it is expanded.
   const looking = visible && !collapsed;
+  const wasLooking = useRef(looking);
+  useLayoutEffect(() => {
+    if (wide && looking && !wasLooking.current) heading.current?.focus();
+    if (wide && visible && collapsed && wasLooking.current) rail.current?.focus();
+    wasLooking.current = looking;
+  }, [wide, visible, collapsed, looking]);
   useEffect(() => {
     if (stream === undefined) return;
     if (seenReply === undefined || looking) setSeenReply(lastReply);
@@ -412,8 +454,32 @@ export function Dock() {
         onKeyDown={drawer ? trapTab : undefined}
       >
         <div className="panel">
+          <div className="dockrail" hidden={!collapsed}>
+            <button
+              type="button"
+              ref={rail}
+              aria-label={`Expand FLIGHT: ${waitingItems.data === undefined ? (waitingItems.error ? "waiting items unavailable" : "waiting items loading") : `${waiting} waiting on you${waitingItems.error ? ", last received count" : ""}`}`}
+              aria-expanded="false"
+              aria-controls="dockBody"
+              onClick={fold}
+            >
+              <span className="dockrail-name">FLIGHT</span>
+              <span className={waiting ? "warn-t" : "fg2"} aria-hidden="true">
+                {waitingItems.data === undefined ? "…" : `◆ ${waiting}`}
+              </span>
+              <span className="dockrail-caption">
+                {waitingItems.error
+                  ? "Error"
+                  : waitingItems.data === undefined
+                    ? "Loading"
+                    : "waiting"}
+              </span>
+            </button>
+          </div>
           <div className="dh" id="dockHead">
-            <AgentTag id="FLIGHT" index="flight" showRole />
+            <h2 id="dockHeading" ref={heading} tabIndex={-1}>
+              <AgentTag id="FLIGHT" index="flight" showRole />
+            </h2>
             <BuildChips panel="dock" />
             <span className="spacer" />
             {seat && !live && (
@@ -427,16 +493,16 @@ export function Dock() {
               </button>
             )}
             {collapsed && waiting > 0 && <Pill tone="warn">{`Waiting on you · ${waiting}`}</Pill>}
-            {wide && (
+            {wide && !collapsed && (
               <button
                 type="button"
                 className="sm"
                 aria-expanded={!collapsed}
                 aria-controls="dockBody"
-                title={collapsed ? "Expand FLIGHT's conversation" : "Collapse FLIGHT to its title"}
+                title="Collapse FLIGHT to its rail"
                 onClick={fold}
               >
-                {collapsed ? "Expand" : "Collapse"}
+                Collapse
               </button>
             )}
             <button
@@ -444,25 +510,11 @@ export function Dock() {
               className="sm"
               ref={hide}
               title="Hide FLIGHT (f)"
-              onClick={toggle}
+              onClick={() => toggleDock(false)}
             >
               Hide
             </button>
-            <div className="meta">
-              {flight === undefined
-                ? "Loading…"
-                : seat
-                  ? [
-                      row?.accountId,
-                      seat.model,
-                      seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
-                      ctx !== null && `context ${percent(ctx)}`,
-                      row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : FLIGHT_NO_SEAT}
-            </div>
+            <DockMeta flight={flight} />
           </div>
           {err !== null && (
             <p className="note err" role="alert">

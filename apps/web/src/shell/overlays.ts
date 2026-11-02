@@ -6,7 +6,15 @@
 import type { AttentionItem } from "@mc/core";
 import { type KeyboardEvent, useEffect, useRef, useSyncExternalStore } from "react";
 import { itemParam, withItemParam } from "../router.ts";
-import { BUILD_STATUS_KEY, DOCK_KEY, readBool, writeBool } from "../storage.ts";
+import {
+  BUILD_STATUS_KEY,
+  DOCK_COLLAPSED_KEY,
+  DOCK_KEY,
+  readBool,
+  readSessionBool,
+  writeBool,
+  writeSessionBool,
+} from "../storage.ts";
 import { store, useStore } from "./store.ts";
 
 export const ITEM_GONE = "That item is no longer waiting.";
@@ -191,6 +199,7 @@ export function useBuildStatus(): [boolean, (on: boolean) => void] {
  * breakpoint closes the drawer (catalogue §1.4).
  */
 const WIDE_QUERY = "(min-width: 1200px)";
+const ROOMY_QUERY = "(min-width: 2200px)";
 const DRAWER = "dock";
 
 export interface DockState {
@@ -198,12 +207,16 @@ export interface DockState {
   visible: boolean;
   /** At least 1200 px wide: a column rather than a drawer. */
   wide: boolean;
+  /** A 48px named rail. The chat stays mounted while it is collapsed. */
+  collapsed: boolean;
 }
 
 let query: MediaQueryList | null | undefined; // undefined: not looked up yet
 let shown: boolean | undefined; // the column, remembered; undefined: not read yet
+let roomyQuery: MediaQueryList | null | undefined;
+let collapsedChoice: boolean | null | undefined;
 let drawerOpen = false;
-let snap: DockState = { visible: true, wide: true };
+let snap: DockState = { visible: true, wide: true, collapsed: true };
 const dockListeners = new Set<() => void>();
 
 function wideQuery(): MediaQueryList | null {
@@ -216,8 +229,23 @@ function wideQuery(): MediaQueryList | null {
 
 const isWide = (): boolean => wideQuery()?.matches ?? true;
 
+function columnCollapsed(): boolean {
+  if (roomyQuery === undefined) {
+    roomyQuery = typeof window.matchMedia === "function" ? window.matchMedia(ROOMY_QUERY) : null;
+    roomyQuery?.addEventListener?.("change", onBreakpoint);
+  }
+  if (collapsedChoice === undefined) collapsedChoice = readSessionBool(DOCK_COLLAPSED_KEY);
+  return collapsedChoice ?? !(roomyQuery?.matches ?? window.innerWidth >= 2200);
+}
+
+export function setDockCollapsed(collapsed: boolean): void {
+  collapsedChoice = collapsed;
+  writeSessionBool(DOCK_COLLAPSED_KEY, collapsed);
+  refresh();
+}
+
 function columnShown(): boolean {
-  if (shown === undefined) shown = readBool(DOCK_KEY, true);
+  if (shown === undefined) shown = readSessionBool(DOCK_KEY) ?? true;
   return shown;
 }
 
@@ -225,8 +253,9 @@ function columnShown(): boolean {
 function recompute(): boolean {
   const wide = isWide();
   const visible = wide ? columnShown() : drawerOpen;
-  if (visible === snap.visible && wide === snap.wide) return false;
-  snap = { visible, wide };
+  const collapsed = wide && columnCollapsed();
+  if (visible === snap.visible && wide === snap.wide && collapsed === snap.collapsed) return false;
+  snap = { visible, wide, collapsed };
   return true;
 }
 
@@ -254,8 +283,12 @@ function onBreakpoint(): void {
 /** Show or hide the dock (`f`, the header's chat button, its Hide button). */
 export function toggleDock(force?: boolean): void {
   if (isWide()) {
+    if (force === undefined && columnShown() && columnCollapsed()) {
+      setDockCollapsed(false);
+      return;
+    }
     shown = force ?? !columnShown();
-    writeBool(DOCK_KEY, shown);
+    writeSessionBool(DOCK_KEY, shown);
     refresh();
   } else {
     setDrawer(force ?? !drawerOpen);
@@ -281,6 +314,7 @@ export const useFlightUnread = (): number => useStore(flightUnread);
 
 /** Show the dock (the Needs-you "FLIGHT replied" row). */
 export function openDockChat(): void {
+  setDockCollapsed(false);
   toggleDock(true);
 }
 
@@ -296,7 +330,10 @@ export function resetOverlays(): void {
   buildOn = undefined;
   query?.removeEventListener?.("change", onBreakpoint);
   query = undefined;
+  roomyQuery?.removeEventListener?.("change", onBreakpoint);
+  roomyQuery = undefined;
+  collapsedChoice = undefined;
   shown = undefined;
   drawerOpen = false;
-  snap = { visible: true, wide: true };
+  snap = { visible: true, wide: true, collapsed: true };
 }
