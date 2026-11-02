@@ -5,9 +5,9 @@
 
 /** public/theme-init.js hard-codes this value (a test keeps the two equal). */
 export const THEME_KEY = "mc-theme";
-/** FLIGHT's dock shown or hidden on wide screens. */
+/** FLIGHT's explicit shown/hidden choice on wide screens, for this browser session. */
 export const DOCK_KEY = "mc-dock";
-/** FLIGHT's dock folded to its title row; folded unless the operator expanded it. */
+/** FLIGHT's explicit rail choice, kept only for this browser session. */
 export const DOCK_COLLAPSED_KEY = "mc-dock-collapsed";
 /** The Crew Activity Map's last manually picked repo. */
 export const MAP_REPO_KEY = "mc-map-repo";
@@ -50,3 +50,21 @@ export function readBool(key: string, fallback: boolean): boolean {
 }
 
 export const writeBool = (key: string, value: boolean): void => writeKey(key, String(value));
+
+/** Null means no explicit session choice; blocked storage keeps the in-memory choice usable. */
+export function readSessionBool(key: string): boolean | null {
+  try {
+    const value = sessionStorage.getItem(key);
+    return value === "true" ? true : value === "false" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionBool(key: string, value: boolean): void {
+  try {
+    sessionStorage.setItem(key, String(value));
+  } catch {
+    // The session still has an in-memory choice when storage is unavailable.
+  }
+}

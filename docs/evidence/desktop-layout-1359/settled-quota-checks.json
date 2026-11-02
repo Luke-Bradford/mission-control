@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "productSourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+  "driverSourceSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3",
+  "scope": "Actual component-browser verification; baseline uses the same current test/harness and frozen fixture clock, with production source unchanged at2b. No live data, engine, crew, provider or loop writes.",
+  "pairs": [
+    {
+      "label": "Settled Overview component \u00b7 viewport 1600\u00d71000 \u00b7 light",
+      "viewport": "1600\u00d71000",
+      "theme": "light",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-clip-1600-light-before.png",
+        "sha256": "566fffa5179a8f698cf805e3807bd579fd879e289ea343060085f5e33d93b91b",
+        "capturedAt": 1793642093458,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-clip-1600-light-after.png",
+        "sha256": "5e8dab123f096c98b1d8ba82bd8f19fd7925648ede14ff9f79e27b79a42cf503",
+        "capturedAt": 1793641944211,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    },
+    {
+      "label": "Settled Overview component \u00b7 viewport 1600\u00d71000 \u00b7 dark",
+      "viewport": "1600\u00d71000",
+      "theme": "dark",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-clip-1600-dark-before.png",
+        "sha256": "bab5d002973244219df0aa52a342629ee4aa143914022ca88078da79c9eaa67f",
+        "capturedAt": 1793642093875,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-clip-1600-dark-after.png",
+        "sha256": "53e19b9c1982c410fda265245092ac1cb78bd1e5f146d4036c59279e511821ae",
+        "capturedAt": 1793641944628,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    },
+    {
+      "label": "Settled Overview component \u00b7 viewport 1280\u00d71000 \u00b7 light",
+      "viewport": "1280\u00d71000",
+      "theme": "light",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-clip-1280-light-before.png",
+        "sha256": "88ad73fd0c282d69361b5f9bf4793a3a58f07493b86b7be449788bed397b8032",
+        "capturedAt": 1793642092641,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-clip-1280-light-after.png",
+        "sha256": "4e9caf959819aace1ef9f6b5c3b1f07fdd431941b4506ab992475eaa4c1eeec4",
+        "capturedAt": 1793641943356,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    },
+    {
+      "label": "Settled Overview component \u00b7 viewport 1280\u00d71000 \u00b7 dark",
+      "viewport": "1280\u00d71000",
+      "theme": "dark",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-clip-1280-dark-before.png",
+        "sha256": "bcdcf59e4698c18a7e3add064086fdfa3eda9d247c2bbf5db100d6d77af18a15",
+        "capturedAt": 1793642093058,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-clip-1280-dark-after.png",
+        "sha256": "4a705c3523b96b25ba0fbff1c48fca445a51f59176b2d22093a01841ffd54f17",
+        "capturedAt": 1793641943789,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    },
+    {
+      "label": "Settled Overview component \u00b7 viewport 1600\u00d7700 \u00b7 light",
+      "viewport": "1600\u00d7700",
+      "theme": "light",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-populated-1600x700-light-before.png",
+        "sha256": "a34682cbbb9507d7b04af7f8bff48bd19ebbfee1e54b4efacb4125a0d0519d52",
+        "capturedAt": 1793642094390,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-populated-1600x700-light-after.png",
+        "sha256": "741fd5a358f104567744d9768abb423a6791c9c9d5db344905b0b607f490bc91",
+        "capturedAt": 1793641945188,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    },
+    {
+      "label": "Settled Overview component \u00b7 viewport 1600\u00d7700 \u00b7 dark",
+      "viewport": "1600\u00d7700",
+      "theme": "dark",
+      "scope": "Overview component harness, complete viewport; global header/dock are not included",
+      "fixture": "Same fictional API fixture and frozen clock; quota 41%/63%/12%, forecasts/warnings. Short-window case selects All for the120-event log.",
+      "before": {
+        "file": "images/settled-overview-populated-1600x700-dark-before.png",
+        "sha256": "b4ddd7fbdb56ca0d805b6846bdf2201353b83c8ddc194b474d98de67825a91ea",
+        "capturedAt": 1793642094941,
+        "commitSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f"
+      },
+      "after": {
+        "file": "images/settled-overview-populated-1600x700-dark-after.png",
+        "sha256": "e26665230e405738029e639bf6db76e69d96cca84581347383087b86e39e4dd5",
+        "capturedAt": 1793641945688,
+        "commitSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3"
+      }
+    }
+  ],
+  "results": {
+    "baselinePassed": 6,
+    "afterPassed": 6,
+    "failed": 0
+  }
+}

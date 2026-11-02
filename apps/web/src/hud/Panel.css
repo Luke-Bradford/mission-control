@@ -1,3 +1,13 @@
+.app .panel > div.ph {
+  padding: var(--panel-head-y) var(--sp-4);
+}
+
+.app .panel > div.ph h2 {
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .ph .sub {
   color: var(--muted);
   font-family: var(--mono);

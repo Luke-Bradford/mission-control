@@ -476,11 +476,11 @@ describe("Header", () => {
     fireEvent.click(setup);
     expect(window.location.pathname).toBe("/setup");
     const chat = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(chat.title).toBe("Open FLIGHT chat in Comms (f)");
-    expect(chat.getAttribute("aria-pressed")).toBeNull();
+    expect(chat.title).toBe("Show or hide FLIGHT's chat (f)");
+    expect(chat.getAttribute("aria-pressed")).toBe("false");
     expect(chat.querySelector(".badge")).toBeNull();
     fireEvent.click(chat);
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname).toBe("/setup");
     unmount();
     render(<Header page="comms" />);
     const open = screen.getByRole("button", { name: "FLIGHT chat" });

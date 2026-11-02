@@ -431,7 +431,10 @@ describe("ItemPanel, acting on an item", () => {
       [DISMISS]: () => ({ status: 404, body: { error: "no such open note" } }),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("no such open note");
+    expect(
+      (await within(document.querySelector("#discuss") as HTMLElement).findByRole("alert"))
+        .textContent,
+    ).toBe("no such open note");
     expect(document.querySelector("#discuss")).toBeTruthy();
   });
 
