@@ -2401,11 +2401,32 @@ function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): Guard
           if (branch === "main" || branch == null)
             return deny("merge-push", "a git history write on main or an unreadable checkout");
         }
+        const mainRef = (arg: string | undefined) => arg === "main" || arg === "refs/heads/main";
+        const branchOperands = git.rest.filter((arg) => !arg.startsWith("-"));
+        const movingBranch = git.rest.some((arg) => /^--move$|^-[a-zA-Z]*[mM]/.test(arg));
+        const copyingBranch = git.rest.some((arg) => /^--copy$|^-[a-zA-Z]*[cC]/.test(arg));
+        const deletingBranch = git.rest.some((arg) => /^--delete$|^-[a-zA-Z]*[dD]/.test(arg));
+        const replacingBranch = git.rest.some((arg) => /^--force$|^-[a-zA-Z]*f/.test(arg));
+        const createdMain =
+          ["checkout", "switch"].includes(git.sub) &&
+          git.rest.some(
+            (arg, index) =>
+              (["-B", "-C", "--force-create"].includes(arg) && mainRef(git.rest[index + 1])) ||
+              /^-(?:B|C)(?:main|refs\/heads\/main)$|^--force-create=(?:main|refs\/heads\/main)$/.test(
+                arg,
+              ),
+          );
         if (
-          ["update-ref", "branch"].includes(git.sub) &&
-          git.rest.some((arg) => /(?:^|\/)main$/.test(arg)) &&
-          (git.sub === "update-ref" ||
-            git.rest.some((arg) => /^--(?:force|delete)$|^-[a-zA-Z]*[fDd]/.test(arg)))
+          createdMain ||
+          (git.sub === "update-ref" && git.rest.some(mainRef)) ||
+          (git.sub === "branch" &&
+            ((deletingBranch && branchOperands.some(mainRef)) ||
+              (replacingBranch && mainRef(branchOperands[0])) ||
+              ((movingBranch || copyingBranch) && mainRef(branchOperands.at(-1))) ||
+              (movingBranch &&
+                (branchOperands.length > 1
+                  ? mainRef(branchOperands[0])
+                  : ctx.flightGitBranch?.([...directories, ...wrapped], global) === "main"))))
         )
           return deny("merge-push", "a direct git rewrite of main");
         const alias = !GIT_KNOWN.has(git.sub)
@@ -3410,6 +3431,102 @@ const SHELL_READERS = new Set([
 ]);
 const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "search", "watch"]);
 
+/** Explicit file destinations. Null is a read; an empty list is a write with unknown targets. */
+function shellWriteTargets(program: string, args: readonly string[]): string[] | null {
+  const output = (short: string, long: string): string[] => {
+    const paths: string[] = [];
+    for (let n = 0; n < args.length; n++) {
+      const arg = args[n] ?? "";
+      if (arg === short || arg === long) paths.push(args[++n] ?? "");
+      else if (arg.startsWith(`${long}=`)) paths.push(arg.slice(long.length + 1));
+      else if (arg.startsWith(short) && arg.length > short.length)
+        paths.push(arg.slice(short.length));
+      else if (short === "-o") {
+        const cluster = /^-[a-zA-Z]*?o(.*)$/.exec(arg);
+        if (cluster) paths.push(cluster[1] || args[++n] || "");
+      }
+    }
+    return paths;
+  };
+  if (program === "sort") {
+    const paths = output("-o", "--output");
+    return paths.length ? paths : null;
+  }
+  if (program === "curl") {
+    const paths = output("-o", "--output");
+    if (args.some((arg) => /^--(?:remote-name|output-dir)(?:=|$)|^-[a-zA-Z]*O/.test(arg)))
+      return [];
+    const files = paths.filter((path) => path !== "-");
+    return files.length ? files : null;
+  }
+  if (program === "wget") return output("-O", "--output-document");
+  if (program === "sed" || program === "perl") {
+    if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
+    const files: string[] = [];
+    let script = false;
+    for (let n = 0; n < args.length; n++) {
+      const arg = args[n] ?? "";
+      if (["-e", "--expression", "-f", "--file"].includes(arg)) {
+        n++;
+        script = true;
+      } else if (/^-[a-zA-Z]*[ef].+|^--(?:expression|file)=/.test(arg)) script = true;
+      else if (arg.startsWith("-") || arg === "") continue;
+      else if (!script) script = true;
+      else files.push(arg);
+    }
+    return files;
+  }
+  if (
+    ![
+      "cp",
+      "mv",
+      "rm",
+      "rmdir",
+      "touch",
+      "mkdir",
+      "install",
+      "ln",
+      "chmod",
+      "chown",
+      "chgrp",
+      "truncate",
+    ].includes(program)
+  )
+    return null;
+  if (args.includes("--help") || args.includes("--version")) return null;
+  const target = output("-t", "--target-directory");
+  if (target.length)
+    return program === "mv" ? [...target, ...args.filter((arg) => !arg.startsWith("-"))] : target;
+  const paths = args.filter((arg) => arg !== "--" && !arg.startsWith("-"));
+  if (["cp", "install", "ln"].includes(program)) return paths.length > 1 ? paths.slice(-1) : [];
+  return paths;
+}
+
+export interface FlightShellContext {
+  cwd?: string;
+  worktree?: string;
+  /** Resolve real path identities so a worktree symlink cannot hide an outside write. */
+  resolvePath?: (path: string) => string | null;
+}
+
+function outsideShellWorktree(
+  paths: readonly string[],
+  cwd: string | undefined,
+  context: FlightShellContext,
+): boolean {
+  if (!paths.length || !cwd || !context.worktree) return true;
+  const root = normPath(context.resolvePath?.(context.worktree) ?? context.worktree).replace(
+    /\/$/,
+    "",
+  );
+  return paths.some((path) => {
+    if (!path || /[$`*?[~]/.test(path)) return true;
+    const absolute = normPath(path.startsWith("/") ? path : `${cwd}/${path}`);
+    const real = context.resolvePath ? context.resolvePath(absolute) : absolute;
+    return real === null || !(real === root || real.startsWith(`${root}/`));
+  });
+}
+
 /**
  * Whether a shell command can change anything: FLIGHT's audit records the ones that can (#1214).
  * A command the guard cannot read to the end counts as a write, as does any redirect to a file.
@@ -3419,6 +3536,7 @@ export function flightShellWrite(command: string): boolean {
   for (const { argv } of lineCommands(command, newWalk())) {
     const [program, ...rawArgs] = argv;
     if (program === undefined) continue;
+    if (shellWriteTargets(program, rawArgs) !== null) return true;
     if (SHELL_READERS.has(program)) continue;
     const args = program === "gh" ? ghStripGlobal(rawArgs) : rawArgs;
     if (program === "git") {
@@ -3548,14 +3666,35 @@ const BREAKER_GIT_WRITES = new Set(["push", "commit", "merge", "rebase", "reset"
  * Whether a shell command is a write the runaway breaker counts (#1214): a redirect or tee to a
  * file; a git push, commit, merge, rebase, reset, ref update, tag, branch delete or worktree
  * remove; a gh verb that writes (after `-R o/r`); a gh api call with a writing method; and a curl
- * with a method, body or upload. Reads such as `git fetch`, `find` or `sqlite3 -readonly` are not
- * counted, so a diagnostic repeated on every wake cannot trip it.
+ * with a method, body or upload. Explicit file writers also count when a destination (or a move's
+ * source) is outside the watch worktree or cannot be resolved. Ordinary worktree edits stay audited
+ * without adding a new cap. Reads such as `git fetch`, `find` or `sqlite3 -readonly` are not counted.
  */
-export function flightShellBreakerWrite(command: string): boolean {
+export function flightShellBreakerWrite(
+  command: string,
+  context: FlightShellContext = {},
+): boolean {
   if (shellFileWrite(command)) return true;
-  for (const { argv } of lineCommands(command, newWalk())) {
+  let cwd = context.cwd;
+  for (const { argv, directories = [] } of lineCommands(command, newWalk())) {
     const [program, ...raw] = argv;
     if (program === undefined) continue;
+    if (program === "cd") {
+      const path = raw[0];
+      cwd =
+        path && !/[$`*?[~]/.test(path)
+          ? normPath(path.startsWith("/") ? path : `${cwd ?? ""}/${path}`)
+          : undefined;
+      continue;
+    }
+    let effective = cwd;
+    for (const directory of directories)
+      effective =
+        effective && !/[$`*?[~]/.test(directory)
+          ? normPath(directory.startsWith("/") ? directory : `${effective}/${directory}`)
+          : undefined;
+    const targets = shellWriteTargets(program, raw);
+    if (targets !== null && outsideShellWorktree(targets, effective, context)) return true;
     if (program === "git") {
       const g = gitSubcommand(raw);
       if (g === null) continue;

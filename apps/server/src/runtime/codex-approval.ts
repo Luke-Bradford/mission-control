@@ -60,7 +60,7 @@ export function createCodexApprover(i: {
   runId: string;
   mode: CrewMode;
   fullAccess?: boolean;
-  floor?: (event: GuardEvent, verdict: GuardVerdict) => Promise<GuardVerdict>;
+  floor?: (event: GuardEvent, verdict: GuardVerdict, cwd?: string) => Promise<GuardVerdict>;
   area: readonly string[];
   /** Files outside the area that FLIGHT approved for this run alone. */
   granted?: readonly string[];
@@ -186,7 +186,12 @@ export function createCodexApprover(i: {
         typeof params.cwd === "string" ? params.cwd : undefined,
         i.fullAccess,
       );
-      if (i.fullAccess && i.floor) verdict = await i.floor(event, verdict);
+      if (i.fullAccess && i.floor)
+        verdict = await i.floor(
+          event,
+          verdict,
+          typeof params.cwd === "string" ? params.cwd : undefined,
+        );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);

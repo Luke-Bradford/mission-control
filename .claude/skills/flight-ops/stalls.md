@@ -48,6 +48,7 @@ Use `mc settle_park { runId, action, basis }`:
 
 ## Controller-check parks
 
+- For changes to FLIGHT's own runtime or approval guidance, the engine requests the independent current-head verdict while the PR is awaiting FLIGHT clearance. The operator records it through `/api/runs/:id/controller-check`; then FLIGHT can clear the PR.
 - At merge, the engine parks a run whose ticket has a `## Controller check` (park kind `controller-check`). It stays parked until the controller records a verdict for that head; a later push needs a new one.
 - Produce the required evidence and record the head-bound verdict with `mc operator`. A check expressly reserved for the controller remains theirs. Never end the run to bypass evidence.
 - When the check belongs to the controller, record the evidence and the one outstanding action. Use a named wait condition.

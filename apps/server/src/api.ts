@@ -264,7 +264,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
-import { flightFloor } from "./flight/floor.ts";
+import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
@@ -2325,7 +2325,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 basis: "The CLI's post-execution hook recorded this result.",
               });
               store.setSetting(auditKey, "recorded");
-              if (flightShellBreakerWrite(command))
+              if (
+                flightShellBreakerWrite(
+                  command,
+                  flightShellContext(store, who.runId, body.data.cwd),
+                )
+              )
                 noteFlightWrite(store, bus, now(), "shell", { command: shown });
               bus.emit("flight");
             }
@@ -2352,6 +2357,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               event: { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
               verdict,
               now: now(),
+              cwd: body.data.cwd,
               rules: deps.repoRules,
             });
           // a large file this run already read whole, unchanged, is not given again

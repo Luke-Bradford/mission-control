@@ -67,6 +67,7 @@ import {
   fixSentText,
   fixText,
   gateView,
+  globMatches,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
@@ -317,9 +318,9 @@ export interface Engine {
     },
   ): Promise<OperatorResult>;
   /**
-   * The operator's verdict on a run parked on its ticket's controller check. `pass` (only while the
-   * PR head is still the parked head) lets the next pass merge; `fail` sends the note to the seat
-   * as rework and ends the park.
+   * The operator's verdict on a requested controller check, while parked or awaiting FLIGHT's
+   * clearance. A pass belongs to that exact current head; it still needs any outstanding FLIGHT
+   * clearance. A fail sends the note to the seat as rework.
    */
   controllerCheck(
     runId: string,
@@ -598,6 +599,17 @@ export function createEngine(deps: EngineDeps): Engine {
         ) ||
       seat === undefined ||
       accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
+    );
+  }
+
+  function requiresIndependentController(loop: RunLoop, sha: string): boolean {
+    return (
+      loop.touches?.sha === sha &&
+      loop.touches.paths.some((path) =>
+        [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"].some(
+          (pattern) => globMatches(pattern, path, true),
+        ),
+      )
     );
   }
 
@@ -2044,6 +2056,16 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
+    // FLIGHT cannot clear its own authority changes. Request the independent verdict while
+    // clearance is pending, before the merge action that used to create this check too late.
+    if (
+      cur.phase === "review" &&
+      cur.awaitingFlight &&
+      requiresIndependentController(cur, cur.awaitingFlight) &&
+      !(cur.controllerCheck?.sha === cur.awaitingFlight && cur.controllerCheck.pass)
+    ) {
+      cur.controllerCheck = { sha: cur.awaitingFlight, from: "review", pass: false };
+    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2995,11 +3017,19 @@ export function createEngine(deps: EngineDeps): Engine {
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
         const held = loop.controllerCheck;
+        const awaiting =
+          loop.phase === "review" &&
+          held !== undefined &&
+          held !== null &&
+          !held.pass &&
+          loop.awaitingFlight === held.sha &&
+          requiresIndependentController(loop, held.sha);
         if (
           run.endedAt !== null ||
-          loop.phase !== "parked" ||
-          loop.parked?.kind !== CONTROLLER_CHECK_PARK ||
-          loop.parked.ended ||
+          (!awaiting &&
+            (loop.phase !== "parked" ||
+              loop.parked?.kind !== CONTROLLER_CHECK_PARK ||
+              loop.parked.ended)) ||
           !held
         )
           return refuse("not-parked");
@@ -3227,7 +3257,9 @@ export function createEngine(deps: EngineDeps): Engine {
         if (
           !sha ||
           (expectedSha !== undefined && sha !== expectedSha) ||
-          sha !== store.runPush(runId)?.sha
+          sha !== store.runPush(runId)?.sha ||
+          (requiresIndependentController(run.loop, sha) &&
+            !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass))
         )
           return false;
         store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });

@@ -2,6 +2,8 @@
 
 /** Code that enforces FLIGHT's floors requires independent RETRO review. */
 export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
+  "roles/FLIGHT.md",
+  ".claude/skills/flight-ops/**",
   "apps/server/src/api.ts",
   "apps/server/src/main.ts",
   "apps/server/src/flight-approvals.ts",

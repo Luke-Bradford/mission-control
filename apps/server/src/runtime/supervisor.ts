@@ -152,7 +152,7 @@ import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
-import { flightFloor } from "../flight/floor.ts";
+import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
@@ -1236,7 +1236,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               basis: "The Codex command completion recorded this result.",
             });
             store.setSetting(key, "recorded");
-            if (flightShellBreakerWrite(e.command))
+            if (flightShellBreakerWrite(e.command, flightShellContext(store, l.run.id, e.cwd)))
               noteFlightWrite(store, bus, now(), "shell", { command: cleanText(e.command, 1500) });
             bus.emit("flight");
           }
@@ -1845,7 +1845,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const home = join(runDir, "codex-home");
         const zdotdir = join(runDir, "zsh-empty");
         const env = Object.fromEntries(
-          Object.entries(crewEnv(info.seat.id, tmp)).filter(
+          Object.entries(
+            crewEnv(info.seat.id, tmp, crewProfileOf(info.seat.role, def.loop) === "flight-full"),
+          ).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
         );
@@ -2004,7 +2006,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       runId: run.id,
       mode: seatDef(info.seat).mode,
       fullAccess: crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full",
-      floor: (event, verdict) =>
+      floor: (event, verdict, commandCwd) =>
         flightFloor({
           store,
           bus,
@@ -2014,6 +2016,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           event,
           verdict,
           now: now(),
+          cwd: commandCwd ?? cwd,
           rules: deps.rules,
         }),
       area: info.seat.area,

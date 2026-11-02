@@ -1,6 +1,7 @@
 /** Repository floors shared by Claude hooks and Codex approval requests. */
 import {
   FLIGHT_APPROVAL_RULES,
+  type FlightShellContext,
   flightShellBreakerWrite,
   flightTicketWrites,
   GUARD_RULES,
@@ -12,8 +13,18 @@ import {
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { findApproval, useApproval } from "../flight-approvals.ts";
+import { realPathOrParent } from "../runtime/codex-floor.ts";
 import type { Store } from "../store.ts";
 import { runawayTrip } from "./runaway.ts";
+
+export function flightShellContext(store: Store, runId: string, cwd?: string): FlightShellContext {
+  const run = store.run(runId);
+  const worktree =
+    run?.loop?.aside?.worktree ??
+    (run ? store.seatSession(run.agentId)?.worktree : undefined) ??
+    undefined;
+  return { cwd: cwd ?? worktree, worktree, resolvePath: realPathOrParent };
+}
 
 export async function flightFloor(i: {
   store: Store;
@@ -24,6 +35,7 @@ export async function flightFloor(i: {
   event: GuardEvent;
   verdict: GuardVerdict;
   now: number;
+  cwd?: string;
   rules?: (repo: string) => Promise<RepoRules | Error>;
 }): Promise<GuardVerdict> {
   let verdict = i.verdict;
@@ -77,7 +89,11 @@ export async function flightFloor(i: {
       verdict = { kind: "allow" };
     }
   }
-  if (verdict.kind === "allow" && command !== undefined && flightShellBreakerWrite(command)) {
+  if (
+    verdict.kind === "allow" &&
+    command !== undefined &&
+    flightShellBreakerWrite(command, flightShellContext(i.store, i.runId, i.cwd))
+  ) {
     const tripped = runawayTrip(i.store);
     if (tripped !== null)
       verdict = {

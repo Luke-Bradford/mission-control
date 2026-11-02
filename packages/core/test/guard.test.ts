@@ -140,6 +140,14 @@ describe("FLIGHT's full profile", () => {
     ["git push origin +feature/x:feature/x", "merge-push"],
     ["git push --mirror", "merge-push"],
     ["git push origin HEAD:main", "merge-push"],
+    ["git checkout -B main feature/x", "merge-push"],
+    ["git checkout -Bmain feature/x", "merge-push"],
+    ["git switch -C main feature/x", "merge-push"],
+    ["git switch --force-create=main feature/x", "merge-push"],
+    ["git branch -M main", "merge-push"],
+    ["git branch --move feature/x main", "merge-push"],
+    ["git branch -D feature/old main", "merge-push"],
+    ["git branch --delete feature/old main", "merge-push"],
     ["gh pr merge 12 --squash", "merge-push"],
     ["gh api repos/o/r/pulls/12/merge -X PUT", "merge-push"],
     ["gh api repos/o/r/branches/main/protection -X PUT", "repo-rules"],
@@ -162,6 +170,23 @@ describe("FLIGHT's full profile", () => {
     expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => null })).toBe(
       "merge-push",
     );
+  });
+
+  it.each([
+    "git checkout -B feature/x main",
+    "git switch -C feature/x main",
+    "git branch -M feature/x",
+    "git branch -f feature/x main",
+    "git branch -D feature/old",
+  ])("retains the feature equivalent: %s", (command) => {
+    expect(
+      guardDecision(bash(command), { ...flightFull, flightGitBranch: () => "feature/current" }),
+    ).toEqual({ kind: "allow" });
+  });
+  it("does not rename the checked-out main branch away", () => {
+    expect(
+      ruleOf(bash("git branch -M feature/x"), { ...flightFull, flightGitBranch: () => "main" }),
+    ).toBe("merge-push");
   });
 
   it("protects only the Mission Control block when editing CLAUDE.md", () => {
@@ -247,6 +272,50 @@ describe("flightTicketWrites", () => {
 });
 
 describe("flightShellBreakerWrite", () => {
+  it.each([
+    "cp input /outside/file",
+    "mv /outside/source inside",
+    "rm /outside/file",
+    "touch /outside/file",
+    "sed -i s/a/b/ /outside/file",
+    "sort -o /outside/file input",
+    "curl -o /outside/file https://example.test",
+    "curl -so /outside/file https://example.test",
+    "curl -sSo/outside/file https://example.test",
+    "mv -t /worktree /outside/source",
+    "cd /outside && touch file",
+    "bash -c 'touch /outside/file'",
+    "touch $DESTINATION",
+  ])("audits and counts an explicit outside file write: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      true,
+    );
+  });
+  it.each([
+    "cp input output",
+    "mv input output",
+    "rm output",
+    "touch output",
+    "sed -i s/a/b/ output",
+    "sort --output=output input",
+    "curl --output output https://example.test",
+    "mv -t /worktree input",
+  ])("audits ordinary worktree edits without adding them to the breaker: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      false,
+    );
+  });
+  it("counts a write through a symlink to an outside destination", () => {
+    expect(
+      flightShellBreakerWrite("touch linked/file", {
+        cwd: "/worktree",
+        worktree: "/worktree",
+        resolvePath: (path) => path.replace("/worktree/linked", "/outside"),
+      }),
+    ).toBe(true);
+  });
   it.each([
     "git fetch origin",
     "git status",

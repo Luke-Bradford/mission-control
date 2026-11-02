@@ -9849,6 +9849,39 @@ describe("FLIGHT's full access (#1214)", () => {
       expect(ghCalls[3]).toEqual(["pr", "ready", "12", "--repo=o/mc"]);
     });
 
+    it("records the actual edit and label delta on the Audit ledger", async () => {
+      await call("gh_write", {
+        action: "edit",
+        target: "pr",
+        number: 12,
+        title: "Updated title",
+        body: "Exact edited body.",
+      });
+      await call("gh_write", {
+        action: "label",
+        target: "pr",
+        number: 12,
+        addLabels: ["ready"],
+        removeLabels: ["blocked"],
+      });
+      const audit = decisions().filter((decision) => decision.kind === "github");
+      expect(
+        audit.some(
+          (decision) =>
+            decision.decision.includes('"title":"Updated title"') &&
+            decision.decision.includes('"body":"Exact edited body."'),
+        ),
+      ).toBe(true);
+      expect(
+        audit.some(
+          (decision) =>
+            decision.decision.includes('"addLabels":["ready"]') &&
+            decision.decision.includes('"removeLabels":["blocked"]'),
+        ),
+      ).toBe(true);
+      expect(audit.every((decision) => decision.decision.length <= 4000)).toBe(true);
+    });
+
     it("refuses an @mention and a secret in the text", async () => {
       secrets = ["s3cr3t-token-value"];
       for (const text of ["thanks @someone", "token s3cr3t-token-value"]) {
@@ -9856,6 +9889,28 @@ describe("FLIGHT's full access (#1214)", () => {
         expect(r.isError).toBe(true);
       }
       expect(ghCalls).toEqual([]);
+    });
+
+    it("redacts known secrets from Audit basis and bounds a long actual edit body", async () => {
+      secrets = ["fixture-private-value"];
+      const body = `Start of actual body. ${"More detail. ".repeat(600)}`;
+      expect(
+        (
+          await call("gh_write", {
+            action: "edit",
+            target: "pr",
+            number: 12,
+            body,
+            basis: "Checked using fixture-private-value",
+          })
+        ).isError,
+      ).toBeUndefined();
+      const audit = need(decisions().find((decision) => decision.kind === "github"));
+      expect(audit.decision).toContain("Start of actual body.");
+      expect(audit.decision.length).toBeLessThanOrEqual(4000);
+      expect(audit.decision.endsWith("…")).toBe(true);
+      expect(audit.basis).toContain("[redacted]");
+      expect(JSON.stringify(audit)).not.toContain("fixture-private-value");
     });
 
     it("leaves an always_ask ticket alone", async () => {

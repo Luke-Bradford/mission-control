@@ -1327,7 +1327,9 @@ Shell writes are recorded after execution with command, cwd and exit code. A mis
 or background launch is recorded as unknown, never as a successful completion. Duplicate completion
 notifications do not duplicate the audit. Secrets are redacted. Claude uses PostToolUse and
 PostToolUseFailure; Codex uses command completion facts. Counted writes feed the existing runaway
-breaker; a tripped breaker holds further writes until a controller lifts it.
+breaker; a tripped breaker holds further counted writes until a controller lifts it. Common file
+writers and explicit output flags count outside the watch worktree (or when their destinations are
+unknown); ordinary edits inside the worktree remain audited without an additional breaker cap.
 
 FLIGHT may move unstarted Ready or Refinement work back to Backlog, hold an item for its named
 condition, reverse a mistaken closure with `gh_write`, and retain its own brief without an arbitrary
@@ -1350,6 +1352,9 @@ Ordinary CLAUDE.md prose does not require that approval when its Mission Control
 unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
 controller check. FLIGHT cannot give itself that verdict through `mc operator`; the in-process
 request retains its authenticated FLIGHT actor instead of impersonating an anonymous operator.
+For a crew PR awaiting FLIGHT clearance, the engine requests this check before clearance. The
+operator can pass the current head through `/api/runs/:id/controller-check`, after which FLIGHT
+clears the PR through its ordinary merge path. A new head requires a new verdict.
 
 External PR acceptance and controller checks have head-bound records. A required acceptance
 appears in the existing QA queue and uses the existing operator route:

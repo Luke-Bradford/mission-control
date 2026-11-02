@@ -715,7 +715,7 @@ export const commentTextText = (what: string): string =>
 export const commentFailedText = (issue: number): string =>
   `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
 
-export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. Use gh_write with action reopen when a mistaken closure needs to be reversed. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. Superuser repos only.`;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. Use gh_write with action reopen when a mistaken closure needs to be reversed. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away.`;
 export const closeComment = (replacement: number): string =>
   `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
 export const CLOSED_PREFIX = "Closed as";

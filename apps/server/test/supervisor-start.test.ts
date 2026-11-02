@@ -2695,6 +2695,43 @@ import(${JSON.stringify(fixture)});
     ]);
   });
 
+  it("lets Codex FLIGHT read the operator credential helper while normal Codex seats cannot", async () => {
+    const { sup, cfg } = codex();
+    const home = join(dir, "home");
+    writeFileSync(join(home, ".gitconfig"), "[credential]\n\thelper = fixture-operator-helper\n");
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    sup.start();
+    await sup.startRun("guido-1", 7);
+    await untilCodex(() =>
+      expect(recorded().filter((message) => message.type === "spawn")).toHaveLength(1),
+    );
+    const normal = recorded().find((message) => message.type === "spawn");
+    await sup.startWatch("flight-1");
+    await untilCodex(() =>
+      expect(recorded().filter((message) => message.type === "spawn")).toHaveLength(2),
+    );
+    const full = recorded().filter((message) => message.type === "spawn")[1];
+    const helper = (spawn: { env: Record<string, string>; cwd: string }) =>
+      spawnSync("git", ["config", "--global", "--get", "credential.helper"], {
+        env: spawn.env,
+        cwd: spawn.cwd,
+        encoding: "utf8",
+      });
+    expect(normal.env.HOME).toBe(home);
+    expect(normal.env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    expect(helper(normal).stdout.trim()).toBe("");
+    for (const key of ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM"])
+      expect(full.env[key]).toBeUndefined();
+    expect(helper(full)).toMatchObject({ status: 0, stdout: "fixture-operator-helper\n" });
+    expect(full.env.GIT_CONFIG_VALUE_1).toBe("/dev/null");
+  });
+
   it("gives Codex FLIGHT guidance only, without changing its prompt or tool grants", async () => {
     const flight: CrewSeatConfig = {
       id: "flight-1",

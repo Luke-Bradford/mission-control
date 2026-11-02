@@ -588,16 +588,25 @@ describe("POST /api/guard/check", () => {
       expect(runawayTrip(store)).toBeNull();
     });
 
-    it.each(["bash -c 'echo x > f'", "eval 'echo x > f'", "bash -c 'echo x | tee f'"])(
-      "counts %s toward the breaker, and a tripped breaker refuses it",
-      async (cmd) => {
-        for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await complete(`w${i}`, cmd);
-        expect(runawayTrip(store)).not.toBeNull();
-        expect(reason((await check(tokF, bash("w-next", cmd), flight)).body)).toContain(
-          "runaway breaker",
-        );
-      },
-    );
+    it.each([
+      "bash -c 'echo x > f'",
+      "eval 'echo x > f'",
+      "bash -c 'echo x | tee f'",
+      "cp input /outside/file",
+      "mv /outside/source inside",
+      "rm /outside/file",
+      "touch /outside/file",
+      "sed -i s/a/b/ /outside/file",
+      "sort -o /outside/file input",
+      "curl -o /outside/file https://example.test",
+    ])("counts %s toward the breaker, and a tripped breaker refuses it", async (cmd) => {
+      for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await complete(`w${i}`, cmd);
+      expect(shell()).toHaveLength(FLIGHT_RUNAWAY.sameActionLimit);
+      expect(runawayTrip(store)).not.toBeNull();
+      expect(reason((await check(tokF, bash("w-next", cmd), flight)).body)).toContain(
+        "runaway breaker",
+      );
+    });
 
     it("does not count a read toward the breaker", async () => {
       for (let i = 0; i < 8; i++) await check(tokF, bash(`g${i}`, "gh pr view 12"), flight);

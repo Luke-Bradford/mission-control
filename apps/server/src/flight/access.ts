@@ -101,6 +101,13 @@ export function createAccessTools(h: PowerHelpers) {
     async (a: z.output<typeof GhWriteArgs>, repo, ctx: McToolContext): Promise<McToolResult> => {
       if (a.repo !== undefined && a.repo !== repo.github && a.repo !== repo.id)
         return fail(`Refused: gh_write works on ${repo.github} only.`);
+      const known = await readKnown(deps, MC_TOOL_NAMES.ghWrite);
+      const redacted = (text: string) => {
+        let shown = text;
+        for (const secret of [...known].sort((left, right) => right.length - left.length))
+          if (secret) shown = shown.split(secret).join("[redacted]");
+        return shown;
+      };
       const run = async (args: string[], input?: string) => {
         const r = await deps.gh(args, {
           cwd: crewDir(deps.dbPath),
@@ -111,9 +118,9 @@ export function createAccessTools(h: PowerHelpers) {
       const done = (what: string, ref: string): McToolResult => {
         h.record(now(), {
           kind: "github",
-          about: `gh_write ${a.action} ${ref}`,
-          decision: what,
-          basis: a.basis,
+          about: redacted(`gh_write ${a.action} ${ref}`),
+          decision: `${redacted(what)} Arguments ${JSON.stringify({ ...a, basis: undefined }, (_key, value) => (typeof value === "string" ? redacted(value) : value))}`,
+          basis: redacted(a.basis),
           seatId: ctx.seatId,
         });
         bus.emit("boards");
@@ -170,7 +177,6 @@ export function createAccessTools(h: PowerHelpers) {
         ...(a.title === undefined ? [] : [{ label: "title", text: a.title }]),
         ...(a.body === undefined ? [] : [{ label: "body", text: a.body }]),
       ];
-      const known = await readKnown(deps, MC_TOOL_NAMES.ghWrite);
       const unfit = await h.textProblem(ctx, MC_TOOL_NAMES.ghWrite, repo.github, n, texts, known);
       if (unfit !== null) return fail(unfit);
       // the card floor: an always_ask ticket and another lane's are not edited, labelled or closed
