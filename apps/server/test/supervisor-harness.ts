@@ -303,6 +303,8 @@ function make(
     enabled?: boolean;
     fetchTicket?: FetchTicket;
     flightEnvironment?: SupervisorDeps["flightEnvironment"];
+    externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
+    fileContext?: SupervisorDeps["fileContext"];
     command?: string;
     codexCommand?: string;
     codexAuthPath?: string;
@@ -383,6 +385,10 @@ function make(
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
     flightEnvironment: over.flightEnvironment,
+    ...(over.externalReviewSubject === undefined
+      ? {}
+      : { externalReviewSubject: over.externalReviewSubject }),
+    fileContext: over.fileContext,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),

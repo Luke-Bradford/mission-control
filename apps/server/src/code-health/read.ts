@@ -96,7 +96,7 @@ export class CodeHealthReader {
         cached = this.recommendationRefresh.get(repoId),
         at = this.now();
       if (!cached || cached.revision !== revision || at - cached.at >= CACHE_MS) {
-        this.store.refreshCodeHealthRecommendations(repoId, at);
+        this.store.refreshCodeHealthRecommendations(repoId, at, this.checkout(repoId));
         if (this.recommendationRefresh.size >= CACHE_MAX) {
           const first = this.recommendationRefresh.keys().next().value;
           if (first) this.recommendationRefresh.delete(first);
@@ -284,6 +284,38 @@ export class CodeHealthReader {
       note: "Conservative fixed-30-day triage, independent of the selected dashboard window. Coverage describes the observed cohort; this query is narrowed to the recommendation's PR or category/file. Earlier unobserved periods are not zero.",
     };
     const { file, category, pr, from, until } = scope;
+    if (scope.kind === "file-risk") {
+      if (!file || !scope.sizeSha || scope.sizeVersion !== 1)
+        throw new CodeHealthReadError(
+          404,
+          "This file recommendation lacks supported size provenance.",
+        );
+      const base = { repoId: row.repoId, revision, from, until, file };
+      const fileCoverage = {
+        ...coverage,
+        collectedAt: scope.sizeCapturedAt ?? null,
+        analysedSha: scope.sizeSha,
+        source: "measured file size and dated 30-day merged-PR cohort",
+        note: "Investigation threshold from measured size and observed merged changes. Earlier unobserved history is unknown; size does not establish a defect.",
+      };
+      return {
+        ...row,
+        evidence: [
+          this.reference(
+            { ...base, kind: "sizes", sha: scope.sizeSha },
+            "Measured file size",
+            "Regular-text line count at the recommendation's recorded SHA and size policy.",
+            fileCoverage,
+          ),
+          this.reference(
+            { ...base, kind: "merged-files" },
+            "Dated file touches · 30d",
+            "Observed merged PRs touching this exact path in the recommendation's fixed30-day window.",
+            fileCoverage,
+          ),
+        ],
+      };
+    }
     return {
       ...row,
       evidence: [

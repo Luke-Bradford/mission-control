@@ -42,4 +42,33 @@ The reader shows up to 50 largest scoped files. For each, history returns the ea
 
 Tree output is limited to four MiB and 50,000 eligible files. A blob batch has the existing five-second command limit and a 64-MiB output limit. Duplicate blob identities are read once. Incomplete snapshots and malformed boundaries fail closed. The tool prefix also bounds size histories and states omitted counts.
 
-File recommendations and scoped FAO context remain follow-up work in #1346. Membership counts are never labelled as line churn. One size snapshot never establishes growth.
+Membership counts are never labelled as line churn. One size snapshot never establishes growth.
+
+## File recommendations and planner context
+
+The conservative file proposal requires at least 1,000 measured regular-text lines and five observed
+merged PR touches in 30 days. It uses complete dated membership and a current size snapshot checked
+within 15 minutes. Missing inputs produce collection gaps rather than a ranking. This threshold
+requests an investigation; it does not diagnose a defect or prescribe splitting a file. The proposal
+keeps its measured SHA and size policy, and an accepted decision retains its original baseline when
+new observations arrive. Expired evidence snapshots return an explicit unavailable response.
+
+FAO's generated planning brief includes at most three recommendations for explicitly declared files.
+Declare exact paths as bullet items under `## Files`, `## File scope`, `## Paths`, `## Affected files`
+or `## Touched files`. References, fenced examples, comments, globs, absolute paths and traversal do
+not declare scope. A seat's area never supplies file scope. Truncated ticket bodies receive no added
+context. Developer briefs are unchanged; broader evidence remains available through `mc code_health`.
+
+The added block is bounded to 4,000 characters, redacted using known secrets, and wrapped as
+untrusted evidence. It includes proposed, accepted or elapsed-snooze decisions for the declared
+paths, with uncertainty and linked work. Dismissed and assessed recommendations are omitted. A
+failed or timed-out secret lookup omits this optional block without changing the ticket. Brief
+generation reads local cached evidence and adds no git command or GitHub write.
+
+On a private copied database checked on 2 November 2026, this source produced 29 file proposals.
+Three declared paths yielded three redacted observations in 1,871 characters. Brief context took
+70 ms including known-secret lookup. With retained sources, the background collector took 41 ms
+on its first pass and 34 ms on repeat. The 7/30/90-day Overview and risk readers took 6–41 ms cold
+and at most 1.4 ms warm.
+These are local observations, not service guarantees; the earlier source-collection evidence remains
+valid for its recorded dataset and SHAs. No live hub, worktree or historical QA approval was changed.

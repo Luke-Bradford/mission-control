@@ -151,6 +151,7 @@ import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
+import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
 import { flightFloor } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
@@ -451,6 +452,13 @@ export interface SupervisorDeps {
   /** FLIGHT alone inherits controller credentials; kept out of keeper specs and transcripts. */
   flightEnvironment?: () => Promise<Record<string, string>>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
+  /** Fresh same-repository/default-branch provenance, only for a non-crew review subject. */
+  externalReviewSubject?: (
+    repo: CcConfig["repos"][number],
+    review: import("@mc/core").ReviewRow,
+  ) => Promise<ExternalReviewSubject | null>;
+  /** Optional redacted file observations, read locally without starting any seat. */
+  fileContext?: (repoId: string, body: string) => Promise<string | null>;
   /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
   claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
   /** false: `MC_NO_CREW=1`, or no `crew` config. */
@@ -3309,6 +3317,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         throw new SupervisorError(409, "a newer handoff arrived; retry this ticket");
       const title = ticket.title;
+      const fileContext =
+        planner && info.seat.role === "FAO" && !ticket.bodyTruncated
+          ? await deps.fileContext?.(info.repo.id, ticket.body)
+          : null;
+      if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
       const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
@@ -3526,6 +3539,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         issue,
         title,
         body: ticket.body,
+        fileContext,
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
@@ -3796,17 +3810,29 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const notWanted = new SupervisorError(409, REVIEW_NOT_WANTED);
       const review = store.review(reviewId);
       const author = review === null ? null : store.run(review.authorRunId);
-      if (review?.state !== "starting" || author === null || author.endedAt !== null) {
+      if (review?.state !== "starting" || review.repoId !== info.repo.id) {
         throw notWanted;
       }
-      const issue = issueOf(author);
-      const head = store.runPush(author.id)?.sha ?? null;
+      const external = isExternalReview(review);
+      const readSubject = async () => {
+        try {
+          return await deps.externalReviewSubject?.(info.repo, review);
+        } catch (error) {
+          throw new SupervisorError(502, "The PR review context could not be read.", {
+            cause: error,
+          });
+        }
+      };
+      const subject = external ? await readSubject() : null;
+      if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+      const issue = external ? subject!.ticket.number : issueOf(author!);
+      const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
       if (
-        author.repoId !== info.repo.id ||
+        (!external && author!.repoId !== info.repo.id) ||
         issue === null ||
         (head !== review.sha &&
           (head === null ||
-            carriedFrom(author.loop?.carry, author.loop?.reviewWaivedSha, head) !== review.sha))
+            carriedFrom(author?.loop?.carry, author?.loop?.reviewWaivedSha, head) !== review.sha))
       ) {
         throw notWanted;
       }
@@ -3820,7 +3846,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       let ticket: TicketView | null;
       try {
-        ticket = await deps.fetchTicket(info.repo, issue);
+        ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
       } catch (e) {
         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
           cause: e,
@@ -3830,11 +3856,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
       // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
       // the first review's findings and FLIGHT's reason
-      const secondOf = author.loop?.flightSecondReview?.[review.sha];
+      const secondOf = author?.loop?.flightSecondReview?.[review.sha];
       const second = secondOf?.epoch === review.epoch ? secondOf : null;
       // a Claude full-depth profile wins; a Codex seat always keeps its configured model
       const model =
-        second !== null || author.profile?.profile.reviewer.depth === "full"
+        external || second !== null || author?.profile?.profile.reviewer.depth === "full"
           ? isCodex(info)
             ? info.seat.model
             : REVIEW_FULL_MODEL
@@ -3846,7 +3872,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const checkout = info.session.checkout;
       const prev =
         store
-          .reviewsOfRun(author.id)
+          .reviewsOfRun(review.authorRunId)
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
@@ -3899,11 +3925,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           }
         },
       );
-      if (stopping) {
+      try {
+        if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+        if (external && !(await readSubject())) throw notWanted;
+      } catch (error) {
         await inClone(checkout, () =>
           removeCheckout(checkout, scratch.path, { force: true }),
         ).catch(() => {});
-        throw new SupervisorError(409, SHUTTING_DOWN);
+        throw error;
       }
 
       const on = await startedOn(info);
@@ -3927,8 +3956,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         effort: info.seat.effort ?? null,
         ...on,
         branch: null,
-        ticket: author.ticket,
-        ticketTitle: author.ticketTitle ?? ticket.title,
+        ticket: author?.ticket ?? null,
+        ticketTitle: author?.ticketTitle ?? ticket.title,
         costUsd: null,
         tokens: null,
         transcriptPath: crewTranscriptPath(deps.dbPath, runId),
@@ -3947,11 +3976,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               runId,
               repoId: info.repo.id,
               pr: review.prNumber,
-              branch: author.branch ?? "",
+              branch: author?.branch ?? subject?.branch ?? "",
               sha: review.sha,
             });
-      const touches = author.loop?.touches;
-      const evidence = store.evidenceNotes(author.id);
+      const touches = author?.loop?.touches;
+      const evidence = author ? store.evidenceNotes(author.id) : [];
       const prevReply =
         prev === null
           ? null
@@ -3962,6 +3991,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         issue,
         title: ticket.title,
         prNumber: review.prNumber,
+        external,
         sha: review.sha,
         mergeBase: scratch.mergeBase,
         round: review.round,

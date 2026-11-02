@@ -231,6 +231,28 @@ profiles:
 - **Dollar cap.** `budget_usd` is separate from the template's token `budget` and is passed to Claude as `--max-budget-usd`. Omit it to leave Claude uncapped. When Claude reaches it, the run uses the normal budget park and names the dollars used and cap. A working run parks at once; a run whose PR is already pushed keeps moving until the CLI ends. Unlike a token park, Resume refuses a dollar park: the Claude process keeps the cap it started with, so end the run and start the ticket again.
 - **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
 
+## Reviews of controller and personal PRs
+
+In a `merge` workspace, an open PR without a crew author run enters the existing scratch review
+queue after its CI passes. The PR must come from the same repository and target its default branch.
+Drafts, forks and PRs labelled `skip-review` are excluded. Existing crew branches retain their normal
+author-run review path. An existing `mc/review` status from another reviewer is respected.
+
+The reviewer uses the exact head SHA. Before launch and before publishing, the hub checks the PR
+again. A later push needs a new review; a closed, drafted, opted-out or changed PR cannot receive an
+old verdict. Paused seats, account stops and capacity limits still govern reviewer starts. Queued
+review data includes its PR, head and waiting reason even when the reviewer cannot start.
+
+The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
+tests. It links the available before/after screenshot manifest for that head, or states that no pairs
+were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
+isolated previews and copied data; it never reconstructs a historical approval. A reviewer run is
+recorded, but no developer run is invented for the PR.
+
+These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
+review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly
+starting paid retries. A new push creates a new review opportunity.
+
 ## Moving from Control Centre
 
 The project was renamed Mission Control on 2026-10-18. An install made under the old name moves

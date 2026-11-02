@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { CodeHealthReadError } from "./error.ts";
 import { riskFile } from "./risk.ts";
 import { type FileSizeSnapshot, SIZE_FILES_MAX, SIZE_SCOPE_VERSION } from "./size-source.ts";
 
@@ -175,6 +176,22 @@ export function sizeEvidence(
     limit: number;
   },
 ) {
+  const retained = db
+    .prepare(
+      "SELECT file_count FROM code_health_size_snapshots WHERE repo_id=? AND checkout=? AND sha=? AND version=?",
+    )
+    .get(query.repoId, query.checkout, query.sha, SIZE_SCOPE_VERSION);
+  if (!retained)
+    throw new CodeHealthReadError(
+      404,
+      "This size snapshot is no longer retained. The recorded recommendation baseline remains available.",
+    );
+  const count = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM code_health_file_sizes WHERE repo_id=? AND checkout=? AND sha=? AND version=?",
+    )
+    .get(query.repoId, query.checkout, query.sha, SIZE_SCOPE_VERSION);
+  if (count?.n !== retained.file_count) throw Error("Incomplete size snapshot");
   return validateRows(
     db
       .prepare(
@@ -256,4 +273,26 @@ export function fileSizeHistory(
         points[points.length - 1].sha === currentSha,
     };
   });
+}
+
+/** Candidate paths come from complete dated membership, not a seat's area. */
+export function sizedPaths(
+  db: Db,
+  repoId: string,
+  checkout: string,
+  sha: string,
+  paths: readonly string[],
+  minimum: number,
+) {
+  if (paths.length > 100000) throw Error("Sized path query limit");
+  if (!paths.length) return [];
+  return validateRows(
+    db
+      .prepare(`SELECT path,lines FROM code_health_file_sizes WHERE repo_id=? AND checkout=? AND sha=? AND version=?
+    AND lines>=? AND path IN (SELECT value FROM json_each(?)) ORDER BY lines DESC,path LIMIT 200`)
+      .all(repoId, checkout, sha, SIZE_SCOPE_VERSION, minimum, JSON.stringify(paths)) as {
+      path: string;
+      lines: number;
+    }[],
+  );
 }

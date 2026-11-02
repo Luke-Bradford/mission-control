@@ -16,4 +16,4 @@ export type ReviewCheckState =
   | { kind: "checking"; seat: string; since: number }
   | { kind: "sent" }
   | { kind: "ready" }
-  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" | "hub" };
+  | { kind: "held"; by: "FLIGHT" | "CAPCOM" | "operator" | "hub"; reason?: string };

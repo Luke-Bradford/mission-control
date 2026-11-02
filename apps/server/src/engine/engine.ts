@@ -104,6 +104,7 @@ import {
   pendingSeatWork,
   pendingWakeText,
   REFUSAL_TRIES,
+  REVIEW_NOT_WANTED,
   REVIEW_STATUS_CONTEXT,
   REVIEW_STATUS_WAIVED,
   type RepoId,
@@ -150,6 +151,7 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
+import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
@@ -217,6 +219,8 @@ export interface EngineDeps {
   pollGithub?: () => void;
   /** Screenshot pairs of a web PR: captured for each head, and required before it leaves draft. */
   evidence?: PrEvidence;
+  /** Same-repository controller PRs share the scratch queue, without a fabricated author run. */
+  externalReviews?: ExternalReviews;
   /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
   rules: (repoId: RepoId, mainSha?: string) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
@@ -2239,6 +2243,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Whether the review's author run is in review on the sha the hub pushed, its PR open at that head. */
   function reviewWanted(row: ReviewRow): boolean {
+    if (isExternalReview(row)) return deps.externalReviews?.wanted(row) ?? false;
     const author = store.run(row.authorRunId);
     const loop = author?.loop;
     if (author === null || loop === undefined || loop === null) return false;
@@ -2256,6 +2261,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
+    if (isExternalReview(row)) return false;
     const author = store.run(row.authorRunId);
     if (author === null) return true;
     const prs = prsFor(author.repoId);
@@ -2412,6 +2418,8 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */
   async function superviseReviews(): Promise<void> {
     if (!live()) return;
+    // Network reads and screenshot preparation must not hold up existing review supervision.
+    void deps.externalReviews?.sync().catch(() => log("External QA queue refresh failed."));
     await supervisor.resumeDeferredRuns?.();
     if (!live()) return;
     // 1. the health of each running review
@@ -2423,7 +2431,11 @@ export function createEngine(deps: EngineDeps): Engine {
       if (pausedSeat(store, row.seatId)) continue;
       const author = store.run(row.authorRunId);
       const phase = author?.loop?.phase;
-      if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
+      if (
+        isExternalReview(row)
+          ? !reviewWanted(row)
+          : author === null || author.endedAt !== null || phase === "done" || phase === "parked"
+      ) {
         dropReview(row);
         await endReviewRun(row, "superseded");
         continue;
@@ -2555,7 +2567,9 @@ export function createEngine(deps: EngineDeps): Engine {
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           log(`${seat.id}: could not start review ${row.id}: ${message}`);
-          if (isTransientStart(e)) {
+          if (isExternalReview(row) && message === REVIEW_NOT_WANTED) {
+            dropReview(row);
+          } else if (isTransientStart(e)) {
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
           } else {
             const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
