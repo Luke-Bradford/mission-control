@@ -64,6 +64,7 @@ export interface GuardEvent {
     content?: string;
     old_string?: string;
     new_string?: string;
+    replace_all?: boolean;
   };
 }
 
@@ -104,6 +105,7 @@ export interface GuardContext {
   ) => string | null;
   /** Compare a CLAUDE.md edit against the current Mission Control section. */
   flightFileAllowed?: (event: GuardEvent) => boolean;
+  flightFilePath?: (path: string) => string;
   /** Only "dev" for now; repo permission levels (spec §8c) slot in here. */
   repo: "dev";
   /** The repo's current `flight_powers`, read from the live config on each call. */
@@ -2153,7 +2155,6 @@ const deny = (rule: GuardRule, what: string): GuardVerdict => ({
 });
 
 /** The files whose change is a controller's: CI workflows and `CLAUDE.md` (with its Mission Control block). */
-const PROTECTED_FILE = /(?:^|[\s"'=/])(?:\.github(?:\/|["'\s;&|]|$)|CLAUDE\.md(?:["'\s;&|]|$))/;
 /** Programs that write the files they are given. */
 const FILE_WRITERS = new Set([
   "tee",
@@ -2171,9 +2172,6 @@ const FILE_WRITERS = new Set([
 /** `gh api` endpoints a writing call may not reach: the repo's protection, settings and access. */
 const GH_PROTECTED_ENDPOINT =
   /^\/?repos\/[^/]+\/[^/]+(?:$|\?|\/(?:branches\/.+\/protection|rulesets|collaborators|invitations|hooks|keys|environments|pages|transfer|actions\/(?:permissions|secrets|variables)|codespaces\/secrets|dependabot\/secrets)(?:\/|\?|$))/;
-/** A controller's act: FLIGHT neither reads the operator token nor records its own approvals. */
-const APPROVAL_PATHS =
-  /operator[-/](?:token|tok|bootstrap)|x-mc-operator|flight[/.](?:approvals|runaway)|flight\.appr|flight-runaway/i;
 /** `%xx` escapes decoded, so `flight/%61pprovals` is read as the route the hub will route it to. */
 const decodePercent = (s: string): string =>
   s.replace(/%([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(Number.parseInt(h, 16)));
@@ -2190,19 +2188,6 @@ const normPath = (w: string): string => {
   } while (x !== y);
   return x;
 };
-/** Whether a command, word or path names the operator token, the HUD's bootstrap, approvals or the breaker. */
-const namesControllerAct = (s: string): boolean =>
-  APPROVAL_PATHS.test(s) ||
-  APPROVAL_PATHS.test(decodePercent(s)) ||
-  APPROVAL_PATHS.test(normPath(s));
-/** A glob that could expand to the operator token file: `operator-t*`, `operator?token`, or any glob in the hub's data dir. */
-const globsToken = (w: string): boolean =>
-  /operator[^\s/]*[*?[]/i.test(w) ||
-  /mission-c[^\s]*[*?[]/i.test(w) ||
-  /[*?[].*tok|tok.*[*?[]/i.test(w);
-/** Programs that read whole folders: pointed at the hub's data folder they would read the token file. */
-const FOLDER_READERS = new Set(["grep", "rg", "find", "tar", "cp", "rsync", "zip", "ag", "ack"]);
-
 /** The word after `git push`'s flags, as the refs it pushes. */
 function pushRefusal(rest: readonly string[]): string | null {
   for (const w of rest) {
@@ -2380,7 +2365,8 @@ function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): Guard
     );
   if (e.tool !== "Bash") {
     if (["Edit", "Write", "NotebookEdit"].includes(e.tool)) {
-      const path = normPath(e.input.file_path ?? "");
+      const supplied = e.input.file_path ?? "";
+      const path = normPath(ctx.flightFilePath?.(supplied) ?? supplied);
       if (/(?:^|\/)\.github(?:\/|$)/.test(path)) return deny("repo-rules", ".github/**");
       if (/(?:^|\/)CLAUDE\.md$/.test(path) && ctx.flightFileAllowed?.(e) !== true)
         return deny("repo-rules", "the Mission Control block in CLAUDE.md");
@@ -2422,12 +2408,27 @@ function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): Guard
             git.rest.some((arg) => /^--(?:force|delete)$|^-[a-zA-Z]*[fDd]/.test(arg)))
         )
           return deny("merge-push", "a direct git rewrite of main");
-        const alias = ctx.flightGitAlias?.(git.sub, [...directories, ...wrapped], global);
+        const alias = !GIT_KNOWN.has(git.sub)
+          ? ctx.flightGitAlias?.(git.sub, [...directories, ...wrapped], global)
+          : null;
         if (alias) {
           const expanded = alias.startsWith("!") ? alias.slice(1) : `git ${alias}`;
           const verdict = flightGuardDecision(
             { tool: "Bash", input: { command: `${expanded} ${git.rest.join(" ")}` } },
-            ctx,
+            {
+              ...ctx,
+              flightGitBranch: (nestedDirectories, nestedGlobal) =>
+                ctx.flightGitBranch?.(
+                  [...directories, ...wrapped, ...nestedDirectories],
+                  [...global, ...nestedGlobal],
+                ) ?? null,
+              flightGitAlias: (name, nestedDirectories, nestedGlobal) =>
+                ctx.flightGitAlias?.(
+                  name,
+                  [...directories, ...wrapped, ...nestedDirectories],
+                  [...global, ...nestedGlobal],
+                ) ?? null,
+            },
             depth + 1,
           );
           if (verdict.kind === "deny") return verdict;
@@ -2458,11 +2459,18 @@ function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): Guard
     if (["curl", "wget"].includes(program)) {
       if (
         args.some((arg) =>
-          /\/flight\/(?:approvals|runaway\/lift)(?:[/?]|$)/.test(decodePercent(arg)),
+          /\/api\/(?:prs|runs)\/.+\/(?:controller-check|uat|merge-hold)(?:[/?]|$)/.test(
+            normPath(arg),
+          ),
         )
       )
+        return deny(
+          "repo-rules",
+          "use mc operator to retain FLIGHT's role for controller checks and holds; operator acceptance remains the operator's",
+        );
+      if (args.some((arg) => /\/flight\/(?:approvals|runaway\/lift)(?:[/?]|$)/.test(normPath(arg))))
         return deny("repo-rules", "controller approval and breaker lifts belong to the controller");
-      if (args.some((arg) => /\/pulls\/\d+\/merge(?:[/?]|$)/.test(decodePercent(arg))))
+      if (args.some((arg) => /\/pulls\/\d+\/merge(?:[/?]|$)/.test(normPath(arg))))
         return deny("merge-push", "merge through mc merge_pr");
     }
     if (
@@ -2524,30 +2532,7 @@ export function guardDecision(
   ) {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
-  if (e.tool !== "Bash") {
-    if (
-      ctx.fullAccess &&
-      (namesControllerAct(e.input.file_path ?? "") || globsToken(e.input.file_path ?? ""))
-    )
-      return deny(
-        "repo-rules",
-        "the operator token, approvals and the runaway breaker are a controller's",
-      );
-    if (
-      ctx.fullAccess &&
-      ["Edit", "Write"].includes(e.tool) &&
-      /(?:^|\/)(?:\.github(?:\/|$)|CLAUDE\.md$)/.test(e.input.file_path ?? "")
-    ) {
-      const path = e.input.file_path ?? "";
-      return deny(
-        "repo-rules",
-        /(?:^|\/)CLAUDE\.md$/.test(path)
-          ? "the whole CLAUDE.md file is protected; ask a controller to approve an override"
-          : e.tool,
-      );
-    }
-    return { kind: "allow" };
-  }
+  if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
   const backgroundCommand = e.input.run_in_background === true;
@@ -2567,49 +2552,6 @@ export function guardDecision(
   } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
-    if (ctx.fullAccess) {
-      const command = e.input.command ?? "";
-      // SQL can always be reworded, so the hub's database is only read: no write, no shell escape
-      if (
-        program === "sqlite3" &&
-        (!args.includes("-readonly") ||
-          /(?:^|[\s;"'])\.(?:shell|system|load|output|once|import|backup|save|restore|read)\b/.test(
-            command,
-          ))
-      )
-        return deny(
-          "repo-rules",
-          "sqlite3 on the hub's database runs with -readonly and no dot-command that writes",
-        );
-      // backstop only (the sandbox denies the data folder; the hub refuses a seat on the token routes):
-      // a $'...' word is decoded by bash but not by the parser, and curl expands [..] and {..} in a URL
-      if (/\$'[^']*\\/.test(command))
-        return deny("repo-rules", "a $'...' word with an escape: the guard does not decode it");
-      if (
-        program === "curl" &&
-        !args.some((a) => /^-[a-zA-Z]*g|^--globoff$/.test(a)) &&
-        args.some((a) => /^https?:\/\/.*[[{]/.test(a))
-      )
-        return deny("repo-rules", "a curl URL glob that could name a controller's act");
-      if (
-        FOLDER_READERS.has(program) &&
-        args.some((a) => /\/mission-control\/?$/.test(normPath(a)))
-      )
-        return deny("repo-rules", "a folder read of the hub's data folder");
-      // each parsed word too: the parser has already taken out quotes and backslashes (`operator-to''ken`)
-      if (namesControllerAct(command) || argv.some((w) => namesControllerAct(w) || globsToken(w)))
-        return deny(
-          "repo-rules",
-          "the operator token, approvals and the runaway breaker are a controller's",
-        );
-      if (
-        /(?:^|[^>])>>?\s*["']?[^\s;&|"']*(?:\.github\/|CLAUDE\.md)/.test(command) ||
-        ((FILE_WRITERS.has(program) ||
-          (["sed", "perl"].includes(program) && args.some((a) => /^-[a-zA-Z]*i/.test(a)))) &&
-          args.some((a) => PROTECTED_FILE.test(` ${a}`)))
-      )
-        return deny("repo-rules", "a write to .github/** or CLAUDE.md");
-    }
     if (program === TOO_LONG) {
       return { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
     }
@@ -2663,20 +2605,6 @@ export function guardDecision(
     }
     if (program === "git") {
       const g = gitSubcommand(args);
-      if (ctx.fullAccess && g?.sub === "commit") return deny("merge-push", "git commit on main");
-      // an alias or a push mapping can hide a force push or a push to main from the checks above
-      if (
-        ctx.fullAccess &&
-        (/(?:^|\s)(?:alias\.|remote\.[^.\s=]+\.(?:push|mirror)\b|push\.default)/i.test(
-          args.join(" "),
-        ) ||
-          (g !== null && (!GIT_KNOWN.has(g.sub) || g.sub === "send-pack" || g.sub === "http-push")))
-      )
-        return deny("merge-push", "a git alias, push mapping or unknown git subcommand");
-      if (ctx.fullAccess && g?.sub === "push") {
-        const refused = pushRefusal(g.rest);
-        if (refused !== null) return deny("merge-push", refused);
-      }
       if (g?.sub === "difftool" && g.rest.includes("--no-index"))
         return deny("git-env", "git --no-index");
       if (!ctx.fullAccess && g !== null && !gitReadOnly(g.sub, g.rest))
@@ -2686,7 +2614,7 @@ export function guardDecision(
       // FLIGHT's git reaches the hub checkout and the crew clones, so it is not held to one worktree
       if (!ctx.fullAccess && (expandedCwd || (unknownCwd && ctx.gitPathAllowed)))
         return deny("git-env", "git directory outside worktree");
-      for (const directory of ctx.fullAccess ? [] : wrapperDirectories) {
+      for (const directory of wrapperDirectories) {
         if (
           !directory ||
           gitPathExpands(directory) ||
@@ -2758,17 +2686,7 @@ export function guardDecision(
       )
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
-      if (ctx.fullAccess) {
-        const ghArgs = ghStripGlobal(args);
-        const gh = ghArgs.join(" ");
-        if (
-          /^pr\s+merge(?:\s|$)/.test(gh) ||
-          (ghArgs[0] === "api" && /(?:^|\/)merge$/.test(ghApiCall(ghArgs).path ?? ""))
-        )
-          return deny("merge-push", "gh PR merge");
-        const api = ghArgs[0] === "api" ? ghApiRefusal(ghArgs) : null;
-        if (api !== null) return deny(api.rule, api.text);
-      } else githubDenied ??= ghText(args);
+      githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
       if (!ctx.fullAccess) return deny("network", program);
     }

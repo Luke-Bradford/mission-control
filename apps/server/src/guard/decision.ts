@@ -32,6 +32,8 @@ export function crewGuardDecision(
     {
       mode,
       fullAccess,
+      flightFilePath: (path) =>
+        realPathOrParent(resolve(commandCwd ?? worktree ?? ".", path)) ?? path,
       flightGitAlias: (name, directories, global) => {
         try {
           let cwd = commandCwd ?? worktree;
@@ -76,7 +78,9 @@ export function crewGuardDecision(
             input.new_string !== undefined &&
             before.includes(input.old_string)
           )
-            after = before.replace(input.old_string, input.new_string);
+            after = input.replace_all
+              ? before.replaceAll(input.old_string, input.new_string)
+              : before.replace(input.old_string, input.new_string);
           else return false;
           return mcSection(before) === mcSection(after);
         } catch {

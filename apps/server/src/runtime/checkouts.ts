@@ -1900,12 +1900,31 @@ export async function existingDetached(
   checkout: string,
   path: string,
 ): Promise<{ path: string; gitDir: string }> {
+  return verifiedExistingCheckout(checkout, path, true);
+}
+
+/** FLIGHT may keep its own attached branch and uncommitted work across a hub restart. */
+export async function existingFlightCheckout(
+  checkout: string,
+  path: string,
+): Promise<{ path: string; gitDir: string }> {
+  return verifiedExistingCheckout(checkout, path, false);
+}
+
+async function verifiedExistingCheckout(
+  checkout: string,
+  path: string,
+  detached: boolean,
+): Promise<{ path: string; gitDir: string }> {
   const notIt = () => new CheckoutError("path", `${path} is not this run's checkout`);
   const common = await realpath(join(checkout, ".git")).catch(() => null);
   const gitDir = common === null ? null : await adminDirOf(common, path);
   if (common === null || gitDir === null) throw notIt();
   // A resumed read-only run must still use a detached copy.
-  if (await succeeds(crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }))) {
+  if (
+    detached &&
+    (await succeeds(crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir })))
+  ) {
     throw notIt();
   }
   if (!(await succeeds(crewGit(path, ["rev-parse", "--verify", "HEAD"], common, { gitDir })))) {

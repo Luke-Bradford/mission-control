@@ -1186,7 +1186,7 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 `{"action":"release"}` on the same route, which returns it to the phase it left. A plain resume or
 message does not lift this park. A new push keeps the hold.
 
-FLIGHT has the same power on a superuser repo with `mc hold_pr { runId, action, reason, basis }`, logged
+FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
 may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
 to hold, or the hold is the controller's and the caller is FLIGHT.
@@ -1245,7 +1245,7 @@ every reason it lists is handled, not when some later audit is clean. The audit 
 ### FLIGHT adds a controller check to a ticket
 
 Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`
-itself (superuser repos): `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
+itself: `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
 that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
 removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
@@ -1277,8 +1277,7 @@ it has waited. A chain that has stood still for 30 minutes raises a `chain_stall
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
-repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
-repo's FLIGHT; each change is a logged decision. The floor is the repo's own rules (guard rules,
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are FLIGHT shortcuts; each change is a logged decision. The floor is the repo's own rules (guard rules,
 hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
 [FLIGHT approvals](#flight-approvals)) is what lifts one.
 
@@ -1286,8 +1285,8 @@ hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controll
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). Any FLIGHT write to the pause only edits the seats of a record someone else set: it never clears or replaces it, a refused write leaves the record and goes in the hub log, and a change is logged as FLIGHT's. A start that fails puts the stop and the pause back |
-| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a superuser repo, a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
-| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
+| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
+| `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
@@ -1337,6 +1336,34 @@ one-day expiry. None of that lifts an operator instruction or supplies a missing
 The controller still checks the widened runtime before merge. After Update, verify the real FLIGHT
 provider can perform the authorised actions and is refused a push to main. Keep #1214 open through
 its one-day observation of cleared stalls and counted manual controller actions.
+
+### External PR merge and sign-off
+
+`mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
+same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
+GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
+with `--match-head-commit`; branch protection stays in force. A crew-owned branch keeps its normal
+engine path. No build run is invented and no board card is marked Done by this path.
+
+Protected repository rules require the existing head-bound `merge-floor` controller approval.
+Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
+unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
+controller check. FLIGHT cannot give itself that verdict through `mc operator`; the in-process
+request retains its authenticated FLIGHT actor instead of impersonating an anonymous operator.
+
+External PR acceptance and controller checks have head-bound records. A required acceptance
+appears in the existing QA queue and uses the existing operator route:
+
+- `POST /api/prs/:repo/:number/uat { action: "accept" | "send_back", sha, note? }`.
+- `POST /api/prs/:repo/:number/controller-check { verdict: "pass" | "fail", sha, note? }`.
+- `POST /api/prs/:repo/:number/merge-hold { action: "hold" | "release", sha, reason? }`.
+
+A failure or send-back needs its note. Each route rechecks the current head and PR provenance;
+an old verdict does not apply after a push. A merge hold remains on the PR across pushes and can
+only be changed from the head the caller has checked. Operator acceptance stays with the operator.
+FLIGHT may manage its own holds and ordinary evidence checks, while operator holds and checks on
+FLIGHT's own access remain the independent controller's. These records do not replace CI or QA,
+and they never stand in for #1214's day-long post-Update observation.
 
 ### FLIGHT approvals
 
@@ -1661,7 +1688,7 @@ scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
 ### HUD screenshots
 
-FLIGHT's `screenshot_hud` tool (superuser repos only) renders one HUD page at 1600×1000 in the
+FLIGHT's `screenshot_hud` tool renders one HUD page at 1600×1000 in the
 system Chrome. The render runs in an owned helper process in its own process group with a minimal
 environment (no tokens); the hub kills the whole group when the render ends or its 30 s deadline
 passes, so no Chrome outlives a call. Chrome is started with `launch()` (a private pipe, no control
@@ -1669,7 +1696,7 @@ socket) and every request it makes, loopback included, goes through a loopback-o
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
 The shot is taken after the shell is ready, the lazy page's `Loading…` placeholder has gone and the
-page's requests have been quiet for 400 ms. Renders are one at a time per host, and the repo's powers are rechecked just before launch.
+page's requests have been quiet for 400 ms. Renders are one at a time per host.
 
 Each screenshot is kept under `hud-screenshots/` in the data dir (directory `0700`, files `0600`,
 an opaque 128-bit id), at most 50 files and one week. The tool's answer ends with `Reference:

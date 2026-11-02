@@ -151,7 +151,7 @@ export async function main(): Promise<void> {
   const hubRoot = findHubRoot();
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
-  const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
+  const operatorToken = newOperatorToken(); // per boot; FLIGHT alone also receives it in memory
   writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
   markHubStarted(hubStartedAt);

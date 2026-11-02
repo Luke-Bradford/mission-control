@@ -131,7 +131,10 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
       for (const key of ["content", "old_string", "new_string"]) {
         if (typeof raw[key] === "string") input[key] = raw[key];
       }
+      if (typeof raw.replace_all === "boolean") input.replace_all = raw.replace_all;
     }
+    if (tool === "NotebookEdit" && typeof raw.notebook_path === "string")
+      input.file_path = raw.notebook_path;
     out.tool_input = input;
     if (event !== "PreToolUse" && typeof input.command === "string") {
       const exit =

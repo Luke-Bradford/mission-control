@@ -2599,16 +2599,12 @@ describe("repo guidance at launch", () => {
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    // --restricted removes Bash and WebFetch unless --tools names them
-    const tools = (argv[argv.indexOf("--tools") + 1] ?? "").split(",");
-    expect(tools).toEqual(expect.arrayContaining(["Bash", "WebFetch"]));
-    expect(argv).not.toContain("--disallowedTools");
-    expect(argv).toContain("--allowedTools");
-    // sandboxed, with the hub's data folder (the operator token) denied to read and write
-    const sandbox = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox;
-    expect(sandbox.enabled).toBe(true);
-    expect(sandbox.filesystem.denyRead).toContain(realpathSync(dirname(dbPath)));
-    expect(sandbox.filesystem.denyWrite).toContain(realpathSync(dirname(dbPath)));
+    for (const flag of ["--restricted", "--tools", "--allowedTools", "--disallowedTools"])
+      expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
+    expect(settings.sandbox).toEqual({ enabled: false });
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
   });
 
   it("lets FLIGHT's git use the operator's config and credentials, with hooks and fsmonitor still off", async () => {
@@ -2672,6 +2668,32 @@ import(${JSON.stringify(fixture)});
   }
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
+
+  it("starts Codex FLIGHT with full authority, retains the approval floor and audits completed writes", async () => {
+    const { sup, cfg } = codex({ command: "gh pr close 7", exitCode: 0 });
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    sup.start();
+    await sup.startWatch("flight-1");
+    await untilCodex(() =>
+      expect(store.flightDecisions(0, 50).some((decision) => decision.kind === "shell")).toBe(true),
+    );
+    const start = recorded().find((message) => message.method === "thread/start");
+    expect(start.params.sandbox).toBe("danger-full-access");
+    expect(start.params.approvalPolicy).toBe("untrusted");
+    expect(store.flightDecisions(0, 50).filter((decision) => decision.kind === "shell")).toEqual([
+      expect.objectContaining({
+        seatId: "flight-1",
+        about: "gh pr close 7",
+        decision: expect.stringContaining("exit 0; cwd"),
+      }),
+    ]);
+  });
 
   it("gives Codex FLIGHT guidance only, without changing its prompt or tool grants", async () => {
     const flight: CrewSeatConfig = {

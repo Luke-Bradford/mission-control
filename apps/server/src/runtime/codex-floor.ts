@@ -32,7 +32,6 @@ export function codexSeatConfig(
   if (fullAccess)
     return [
       `approvals_reviewer = "user"`,
-      `approval_policy = "untrusted"`,
       `sandbox_mode = "danger-full-access"`,
       `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
       `web_search = "live"`,

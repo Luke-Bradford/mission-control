@@ -5,6 +5,7 @@ import {
   type ReviewRow,
   reviewCheckOf,
 } from "@mc/core";
+import { externalControlReason } from "./external-pr-control.ts";
 import { isExternalReview } from "./external-reviews.ts";
 import type { Store } from "./store.ts";
 
@@ -35,6 +36,10 @@ export function reviewCheckFor(
     });
     const last = rows.findLast((r) => r.state !== "superseded");
     if (last === undefined) return null;
+    if (isExternalReview(last) && pr.headSha) {
+      const reason = externalControlReason(store, repoId, pr.number, pr.headSha);
+      if (reason !== null) return { kind: "held", by: "operator", reason };
+    }
     // Crew failures can retry through the author loop. External failures remain terminal.
     if (isExternalReview(last) && last.state === "failed")
       return {

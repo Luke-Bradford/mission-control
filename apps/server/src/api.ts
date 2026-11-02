@@ -59,6 +59,7 @@ import {
   effectiveHardRules,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
+  FLIGHT_FLOOR_ENFORCING_PATHS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -249,6 +250,13 @@ import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  externalMergeHold,
+  externalPrControl,
+  setExternalMergeHold,
+  setExternalPrControl,
+} from "./external-pr-control.ts";
+import { readExternalSubject } from "./external-reviews.ts";
+import {
   changedFiles,
   committedLines,
   fileDiff,
@@ -260,6 +268,7 @@ import { flightFloor } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
 import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
 import {
   flightBriefView,
@@ -667,6 +676,7 @@ const GuardCheckBody = z.strictObject({
       content: z.string().optional(),
       old_string: z.string().optional(),
       new_string: z.string().optional(),
+      replace_all: z.boolean().optional(),
       run_in_background: z.boolean().optional(),
       pages: z.string().optional(),
       offset: z.number().optional(),
@@ -1208,6 +1218,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
   // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
   // check keeps its own run token; /mcp is outside /api.
+  const flightActor = (req: FastifyRequest): { seatId: string; runId: string } | null => {
+    const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
+    if (typeof raw !== "string") return null;
+    try {
+      const value = JSON.parse(raw);
+      if (typeof value?.seatId !== "string" || typeof value.runId !== "string") return null;
+      const seat = configuredAgents(config).find(
+        (agent) => agent.kind === "crew" && agent.id === value.seatId,
+      );
+      const run = store.run(value.runId);
+      return seat?.kind === "crew" &&
+        crewSeatDef(config, seat.id).loop === "watch" &&
+        run?.agentId === seat.id &&
+        run.endedAt === null
+        ? { seatId: seat.id, runId: run.id }
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] === undefined) return;
+    const actor = flightActor(req);
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      !actor ||
+      path === OPERATOR_BOOTSTRAP_PATH ||
+      path === "/api/flight/approvals" ||
+      path === "/api/flight/runaway/lift" ||
+      path.endsWith("/uat")
+    )
+      return reply
+        .code(403)
+        .send({ error: "This action belongs to the operator or independent controller." });
+  });
   // A seat's run token marks a request as a seat's: it never reaches the routes that hand out or use
   // the operator's authority (the token's bootstrap, FLIGHT's approvals, lifting the breaker, and the
   // attention items whose dismissal lifts it). The operator token is a second, separate key.
@@ -4643,9 +4688,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+        const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
-          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+          ? await deps.engine.onOperatorMessage(run.id, by, { action: "accept" })
+          : await deps.engine.onOperatorMessage(run.id, by);
         if (!lifted.lifted) {
           return reply
             .code(409)
@@ -4666,6 +4712,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!crewGate(run.agentId, reply)) return reply;
           const body = ControllerCheckBody.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (
+            flightActor(req) &&
+            run.loop.touches?.paths.some((path) =>
+              FLIGHT_FLOOR_ENFORCING_PATHS.some((pattern) => globMatches(pattern, path, true)),
+            )
+          )
+            return reply.code(403).send({
+              error:
+                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+            });
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
             return reply.code(409).send({ error: "the loop engine is off" });
@@ -4694,6 +4750,143 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
+      const externalTarget = async (
+        repoId: string,
+        number: number,
+        prefix: string,
+        reply: FastifyReply,
+      ) => {
+        const repo = config.repos.find((value) => value.id === repoId);
+        const pr = store.pullRequests(repoId).find((value) => value.number === number);
+        const sha = pr?.headSha;
+        if (
+          !repo ||
+          !pr ||
+          pr.state !== "open" ||
+          !sha ||
+          repo.autonomy !== "merge" ||
+          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+        ) {
+          reply.code(404).send({ error: "no external PR is waiting here" });
+          return null;
+        }
+        if (deps.noLoopWrites) {
+          reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          return null;
+        }
+        if (!sha.startsWith(prefix.toLowerCase())) {
+          reply
+            .code(409)
+            .send({ error: "the PR head changed; reload its evidence before deciding" });
+          return null;
+        }
+        try {
+          if (
+            !(await readExternalSubject(
+              deps.gh ?? createGh(),
+              crewDir(store.path),
+              repo,
+              number,
+              sha,
+            )) ||
+            store.pullRequests(repoId).find((value) => value.number === number)?.headSha !== sha
+          ) {
+            reply
+              .code(409)
+              .send({ error: "the current PR head and provenance could not be verified" });
+            return null;
+          }
+        } catch {
+          reply.code(502).send({ error: "the current PR could not be read" });
+          return null;
+        }
+        return { repo, pr, sha };
+      };
+      const externalNoteAllowed = async (note: string | undefined, reply: FastifyReply) => {
+        if (note === undefined) return true;
+        try {
+          await validateCommsText(deps.knownSecrets ?? (async () => []), note);
+          return true;
+        } catch {
+          reply.code(400).send({ error: "The note contains text that cannot be recorded." });
+          return false;
+        }
+      };
+      // Reader: docs/runbook.md#flight-full-access (controller PRs have no author run).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/controller-check",
+        async (req, reply) => {
+          const body = ControllerCheckBody.safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid controller-check request" });
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          const control = externalPrControl(store, target.repo.id, number, target.sha);
+          if (!control?.controllerRequired)
+            return reply.code(404).send({ error: "this head has no outstanding controller check" });
+          if (flightActor(req) && control.protectedController)
+            return reply.code(403).send({
+              error:
+                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+            });
+          if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+          setExternalPrControl(store, target.repo.id, number, target.sha, {
+            ...control,
+            controllerPassed: body.data.verdict === "pass",
+            note: body.data.note ?? null,
+          });
+          store.addHubEvent(
+            `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/merge-hold",
+        async (req, reply) => {
+          const body = z
+            .strictObject({
+              sha: z.string().regex(/^[a-f0-9]{40}$/i),
+              action: z.enum(["hold", "release"]),
+              reason: z.string().trim().min(1).max(300).optional(),
+            })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (
+            !body.success ||
+            !Number.isSafeInteger(number) ||
+            number < 1 ||
+            (body.data.action === "hold" && !body.data.reason)
+          )
+            return reply.code(400).send({ error: "invalid merge-hold request" });
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          const previous = externalMergeHold(store, target.repo.id, number);
+          const actor = flightActor(req);
+          if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
+            return reply
+              .code(403)
+              .send({ error: "Only the controller may change this operator merge hold." });
+          if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
+          setExternalMergeHold(
+            store,
+            target.repo.id,
+            number,
+            body.data.action === "release"
+              ? null
+              : `${actor ? "FLIGHT" : "CAPCOM"}: ${body.data.reason}`,
+          );
+          store.addHubEvent(
+            `${actor ? "FLIGHT" : "Controller"} ${body.data.action} merge hold for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.reason ? `: ${cleanText(body.data.reason, 300)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
       // The operator's acceptance (UAT) of a tested PR the repo's `uat` rule holds: accept lets it merge,
       // send back gives the seat the note and a new round. FLIGHT has no tool for this.
       // Reader: docs/runbook.md#accept-or-send-back-a-pr-at-uat
@@ -4715,8 +4908,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 r.loop?.prNumber === n &&
                 r.loop.parked?.kind === UAT_PARK,
             );
-          if (run === undefined || !run.loop?.uat)
-            return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+          if (run === undefined || !run.loop?.uat) {
+            const target = await externalTarget(repo.id, n, body.data.sha, reply);
+            if (target === null) return reply;
+            const control = externalPrControl(store, repo.id, n, target.sha);
+            if (!control?.uatRequired)
+              return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
+            if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+            setExternalPrControl(store, repo.id, n, target.sha, {
+              ...control,
+              uatAccepted: body.data.action === "accept",
+              note: body.data.note ?? null,
+            });
+            store.addHubEvent(
+              `Operator ${body.data.action === "accept" ? "accepted" : "sent back"} external PR ${repo.id}#${n} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+              now(),
+            );
+            bus.emit("boards");
+            return { ok: true };
+          }
           if (body.data.sha !== run.loop.uat.sha)
             return reply
               .code(409)
@@ -4767,8 +4977,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const result =
           body.data.action === "hold"
-            ? await engine.holdMerge(run.id, "CAPCOM", body.data.reason)
-            : await engine.releaseMergeHold(run.id, "CAPCOM");
+            ? await engine.holdMerge(
+                run.id,
+                flightActor(req) ? "FLIGHT" : "CAPCOM",
+                body.data.reason,
+              )
+            : await engine.releaseMergeHold(run.id, flightActor(req) ? "FLIGHT" : "CAPCOM");
         if (!result.ok)
           return reply.code(409).send({ error: `merge hold not changed: ${result.text}` });
         return { ok: true };

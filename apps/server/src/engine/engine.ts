@@ -2810,11 +2810,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
-          if (
-            (by === "CAPCOM" && opts.action !== "accept") ||
-            (by === "FLIGHT" && flightPowersOf(config, run.repoId) !== "superuser")
-          )
-            return refuse("not-permitted");
+          if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (!pushed) return refuse("head-moved");
@@ -3226,13 +3222,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live()) return false;
         await pass(runId);
         const run = store.run(runId);
-        if (
-          !run?.loop ||
-          run.endedAt !== null ||
-          flightPowersOf(config, run.repoId) !== "superuser" ||
-          flightHeld(run)
-        )
-          return false;
+        if (!run?.loop || run.endedAt !== null || flightHeld(run)) return false;
         const sha = run.loop.awaitingFlight;
         if (
           !sha ||
@@ -3250,13 +3240,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const no = (text: string) => ({ ok: false, text });
       return onChainResult(runId, no("The engine is off."), async () => {
         const run = store.run(runId);
-        if (
-          !live() ||
-          !run?.loop ||
-          run.endedAt !== null ||
-          flightPowersOf(config, run.repoId) !== "superuser" ||
-          flightHeld(run)
-        )
+        if (!live() || !run?.loop || run.endedAt !== null || flightHeld(run))
           return no("Run is held or unavailable.");
         const pr = findPr(run, run.loop);
         const sha = pr?.headSha;

@@ -700,7 +700,7 @@ export const createdText = (ref: string, inBacklog: boolean): string =>
 export const createdDraftText = (ref: string, repoId: string): string =>
   `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
 export const FIELDS_NEED_SUPERUSER =
-  "Not filed: size and priority are set on a superuser repo's merge board only.";
+  "Not filed: size and priority require a writable merge board with checked field options.";
 export const createFieldOptionText = (why: string): string =>
   `Not filed: the board cannot take that size or priority (${why})`;
 export const createdFieldsFailedText = (ref: string): string =>

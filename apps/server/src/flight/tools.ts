@@ -102,6 +102,7 @@ import {
   FLIGHT_CLOSE_SEARCH_LIMIT,
   FLIGHT_DECISION_MAX,
   FLIGHT_FIELD_MAX,
+  FLIGHT_FLOOR_ENFORCING_PATHS,
   FLIGHT_GH_PATH_MAX,
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
@@ -356,6 +357,7 @@ import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
+import { mergeExternalPr } from "./external-merge.ts";
 import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
@@ -447,6 +449,7 @@ export interface FlightToolsDeps {
     method: "GET" | "POST";
     path: string;
     body?: unknown;
+    actor?: { seatId: string; runId: string };
   }) => Promise<{ status: number; body: string }>;
   /** `mc crew_tidy`: the worktree and local-branch housekeeping. */
   tidy?: CrewTidy;
@@ -1921,13 +1924,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ...(priority === undefined ? {} : { priority }),
     };
     const setsFields = size !== undefined || priority !== undefined;
-    if (
-      setsFields &&
-      (repo.flightPowers !== "superuser" ||
-        repo.autonomy !== "merge" ||
-        !deps.board.edit ||
-        !deps.board.checkFields)
-    )
+    if (setsFields && (repo.autonomy !== "merge" || !deps.board.edit || !deps.board.checkFields))
       return fail(FIELDS_NEED_SUPERUSER);
     const bad = labelsProblem(labels);
     if (bad !== null) return fail(createLabelsText(bad));
@@ -3361,7 +3358,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear an awaiting-flight run PR in your lane; the engine merges it. Workflows, repo rules and operator holds remain protected.",
+      "Clear a crew PR for engine merge, or merge an eligible controller PR without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {
@@ -3370,9 +3367,46 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return fail(
             "This PR waits for the operator's acceptance; only the operator can clear it.",
           );
-        if (!run?.loop?.awaitingFlight || !deps.engine?.clearFlight)
+        if (run === null) {
+          const rules = await deps.rules(repo.id);
+          if (rules instanceof Error) return fail("The repository rules could not be read.");
+          const result = await mergeExternalPr({
+            config,
+            repo,
+            store,
+            bus,
+            gh: deps.gh,
+            cwd: crewDir(deps.dbPath),
+            number: a.pr,
+            rules: () => deps.rules(repo.id),
+            now,
+            fetchTicket: deps.fetchTicket,
+          });
+          if (!result.isError)
+            record(now(), {
+              kind: "merge",
+              about: `External PR #${a.pr}`,
+              decision: result.text,
+              basis: a.basis,
+              seatId: ctx.seatId,
+            });
+          return result;
+        }
+        if (!run.loop?.awaitingFlight || !deps.engine?.clearFlight)
           return fail("No awaiting-flight run PR in your lane.");
         const sha = run.loop.awaitingFlight;
+        const protectsFlight = run.loop.touches?.paths.some((path) =>
+          [...FLIGHT_FLOOR_ENFORCING_PATHS, "roles/FLIGHT.md", ".claude/skills/flight-ops/**"].some(
+            (pattern) => globMatches(pattern, path, true),
+          ),
+        );
+        if (
+          protectsFlight &&
+          !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass)
+        )
+          return fail(
+            "An independent controller must record a passing check on this head before FLIGHT clears its runtime or approval rules.",
+          );
         // CLAUDE.md and .github/** are the repo's rules: only a controller's approval for this head lifts them
         const approval = flightFloorBlocked(run.loop)
           ? mergeFloorApproval(store, a.pr, sha, now())
@@ -4000,8 +4034,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
           labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 },
-          size: { enum: [...TICKET_SIZES], description: "Optional; superuser repos only." },
-          priority: { enum: [...PRIORITIES], description: "Optional; superuser repos only." },
+          size: {
+            enum: [...TICKET_SIZES],
+            description: "Optional; requires a writable merge board.",
+          },
+          priority: {
+            enum: [...PRIORITIES],
+            description: "Optional; requires a writable merge board.",
+          },
           basis: BASIS_SCHEMA,
         },
         ["title", "body", "labels", "basis"],

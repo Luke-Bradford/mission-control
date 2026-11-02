@@ -51,14 +51,17 @@ export function createAccessTools(h: PowerHelpers) {
       if (payload !== undefined && payload.length > FLIGHT_OPERATOR_BODY_MAX)
         return fail("Refused: the body is too long.");
       const known = await readKnown(deps, MC_TOOL_NAMES.operator);
-      if (known.some((k) => `${payload ?? ""}${a.path}`.includes(k)))
+      if (known.some((k) => `${payload ?? ""}${a.path}${a.basis}`.includes(k)))
         return fail("Refused: the call contains a secret.");
       const answer = await deps.operator({
         method: a.method,
         path: a.path,
+        actor: { seatId: ctx.seatId, runId: ctx.runId },
         ...(a.body === undefined ? {} : { body: a.body }),
       });
-      const shown = cut(answer.body, FLIGHT_OPERATOR_RESPONSE_MAX);
+      let shown = answer.body;
+      for (const secret of known) if (secret !== "") shown = shown.split(secret).join("[redacted]");
+      shown = cut(shown, FLIGHT_OPERATOR_RESPONSE_MAX);
       if (a.method === "POST") {
         h.record(now(), {
           kind: "operator",

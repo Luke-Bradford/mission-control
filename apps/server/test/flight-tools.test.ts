@@ -4767,10 +4767,10 @@ describe("create_ticket", () => {
       expect(editCalls).toEqual([]);
       expect(decisions()).toEqual([]);
     });
-    it("refuses before any write on a repo that is not superuser", async () => {
+    it("can set validated board fields without a legacy powers tier gate", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
-      expect((await call("create_ticket", C({ size: "S" }))).isError).toBe(true);
-      expect(ghCalls).toEqual([]);
+      expect((await call("create_ticket", C({ size: "S" }))).isError).toBeUndefined();
+      expect(editCalls).toHaveLength(1);
     });
     it("says so when the fields could not be set, and still records the ticket", async () => {
       failEdit = true;
@@ -9607,7 +9607,13 @@ describe("FLIGHT's full access (#1214)", () => {
       live("guido-1", "r-pr");
       const r = await call("operator", { method: "POST", path: "/api/runs/r-pr/resume" });
       expect(r.isError).toBeUndefined();
-      expect(operatorCalls).toEqual([{ method: "POST", path: "/api/runs/r-pr/resume" }]);
+      expect(operatorCalls).toEqual([
+        {
+          method: "POST",
+          path: "/api/runs/r-pr/resume",
+          actor: { seatId: "flight-1", runId: "r-flight" },
+        },
+      ]);
       expect(decisions()).toEqual([
         expect.objectContaining({
           kind: "operator",

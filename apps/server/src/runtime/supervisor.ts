@@ -212,6 +212,7 @@ import {
 import {
   existingCheckout,
   existingDetached,
+  existingFlightCheckout,
   existingReadOnlyCheckout,
   existingScratch,
   findHandoffCheckout,
@@ -870,6 +871,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const transfers = new Map<string, Promise<AccountTransferResult>>();
   const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
+  const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
+  const FLIGHT_RUNTIME_PROFILE = "controller-v1";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
@@ -1634,6 +1637,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const pause = pausedSeat(store, info.seat.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
+    const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
+    const upgradeFlight =
+      fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
     const model =
       resume || keepPrompt
         ? resumeModel(info, run)
@@ -1652,8 +1658,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
     const promptPath = crewPromptPath(deps.dbPath, run.id);
     let system: PromptPiece[] | null = null;
-    if ((!resume && !keepPrompt) || !existsSync(promptPath)) {
-      if (resume) {
+    if ((!resume && !keepPrompt) || !existsSync(promptPath) || upgradeFlight) {
+      if (resume && !upgradeFlight) {
         log(
           `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md, AGENTS.md or reference index`,
         );
@@ -1975,6 +1981,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
     if (privateEnv !== undefined)
       store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
+    if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
@@ -2476,7 +2483,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           deps.flightEnvironment !== undefined &&
           store.getSetting(credentialPolicyKey(run.id)) !==
             credentialRevision(await deps.flightEnvironment());
-        if (credentialsChanged || profileDenies().some((profile) => !denied.includes(profile))) {
+        if (
+          credentialsChanged ||
+          (flight && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE) ||
+          profileDenies().some((profile) => !denied.includes(profile))
+        ) {
           if (!(await endKeeper(dir, keeperEndWait(), log))) return;
           dropGrant(row.seatId, run.id);
           if (
@@ -2564,7 +2575,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const path = row.worktree;
     if (path === null) throw new Error("no worktree recorded");
     return inClone(info.session.checkout, async () => {
-      const checkout = await existingReadOnlyCheckout(info.session.checkout, path, run.branch);
+      const checkout =
+        crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full"
+          ? await existingFlightCheckout(info.session.checkout, path)
+          : await existingReadOnlyCheckout(info.session.checkout, path, run.branch);
       if (runGone(run.id, row.seatId)) throw new Error("run ended during checkout validation");
       if (run.branch !== null) {
         const current = store.run(run.id);

@@ -17,7 +17,7 @@ vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
@@ -458,6 +458,10 @@ describe("startWatch", () => {
     const { runId } = await first.sup.startWatch("flight-1");
     await until(() => expect(userLines()).toHaveLength(1));
     const oldRevision = store.getSetting(`flight-credential-revision:${runId}`);
+    const worktree = store.seatSession("flight-1")?.worktree;
+    if (!worktree) throw new Error("missing watch worktree");
+    git(worktree, "switch", "-c", "feature/kept-work");
+    writeFileSync(join(worktree, "kept-work.txt"), "unfinished work");
     await first.sup.stopAll();
     const next = flightMake(async () => ({
       MC_OPERATOR_TOKEN: "fixture-new-operator-token",
@@ -471,6 +475,8 @@ describe("startWatch", () => {
     expect(store.seatSession("flight-1")?.runId).toBe(runId);
     expect(store.getSetting(`flight-credential-revision:${runId}`)).not.toBe(oldRevision);
     expect(recorded().filter((line) => Array.isArray(line.argv))[1].argv).toContain("--resume");
+    expect(git(worktree, "symbolic-ref", "--short", "HEAD").trim()).toBe("feature/kept-work");
+    expect(readFileSync(join(worktree, "kept-work.txt"), "utf8")).toBe("unfinished work");
   });
 
   it("ending the watch seat's run stops it, so the watch does not restart it", async () => {

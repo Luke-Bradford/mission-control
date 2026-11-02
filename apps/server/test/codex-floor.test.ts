@@ -116,7 +116,7 @@ describe("codexSeatConfig", () => {
       true,
     );
     expect(config).toContain('sandbox_mode = "danger-full-access"');
-    expect(config).toContain('approval_policy = "untrusted"');
+    expect(config).not.toContain("approval_policy");
     expect(config).toContain('web_search = "live"');
     expect(config).not.toContain("default_permissions");
     expect(config).not.toContain("filesystem");
