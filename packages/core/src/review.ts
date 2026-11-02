@@ -645,7 +645,11 @@ export function reviewCheckOf(
     case "failed":
       // the engine re-requests a failed attempt at once; past the cap the run parks review-failed
       return loop?.phase === "parked"
-        ? { kind: "held", by: "hub" }
+        ? {
+            kind: "held",
+            by: "hub",
+            ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+          }
         : { kind: "queued", position: queueAhead + 1 };
     default:
       return null;
