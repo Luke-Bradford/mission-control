@@ -12,7 +12,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("button")).toContain("min-width: 24px");
     expect(rule("button")).toContain("min-height: 24px");
     expect(rule("select")).toContain("min-width: 24px");
-    expect(rule("select")).toContain("min-height: 24px");
+    expect(rule("select")).toContain("min-height: var(--sp-6)");
     expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
@@ -60,7 +60,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
     expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
     expect(rule(String.raw`\.overview-grid`)).toContain(
-      "grid-template-rows: max-content minmax(160px, 1fr) max-content 280px",
+      "grid-template-rows: max-content minmax(160px, 1fr) max-content minmax(280px, max-content)",
     );
     // Crew beside Timeline: 31% for the Timeline, 34% at 1280 and under, 27% at 1920 and over.
     expect(rule(String.raw`\.overview-work`)).toContain(
@@ -154,8 +154,8 @@ describe("Overview layout (hud.css)", () => {
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
     const row = rule(String.raw`#agentsList \.trow`);
-    // the 40px system row, spelled from the spacing tokens (32 + 8)
-    expect(row).toContain("height: calc(var(--sp-6) + var(--sp-2))");
+    // The shared row token switches between compact and comfortable density.
+    expect(row).toContain("height: var(--table-row)");
     expect(row).not.toMatch(/\bheight: \d+px/);
   });
 
