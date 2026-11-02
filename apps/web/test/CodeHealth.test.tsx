@@ -129,7 +129,7 @@ it("fetches only the selected tab and uses keyboard tab navigation", async () =>
   const fetch = setup();
   render(<CodeHealth />);
   await ready();
-  expect(screen.getByText("70.0%")).toBeTruthy();
+  expect(screen.getByText("70%")).toBeTruthy();
   expect(fetch.mock.calls.some(([url]) => url.includes("tab=review"))).toBe(false);
   fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "ArrowRight" });
   await screen.findByText("Recurring correction categories");

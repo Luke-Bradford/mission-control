@@ -1,4 +1,5 @@
 import type { CodeHealthReviewQuality } from "@mc/core";
+import { percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { label } from "./format.ts";
 export function Comparison() {
@@ -24,10 +25,8 @@ export function ReviewRounds({
     <Panel title="Observed review rework" sub="Distinct reviewed PRs · maximum reported round">
       <div className="pb ch-stack">
         <p>
-          <strong className="ch-value">
-            {rate.percent === null ? "—" : `${rate.percent.toFixed(1)}%`}
-          </strong>{" "}
-          {rate.numerator} of {rate.denominator} reviewed PRs reached round 2 or later.
+          <strong className="ch-value">{percent(rate.percent, 1)}</strong> {rate.numerator} of{" "}
+          {rate.denominator} reviewed PRs reached round 2 or later.
         </p>
         {!review.reviewedPrs ? (
           <p>
@@ -114,7 +113,7 @@ export function Categories({
           uncategorised
           {review.uncategorised.percent === null
             ? ""
-            : ` (${review.uncategorised.percent.toFixed(1)}%)`}
+            : ` (${percent(review.uncategorised.percent, 1)})`}
           . Counts do not establish per-file incidence.
         </p>
         {other > 0 && (
