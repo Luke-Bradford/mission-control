@@ -213,7 +213,7 @@ export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original up to ${BRIEF_INPUT_MAX} characters. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. When your recommendation is to wait, add hold { condition } (a date, a ticket merge, a PR's CI passing or failing, another item resolving, or the crew resuming): the item leaves Needs you, and when the condition is met it returns and wakes you to refresh the brief. Texts accept ${BRIEF_INPUT_MAX} characters without truncation.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling until FLIGHT changes the brief or records a wait condition. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original up to ${BRIEF_INPUT_MAX} characters. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. When your recommendation is to wait, add hold { condition } (a date, a ticket merge, a PR's CI passing or failing, another item resolving, or the crew resuming): the item leaves Needs you, and when the condition is met it returns and wakes you to refresh the brief. Texts accept ${BRIEF_INPUT_MAX} characters without truncation.`;
 
 export const FLIGHT_LEDGER_KINDS = ["work", "watch", "commitment", "incoming"] as const;
 export type FlightLedgerKind = (typeof FLIGHT_LEDGER_KINDS)[number];
@@ -583,7 +583,7 @@ export const promoteOffText = (repoId: string): string =>
   `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
-  `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.`;
+  `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
 export const moveHasRunText = (ref: string): string => `Not moved: ${ref} has a run.`;
 export const PROMOTE_NO_GITHUB = "Not moved: GitHub could not be reached.";
 export const missingNeedsText = (ref: string, missing: readonly string[]): string =>
@@ -715,7 +715,7 @@ export const commentTextText = (what: string): string =>
 export const commentFailedText = (issue: number): string =>
   `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
 
-export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. FLIGHT never reopens: if a close was wrong, ask the operator to reopen it. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. Superuser repos only.`;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. Use gh_write with action reopen when a mistaken closure needs to be reversed. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. Superuser repos only.`;
 export const closeComment = (replacement: number): string =>
   `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
 export const CLOSED_PREFIX = "Closed as";

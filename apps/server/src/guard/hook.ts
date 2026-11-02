@@ -92,7 +92,8 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
     throw new Unusable();
   }
   const out: Record<string, unknown> = { hook_event_name: event, tool_name: tool, tool_use_id: id };
-  if (event === "PreToolUse") {
+  if (typeof e.cwd === "string") out.cwd = e.cwd;
+  if (event === "PreToolUse" || tool === "Bash") {
     // a subagent's call carries its id: what it reads is in its context, not the seat's
     if (e.agent_id !== undefined) {
       if (typeof e.agent_id !== "string") throw new Unusable();
@@ -122,7 +123,31 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
       if (typeof n !== "number" || !Number.isFinite(n)) throw new Unusable();
       input[k] = n;
     }
+    if (
+      event === "PreToolUse" &&
+      typeof raw.file_path === "string" &&
+      /(?:^|\/)CLAUDE\.md$/.test(raw.file_path)
+    ) {
+      for (const key of ["content", "old_string", "new_string"]) {
+        if (typeof raw[key] === "string") input[key] = raw[key];
+      }
+    }
     out.tool_input = input;
+    if (event !== "PreToolUse" && typeof input.command === "string") {
+      const exit =
+        event === "PostToolUseFailure" && typeof e.error === "string"
+          ? /^Exit code (\d+)\b/.exec(e.error)?.[1]
+          : undefined;
+      const response = isObject(e.tool_response) ? e.tool_response : {};
+      out.exit_code =
+        exit !== undefined
+          ? Number(exit)
+          : event === "PostToolUse" &&
+              input.run_in_background !== true &&
+              response.interrupted !== true
+            ? 0
+            : null;
+    }
   }
   return { event: event as GuardHookEvent, body: JSON.stringify(out) };
 }

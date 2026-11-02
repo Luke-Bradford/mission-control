@@ -27,7 +27,27 @@ export function codexSeatConfig(
   mode: CrewMode,
   mcpUrl: string,
   tmpDir: string,
+  fullAccess = false,
 ): string {
+  if (fullAccess)
+    return [
+      `approvals_reviewer = "user"`,
+      `approval_policy = "untrusted"`,
+      `sandbox_mode = "danger-full-access"`,
+      `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
+      `web_search = "live"`,
+      "[features]",
+      "remote_plugin = false",
+      "unified_exec = false",
+      "shell_snapshot = false",
+      "shell_zsh_fork = false",
+      "[shell_environment_policy]",
+      `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
+      `[mcp_servers.${MC_MCP_SERVER}]`,
+      `url = ${tomlString(mcpUrl)}`,
+      `bearer_token_env_var = ${tomlString(CODEX_SEAT_TOKEN_ENV)}`,
+      "",
+    ].join("\n");
   if (i.pnpmStoreDir === undefined || !isAbsolute(i.pnpmStoreDir))
     throw new Error("codex seat config: pnpmStoreDir must be absolute");
   const denied = sandboxReadDenies(i);

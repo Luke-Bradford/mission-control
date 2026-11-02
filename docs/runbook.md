@@ -1271,7 +1271,7 @@ hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controll
 | `promote` | Reads the live card, and refuses when it cannot be read |
 | `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
 
-Three further tools give FLIGHT the controller's reach without a shell (#1214). Each landed call is a
+Three further tools give FLIGHT the controller's routine actions (#1214). Each landed call is a
 FLIGHT decision on the Audit ledger with its route or verb, body and basis, and each is refused during Away:
 
 | Tool | What it does |
@@ -1282,30 +1282,39 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 
 ### FLIGHT's full access
 
-FLIGHT's watch run starts with the `flight-full` profile (`crewProfileOf` in `packages/core/src/runtime.ts`):
-every built-in tool allowed unscoped and named with `--tools` (the CLI's `--restricted` removes Bash and WebFetch otherwise), with `--add-dir` for the crew clone so its file tools reach it (shell, `git`, `gh` as the operator, `curl`, the web, subagents) and no
-denied-tool list. Every other seat keeps its sandbox and denies unchanged. Its shell is sandboxed around one
-thing only, and that is the barrier that keeps the operator token out of FLIGHT's hands: the hub's data folder
-(the token file, the DB, every transcript) and `~/.config/mission-control` are denied to read, the data folder, the hub's own
-checkout (with its `node_modules`: the hub runs that code, holding the token, on its next start) and
-`~/Library/LaunchAgents` and the git, npm and pnpm config in home (`.gitconfig`, `.config/git`, `.npmrc`, `.config/pnpm`: the hub's own git and pnpm read them when it updates itself) are denied to write, the rest of home and temp are writable, and the only hosts it reaches are GitHub (`git` and `gh`), so the hub's
-loopback address, and with it the HUD's token route, is out of reach from its shell. `mc operator` is its way to the
-hub. The hub also refuses any request that carries a seat's run token on the token's bootstrap route, `flight/approvals`,
-`flight/runaway/lift` and the attention routes (the operator token is a second, separate key). The guard hook still
-runs before each of FLIGHT's calls and holds it to the repo's rules only, naming the rule it refused. Its text checks
-on the token, approvals and breaker names (below) are a backstop for the sandbox, not the barrier; the controller
-checks the sandbox live after an Update (`git push`, `gh` and the keychain must still work from inside it).
+FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted`, a Bash
+sandbox or per-tool allow-lists; its guard hooks stay installed. Codex requests and verifies a
+`dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
+existing filesystem, network and tool restrictions.
 
-- `git push` to `main`, with `--force`, `-f`, `--mirror`, `--all` or a `+refspec`, or without an explicit branch (`git push`, `git push origin` and `git push origin HEAD` are refused, since FLIGHT's checkout may be on `main`; `git push origin <branch>` is allowed; a branch built by `$(...)`, backticks or `@{...}` is refused too); `git commit` (FLIGHT's checkouts are not for commits);
-- `gh pr merge` and `PUT .../merge`, and any other way to the same end: a `gh api` write that moves or deletes `main`, `merges`, commits `CLAUDE.md` or `.github/**` through `contents`, or renames `main`; a `gh api graphql` call that reads its query from a file or `--input`, or names `createCommitOnBranch`, `updateRef`, `deleteRef`, `mergeBranch`, `mergePullRequest` or `enablePullRequestAutoMerge`; a git alias, a `remote.*.push` or `.mirror` setting, or a git subcommand the guard does not know (merging goes through `merge_pr`, which keeps hard-rule clearance and the engine's gates);
-- writes to `.github/**` or `CLAUDE.md` by Edit, Write, a redirect, `tee`, `cp`, `mv`, `rm` or `sed -i` (best effort for a shell; the whole `CLAUDE.md` file is held, not only its Mission Control block);
-- `gh api` with a writing method on branch protection, rulesets, repo settings, collaborators, hooks, keys, environments, pages or Actions secrets and variables;
-- reading or writing the operator token file (or a glob of it), calling the HUD's `operator/bootstrap` route, sending the `x-mc-operator` header, or naming `flight/approvals` (each parsed word is read after the shell's quotes are removed, `%xx` escapes are decoded and `./`, `x/../` and `//` are folded, so `flight/%61pprovals`, `operator-to''ken` and `flight/x/../approvals` are read as what they are; a glob that could expand to the token file, or any glob in the hub's data folder, is refused), the `flight-runaway` note key, the `flight.approvals` setting or the `flight.runaway` setting: approvals and lifting the breaker are a controller's acts; `sqlite3` runs only with `-readonly` and no writing dot-command, since SQL text can always be reworded;
-- `gh issue edit|close|reopen|delete|transfer|lock|pin` on an `always_ask` ticket (every number is read, with flags before or after it; judged on the board the hub last read; refused when a number or the repo's rules cannot be read), and any `gh project item-*` write or `gh api graphql` mutation (use `set_fields` or `edit_card`). A `gh api` write to `repos/<o>/<r>/issues/<n>...` counts as a ticket edit, and a `-R o/r` or `--repo o/r` before the verb is looked through.
+FLIGHT receives `GH_TOKEN`, `MC_HUB` and `MC_OPERATOR_TOKEN` in its process environment.
+Credential values pass through the keeper's inherited environment, never its spec file. The keeper
+redacts them before saving or replaying stdout and stderr. A credential revision hash makes a
+surviving FLIGHT run resume with fresh credentials after a hub restart; other keepers still attach
+normally. The `mc` tools remain convenient shortcuts, with role authentication, repo/lane checks,
+merge gates and recorded operator holds. Per-repo power tiers do not withhold FLIGHT shortcuts.
 
-`gh_write` refuses an `always_ask` or other-lane ticket, and refuses when the card cannot be read live. Every FLIGHT shell command that can change something (anything but a plain read) is recorded as
-a `shell` decision, with credentials redacted. The runaway breaker counts `operator` (POST), `gh_write` and `crew_tidy` calls like any other FLIGHT write; a shell command also counts as one when it redirects or tees to a file, pushes, commits, merges, rebases, resets, tags, deletes a branch or removes a worktree, runs a `gh` verb that writes (also behind `-R o/r`), makes a writing `gh api` call, or runs `curl` with a method, body or upload; reads such as `git fetch`, `find` or `sqlite3 -readonly` do not count, though a command that can change anything is still recorded as a `shell` decision. A loop of the same counted command trips it, and while the breaker is tripped the guard refuses every FLIGHT shell write until the operator lifts it. FLIGHT's git runs with the operator's git config and credential helper (the seats' `GIT_CONFIG_GLOBAL=/dev/null` is left out for its run; hooks and fsmonitor stay off), so `git push origin <branch>` can authenticate. The
-FLIGHT's git runs with the operator's git config and credential helper (the seats' `GIT_CONFIG_GLOBAL=/dev/null` is left out of its run; hooks and fsmonitor stay off), so `git push origin <branch>` can authenticate. The operator token and `GH_TOKEN` are not added to FLIGHT's environment: `operator` and the operator's own `gh` login are its routes.
+The guard checks repository floors: no history writes on main, no force-push, no direct PR merge
+that bypasses `merge_pr`, protected GitHub settings, `.github/**`, the Mission Control section in
+CLAUDE.md, and edits of known `always_ask` tickets. It reads the actual checkout branch for history
+writes, permits ordinary CLAUDE.md edits when that section stays identical, and accepts a matching
+recorded controller approval for a rule override. Approval grants and breaker lifts belong to the
+controller. Full machine authority means these hooks are guardrails, not an operating-system
+security boundary against arbitrary code; the operator accepted that risk in #1214.
+
+Shell writes are recorded after execution with command, cwd and exit code. A missing failure code
+or background launch is recorded as unknown, never as a successful completion. Duplicate completion
+notifications do not duplicate the audit. Secrets are redacted. Claude uses PostToolUse and
+PostToolUseFailure; Codex uses command completion facts. Counted writes feed the existing runaway
+breaker; a tripped breaker holds further writes until a controller lifts it.
+
+FLIGHT may move unstarted Ready or Refinement work back to Backlog, hold an item for its named
+condition, reverse a mistaken closure with `gh_write`, and retain its own brief without an arbitrary
+one-day expiry. None of that lifts an operator instruction or supplies a missing approval.
+
+The controller still checks the widened runtime before merge. After Update, verify the real FLIGHT
+provider can perform the authorised actions and is refused a push to main. Keep #1214 open through
+its one-day observation of cleared stalls and counted manual controller actions.
 
 ### FLIGHT approvals
 

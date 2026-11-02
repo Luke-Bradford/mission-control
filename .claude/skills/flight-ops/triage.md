@@ -22,7 +22,7 @@ Read this when `items` holds anything, or when you pass an item up or dismiss on
 - For a decision with no item of its own, ask with an `@CAPCOM` question in your reply: it appears immediately.
 - Never keep an approval or floor decision from the operator.
 
-## Dismissing resolved items (superuser repos)
+## Dismissing resolved items
 
 - Use `mc dismiss_item { key, basis }` to settle an attention item whose subject is resolved. Do it in the same wake you resolve it, so Needs you holds only live decisions.
 - Besides what its description protects, it refuses:

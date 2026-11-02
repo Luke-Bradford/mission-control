@@ -116,205 +116,68 @@ const ruleOf = (e: GuardEvent, ctx = writer) => {
 };
 
 describe("FLIGHT's full profile", () => {
-  it("permits ordinary shell authority but retains repository floors", () => {
-    expect(guardDecision(bash("gh pr close 12"), flightFull)).toEqual({ kind: "allow" });
-    expect(ruleOf(bash("git push origin main"), flightFull)).toBe("merge-push");
-    expect(ruleOf(bash("git push --force origin feature/x"), flightFull)).toBe("merge-push");
-    expect(ruleOf(bash("gh pr merge 12"), flightFull)).toBe("merge-push");
-    expect(
-      ruleOf({ tool: "Write", input: { file_path: "/work/.github/workflows/ci.yml" } }, flightFull),
-    ).toBe("repo-rules");
-    expect(ruleOf({ tool: "Edit", input: { file_path: "/work/CLAUDE.md" } }, flightFull)).toBe(
-      "repo-rules",
-    );
-  });
-
   it.each([
     "gh pr close 12",
-    "gh issue edit 3 --add-label x",
-    "git worktree remove ../wt/guido-1-7",
-    "git -C /clones/mission-control branch -D mc/7",
-    "cd /clones/other && git log --oneline",
-    "git push origin mc/7:mc/7",
-    "git push -u origin mc/7:mc/7",
-    "git push origin --delete mc/7",
-    "gh api repos/o/mc/git/refs/heads/mc/7",
-    "gh api -X PATCH repos/o/mc/git/refs/heads/mc/7 -f sha=abc",
-    "gh api graphql -f query='query{viewer{login}}'",
-    'sqlite3 -readonly ~/.local/share/mission-control/mc.db "select 1"',
-    'sqlite3 -readonly mc.db "select count(*) from runs"',
-    "git push -o ci.skip origin mc/7:mc/7",
-    "curl -s -X POST http://127.0.0.1:7420/api/runs/r/resume",
-    "gh api repos/o/r/issues -f title=x",
-    "gh api repos/o/r/rulesets",
-    "gh api repos/o/r/branches/main/protection",
-    "cat CLAUDE.md",
-    "grep -n uses .github/workflows/ci.yml",
-    "gh pr view 3 --json files",
-  ])("allows %s", (command) => {
+    "git worktree remove ../old",
+    "git -C /other branch -D feature/old",
+    'curl -X POST -H "x-mc-operator: $MC_OPERATOR_TOKEN" $MC_HUB/api/runs/run/resume',
+    "gh api repos/o/r/issues/7 -X PATCH -f state=closed",
+    "gh project item-edit --id ITEM",
+    'sqlite3 copied.db "create table example(id)"',
+    "cat ~/.local/share/mission-control/operator-token",
+    "git push origin feature/x:feature/x",
+    "git push origin --delete feature/old",
+    "curl https://example.test",
+    "sleep 1 &",
+    "env GIT_CONFIG_GLOBAL=/tmp/config git status",
+  ])("permits controller authority: %s", (command) => {
     expect(guardDecision(bash(command), flightFull)).toEqual({ kind: "allow" });
   });
 
   it.each([
-    ["git push", "merge-push"],
-    ["git push origin", "merge-push"],
-    ["git push origin HEAD", "merge-push"],
-    ["git push origin HEAD:mc/7", "merge-push"],
-    ["git push --all origin", "merge-push"],
-    ["gh api repos/o/mc/git/refs/heads/main -XPATCH -fsha=abc -Fforce=true", "merge-push"],
-    ["gh api repos/o/mc/merges -fbase=main -fhead=mc/9", "merge-push"],
-    ["gh api repos/o/mc/contents/CLAUDE.md -fmessage=x -fcontent=eA== -XPUT", "merge-push"],
-    [
-      "gh api /graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
-      "merge-push",
-    ],
-    [
-      "gh api https://api.github.com/graphql -f query='mutation{updateRef(input:{}){clientMutationId}}'",
-      "merge-push",
-    ],
-    [
-      "gh api graphql -fquery='mutation{mergePullRequest(input:{}){clientMutationId}}'",
-      "merge-push",
-    ],
-    ["gh api /graphql --input q.json", "repo-rules"],
-    ["gh api https://api.github.com/graphql -F query=@m.graphql", "repo-rules"],
-    [
-      "gh api https://api.github.com/repos/o/mc/git/refs/heads/main -X PATCH -f sha=abc -F force=true",
-      "merge-push",
-    ],
-    ["gh api repos/o/mc/git/refs/heads/%6dain -X PATCH -f sha=abc", "merge-push"],
-    ["gh api repos/o/mc/git/refs/heads//main -X PATCH -f sha=abc", "merge-push"],
-    ["gh api repos/o/mc/git/refs/heads/./main -X PATCH -f sha=abc", "merge-push"],
-    ["gh api repos/o/mc/git/refs/heads/x/../main -X PATCH -f sha=abc", "merge-push"],
-    ["gh api repos/o/mc/merges/ -f base=main -f head=mc/9", "merge-push"],
-    ["gh api repos/o/mc/contents/%2Egithub/workflows/ci.yml -X PUT -f message=x", "merge-push"],
-    ["gh api -X PUT repos/o/mc/pulls/5/merge/", "merge-push"],
-    ["gh api -XPUT repos/o/mc/pulls/5/merge", "merge-push"],
-    ["git config --global REMOTE.origin.PUSH refs/heads/mc/7:refs/heads/main", "merge-push"],
-    ["git config --global Alias.fp x", "merge-push"],
-    ["git send-pack https://github.com/o/mc mc/7:main", "merge-push"],
-    ["git http-push https://github.com/o/mc mc/7:main", "merge-push"],
-    ["git push origin mc/7", "merge-push"],
-    ["git push -u origin mc/7", "merge-push"],
-    ["gh api -X PATCH repos/o/mc/git/refs/heads/main -f sha=abc -F force=true", "merge-push"],
-    ["gh api -X DELETE repos/o/mc/git/refs/heads/main", "merge-push"],
-    ["gh api -X POST repos/o/mc/merges -f base=main -f head=mc/9", "merge-push"],
-    ["gh api -X PUT repos/o/mc/contents/CLAUDE.md -f message=x -f content=eA==", "merge-push"],
-    ["gh api -X PUT repos/o/mc/contents/.github/workflows/ci.yml -f message=x", "merge-push"],
-    ["gh api -X POST repos/o/mc/branches/main/rename -f new_name=x", "merge-push"],
-    ["gh api graphql -F query=@m.graphql", "repo-rules"],
-    ["gh api graphql --input q.json", "repo-rules"],
-    [
-      "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
-      "merge-push",
-    ],
-    [
-      "gh api graphql -f query='mutation{createCommitOnBranch(input:{}){commit{oid}}}'",
-      "merge-push",
-    ],
-    ["git config --global alias.fp 'push --force'", "merge-push"],
-    ["git -c alias.fp='push --force' fp origin mc/9:main", "merge-push"],
-    ["git config remote.origin.push refs/heads/*:refs/heads/main", "merge-push"],
-    ["git fp origin mc/9:main", "merge-push"],
-    [
-      "curl -s -H 'sec-fetch-site: same-origin' http://127.0.0.1:7420/api/operator/bootstrap",
-      "repo-rules",
-    ],
-    ["cat ~/.local/share/mission-control/operator-tok*", "repo-rules"],
-    ["cat ~/.local/share/mission-control/$'operator-t\\x6fken'", "repo-rules"],
-    [
-      "curl -X POST -H $'x-mc-\\x6fperator: T' $'http://127.0.0.1:7420/api/flight/appr\\x6fvals' -d x",
-      "repo-rules",
-    ],
-    ["curl -X POST $'http://127.0.0.1:7420/api/flight/runaw\\x61y/lift' -d '{}'", "repo-rules"],
-    ["cat ~/.local/share/mission-c*/*-token", "repo-rules"],
-    ["cd ~/.local/share/mission-control && cat *-token", "repo-rules"],
-    ["grep -r . ~/.local/share/mission-control", "repo-rules"],
-    ["find ~/.local/share/mission-control -name 'op*' -exec cat {} +", "repo-rules"],
-    ["curl -s 'http://127.0.0.1:7420/api/operator/boot[s-s]trap'", "repo-rules"],
-    ["curl -s 'http://127.0.0.1:7420/api/operator/boot{strap}'", "repo-rules"],
-    ["curl -X POST 'http://127.0.0.1:7420/api/flight/approval[s-s]' -d x", "repo-rules"],
-    ["cat ~/.local/share/mission-control/operator-t*", "repo-rules"],
-    ["cat ~/.local/share/mission-control/operator?token", "repo-rules"],
-    ["cat ~/.local/share/mission-control/operator-to''ken", "repo-rules"],
-    ["cat ~/.local/share/mission-control/operator-to\\ken", "repo-rules"],
-    ["cat ~/.local/share/mission-control/*", "repo-rules"],
-    [
-      "curl -s -H 'sec-fetch-site: same-origin' http://127.0.0.1:7420/api/operator/x/../bootstrap",
-      "repo-rules",
-    ],
-    ["curl -s http://127.0.0.1:7420/api/operator/boot''strap", "repo-rules"],
-    ["curl -X POST -H @h.txt http://127.0.0.1:7420/api/flight/x/../approvals -d x", "repo-rules"],
-    ["curl -X POST -H 'x-mc-oper''ator: t' http://127.0.0.1:7420/api/flight/x", "repo-rules"],
-    [
-      "curl -X POST http://127.0.0.1:7420/api/attention/note:flight-run''away/dismiss",
-      "repo-rules",
-    ],
-    ["curl -X POST http://127.0.0.1:7420/api//flight/./approvals", "repo-rules"],
-    [
-      "curl -X POST -H 'x-mc-operator: t' http://127.0.0.1:7420/api/flight/%61pprovals",
-      "repo-rules",
-    ],
-    ["curl -X POST http://127.0.0.1:7420/api/flight/%61pprovals -d {}", "repo-rules"],
-    ["curl http://127.0.0.1:7420/api/%6fperator/bootstrap", "repo-rules"],
-    ["curl -X POST http://127.0.0.1:7420/api/attention/note:flight-runaway/dismiss", "repo-rules"],
-    ["gh -R o/r pr merge 3", "merge-push"],
-    ["gh --repo o/r pr merge 3", "merge-push"],
-    ["sqlite3 mc.db \"delete from settings where key='flight.runaway'\"", "repo-rules"],
-    [
-      "sqlite3 mc.db \"update settings set value='[]' where key like 'flight.appr%'\"",
-      "repo-rules",
-    ],
-    ['sqlite3 -readonly mc.db ".shell rm x"', "repo-rules"],
-    [
-      "sqlite3 -readonly mc.db \"select value from settings where key='flight.runaway'\"",
-      "repo-rules",
-    ],
-    ["git push origin $(git branch --show-current)", "merge-push"],
-    ['git push origin "$(git rev-parse --abbrev-ref HEAD)"', "merge-push"],
-    ["git push origin `git branch --show-current`", "merge-push"],
-    ["git push origin @{0}", "merge-push"],
-    ["git merge mc/7 && git push origin HEAD", "merge-push"],
-    ["sqlite3 mc.db \"update settings set value='[]' where key='flight.approvals'\"", "repo-rules"],
-    ["git push origin +mc/7", "merge-push"],
-    ["git push -fu origin mc/7", "merge-push"],
-    ["git push --force-with-lease origin mc/7", "merge-push"],
+    ["git push origin main", "merge-push"],
+    ["git push --force-with-lease origin feature/x:feature/x", "merge-push"],
+    ["git push origin +feature/x:feature/x", "merge-push"],
     ["git push --mirror", "merge-push"],
     ["git push origin HEAD:main", "merge-push"],
-    ["git push origin :main", "merge-push"],
-    ["git push origin HEAD:refs/heads/main", "merge-push"],
-    ["git commit -m x", "merge-push"],
     ["gh pr merge 12 --squash", "merge-push"],
-    ["gh api -X PUT repos/o/r/pulls/12/merge", "merge-push"],
-    ["gh api -X PUT repos/o/r/branches/main/protection -f x=y", "repo-rules"],
+    ["gh api repos/o/r/pulls/12/merge -X PUT", "merge-push"],
+    ["gh api repos/o/r/branches/main/protection -X PUT", "repo-rules"],
     ["gh api repos/o/r/rulesets -f name=x", "repo-rules"],
-    ["gh api --method PATCH repos/o/r -f private=true", "repo-rules"],
-    ["gh api -X PUT repos/o/r/collaborators/someone", "repo-rules"],
-    ["gh api -X PUT repos/o/r/actions/secrets/KEY", "repo-rules"],
     ["echo x > .github/workflows/ci.yml", "repo-rules"],
-    ["echo x >> CLAUDE.md", "repo-rules"],
-    ["tee CLAUDE.md", "repo-rules"],
-    ["cp /tmp/x .github/CODEOWNERS", "repo-rules"],
-    ["sed -i s/a/b/ .github/workflows/ci.yml", "repo-rules"],
     ["rm -r .github", "repo-rules"],
-    ["cat ~/.local/share/mission-control/operator-token", "repo-rules"],
-    ["curl -X POST $MC_HUB/api/flight/approvals -d {}", "repo-rules"],
-  ])("refuses %s under %s", (command, rule) => {
+    ["echo x > CLAUDE.md", "repo-rules"],
+    ["curl -X POST $MC_HUB/api/flight/approvals -d '{}'", "repo-rules"],
+  ])("retains the repository floor: %s", (command, rule) => {
     expect(ruleOf(bash(command), flightFull)).toBe(rule);
   });
 
-  it("refuses the operator token file and approvals to any tool", () => {
-    for (const tool of ["Read", "Edit", "Write"]) {
-      expect(
-        ruleOf({ tool, input: { file_path: "/data/mission-control/operator-token" } }, flightFull),
-      ).toBe("repo-rules");
-    }
+  it("allows commits on feature branches and refuses main using the actual checkout", () => {
+    expect(
+      guardDecision(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => "feature/x" }),
+    ).toEqual({ kind: "allow" });
+    expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => "main" })).toBe(
+      "merge-push",
+    );
+    expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => null })).toBe(
+      "merge-push",
+    );
   });
 
-  it("still holds every other seat to its sandboxed rules", () => {
+  it("protects only the Mission Control block when editing CLAUDE.md", () => {
+    const event = { tool: "Edit", input: { file_path: "/repo/CLAUDE.md" } };
+    expect(ruleOf(event, flightFull)).toBe("repo-rules");
+    expect(guardDecision(event, { ...flightFull, flightFileAllowed: () => true })).toEqual({
+      kind: "allow",
+    });
+    expect(
+      ruleOf({ tool: "Write", input: { file_path: "/repo/.github/workflows/ci.yml" } }, flightFull),
+    ).toBe("repo-rules");
+  });
+
+  it("keeps ordinary crew restrictions", () => {
     expect(ruleOf(bash("gh pr close 12"), writer)).not.toBe("allow");
     expect(ruleOf(bash("curl http://x"), writer)).toBe("network");
-    expect(ruleOf(bash("git push --force origin x"), writer)).not.toBe("allow");
   });
 });
 

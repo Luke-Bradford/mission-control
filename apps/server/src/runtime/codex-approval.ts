@@ -4,7 +4,9 @@ import {
   type CrewMode,
   codexCommand,
   GUARD_RULES,
+  type GuardEvent,
   type GuardRule,
+  type GuardVerdict,
   isObj,
   LOCK_WAIT_MS,
   lockBusyText,
@@ -57,6 +59,8 @@ export function createCodexApprover(i: {
   seatId: string;
   runId: string;
   mode: CrewMode;
+  fullAccess?: boolean;
+  floor?: (event: GuardEvent, verdict: GuardVerdict) => Promise<GuardVerdict>;
   area: readonly string[];
   /** Files outside the area that FLIGHT approved for this run alone. */
   granted?: readonly string[];
@@ -96,7 +100,8 @@ export function createCodexApprover(i: {
       const item = typeof key === "string" ? key : null;
       const again = item !== null && commandItems.has(item);
       if (item !== null) commandItems.add(item);
-      if (again || params.reason != null) return refuse("codex-allowlist", CODEX_ESCALATION_TEXT);
+      if (!i.fullAccess && (again || params.reason != null))
+        return refuse("codex-allowlist", CODEX_ESCALATION_TEXT);
     }
     const repo = i.config.repos.find((r) => r.id === i.repoId);
     const seatGrants =
@@ -118,6 +123,7 @@ export function createCodexApprover(i: {
         (schema.required != null &&
           (!Array.isArray(schema.required) || schema.required.length !== 0)) ||
         !(
+          i.fullAccess ||
           grants.base.some((tool) => tool === call.tool) ||
           (grants.grantable.some((tool) => tool === call.tool) && seatGrants.includes(call.tool)) ||
           (i.runGrants !== undefined &&
@@ -134,13 +140,29 @@ export function createCodexApprover(i: {
         i.superuserTools,
         seatGrants,
         i.cwd,
+        undefined,
+        i.fullAccess,
       );
       return verdict.kind === "deny" ? refuse(verdict.rule, verdict.text) : "accept";
     }
-    const events = codexApproval(req, paths, { cwd: i.cwd });
+    const events: GuardEvent[] | null = i.fullAccess
+      ? req.method === "item/fileChange/requestApproval" && paths?.length
+        ? paths.map((file_path) => ({ tool: "Edit", input: { file_path } }))
+        : req.method === CODEX_COMMAND_APPROVAL &&
+            typeof params.command === "string" &&
+            typeof params.cwd === "string"
+          ? [
+              {
+                tool: "Bash",
+                input: { command: codexCommand(params.command, null) ?? params.command },
+              },
+            ]
+          : null
+      : codexApproval(req, paths, { cwd: i.cwd });
     if (!repo || events === null) return refuse("codex-allowlist");
     for (const event of events) {
       if (
+        !i.fullAccess &&
         event.tool === "Edit" &&
         !codexEditAllowed(
           event.input.file_path ?? "",
@@ -162,7 +184,9 @@ export function createCodexApprover(i: {
         seatGrants,
         i.cwd,
         typeof params.cwd === "string" ? params.cwd : undefined,
+        i.fullAccess,
       );
+      if (i.fullAccess && i.floor) verdict = await i.floor(event, verdict);
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);

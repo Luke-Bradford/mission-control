@@ -40,7 +40,6 @@ import {
   FLIGHT_CLOSE_SEARCH_LIMIT,
   FLIGHT_DECISION_MAX,
   FLIGHT_GH_READ_MAX,
-  FLIGHT_HANDLING_MAX_MS,
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
@@ -148,7 +147,7 @@ import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flig
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
-import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
@@ -818,14 +817,14 @@ describe("resume_seat", () => {
     expect(resumeCalls).toEqual([]);
   });
 
-  it("needs a superuser repo", async () => {
+  it("uses controller authority on a standard repo too", async () => {
     live("guido-1", "r-guido");
     store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
 
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
-    expect(result).toEqual({ text: needsSuperuserText("o/mc"), isError: true });
-    expect(resumeCalls).toEqual([]);
+    expect(result.text).toContain("run is not running; put back");
+    expect(resumeCalls).toEqual(["r-guido"]);
   });
 
   it("reports a failed resume that ended its run", async () => {
@@ -1249,18 +1248,14 @@ describe("tool list", () => {
 });
 
 describe("screenshot_hud", () => {
-  it("refuses standard powers before rendering and rechecks a live downgrade", async () => {
-    const refusal = { text: needsSuperuserText("o/mc"), isError: true };
-    expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
-    expect(screenshotCalls).toEqual([]);
-
-    need(cfg.repos[0]).flightPowers = "superuser";
-    expect(await call("screenshot_hud", { page: "/map" })).toMatchObject({
-      image: { mimeType: "image/png", data: Buffer.from("png").toString("base64") },
-    });
-    need(cfg.repos[0]).flightPowers = "standard";
-    expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
-    expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  it("renders with controller authority regardless of the legacy powers tier", async () => {
+    for (const powers of ["standard", "superuser", "standard"] as const) {
+      need(cfg.repos[0]).flightPowers = powers;
+      expect(await call("screenshot_hud", { page: "/map" })).toMatchObject({
+        image: { mimeType: "image/png" },
+      });
+    }
+    expect(screenshotCalls).toHaveLength(3);
   });
 
   it("stores the screenshot and cites an opaque reference in the answer", async () => {
@@ -1282,21 +1277,22 @@ describe("screenshot_hud", () => {
     expect(result).toMatchObject({ image: { mimeType: "image/png" } });
   });
 
-  it("applies a powers downgrade made while the call waits in the render queue", async () => {
-    need(cfg.repos[0]).flightPowers = "superuser";
+  it("keeps queued renders when the legacy powers tier changes", async () => {
     let release: () => void = () => {};
-    screenshotImpl = () =>
-      new Promise<Buffer>((resolve) => {
-        release = () => resolve(Buffer.from("png"));
-      });
+    screenshotImpl = (url) =>
+      url.endsWith("/map")
+        ? new Promise<Buffer>((resolve) => {
+            release = () => resolve(Buffer.from("png"));
+          })
+        : Promise.resolve(Buffer.from("png"));
     const first = call("screenshot_hud", { page: "/map" });
     await vi.waitFor(() => expect(screenshotCalls).toHaveLength(1));
     const second = call("screenshot_hud", { page: "/board" });
-    need(cfg.repos[0]).flightPowers = "standard"; // while the second is queued behind the first
+    need(cfg.repos[0]).flightPowers = "standard";
     release();
     await first;
-    expect(await second).toEqual({ text: needsSuperuserText("o/mc"), isError: true });
-    expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+    expect(await second).toMatchObject({ image: { mimeType: "image/png" } });
+    expect(screenshotCalls).toHaveLength(2);
   });
 
   it("runs a queued render after the one before it failed", async () => {
@@ -1358,31 +1354,6 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
-  });
-});
-
-describe("requirePowers", () => {
-  it.each(["standard", "superuser"] as const)("allows standard powers on a %s repo", (powers) => {
-    const cfg = {
-      repos: [{ id: "r", flightPowers: powers }],
-    } as CcConfig;
-    expect(requirePowers(cfg, "r", "standard")).toBeNull();
-  });
-
-  it("refuses a standard repo, passes a superuser one, and reads the config each call", () => {
-    const cfg = {
-      repos: [{ id: "r", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
-    } as unknown as CcConfig;
-    const refusal = { text: needsSuperuserText("o/r"), isError: true };
-    expect(requirePowers(cfg, "r", "superuser")).toEqual(refusal);
-    for (const r of cfg.repos) r.flightPowers = "superuser";
-    expect(requirePowers(cfg, "r", "superuser")).toBeNull();
-    for (const r of cfg.repos) r.flightPowers = "standard";
-    expect(requirePowers(cfg, "r", "superuser")).toEqual(refusal);
-    expect(requirePowers(cfg, "nobody", "superuser")).toEqual({
-      text: needsSuperuserText("nobody"),
-      isError: true,
-    });
   });
 });
 
@@ -1960,10 +1931,10 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("leaves an operator stop alone on a standard repo", async () => {
+  it("can apply an authorised controller start on a standard repo", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
-    expect(await start()).toHaveProperty("isError", true);
-    expect(startCalls).toEqual([]);
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
 
   it("starts the seat with the loop when the engine is on", async () => {
@@ -2905,11 +2876,11 @@ describe("end_run", () => {
     expect(endCalls).toEqual(["guido-1"]);
   });
 
-  it("does not end a working run on a standard repo", async () => {
+  it("can end an unheld working run on a standard repo", async () => {
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
-    expect(await call("end_run", E())).toEqual(refused(needsSuperuserText("o/mc")));
-    expect(endCalls).toEqual([]);
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(endCalls).toEqual(["guido-1"]);
   });
 
   it("ends a stalled run on a standard repo: its seat running with no output for ten minutes", async () => {
@@ -2924,11 +2895,11 @@ describe("end_run", () => {
     expect(endCalls).toEqual(["guido-1"]);
     // no interrupt: a stalled seat may have no process, and an interrupt would try to resume it
     expect(interruptCalls).toEqual([]);
-    // a seat that wrote just now is working, not stalled: a controller power the standard repo lacks
+    // a seat that wrote just now is working, not stalled: still within controller authority
     live("inco-1", "r-i", { ticket: "mc#8" });
     store.setRunLoop("r-i", NEW_LOOP);
     store.setSeatSession({ ...row("inco-1", "r-i"), state: "running", updatedAt: NOW });
-    expect((await call("end_run", E({ runId: "r-i" }))).isError).toBe(true);
+    expect((await call("end_run", E({ runId: "r-i" }))).isError).toBeUndefined();
   });
 
   it("reads the files, interrupts a seat that is in a turn, reads again, then ends it", async () => {
@@ -3963,7 +3934,7 @@ describe("promote", () => {
     expect((await call("promote", P())).isError).toBeUndefined();
   });
 
-  it("moves Refinement to Ready, and back to Backlog only after its own move", async () => {
+  it("moves Refinement to Ready and back to Backlog", async () => {
     board(backlog({ status: "Refinement" }));
     expect((await call("promote", P())).isError).toBeUndefined();
     board(backlog({ status: "Ready" }));
@@ -3971,26 +3942,15 @@ describe("promote", () => {
     expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Backlog"]);
   });
 
-  it("refuses an undo with no earlier promote", async () => {
-    board(backlog({ status: "Ready" }));
-    expect(await call("promote", P({ to: "Backlog" }))).toEqual(
-      refused(
-        "Not moved: mc#7 is in Ready; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.",
-      ),
-    );
-    expect(moveCalls).toEqual([]);
-  });
-
-  it("refuses an undo when only another ticket was promoted", async () => {
-    addDecision({ kind: "promote", ref: "mc#8" });
-    board(backlog({ status: "Ready" }));
-    expect(await call("promote", P({ to: "Backlog" }))).toEqual(
-      refused(
-        "Not moved: mc#7 is in Ready; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.",
-      ),
-    );
-    expect(moveCalls).toEqual([]);
-  });
+  it.each([false, true])(
+    "can move unstarted Ready work to Backlog without owning the earlier promotion (%s)",
+    async (other) => {
+      if (other) addDecision({ kind: "promote", ref: "mc#8" });
+      board(backlog({ status: "Ready" }));
+      expect((await call("promote", P({ to: "Backlog" }))).isError).toBeUndefined();
+      expect(moveCalls.map((move) => move.column)).toEqual(["Backlog"]);
+    },
+  );
 
   it("refuses a move from a column outside the pairs", async () => {
     board(backlog({ status: "In progress", state: "in progress" }));
@@ -5341,29 +5301,18 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
   });
 
-  it("returns a kept blocked run to the operator after 24 hours since its brief", async () => {
-    expect(FLIGHT_HANDLING_MAX_MS).toBe(24 * 60 * 60_000);
+  it("keeps FLIGHT's own brief without an arbitrary one-day handback", async () => {
     nowMs += 60 * 60_000;
     expect(
       (await call("brief_item", B({ for: "flight", ask: undefined }))).isError,
     ).toBeUndefined();
-    const expiresAt = nowMs + FLIGHT_HANDLING_MAX_MS;
-    expect(attentionItems(cfg, store, expiresAt - 1).find((i) => i.key === KEY)).toMatchObject({
+    expect(
+      attentionItems(cfg, store, nowMs + 48 * 60 * 60_000).find((i) => i.key === KEY),
+    ).toMatchObject({
       owner: "flight",
       flightTriage: "handling",
+      brief: { for: "flight", at: nowMs },
     });
-    for (const at of [expiresAt, expiresAt + 1]) {
-      const items = attentionItems(cfg, store, at);
-      // a stuck run is never folded into the not-triaging item (#758): it notifies as itself
-      expect(items.find((i) => i.key === KEY)).toMatchObject({
-        owner: "operator",
-        flightTriage: "missed",
-        brief: { for: "flight", at: nowMs },
-      });
-      expect(
-        items.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys ?? [],
-      ).not.toContain(KEY);
-    }
   });
 
   it.each(["operator", "flight"])(
@@ -6742,10 +6691,10 @@ describe("superuser housekeeping", () => {
     ["rerun_ci", { pr: 12 }],
     ["edit_card", { issue: 7, size: "S" }],
     ["dismiss_item", { key: "note:x" }],
-  ])("%s requires superuser", async (name, a) => {
+  ])("%s retains the engine-off check without a powers-tier gate", async (name, a) => {
     expect(await call(name as string, a as object)).toMatchObject({
       isError: true,
-      text: expect.stringContaining("superuser"),
+      text: expect.stringContaining("loop engine is off"),
     });
   });
   it.each([
@@ -8105,10 +8054,8 @@ describe("gh_read", () => {
     ]);
   });
 
-  it("checks live powers, the run and the watch role before invoking gh", async () => {
+  it("checks the run and watch role without a powers-tier gate", async () => {
     need(cfg.repos[0]).flightPowers = "standard";
-    expect(await call("gh_read", { path })).toEqual(refused(needsSuperuserText("o/mc")));
-    need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-guido");
     expect(await call("gh_read", { path }, ctx("guido-1", "r-guido"))).toEqual(
       refused(MC_FLIGHT_ONLY),
@@ -8123,7 +8070,7 @@ describe("gh_read", () => {
     need(cfg.crew?.sessions[1]).seats.push(seat("flight-2", "FLIGHT"));
     live("flight-2", "r-flight-2");
     expect(await call("gh_read", { path }, ctx("flight-2", "r-flight-2"))).toEqual(
-      refused(needsSuperuserText("o/other")),
+      refused(GH_READ_BAD_PATH),
     );
     need(cfg.repos[1]).flightPowers = "superuser";
     expect(await call("gh_read", { path }, ctx("flight-2", "r-flight-2"))).toEqual(
@@ -8417,10 +8364,8 @@ describe("close_ticket", () => {
     );
   });
 
-  it("refuses a standard repo, and the engine off", async () => {
+  it("refuses while the engine is off regardless of powers tier", async () => {
     need(cfg.repos[0]).flightPowers = "standard";
-    await refusedNothingWritten(closeCall(), /superuser/i);
-    need(cfg.repos[0]).flightPowers = "superuser";
     engineOn = false;
     expect(await closeCall()).toEqual(refused(GITHUB_WRITES_OFF));
     expect(ghCalls).toEqual([]);
@@ -8731,7 +8676,7 @@ describe("attention hold tools", () => {
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
   });
-  it("allows only a hold of a day or less on a controller check", async () => {
+  it("holds a controller check for its actual wait condition without a one-day cap", async () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
       ticket: "mc#7",
@@ -8751,15 +8696,14 @@ describe("attention hold tools", () => {
       at: NOW - 1,
     });
     const cc = { key: "note:blocked:r-pr:0", reason: "Waiting" };
-    expect((await call("hold_item", { ...cc, condition: { kind: "manual" } })).isError).toBe(true);
-    expect((await call("hold_item", { ...cc, condition: { kind: "crew" } })).isError).toBe(true);
-    expect(
-      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 3 * 86_400_000 } }))
-        .isError,
-    ).toBe(true);
-    expect(
-      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 1000 } })).isError,
-    ).not.toBe(true);
+    for (const condition of [
+      { kind: "manual" },
+      { kind: "crew" },
+      { kind: "date", at: NOW + 3 * 86_400_000 },
+    ] as const) {
+      expect((await call("hold_item", { ...cc, condition })).isError).toBeUndefined();
+      expect((await call("release_hold", { key: cc.key })).isError).toBeUndefined();
+    }
   });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
@@ -9039,7 +8983,7 @@ describe("add_controller_check", () => {
     expect(live).toBe(original);
   });
 
-  it("refuses a cut body, a standard repo, the engine off and Away", async () => {
+  it("refuses a cut body, the engine off and Away", async () => {
     fetchImpl = async (n) => ticket(n, { body: live, bodyTruncated: true });
     expect((await addCall()).text).toMatch(/too long/);
     fetchImpl = async (n) => ticket(n, { body: live });
@@ -9047,8 +8991,6 @@ describe("add_controller_check", () => {
     expect(await addCall()).toEqual(refused(GITHUB_WRITES_OFF));
     engineOn = true;
     need(cfg.repos[0]).flightPowers = "standard";
-    expect((await addCall()).text).toMatch(/superuser/i);
-    need(cfg.repos[0]).flightPowers = "superuser";
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect(await addCall()).toEqual(refused(AWAY_WRITES_REFUSED));
     expect(ghCalls).toEqual([]);
@@ -9135,12 +9077,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         "Crew pause by op changed by FLIGHT: all",
       );
     });
-    it("needs superuser to override a stop or a pause", async () => {
+    it("can apply an authorised pause lift without a powers tier gate", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
       writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
-      expect(await start()).toHaveProperty("isError", true);
-      expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
-      expect(startCalls).toEqual([]);
+      expect((await start()).isError).toBeUndefined();
+      expect(readCrewPause(store)).toBeNull();
+      expect(startCalls).toHaveLength(1);
     });
     it("puts everything back when the start itself fails", async () => {
       startImpl = async () => {

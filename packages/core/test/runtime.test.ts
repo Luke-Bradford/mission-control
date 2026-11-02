@@ -31,8 +31,6 @@ import {
   crewSandboxTmp,
   DEFAULT_SEAT_COMMANDS,
   DENIED_TOOLS,
-  FLIGHT_FULL_BUILTINS,
-  FLIGHT_FULL_DOMAINS,
   FLIGHT_TOOLS,
   foldForMatch,
   globMatches,
@@ -94,94 +92,26 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
-  it("gives FLIGHT's full profile an unrestricted shell while retaining guard hooks", () => {
+  it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    // --restricted removes Bash and WebFetch unless --tools names them (claude --help), so it names them
-    const tools = args[args.indexOf("--tools") + 1]?.split(",") ?? [];
-    expect(tools).toEqual([...FLIGHT_FULL_BUILTINS]);
-    expect(tools).toEqual(expect.arrayContaining(["Bash", "WebFetch"]));
-    expect(args).toContain("--restricted");
-    // and its file tools reach the crew clone, never home or the data folder
-    expect(args[args.indexOf("--add-dir") + 1]).toBe("/mc/clone");
-    expect(args.filter((a) => a === "--add-dir")).toHaveLength(1);
-    expect(args).not.toContain("--disallowedTools");
-    // the shell, the web and subagents are allowed whole; the mc tools it holds stay allowed
-    const allowed = args.slice(
-      args.indexOf("--allowedTools") + 1,
-      args.indexOf("--append-system-prompt-file"),
-    );
-    expect(allowed).toEqual(expect.arrayContaining(["Bash", "WebFetch", "Task", "Edit"]));
-    expect(allowed.some((t) => t.startsWith("Edit("))).toBe(false);
-    const settings = JSON.parse(
-      crewSandboxSettings(base.sandbox, "read-only", base.hook, "flight-full"),
-    );
+    for (const flag of ["--tools", "--allowedTools", "--disallowedTools", "--restricted"])
+      expect(args).not.toContain(flag);
+    expect(args[args.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+    expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);
-    // sandboxed around the data folder, not unsandboxed: the one structural barrier
-    expect(settings.sandbox.enabled).toBe(true);
-    expect(settings.sandbox.failIfUnavailable).toBe(true);
+    expect(settings.hooks.PostToolUse).toHaveLength(1);
+    expect(args).toContain("--strict-mcp-config");
   });
 
-  describe("FLIGHT's full profile keeps the data folder out of reach (#1214)", () => {
-    const profile = (mode: "read-only" | "writer" = "read-only") =>
-      JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook, "flight-full")).sandbox;
-
-    it("denies reading and writing the hub's data folder, where the operator token lives", () => {
-      for (const mode of ["read-only", "writer"] as const) {
-        const fs = profile(mode).filesystem;
-        expect(fs.denyRead).toContain(base.sandbox.dataDir);
-        expect(fs.denyWrite).toContain(base.sandbox.dataDir);
-        // and the hub's config folder
-        expect(fs.denyRead).toContain(`${base.sandbox.home}/.config/mission-control`);
-        // no allow beats the deny except its own temp folder
-        expect(fs.allowRead).toEqual(
-          base.sandbox.tempRoot === undefined ? [] : [base.sandbox.tempRoot],
-        );
-        expect(fs.allowWrite).not.toContain(base.sandbox.dataDir);
-        // the hub runs its own checkout (and node_modules) holding the token, and launchd starts it
-        expect(fs.denyWrite).toEqual(
-          expect.arrayContaining([
-            base.sandbox.hubRoot,
-            `${base.sandbox.home}/Library/LaunchAgents`,
-            // git, npm and pnpm config the hub's own git and pnpm read when they update it
-            `${base.sandbox.home}/.gitconfig`,
-            `${base.sandbox.home}/.config/git`,
-            `${base.sandbox.home}/.npmrc`,
-            `${base.sandbox.home}/.config/pnpm`,
-          ]),
-        );
-      }
-    });
-
-    it("reaches GitHub and not the hub's loopback address, and has no unsandboxed escape", () => {
-      const s = profile();
-      expect(s.network.allowedDomains).toEqual([...FLIGHT_FULL_DOMAINS]);
-      expect(JSON.stringify(s.network)).not.toMatch(/127\.0\.0\.1|localhost|\*"/);
-      expect(s.allowUnsandboxedCommands).toBe(false);
-      expect(s.network.allowLocalBinding).toBeUndefined();
-      expect(s.excludedCommands).toBeUndefined();
-    });
-
-    it("leaves a standard seat's sandbox as it was", () => {
-      const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
-      expect(seat.network).toEqual({ allowedDomains: [] });
-      expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
-    });
-
-    it("refuses a full profile with no hub checkout to protect", () => {
-      const { hubRoot: _hubRoot, ...rest } = base.sandbox;
-      expect(() => crewSandboxSettings(rest, "read-only", base.hook, "flight-full")).toThrow();
-    });
-
-    it("refuses a relative data folder", () => {
-      expect(() =>
-        crewSandboxSettings(
-          { ...base.sandbox, dataDir: "data" },
-          "read-only",
-          base.hook,
-          "flight-full",
-        ),
-      ).toThrow();
-    });
+  it("retains the standard seat's sandbox and tool restrictions", () => {
+    const args = crewCliArgs(base);
+    expect(args).toContain("--restricted");
+    expect(args).toContain("--disallowedTools");
+    const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
+    expect(seat.enabled).toBe(true);
+    expect(seat.network).toEqual({ allowedDomains: [] });
+    expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
   });
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {

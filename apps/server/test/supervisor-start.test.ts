@@ -2489,7 +2489,8 @@ describe("repo guidance at launch", () => {
     // FLIGHT's full profile (#1214) names no tools and denies none
     return {
       tools: argv.includes("--tools") ? argv[argv.indexOf("--tools") + 1] : null,
-      allowed: argv.slice(allowedAt + 1, deniedAt === -1 ? promptAt : deniedAt),
+      allowed:
+        allowedAt === -1 ? [] : argv.slice(allowedAt + 1, deniedAt === -1 ? promptAt : deniedAt),
       denied: deniedAt === -1 ? [] : argv.slice(deniedAt + 1, promptAt),
     };
   };

@@ -256,12 +256,24 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
+import { flightFloor } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
-import { flightBriefView, flightScheduleView, flightSeat, flightView, prFlow } from "./flight/state.ts";
-import { FLIGHT_APPROVAL_MAX_MS, findApproval, grantApproval, useApproval } from "./flight-approvals.ts";
+import {
+  flightBriefView,
+  flightScheduleView,
+  flightSeat,
+  flightView,
+  prFlow,
+} from "./flight/state.ts";
+import {
+  FLIGHT_APPROVAL_MAX_MS,
+  findApproval,
+  grantApproval,
+  useApproval,
+} from "./flight-approvals.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
@@ -646,10 +658,15 @@ const GuardCheckBody = z.strictObject({
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
   agent_id: z.string().min(1).max(256).optional(),
+  cwd: z.string().max(4096).optional(),
+  exit_code: z.number().int().min(0).nullable().optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
+      content: z.string().optional(),
+      old_string: z.string().optional(),
+      new_string: z.string().optional(),
       run_in_background: z.boolean().optional(),
       pages: z.string().optional(),
       offset: z.number().optional(),
@@ -2222,19 +2239,53 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reply
               .type("application/json")
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
-          if (body.data.hook_event_name !== "PreToolUse") {
-            const failed = body.data.hook_event_name === "PostToolUseFailure";
-            // a read that failed gave the seat nothing to scroll back to
-            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            lock?.release(key, failed);
-            await checks?.end(key, !failed);
-            return answer();
-          }
           const fullAccess =
             crewProfileOf(
               seat.kind === "crew" ? seat.seat.role : "",
               crewSeatDef(config, seat.id).loop,
             ) === "flight-full";
+          if (body.data.hook_event_name !== "PreToolUse") {
+            const failed = body.data.hook_event_name === "PostToolUseFailure";
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
+            lock?.release(key, failed);
+            await checks?.end(key, !failed);
+            const command = body.data.tool_input?.command;
+            const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
+            if (
+              fullAccess &&
+              body.data.tool_name === "Bash" &&
+              typeof command === "string" &&
+              flightShellWrite(command) &&
+              store.getSetting(auditKey) === null
+            ) {
+              let shown = command;
+              let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
+              for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
+                if (secret !== "") {
+                  shown = shown.split(secret).join("[redacted]");
+                  cwd = cwd.split(secret).join("[redacted]");
+                }
+              }
+              shown = cleanText(shown, 1500);
+              cwd = cleanText(cwd, 1000);
+              store.addFlightDecision({
+                at: now(),
+                kind: "shell",
+                seatId: who.seatId,
+                targetRunId: who.runId,
+                ref: null,
+                questionId: null,
+                about: shown,
+                decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
+                basis: "The CLI's post-execution hook recorded this result.",
+              });
+              store.setSetting(auditKey, "recorded");
+              if (flightShellBreakerWrite(command))
+                noteFlightWrite(store, bus, now(), "shell", { command: shown });
+              bus.emit("flight");
+            }
+            return answer();
+          }
           let verdict = crewGuardDecision(
             config,
             seat.repoId,
@@ -2243,85 +2294,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.superuserTools,
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
-            undefined,
+            body.data.cwd,
             fullAccess,
           );
-          // FLIGHT's shell edits no always_ask ticket and no board item: those go through its tools
-          if (
-            fullAccess &&
-            verdict.kind === "allow" &&
-            body.data.tool_name === "Bash" &&
-            typeof body.data.tool_input?.command === "string"
-          ) {
-            const writes = flightTicketWrites(body.data.tool_input.command);
-            if (writes.project) {
-              verdict = {
-                kind: "deny",
-                rule: "repo-rules",
-                text: `${GUARD_RULES["repo-rules"]}: a board item write in the shell (use set_fields or edit_card)`,
-              };
-            } else if (writes.unreadable) {
-              verdict = {
-                kind: "deny",
-                rule: "repo-rules",
-                text: `${GUARD_RULES["repo-rules"]}: a ticket edit whose number the guard cannot read (name each ticket: gh issue edit <number>)`,
-              };
-            } else if (writes.issues.length > 0) {
-              const rules = await deps.repoRules?.(seat.repoId);
-              const held =
-                rules === undefined || rules instanceof Error
-                  ? "the repo's rules could not be read"
-                  : writes.issues.some((n) =>
-                        store
-                          .board(seat.repoId)
-                          .find((c) => c.issueNumber === n)
-                          ?.labels.some((l) =>
-                            rules.alwaysAsk.some((g) => globMatches(g, l, true)),
-                          ),
-                      )
-                    ? "an always_ask ticket"
-                    : null;
-              if (held !== null)
-                verdict = {
-                  kind: "deny",
-                  rule: "repo-rules",
-                  text: `${GUARD_RULES["repo-rules"]}: ${held} is not edited from the shell`,
-                };
-            }
-          }
-          // a controller's recorded approval lets the one matching call past a repo rule
-          if (
-            fullAccess &&
-            verdict.kind === "deny" &&
-            (FLIGHT_APPROVAL_RULES as readonly string[]).includes(verdict.rule)
-          ) {
-            const scope = (
-              body.data.tool_name === "Bash"
-                ? body.data.tool_input?.command
-                : body.data.tool_input?.file_path
-            )?.trim();
-            const rule = verdict.rule as (typeof FLIGHT_APPROVAL_RULES)[number];
-            const approval =
-              scope === undefined || scope === ""
-                ? undefined
-                : findApproval(store, rule, scope, now());
-            if (approval !== undefined) {
-              useApproval(store, approval.id, now());
-              store.addFlightDecision({
-                at: now(),
-                kind: "approval",
-                seatId: who.seatId,
-                targetRunId: who.runId,
-                ref: null,
-                questionId: null,
-                about: `${rule}: ${cleanText(scope ?? "", 300)}`,
-                decision: "Used a controller's approval for this one call",
-                basis: approval.reason,
-              });
-              bus.emit("flight");
-              verdict = { kind: "allow" };
-            }
-          }
+          if (fullAccess)
+            verdict = await flightFloor({
+              store,
+              bus,
+              repoId: seat.repoId,
+              runId: who.runId,
+              seatId: who.seatId,
+              event: { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              verdict,
+              now: now(),
+              rules: deps.repoRules,
+            });
           // a large file this run already read whole, unchanged, is not given again
           if (verdict.kind === "allow") {
             const reread = rereadDenial(
@@ -2335,53 +2322,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
-          // FLIGHT's shell is audited: every command that can change something is a decision
-          if (
-            fullAccess &&
-            verdict.kind === "allow" &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string" &&
-            flightShellBreakerWrite(command)
-          ) {
-            // the runaway breaker bounds the shell too: a tripped one holds every shell write
-            const tripped = runawayTrip(store);
-            if (tripped !== null) {
-              verdict = {
-                kind: "deny",
-                rule: "repo-rules",
-                text: `${GUARD_RULES["repo-rules"]}: the runaway breaker is tripped (${tripped.reason}); FLIGHT's shell writes wait until the operator lifts it`,
-              };
-            }
-          }
-          if (
-            fullAccess &&
-            verdict.kind === "allow" &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string" &&
-            flightShellWrite(command)
-          ) {
-            let shown = cleanText(command, 1500);
-            for (const k of await (deps.knownSecrets?.() ?? Promise.resolve([])).catch(() => [])) {
-              if (k !== "") shown = shown.split(k).join("[redacted]");
-            }
-            store.addFlightDecision({
-              at: now(),
-              kind: "shell",
-              seatId: who.seatId,
-              targetRunId: who.runId,
-              ref: null,
-              questionId: null,
-              about: shown,
-              decision: "Ran a shell command",
-              basis:
-                body.data.tool_input?.run_in_background === true
-                  ? "in the background"
-                  : "in the foreground",
-            });
-            // only the writes the breaker counts feed it; the audit above records every change
-            if (flightShellBreakerWrite(command))
-              noteFlightWrite(store, bus, now(), "shell", { command: shown });
-          }
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
           if (
             verdict.kind === "allow" &&

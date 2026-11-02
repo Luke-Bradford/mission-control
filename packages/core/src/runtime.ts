@@ -30,31 +30,6 @@ export type CrewEffort = string;
 /** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
 export const CREW_PROFILES = ["standard", "flight-full"] as const;
 export type CrewProfile = (typeof CREW_PROFILES)[number];
-/** The built-in tools FLIGHT's full profile allows, unscoped: shell, files, the web and subagents. */
-export const FLIGHT_FULL_BUILTINS = [
-  "Read",
-  "Grep",
-  "Glob",
-  "Edit",
-  "Write",
-  "NotebookEdit",
-  "TodoWrite",
-  "Bash",
-  "Skill",
-  "WebFetch",
-  "WebSearch",
-  "Task",
-] as const;
-/**
- * The hosts FLIGHT's sandboxed shell reaches (`git` and `gh` against GitHub). The hub's loopback
- * address is not here, so FLIGHT's shell cannot call the HUD's token route; `mc operator` is its way in.
- */
-export const FLIGHT_FULL_DOMAINS = [
-  "github.com",
-  "api.github.com",
-  "*.github.com",
-  "*.githubusercontent.com",
-] as const;
 /** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
 export const crewProfileOf = (role: string, loop: string): CrewProfile =>
   role === "FLIGHT" && loop === "watch" ? "flight-full" : "standard";
@@ -1133,49 +1108,7 @@ export function crewSandboxSettings(
   profile: CrewProfile = "standard",
 ): string {
   if (profile === "flight-full") {
-    // The one structural barrier of FLIGHT's full access: its shell cannot read or write the hub's
-    // data folder (the operator token, the DB, every transcript) and reaches no host but GitHub.
-    // Everything else is open: home and temp are writable, and nothing else is denied by name.
-    if (!i.dataDir.startsWith("/") || !i.home.startsWith("/"))
-      throw new Error("crew sandbox: dataDir and home must be absolute");
-    if (i.hubRoot === undefined || !i.hubRoot.startsWith("/"))
-      throw new Error("crew sandbox: the full profile needs the hub's absolute checkout");
-    return JSON.stringify({
-      hooks: guardHooks(hook),
-      sandbox: {
-        enabled: true,
-        failIfUnavailable: true,
-        allowUnsandboxedCommands: false,
-        autoAllowBashIfSandboxed: false,
-        network: { allowedDomains: [...FLIGHT_FULL_DOMAINS] },
-        filesystem: {
-          allowWrite: [
-            i.home,
-            "/tmp",
-            "/private/tmp",
-            ...(i.tempRoot === undefined ? [] : [i.tempRoot]),
-          ],
-          // its own temp folder sits inside the denied data folder, as a seat's does
-          allowRead: i.tempRoot === undefined ? [] : [i.tempRoot],
-          // the hub's data folder, its own checkout (with node_modules: the hub runs that code, holding
-          // the operator token, on its next start) and the launchd job that starts it
-          // and the git, npm and pnpm config in home, which the hub's own unsandboxed git and pnpm read
-          // (Update's fetch, pull, install and build): a url.insteadOf with an ext:: command, or a
-          // script-shell, would run as the hub. FLIGHT reads these; it never writes them.
-          denyWrite: [
-            i.dataDir,
-            i.hubRoot,
-            `${i.home}/Library/LaunchAgents`,
-            `${i.home}/.gitconfig`,
-            `${i.home}/.config/git`,
-            `${i.home}/.npmrc`,
-            `${i.home}/.config/pnpm`,
-            `${i.home}/Library/Preferences/pnpm`,
-          ],
-          denyRead: [...new Set([i.dataDir, `${i.home}/.config/mission-control`])],
-        },
-      },
-    });
+    return JSON.stringify({ hooks: guardHooks(hook), sandbox: { enabled: false } });
   }
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
@@ -1359,7 +1292,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
     ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
-    ...CREW_ISOLATION_FLAGS,
+    ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",
     crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
@@ -1371,22 +1304,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // `--restricted` (kept for every seat) removes Bash and WebFetch, and confines the file tools to the
-    // working directories, unless `--tools` names them and `--add-dir` adds the folder (claude --help).
-    // So FLIGHT names its whole set, and its file tools reach the crew clone; never home or the data folder.
-    const clone = i.sandbox.gitCommonDir.endsWith("/.git")
-      ? i.sandbox.gitCommonDir.slice(0, -"/.git".length)
-      : null;
-    args.splice(args.indexOf("--settings"), 0, "--tools", FLIGHT_FULL_BUILTINS.join(","));
-    if (clone !== null) args.splice(args.indexOf("--settings"), 0, "--add-dir", clone);
-    // every built-in tool, unscoped, and FLIGHT's mc tools; nothing is denied by name
-    args.splice(
-      args.indexOf("--append-system-prompt-file"),
-      0,
-      "--allowedTools",
-      ...FLIGHT_FULL_BUILTINS,
-      ...allowed.filter((t) => t.startsWith("mcp__")),
-    );
+    // Keep the guard hooks; use the controller's tools and filesystem without per-tool grants.
+    args.splice(args.indexOf("--settings"), 0, "--permission-mode", "bypassPermissions");
     return args;
   }
   const settingsAt = args.indexOf("--settings");
@@ -1435,6 +1354,9 @@ export type SessionEvent =
       toolUseId: string;
       ok?: boolean;
       exitCode?: number | null;
+      /** Exact completed Codex command facts, supplied only for FLIGHT audit. */
+      command?: string;
+      cwd?: string;
       /** UTF-8 bytes of the result the model reads; Codex events carry none. */
       bytes?: number;
     }

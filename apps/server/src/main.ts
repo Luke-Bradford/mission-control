@@ -456,6 +456,11 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    flightEnvironment: async () => ({
+      GH_TOKEN: await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      MC_HUB: `http://${HOST}:${port}`,
+      MC_OPERATOR_TOKEN: operatorToken,
+    }),
     config,
     store,
     bus,

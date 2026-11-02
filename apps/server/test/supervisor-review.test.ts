@@ -21,7 +21,6 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
-  FLIGHT_FULL_BUILTINS,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
@@ -358,12 +357,14 @@ describe("startWatch", () => {
     model: "opus",
     area: [],
   };
-  const flightMake = () => {
+  const flightMake = (
+    flightEnvironment?: import("../src/runtime/supervisor.ts").SupervisorDeps["flightEnvironment"],
+  ) => {
     // roles/FLIGHT.md is the controller's file; this test brings its own role brief
     const rolesDir = join(dir, "roles");
     mkdirSync(rolesDir, { recursive: true });
     writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
-    return make({ rolesDir, extraSeat: FLIGHT });
+    return make({ rolesDir, extraSeat: FLIGHT, flightEnvironment });
   };
   const BRIEF = watchBrief({
     call: "FLIGHT-1",
@@ -437,62 +438,38 @@ describe("startWatch", () => {
     expect(start.cwd).toBe(wt);
     const argv = start.argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
-    // FLIGHT's watch run has the full profile (#1214): every built-in tool, nothing denied by name
-    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
-    expect(argv).not.toContain("--disallowedTools");
-    expect(
-      argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--append-system-prompt-file")),
-    ).toEqual([
-      ...FLIGHT_FULL_BUILTINS,
-      ...READONLY_TOOLS.filter((t) => t.startsWith("mcp__")),
-      "mcp__mc__code_health",
-      "mcp__mc__log_decision",
-      "mcp__mc__wait_on",
-      "mcp__mc__read_ticket",
-      "mcp__mc__answer_question",
-      "mcp__mc__start_seat",
-      "mcp__mc__reassign_ticket",
-      "mcp__mc__message_seat",
-      "mcp__mc__comms_pin",
-      "mcp__mc__flight_state",
-      "mcp__mc__screenshot_hud",
-      "mcp__mc__promote",
-      "mcp__mc__end_run",
-      "mcp__mc__resume_seat",
-      "mcp__mc__accept_ruling",
-      "mcp__mc__merge_pr",
-      "mcp__mc__settle_park",
-      "mcp__mc__hold_pr",
-      "mcp__mc__rerun_ci",
-      "mcp__mc__edit_card",
-      "mcp__mc__dismiss_item",
-      "mcp__mc__sync_main",
-      "mcp__mc__create_ticket",
-      "mcp__mc__comment_ticket",
-      "mcp__mc__close_ticket",
-      "mcp__mc__add_controller_check",
-      "mcp__mc__brief_item",
-      "mcp__mc__read_pr",
-      "mcp__mc__read_ci_log",
-      "mcp__mc__gh_read",
-      "mcp__mc__list_tickets",
-      "mcp__mc__update_brief",
-      "mcp__mc__draft_reply",
-      "mcp__mc__track",
-      "mcp__mc__untrack",
-      "mcp__mc__ledger",
-      "mcp__mc__remember",
-      "mcp__mc__forget",
-      "mcp__mc__recall",
-      "mcp__mc__hold_item",
-      "mcp__mc__release_hold",
-      "mcp__mc__edit_issue",
-      "mcp__mc__set_fields",
-      "mcp__mc__operator",
-      "mcp__mc__gh_write",
-      "mcp__mc__crew_tidy",
-    ]);
+    for (const flag of ["--tools", "--allowedTools", "--disallowedTools", "--restricted"])
+      expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
+    expect(settings.sandbox.enabled).toBe(false);
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
     await until(() => expect(userLines()).toEqual([BRIEF]));
+  });
+
+  it("refreshes FLIGHT credentials after a hub restart without ending its run", async () => {
+    const oldEnvironment = async () => ({
+      MC_OPERATOR_TOKEN: "fixture-old-operator-token",
+      GH_TOKEN: "fixture-old-github-token",
+    });
+    const first = flightMake(oldEnvironment);
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(userLines()).toHaveLength(1));
+    const oldRevision = store.getSetting(`flight-credential-revision:${runId}`);
+    await first.sup.stopAll();
+    const next = flightMake(async () => ({
+      MC_OPERATOR_TOKEN: "fixture-new-operator-token",
+      GH_TOKEN: "fixture-new-github-token",
+    }));
+    next.sup.start();
+    await until(() =>
+      expect(recorded().filter((line) => Array.isArray(line.argv))).toHaveLength(2),
+    );
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.seatSession("flight-1")?.runId).toBe(runId);
+    expect(store.getSetting(`flight-credential-revision:${runId}`)).not.toBe(oldRevision);
+    expect(recorded().filter((line) => Array.isArray(line.argv))[1].argv).toContain("--resume");
   });
 
   it("ending the watch seat's run stops it, so the watch does not restart it", async () => {

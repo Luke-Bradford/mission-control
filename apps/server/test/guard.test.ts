@@ -474,24 +474,92 @@ describe("POST /api/guard/check", () => {
       await flight.close();
     });
     const shell = () => store.flightDecisions(0, 50).filter((d) => d.kind === "shell");
+    const complete = async (id: string, command: string, exit = 0) => {
+      const before = await check(tokF, { ...bash(id, command), cwd: "/repo" }, flight);
+      if (before.body === "{}")
+        await check(
+          tokF,
+          {
+            ...post(id, exit === 0 ? "PostToolUse" : "PostToolUseFailure"),
+            tool_input: { command },
+            cwd: "/repo",
+            exit_code: exit,
+          },
+          flight,
+        );
+      return before;
+    };
     const grant = (rule: "merge-push" | "repo-rules", scope: string) =>
       grantApproval(store, { rule, scope, until: NOW + 60_000, reason: "controller said so" }, NOW);
 
+    it("checks the actual Git branch and only protects CLAUDE.md's Mission Control section", async () => {
+      const repo = join(dir, "flight-repo");
+      execFileSync("git", ["init", "--initial-branch=feature/work", repo]);
+      const command = "git commit -m example";
+      expect((await check(tokF, { ...bash("branch1", command), cwd: repo }, flight)).body).toBe(
+        "{}",
+      );
+      execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: repo });
+      expect(
+        reason((await check(tokF, { ...bash("branch2", command), cwd: repo }, flight)).body),
+      ).toContain("main");
+      const path = join(repo, "CLAUDE.md");
+      writeFileSync(
+        path,
+        "# Guidance\nKeep it clear.\n\n## Mission Control\n```yaml\nmc:\n  needs: [size]\n```\n",
+      );
+      expect(
+        (
+          await check(
+            tokF,
+            pre("prose", "Edit", {
+              file_path: path,
+              old_string: "Keep it clear.",
+              new_string: "Keep it concise.",
+            }),
+            flight,
+          )
+        ).body,
+      ).toBe("{}");
+      expect(
+        reason(
+          (
+            await check(
+              tokF,
+              pre("floor", "Edit", {
+                file_path: path,
+                old_string: "needs: [size]",
+                new_string: "needs: []",
+              }),
+              flight,
+            )
+          ).body,
+        ),
+      ).toContain("Mission Control");
+    });
+
     it("lets FLIGHT's shell write and records each write as a shell decision", async () => {
       expect((await check(tokF, bash("f1", "gh pr close 12"), flight)).body).toBe("{}");
+      expect(shell()).toEqual([]);
+      await check(
+        tokF,
+        { ...post("f1"), tool_input: { command: "gh pr close 12" }, cwd: "/repo", exit_code: 0 },
+        flight,
+      );
       expect((await check(tokF, bash("f2", "gh pr view 12"), flight)).body).toBe("{}");
       expect(shell()).toEqual([
         expect.objectContaining({
           about: "gh pr close 12",
           seatId: "flight-1",
           targetRunId: "run-f",
+          decision: "Shell completed; exit 0; cwd /repo",
         }),
       ]);
     });
 
     it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {
       for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
-        expect((await check(tokF, bash(`r${i}`, "gh pr close 12"), flight)).body).toBe("{}");
+        expect((await complete(`r${i}`, "gh pr close 12")).body).toBe("{}");
       expect(runawayTrip(store)).not.toBeNull();
       const held = await check(tokF, bash("r-next", "gh pr close 13"), flight);
       expect(reason(held.body)).toContain("runaway breaker");
@@ -523,8 +591,7 @@ describe("POST /api/guard/check", () => {
     it.each(["bash -c 'echo x > f'", "eval 'echo x > f'", "bash -c 'echo x | tee f'"])(
       "counts %s toward the breaker, and a tripped breaker refuses it",
       async (cmd) => {
-        for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
-          await check(tokF, bash(`w${i}`, cmd), flight);
+        for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await complete(`w${i}`, cmd);
         expect(runawayTrip(store)).not.toBeNull();
         expect(reason((await check(tokF, bash("w-next", cmd), flight)).body)).toContain(
           "runaway breaker",
@@ -539,11 +606,7 @@ describe("POST /api/guard/check", () => {
 
     it("redacts a secret from the recorded command", async () => {
       const token = `ghp_${"a1B2c3D4e5".repeat(4)}`;
-      await check(
-        tokF,
-        bash("f1", `curl -X POST -H "Authorization: Bearer ${token}" http://h`),
-        flight,
-      );
+      await complete("f1", `curl -X POST -H "Authorization: Bearer ${token}" http://h`);
       expect(shell()).toHaveLength(1);
       expect(JSON.stringify(shell())).not.toContain(token);
     });
@@ -644,14 +707,14 @@ describe("POST /api/guard/check", () => {
         expect((await check(tokF, bash("rd", "gh issue view 7"), ask)).body).toBe("{}");
       });
 
-      it("refuses a ticket edit whose number it cannot read", async () => {
+      it("allows controller shell commands without a per-command allowlist", async () => {
         const r = await check(tokF, bash("u1", "gh issue edit --add-label x"), ask);
-        expect(reason(r.body)).toContain("cannot read");
+        expect(r.body).toBe("{}");
       });
 
-      it("refuses a board item write in the shell, pointing to set_fields", async () => {
+      it("allows controller project writes through the shell", async () => {
         const r = await check(tokF, bash("p1", "gh project item-edit --id X --field-id Y"), ask);
-        expect(reason(r.body)).toContain("set_fields");
+        expect(r.body).toBe("{}");
       });
 
       it("refuses a ticket edit when the repo's rules cannot be read", async () => {
@@ -661,12 +724,8 @@ describe("POST /api/guard/check", () => {
       });
     });
 
-    it("never lets an approval open the operator token", async () => {
-      const command = "cat /data/operator-token";
-      grant("repo-rules", "cat /data/other");
-      expect(reason((await check(tokF, bash("f1", command), flight)).body)).toContain(
-        GUARD_RULES["repo-rules"],
-      );
+    it("allows reading the controller credential file without an approval", async () => {
+      expect((await check(tokF, bash("f1", "cat /data/operator-token"), flight)).body).toBe("{}");
     });
 
     it("keeps a writer seat sandboxed and its denials unchanged, approval or not", async () => {
@@ -1242,7 +1301,7 @@ describe("POST /api/guard/check", () => {
   it.each([
     [{ ...bash("t1", "ls"), hook_event_name: "PermissionDenied" }],
     [{ ...bash("t1", "ls"), extra: 1 }],
-    [{ ...bash("t1", "ls"), tool_input: { command: "ls", content: "x" } }],
+    [{ ...bash("t1", "ls"), tool_input: { command: "ls", content: 123 } }],
     [{ hook_event_name: "PreToolUse", tool_name: "Bash" }],
     [{ ...bash("t1", "ls"), tool_input: { command: 5 } }],
   ])("answers a body it cannot read with 400 { error }", async (body) => {
@@ -1429,6 +1488,7 @@ describe("hookMain", () => {
           hook_event_name: "PreToolUse",
           tool_name: "Bash",
           tool_use_id: "toolu_1",
+          cwd: "/w",
           tool_input: { command: "ls" },
         }),
       },
@@ -1503,6 +1563,7 @@ describe("hookMain", () => {
       hook_event_name: "PreToolUse",
       tool_name: "Bash",
       tool_use_id: "toolu_1",
+      cwd: "/w",
       tool_input: { command: "pnpm -s test", run_in_background: true, timeout: 5 },
     });
   });
@@ -1552,7 +1613,7 @@ describe("hookMain", () => {
     expect(JSON.parse(posts[0]?.body ?? "").tool_input).toEqual({ file_path: "/w/big.txt" });
   });
 
-  it("sends a Post event without the tool's input or response", async () => {
+  it("sends bounded Bash post metadata without raw tool output", async () => {
     const stdin = stdinFor({
       hook_event_name: "PostToolUse",
       tool_response: { stdout: "y".repeat(2 * 1024 * 1024) },
@@ -1566,6 +1627,9 @@ describe("hookMain", () => {
       hook_event_name: "PostToolUse",
       tool_name: "Bash",
       tool_use_id: "toolu_1",
+      cwd: "/w",
+      exit_code: 0,
+      tool_input: { command: "ls" },
     });
   });
 

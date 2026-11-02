@@ -61,6 +61,9 @@ export interface GuardEvent {
     offset?: number;
     limit?: number;
     pages?: string;
+    content?: string;
+    old_string?: string;
+    new_string?: string;
   };
 }
 
@@ -92,6 +95,15 @@ export interface GuardContext {
   mode: CrewMode;
   /** FLIGHT's controller-equivalent watch profile. */
   fullAccess?: boolean;
+  /** Resolve the checkout a FLIGHT git command will use; null is detached or unreadable. */
+  flightGitBranch?: (directories: readonly string[], global: readonly string[]) => string | null;
+  flightGitAlias?: (
+    name: string,
+    directories: readonly string[],
+    global: readonly string[],
+  ) => string | null;
+  /** Compare a CLAUDE.md edit against the current Mission Control section. */
+  flightFileAllowed?: (event: GuardEvent) => boolean;
   /** Only "dev" for now; repo permission levels (spec §8c) slot in here. */
   repo: "dev";
   /** The repo's current `flight_powers`, read from the live config on each call. */
@@ -2359,12 +2371,127 @@ function ghApiRefusal(args: readonly string[]): { rule: GuardRule; text: string 
   return null;
 }
 
+/** FLIGHT retains repository floors, not the crew's shell/tool restrictions. */
+function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): GuardVerdict {
+  if (depth > 8)
+    return deny(
+      "repo-rules",
+      "a recursive git alias cannot be checked against the repository rules",
+    );
+  if (e.tool !== "Bash") {
+    if (["Edit", "Write", "NotebookEdit"].includes(e.tool)) {
+      const path = normPath(e.input.file_path ?? "");
+      if (/(?:^|\/)\.github(?:\/|$)/.test(path)) return deny("repo-rules", ".github/**");
+      if (/(?:^|\/)CLAUDE\.md$/.test(path) && ctx.flightFileAllowed?.(e) !== true)
+        return deny("repo-rules", "the Mission Control block in CLAUDE.md");
+    }
+    return { kind: "allow" };
+  }
+  const command = e.input.command ?? "";
+  const walk = newWalk();
+  const directories: string[] = [];
+  let lock: string | null = null;
+  for (const { argv, directories: wrapped = [] } of lineCommands(command, walk)) {
+    const [program, ...args] = argv;
+    if (!program) continue;
+    if (program === "cd" && args.length === 1) directories.push(args[0]);
+    if (program === "git") {
+      const git = gitSubcommand(args);
+      if (git !== null) {
+        const global = args.slice(0, args.length - git.rest.length - 1);
+        if (
+          [
+            "commit",
+            "reset",
+            "rebase",
+            "merge",
+            "cherry-pick",
+            "revert",
+            "am",
+            "filter-branch",
+          ].includes(git.sub)
+        ) {
+          const branch = ctx.flightGitBranch?.([...directories, ...wrapped], global);
+          if (branch === "main" || branch == null)
+            return deny("merge-push", "a git history write on main or an unreadable checkout");
+        }
+        if (
+          ["update-ref", "branch"].includes(git.sub) &&
+          git.rest.some((arg) => /(?:^|\/)main$/.test(arg)) &&
+          (git.sub === "update-ref" ||
+            git.rest.some((arg) => /^--(?:force|delete)$|^-[a-zA-Z]*[fDd]/.test(arg)))
+        )
+          return deny("merge-push", "a direct git rewrite of main");
+        const alias = ctx.flightGitAlias?.(git.sub, [...directories, ...wrapped], global);
+        if (alias) {
+          const expanded = alias.startsWith("!") ? alias.slice(1) : `git ${alias}`;
+          const verdict = flightGuardDecision(
+            { tool: "Bash", input: { command: `${expanded} ${git.rest.join(" ")}` } },
+            ctx,
+            depth + 1,
+          );
+          if (verdict.kind === "deny") return verdict;
+        }
+        if (git.sub === "push") {
+          const refused = pushRefusal(git.rest);
+          if (refused) return deny("merge-push", refused);
+        }
+        if (
+          ["send-pack", "http-push"].includes(git.sub) &&
+          args.some((a) => /(?:^|[:/])main$/.test(a))
+        )
+          return deny("merge-push", "a direct git write to main");
+      }
+    }
+    if (program === "gh") {
+      const gh = ghStripGlobal(args);
+      if (gh[0] === "pr" && gh[1] === "merge")
+        return deny("merge-push", "merge through mc merge_pr");
+      if (gh[0] === "api") {
+        const refused = ghApiRefusal(gh);
+        if (refused) return deny(refused.rule, refused.text);
+        const call = ghApiCall(gh);
+        if (call.writes && /(?:^|\/)pulls\/\d+\/merge$/.test(call.path ?? ""))
+          return deny("merge-push", "merge through mc merge_pr");
+      }
+    }
+    if (["curl", "wget"].includes(program)) {
+      if (
+        args.some((arg) =>
+          /\/flight\/(?:approvals|runaway\/lift)(?:[/?]|$)/.test(decodePercent(arg)),
+        )
+      )
+        return deny("repo-rules", "controller approval and breaker lifts belong to the controller");
+      if (args.some((arg) => /\/pulls\/\d+\/merge(?:[/?]|$)/.test(decodePercent(arg))))
+        return deny("merge-push", "merge through mc merge_pr");
+    }
+    if (
+      /(?:^|[^>])>>?\s*["']?[^\s;&|"']*\.github\//.test(command) ||
+      ((FILE_WRITERS.has(program) ||
+        (["sed", "perl"].includes(program) && args.some((a) => /^-[a-zA-Z]*i/.test(a)))) &&
+        args.some((a) => /(?:^|\/)\.github(?:\/|$)/.test(normPath(a))))
+    )
+      return deny("repo-rules", ".github/**");
+    if (
+      flightShellWrite(command) &&
+      /CLAUDE\.md/.test(command) &&
+      (/(?:^|[^>])>[^>]/.test(command) ||
+        /Mission Control|\bmc:/.test(command) ||
+        ["sed", "perl", "rm", "mv", "cp", "tee"].includes(program))
+    )
+      return deny("repo-rules", "a shell replacement of CLAUDE.md's Mission Control block");
+    lock ??= matchedSuite(argv, ctx.fullSuite);
+  }
+  return lock === null ? { kind: "allow" } : { kind: "lock", command: lock };
+}
+
 /** The verdict for one tool call. A deny anywhere in a command line beats a lock. */
 export function guardDecision(
   e: GuardEvent,
   ctx: GuardContext,
   superuserTools: readonly McToolName[] = MC_SUPERUSER_TOOLS,
 ): GuardVerdict {
+  if (ctx.fullAccess) return flightGuardDecision(e, ctx);
   if (
     !ctx.fullAccess &&
     superuserTools.some((name) => mcTool(name) === e.tool) &&
