@@ -318,6 +318,7 @@ describeRendered("Approved Overview hierarchy", () => {
                 ?.textContent?.includes("Not collected");
             }, undefined),
           ).toBe(true);
+          await page.click(".dockrail button");
           await keyboardOpen(page, "#quotaSummaryP .quota-details");
           expect(
             await page.evaluate(() => document.activeElement?.closest("#quotaP")?.id, undefined),
@@ -349,6 +350,27 @@ describeRendered("Approved Overview hierarchy", () => {
             "read",
           ])
             expect(allowance.text).toContain(value);
+          const allowanceOverflow = await page.evaluate(async () => {
+            const until = performance.now() + 1000;
+            const note = document.querySelector<HTMLElement>("#quotaP .allowance-scroll-note");
+            while (note?.hidden && performance.now() < until)
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const region = document.querySelector<HTMLElement>("#quotaP .allowance-scroll");
+            return {
+              named: region?.getAttribute("aria-label"),
+              focusable: region?.tabIndex,
+              overflows: !!region && region.scrollWidth > region.clientWidth,
+              cueVisible: !!note && !note.hidden && note.getBoundingClientRect().height > 0,
+              cue: note?.textContent,
+            };
+          }, undefined);
+          expect(allowanceOverflow).toMatchObject({
+            named: "Complete provider allowance",
+            focusable: 0,
+            overflows: true,
+            cueVisible: true,
+            cue: "Scroll ↔ for every allowance column",
+          });
           await capture(page, `allowance-evidence-${scheme}`);
           const before = await page.evaluate(() => {
             Reflect.set(
@@ -361,7 +383,6 @@ describeRendered("Approved Overview hierarchy", () => {
               .filter((entry) => entry.name.includes("/api/")).length;
           }, undefined);
           await page.resize(1280, 1000);
-          await page.click(".dockrail button");
           await page.evaluate(async () => {
             const roster = document.querySelector<HTMLElement>("#agentsList");
             roster?.scrollIntoView({ block: "center" });
@@ -396,7 +417,6 @@ describeRendered("Approved Overview hierarchy", () => {
               scrollWidth: region?.scrollWidth,
             };
           }, undefined);
-          await page.press("End");
           const retained = await page.evaluate(async () => {
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             const roster = document.querySelector<HTMLElement>("#agentsList");
@@ -424,7 +444,7 @@ describeRendered("Approved Overview hierarchy", () => {
             writeFileSync(
               join(evidence, `context-scroll-trace-${scheme}.json`),
               JSON.stringify(
-                { horizontalBefore, horizontalAfterRight, afterEnd: retained },
+                { horizontalBefore, horizontalAfterRight, afterPan: retained },
                 null,
                 2,
               ),
@@ -439,6 +459,78 @@ describeRendered("Approved Overview hierarchy", () => {
             await page.reachable("#agentsList .context-capacity", "#agentsList"),
           ).not.toContain(false);
           await capture(page, `context-keyboard-narrow-${scheme}`);
+          // Native Tab after a pan must reveal Work links and actions beyond the sticky identity.
+          await page.evaluate(
+            () =>
+              document
+                .querySelector<HTMLElement>('#agentsList .rowlink[href="/agent/dev-1"]')
+                ?.focus(),
+            undefined,
+          );
+          const workFocus = [];
+          for (let step = 0; step < 8; step++) {
+            await page.press("Tab");
+            const focus = await page.evaluate(async () => {
+              const control = document.activeElement as HTMLElement;
+              const visible = () => {
+                const box = control.getBoundingClientRect(),
+                  hit = document.elementFromPoint(
+                    box.left + box.width / 2,
+                    box.top + box.height / 2,
+                  );
+                return hit === control || (!!hit && control.contains(hit));
+              };
+              const until = performance.now() + 1000;
+              while (!visible() && performance.now() < until)
+                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              const target = control.getBoundingClientRect(),
+                identity = control.closest(".trow")?.querySelector(".agent-identity"),
+                hit = document.elementFromPoint(
+                  target.left + target.width / 2,
+                  target.top + target.height / 2,
+                );
+              return {
+                rect: target.toJSON(),
+                identity: identity?.getBoundingClientRect().toJSON(),
+                identityPosition: identity ? getComputedStyle(identity).position : null,
+                hit: hit?.outerHTML,
+                scroll: document.querySelector("#agentsList")?.scrollLeft,
+                text: control.textContent?.trim(),
+                row: control.closest(".trow")?.querySelector(".rowlink")?.getAttribute("href"),
+                paintVisible: visible(),
+              };
+            }, undefined);
+            workFocus.push(focus);
+            if (evidence)
+              writeFileSync(
+                join(evidence, `work-focus-after-pan-${scheme}.json`),
+                JSON.stringify(workFocus, null, 2),
+              );
+            if (!focus.paintVisible) await capture(page, `work-focus-obscured-${scheme}`);
+            expect(focus.row).toBe("/agent/dev-1");
+            expect(focus.paintVisible).toBe(true);
+            if (focus.text === "End") break;
+          }
+          expect(workFocus[0]?.text).toBe("#101");
+          expect(workFocus.map((focus) => focus.text)).toEqual(
+            expect.arrayContaining(["Answer", "Interrupt", "End"]),
+          );
+          if (evidence)
+            writeFileSync(
+              join(evidence, `work-focus-after-pan-${scheme}.json`),
+              JSON.stringify(workFocus, null, 2),
+            );
+          await capture(page, `work-focus-after-pan-${scheme}`);
+          expect(
+            await page.evaluate(
+              () =>
+                performance
+                  .getEntriesByType("resource")
+                  .filter((entry) => entry.name.includes("/api/")).length,
+              undefined,
+            ),
+          ).toBe(before);
+
           expect(page.errors()).toEqual([]);
         } finally {
           await page.close();

@@ -89,7 +89,7 @@ export function QuotaPanel() {
                   const note = health.find((h) => h.collector === usageCollector(account))?.error;
                   return (
                     <tr key={window}>
-                      <th scope="row">
+                      <th scope="row" title={account}>
                         {account} · {window}
                       </th>
                       <UsedAllowanceCell row={row ?? null} account={account} window={window} />

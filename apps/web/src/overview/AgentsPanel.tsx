@@ -8,7 +8,7 @@ import {
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
-import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
+import { type FocusEvent, type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecond, useSecondWhile, useTz } from "../clock.ts";
@@ -64,6 +64,32 @@ const COLUMNS = [
   "Context · used / limit · left · used%",
   "In state",
 ];
+/** Native focus scrolling cannot see a sticky cell painted over another control. */
+function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
+  const region = event.currentTarget,
+    control = event.target;
+  if (!(control instanceof HTMLElement) || region.scrollWidth <= region.clientWidth) return;
+  requestAnimationFrame(() => {
+    if (!region.isConnected || region.ownerDocument.activeElement !== control) return;
+    const row = control.closest<HTMLElement>(".trow"),
+      identity = row?.querySelector<HTMLElement>(".agent-identity");
+    if (
+      !row ||
+      !identity ||
+      identity.contains(control) ||
+      getComputedStyle(identity).position !== "sticky"
+    )
+      return;
+    const viewport = region.getBoundingClientRect(),
+      target = control.getBoundingClientRect();
+    const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
+    const left = Math.max(viewport.left, identity.getBoundingClientRect().right) + gap;
+    const right = viewport.left + region.clientWidth - gap;
+    if (target.left < left) region.scrollLeft -= left - target.left;
+    else if (target.right > right) region.scrollLeft += target.right - right;
+  });
+}
+
 function WorkCell({
   row,
   doing,
@@ -753,6 +779,7 @@ export function AgentsPanel() {
         aria-label="Crew"
         aria-describedby={scrollHint}
         id="agentsList"
+        onFocusCapture={revealCrewFocus}
         aria-busy={!crew.data && !crew.error}
       >
         {/* biome-ignore lint/a11y/useFocusableInteractive: table headers have no interaction */}

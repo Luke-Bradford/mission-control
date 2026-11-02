@@ -1853,7 +1853,7 @@
     width: 100cqw;
   }
   .overview-secondary {
-    margin-top: calc(var(--crew-height, 432px) + var(--sp-3));
+    margin-top: calc(var(--crew-height, 0px) + var(--sp-3));
   }
   .overview-primary > #actP > .ph {
     flex-wrap: wrap;
@@ -1953,7 +1953,7 @@
     width: calc(100cqw - var(--primary-width, 1050px) - var(--sp-3));
   }
   .overview-secondary > #overviewHistoryP {
-    margin-top: calc(var(--timeline-height, 280px) + var(--sp-3));
+    margin-top: calc(var(--timeline-height, 0px) + var(--sp-3));
   }
 }
 #overviewHistoryP > .ph {

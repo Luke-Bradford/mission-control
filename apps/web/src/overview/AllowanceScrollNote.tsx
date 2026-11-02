@@ -1,9 +1,10 @@
-import { type RefObject, useLayoutEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 
 /** A visible cue for overlay-scrollbar platforms, only while this evidence actually overflows. */
 export function AllowanceScrollNote({ region }: { region: RefObject<HTMLElement | null> }) {
   const [text, setText] = useState("");
-  useLayoutEffect(() => {
+  // The scroll region is a later sibling: passive effects run after every DOM ref is attached.
+  useEffect(() => {
     const element = region.current;
     if (!element) return;
     const measure = () => {
