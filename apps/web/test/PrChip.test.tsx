@@ -183,11 +183,14 @@ describe("PrChip", () => {
     expect(pill.getAttribute("title")).toBe("merge held by CAPCOM: wait for the release");
   });
 
-  it("shows no pill when the merge is not held", async () => {
+  it("keeps the QA report link without showing a merge hold", async () => {
     stubFetch({ "/api/config": CONFIG });
     const { container } = render(<PrChip pr={pr} />);
-    await screen.findByRole("link");
-    expect(container.querySelector(".pill")).toBeNull();
+    await screen.findByRole("link", { name: "site-builder PR #7" });
+    expect(container.querySelector(".pill.warn")).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "QA report for site-builder PR #7" }).getAttribute("href"),
+    ).toBe("/qa?repo=site-builder&pr=7");
     expect(screen.queryByText("held")).toBeNull();
   });
 

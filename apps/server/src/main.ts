@@ -103,6 +103,7 @@ import { previewBrowserInHelper } from "./preview-browser.ts";
 import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
+import { createQaReports } from "./qa-reports.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { rotatingLog } from "./rotating-log.ts";
@@ -541,6 +542,15 @@ export async function main(): Promise<void> {
   const early: string[] = [];
   let log: (line: string) => void = (line) => void early.push(line);
   const gh = createGh(ghCommand(process.env, preview, (line) => log(line)));
+  const qaReports = createQaReports({
+    store,
+    config,
+    gh,
+    cwd: hubRoot ?? process.cwd(),
+    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    evidence: evidenceStore,
+    reviewShots,
+  });
   if (config.crew !== undefined) {
     hubLogin = await readLogin(gh, hubRoot ?? process.cwd());
     if (hubLogin === null) log("gh: could not read the signed-in login; the engine takes nothing");
@@ -559,6 +569,8 @@ export async function main(): Promise<void> {
     });
   };
   const mcDeps: McToolsDeps = {
+    qaReports,
+    qaReportBaseUrl: `http://${HOST}:${port}`,
     config,
     store,
     bus,
@@ -641,6 +653,7 @@ export async function main(): Promise<void> {
     supervisor,
     publisher: createPublisher(mcDeps),
     externalReviews: createExternalReviews({
+      reportBaseUrl: `http://${HOST}:${port}`,
       config,
       store,
       gh,
@@ -880,6 +893,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    qaReports,
     previews,
     previewRepoId,
     previewActivity,

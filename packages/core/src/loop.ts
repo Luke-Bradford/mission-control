@@ -1507,7 +1507,12 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
     return {
       kind: "send",
       key: fixKey(runId, loop.epoch, rv.cur.id),
-      text: fixText({ retro: rv.R.retro, sha: rv.P, findings: rv.R.findings }),
+      text: fixText({
+        retro: rv.R.retro,
+        sha: rv.P,
+        findings: rv.R.findings,
+        reportPermalink: rv.cur.reportPermalink,
+      }),
     };
   }
 
@@ -1669,7 +1674,10 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
       actions.push({ kind: "request-review", sha: P, attempt: nextAttempt(R.rows, loop.epoch, P) });
     } else if (cur.state === "reported" && cur.blocking === 0) {
       const listed = loop.prBody?.minor ?? 0;
-      if (loop.prBody?.reviewId !== cur.id && (cur.minor > 0 || listed > 0)) {
+      if (
+        loop.prBody?.reviewId !== cur.id &&
+        (cur.minor > 0 || listed > 0 || cur.reportPermalink)
+      ) {
         actions.push({ kind: "pr-body", reviewId: cur.id });
       }
     }

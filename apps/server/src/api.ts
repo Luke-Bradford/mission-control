@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Run } from "@mc/core";
 import {
   ACK_BATCH_MAX,
@@ -327,6 +327,14 @@ import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
+  createQaReports,
+  QA_REPORT_BODY_LIMIT,
+  QA_REPORT_ID,
+  QaReportError,
+  type QaReportService,
+  qaReportMarkdown,
+} from "./qa-reports.ts";
+import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
@@ -443,6 +451,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  qaReports?: QaReportService;
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Shared bounded reader; the MCP read handler can use this same instance. */
@@ -797,6 +806,22 @@ type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
+  const qaReports =
+    deps.qaReports ??
+    createQaReports({
+      store,
+      config,
+      gh: deps.gh ?? createGh(),
+      cwd: dirname(store.path),
+      knownSecrets:
+        deps.knownSecrets ??
+        (async () => {
+          throw new Error("secret scan unavailable");
+        }),
+      evidence: deps.prEvidence,
+      reviewShots: deps.reviewShots,
+      now: deps.now,
+    });
   const now = deps.now ?? Date.now;
   const codeHealth = deps.codeHealth ?? new CodeHealthReader(store, config, now);
   let transcriptFootprintCache: {
@@ -2479,6 +2504,92 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
         },
       );
+
+      // Reader: docs/runbook.md#durable-qa-reports (archive list by exact PR and optional head)
+      api.get<{ Querystring: { repoId?: unknown; prNumber?: unknown; headSha?: unknown } }>(
+        "/qa-reports",
+        async (req, reply) => {
+          const { repoId, prNumber, headSha } = req.query;
+          if (
+            typeof repoId !== "string" ||
+            !config.repos.some((repo) => repo.id === repoId) ||
+            typeof prNumber !== "string" ||
+            !/^[1-9]\d*$/.test(prNumber) ||
+            !Number.isSafeInteger(Number(prNumber)) ||
+            (headSha !== undefined &&
+              (typeof headSha !== "string" || !/^[a-f0-9]{40}$/.test(headSha)))
+          )
+            return reply.code(400).send({
+              error: "Give a configured repoId, positive prNumber and optional full headSha.",
+            });
+          return {
+            reports: qaReports.list(repoId, Number(prNumber), headSha as string | undefined),
+          };
+        },
+      );
+      // Reader: docs/runbook.md#durable-qa-reports (operator registers an accountable controller report)
+      api.post("/qa-reports/import", { bodyLimit: QA_REPORT_BODY_LIMIT }, async (req, reply) => {
+        if (
+          operatorToken === undefined ||
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        // Retain the full-profile FLIGHT actor's provenance; this is controller recording.
+        if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
+          return reply
+            .code(403)
+            .send({ error: "FLIGHT cannot register an independent controller QA report." });
+        if (deps.tokens?.resolve(bearer(req)) != null)
+          return reply
+            .code(403)
+            .send({ error: "Only the operator or independent controller may import a QA report." });
+        try {
+          const result = await qaReports.importController(req.body);
+          store.addHubEvent(
+            `Controller QA report ${result.report.id} registered for ${result.report.repoId}#${result.report.prNumber} at ${result.report.headSha}`,
+            now(),
+          );
+          bus.emit("boards");
+          return reply.code(result.created ? 201 : 200).send(result);
+        } catch (error) {
+          return reply.code(error instanceof QaReportError ? error.status : 503).send({
+            error:
+              error instanceof QaReportError
+                ? error.message
+                : "QA report could not be saved. Retry when its evidence can be read safely.",
+          });
+        }
+      });
+      // Reader: docs/runbook.md#durable-qa-reports (immutable report JSON permalink)
+      api.get<{ Params: { id: string } }>("/qa-reports/:id", async (req, reply) => {
+        const report = QA_REPORT_ID.test(req.params.id) ? qaReports.read(req.params.id) : null;
+        return report ?? reply.code(404).send({ error: "QA report not found." });
+      });
+      // Reader: docs/runbook.md#durable-qa-reports (Markdown export for Git and handoffs)
+      api.get<{ Params: { id: string } }>("/qa-reports/:id/markdown", async (req, reply) => {
+        const report = qaReports.read(req.params.id);
+        if (!report) return reply.code(404).send({ error: "QA report not found." });
+        return reply
+          .type("text/markdown; charset=utf-8")
+          .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
+          .send(qaReportMarkdown(report));
+      });
+      // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
+      api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
+        if (
+          operatorToken === undefined ||
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const png = qaReports.asset(req.params.id);
+        return png
+          ? reply
+              .type("image/png")
+              .header("x-content-type-options", "nosniff")
+              .header("cache-control", "private, no-store")
+              .send(png)
+          : reply.code(404).send({ error: "QA image not found." });
+      });
 
       // Reader: docs/runbook.md#qa-board-data (the CI run history behind the QA board's flaky-test and green-rate views)
       api.get<{ Querystring: { days?: unknown } }>(

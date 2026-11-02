@@ -15,6 +15,10 @@
   line-height: var(--lh-title);
   margin: 0;
 }
+.uat-title > a {
+  display: inline-block;
+  min-height: 24px;
+}
 .uat-title p {
   color: var(--fg-2);
   font-size: var(--fs-s);

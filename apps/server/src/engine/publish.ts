@@ -57,6 +57,7 @@ import {
   withEngineSection,
 } from "../mcp/tools.ts";
 import { runPathGrants } from "../path-grants.ts";
+import { qaReportGitSummary } from "../qa-reports.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
@@ -625,7 +626,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         section = [MINOR_HEADING, "", minorFallback(review.retro, minors.length)].join("\n");
       }
       const evidence = deps.prEvidenceSection?.(run) ?? null;
-      const sections = [section, evidence].filter((x): x is string => x !== null);
+      const report = deps.store.qaReportForReview(review.id);
+      const reportSection = report ? qaReportGitSummary(report, deps.qaReportBaseUrl) : null;
+      const sections = [section, evidence, reportSection].filter((x): x is string => x !== null);
       const combined = sections.length === 0 ? null : sections.join("\n\n");
       const body = runPrBody(ticket, note, combined, withTitle);
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced

@@ -11,6 +11,7 @@ import type { CcConfig } from "./config.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
+import { qaReportGitSummary } from "./qa-reports.ts";
 import type { Store } from "./store.ts";
 
 /** A review subject identity, deliberately not the id of a stored build run. */
@@ -100,6 +101,7 @@ export function createExternalReviews(deps: {
   cwd: string;
   reviewer(repoId: string): string | null;
   evidence?: PrEvidence;
+  reportBaseUrl?: string;
   evidenceManifest?(repo: string, pr: number, sha: string): EvidenceManifest | null;
   /** Refuses secrets/mentions before any new GitHub comment; failures stay private. */
   textAllowed(text: string, repo: string, pr: number): Promise<boolean>;
@@ -156,19 +158,23 @@ export function createExternalReviews(deps: {
     if (needsComment) {
       const marker = `<!-- mission-control-review:${row.id}:${row.sha} -->`;
       const findings = store.findingsOf(row.id);
+      const report = store.qaReportForReview(row.id);
       const manifest = deps.evidenceManifest?.(row.repoId, row.prNumber, row.sha);
       const body = [
         marker,
         `## QA review — ${row.sha}`,
         `Reviewer: ${row.seatId}. Round ${row.round}. ${row.blocking} blocking, ${row.minor} minor findings.`,
         row.summary ?? "No summary was recorded.",
+        ...(report
+          ? [qaReportGitSummary(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
+          : []),
         ...findings.map(
           (finding) =>
             `- **${finding.severity}** ${finding.file}:${finding.line} — ${finding.summary}\n  ${finding.scenario}\n  Suggested fix: ${finding.fix}`,
         ),
         "### Recorded checks",
         ...store.reviewChecks(row.id).map((check) => `- ${check.check}: ${check.result}`),
-        "### Executed tests",
+        "### Reviewer-reported test counts",
         ...store
           .reviewTests(row.id)
           .map(

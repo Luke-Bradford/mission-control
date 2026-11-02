@@ -29,6 +29,7 @@ export * from "./pr-evidence.ts";
 export * from "./profiles.ts";
 export * from "./prompt-cost.ts";
 export * from "./qa-flow.ts";
+export * from "./qa-report.ts";
 export * from "./repo-rules.ts";
 export * from "./repos.ts";
 export * from "./review.ts";
