@@ -51,6 +51,9 @@ Use the repo's own test setup: its browser test helper, its test database, its r
 - **Screens.** Render each changed screen in a browser test with 50 rows, the longest text each field allows (its schema limit, or 300 characters with no spaces), empty, and each state the screen has (for example loading, error, stale). Render at the narrowest and widest widths the repo's design rules name (1280 and 1920 if it names none), in the default theme; add other widths and themes only where the layout depends on them. Check that:
   - nothing overlaps, clips, or spills out of its row, cell or panel; cut text ends in an ellipsis and the full text is still reachable;
   - padding and spacing follow the repo's design rules;
+  - changed tables follow [the table QA check](../docs/runbooks/table-qa.md): column proportions,
+    header/body alignment, row density, full-content access and reachable actions. Record what
+    you saw for each table in the `design` note; a bounds check alone is insufficient;
   - every link and button goes where its label says, and the route exists;
   - forms handle required fields, bad input, too-long input and double submit, each with a message;
   - every control is reachable by keyboard, with visible focus.
