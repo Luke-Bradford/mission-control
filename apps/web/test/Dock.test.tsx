@@ -674,6 +674,7 @@ describe("Waiting on you", () => {
   });
 
   it("repins on ask mount and growth, while preserving a reader's scroll position", async () => {
+    sessionStorage.setItem(DOCK_COLLAPSED_KEY, "false");
     let asks: ReturnType<typeof ask>[] = [];
     stubFlight(
       { seat: flightSeat(), decisions: [] },
@@ -955,7 +956,43 @@ describe("the conversation", () => {
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("0"));
   });
 
+  it("follows new messages on expansion without moving a reader who had scrolled up", async () => {
+    stubWidth(true);
+    let events = STREAM.events;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/agents/flight-1/stream?limit=20": () => ({
+          status: 200,
+          body: { ...STREAM, events },
+        }),
+      },
+    );
+    render(<Dock />);
+    await waitFor(() => expect(screen.getByRole("log").children).toHaveLength(3));
+    const log = screen.getByRole("log");
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(log.scrollTop).toBe(1000);
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(log.scrollTop).toBe(100);
+    log.scrollTop = 800;
+    fireEvent.scroll(log);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    events = [...events, { id: "new:hidden", at: NOW, kind: "msg", text: "The newest answer" }];
+    await act(async () => hub.refetch("/api/agents/flight-1/stream?limit=20"));
+    await waitFor(() => expect(log.children).toHaveLength(4));
+    expect(log.scrollTop).toBe(800);
+    fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
+    expect(log.scrollTop).toBe(1000);
+  });
+
   it("keeps the scroll position while reading up, and follows again near the bottom", async () => {
+    sessionStorage.setItem(DOCK_COLLAPSED_KEY, "false");
     let events = STREAM.events;
     stubFlight(
       { seat: flightSeat(), decisions: [] },

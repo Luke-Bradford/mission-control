@@ -85,14 +85,22 @@ export function desktopFixture(scenario: DesktopScenario = "default") {
       headlineAgeMin: scenario === "stale" ? 95 : 2,
     }),
     "/api/agents/flight-1/stream?limit=20": {
-      events: [
-        {
-          id: "fixture:0",
-          at: NOW - 10000,
-          kind: "msg",
-          text: "The next step is recorded with the current work. Review its evidence before deciding.",
-        },
-      ],
+      events:
+        scenario === "many"
+          ? Array.from({ length: 20 }, (_, index) => ({
+              id: `fixture:${index}`,
+              at: NOW - (20 - index) * 10000,
+              kind: "msg",
+              text: `Recorded fixture message ${index + 1}: the next step is recorded with its evidence and owner.`,
+            }))
+          : [
+              {
+                id: "fixture:0",
+                at: NOW - 10000,
+                kind: "msg",
+                text: "The next step is recorded with the current work. Review its evidence before deciding.",
+              },
+            ],
       hasMore: false,
     },
     "/api/activity": [],

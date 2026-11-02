@@ -396,7 +396,7 @@ textarea {
 
 select {
   min-width: 24px;
-  min-height: 24px;
+  min-height: var(--sp-6);
 }
 
 .num {

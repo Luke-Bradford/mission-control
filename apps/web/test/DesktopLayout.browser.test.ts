@@ -245,7 +245,34 @@ describeRendered("Approved compact desktop shell", () => {
               undefined,
             );
             if (scenario === "empty") expect(summary).toContain("Nothing is waiting");
-            if (scenario === "many") expect(summary).toContain("View all 50 waiting items");
+            if (scenario === "many") {
+              expect(summary).toContain("View all 50 waiting items");
+              const log = await page.evaluate(() => {
+                const element = document.querySelector<HTMLElement>(".dmsgs");
+                return {
+                  count: element?.children.length,
+                  distance: element
+                    ? element.scrollHeight - element.clientHeight - element.scrollTop
+                    : null,
+                };
+              }, undefined);
+              expect(log.count).toBe(20);
+              expect(log.distance).toBeLessThanOrEqual(1);
+              await page.evaluate(() => {
+                const messages = document.querySelector<HTMLElement>(".dmsgs");
+                if (!messages) throw new Error("Missing conversation");
+                messages.scrollTop = 100;
+                messages.dispatchEvent(new Event("scroll", { bubbles: true }));
+              }, undefined);
+              await page.click("#dockHead button[aria-controls=dockBody]");
+              await page.click(".dockrail button");
+              expect(
+                await page.evaluate(
+                  () => document.querySelector<HTMLElement>(".dmsgs")?.scrollTop,
+                  undefined,
+                ),
+              ).toBe(100);
+            }
             if (scenario === "loading") expect(summary).toContain("Loading waiting items");
             if (scenario === "error") expect(summary).toContain("could not refresh");
             if (scenario === "stale") expect(summary).toContain("Stale headline");

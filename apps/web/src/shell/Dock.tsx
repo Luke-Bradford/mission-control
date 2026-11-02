@@ -190,10 +190,12 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
  */
 export function FlightChat({
   where,
+  active = true,
   prefill,
   onPrefillConsumed,
 }: {
   where: ChatPlace;
+  active?: boolean;
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
@@ -226,8 +228,8 @@ export function FlightChat({
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows and changes to the space available for them
   useEffect(() => {
     const el = msgs.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count, asks.length]);
+    if (active && el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [count, asks.length, active]);
   // Older events arrive above the reader: keep what they were reading where it was.
   const firstRow = shown[0]?.id;
   const heightBefore = useRef<{ first: string | undefined; height: number } | null>(null);
@@ -522,7 +524,7 @@ export function Dock() {
             </p>
           )}
           <div className="dockbody" id="dockBody">
-            <FlightChat where="dock" />
+            <FlightChat where="dock" active={looking} />
           </div>
         </div>
       </aside>
