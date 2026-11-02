@@ -1,0 +1,23 @@
+Transcribed 2 November 2026 from GitHub Actions run41447227063.
+PR #1365 final head4f809752ab34b7f5aada4991f4b46a344a5c5b06.
+Full job logs are linked in README.md. These are retained receipts, not a new test run.
+
+validate	UNKNOWN STEP	2026-11-02T12:45:49.4443110Z ##[group]Run pnpm -s lint
+validate	UNKNOWN STEP	2026-11-02T12:45:54.8601733Z ##[group]Run pnpm -s typecheck
+validate	UNKNOWN STEP	2026-11-02T12:46:35.4557262Z ##[group]Run pnpm -s build
+server-process (1)	UNKNOWN STEP	2026-11-02T12:45:26.9327543Z ##[group]Run pnpm exec vitest run --project server-process --shard=1/2
+server-process (1)	UNKNOWN STEP	2026-11-02T12:47:37.8660037Z  Test Files  8 passed (8)
+server-process (1)	UNKNOWN STEP	2026-11-02T12:47:37.8661126Z       Tests  243 passed (243)
+server (2)	UNKNOWN STEP	2026-11-02T12:45:26.4426249Z ##[group]Run pnpm exec vitest run --project server --shard=2/2
+server (2)	UNKNOWN STEP	2026-11-02T12:48:34.0449054Z    ✓ report_plan > the plan is checked > refuses a plan without ### Tests  383ms
+server (2)	UNKNOWN STEP	2026-11-02T12:50:12.7097055Z  Test Files  84 passed (84)
+server (2)	UNKNOWN STEP	2026-11-02T12:50:12.7103008Z       Tests  3548 passed | 16 skipped (3564)
+web-core	UNKNOWN STEP	2026-11-02T12:45:30.0596971Z ##[group]Run pnpm exec vitest run --project web --project core
+web-core	UNKNOWN STEP	2026-11-02T12:53:58.1140696Z  Test Files  237 passed (237)
+web-core	UNKNOWN STEP	2026-11-02T12:53:58.1161124Z       Tests  5242 passed (5242)
+server (1)	UNKNOWN STEP	2026-11-02T12:45:28.9236737Z ##[group]Run pnpm exec vitest run --project server --shard=1/2
+server (1)	UNKNOWN STEP	2026-11-02T12:50:40.5502416Z  Test Files  84 passed (84)
+server (1)	UNKNOWN STEP	2026-11-02T12:50:40.5511882Z       Tests  2701 passed | 10 skipped (2711)
+server-process (2)	UNKNOWN STEP	2026-11-02T12:45:40.2888803Z ##[group]Run pnpm exec vitest run --project server-process --shard=2/2
+server-process (2)	UNKNOWN STEP	2026-11-02T12:54:33.2549487Z  Test Files  8 passed (8)
+server-process (2)	UNKNOWN STEP	2026-11-02T12:54:33.2567801Z       Tests  402 passed (402)
