@@ -660,6 +660,11 @@ export interface LoopSnapshot {
   hardRulesSet?: boolean;
   flightPowers?: "standard" | "superuser";
   flightHeld?: boolean;
+  /**
+   * A controller approved FLIGHT clearing this head past the floor paths (`CLAUDE.md`, `.github/**`):
+   * FLIGHT may then clear it, and the engine merges it once it does. Absent: false.
+   */
+  floorApproved?: boolean;
   /** The run's profile limits: CI tries and review rounds. Absent: `CI_TRIES` and `REVIEW_ROUNDS`. */
   limits?: { tries: number; rounds: number };
   /** The card's column from the poll. */
@@ -844,16 +849,18 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
   const touches = P !== null && loop.touches?.sha === P ? loop.touches : null;
   const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
   const elevated = s.flightPowers === "superuser";
-  const floor = elevated && flightFloorBlocked({ touches, gate });
   const cleared =
     elevated &&
     P !== null &&
     (loop.flightClearedSha === P ||
       (loop.carry?.to === P && loop.carry.from === loop.flightClearedSha));
+  // only a controller's approval for this head lifts the floor; FLIGHT's own clearance never does
+  const approved = s.floorApproved === true;
+  const floor = elevated && flightFloorBlocked({ touches, gate }) && !approved;
   const clear =
     touches !== null &&
     !floor &&
-    gate?.missionControlChanged !== true &&
+    (gate?.missionControlChanged !== true || approved) &&
     (touches.paths.length === 0 || cleared);
   const otherGates =
     on &&
@@ -1500,7 +1507,12 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
     return {
       kind: "send",
       key: fixKey(runId, loop.epoch, rv.cur.id),
-      text: fixText({ retro: rv.R.retro, sha: rv.P, findings: rv.R.findings }),
+      text: fixText({
+        retro: rv.R.retro,
+        sha: rv.P,
+        findings: rv.R.findings,
+        reportPermalink: rv.cur.reportPermalink,
+      }),
     };
   }
 
@@ -1662,7 +1674,10 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
       actions.push({ kind: "request-review", sha: P, attempt: nextAttempt(R.rows, loop.epoch, P) });
     } else if (cur.state === "reported" && cur.blocking === 0) {
       const listed = loop.prBody?.minor ?? 0;
-      if (loop.prBody?.reviewId !== cur.id && (cur.minor > 0 || listed > 0)) {
+      if (
+        loop.prBody?.reviewId !== cur.id &&
+        (cur.minor > 0 || listed > 0 || cur.reportPermalink)
+      ) {
         actions.push({ kind: "pr-body", reviewId: cur.id });
       }
     }

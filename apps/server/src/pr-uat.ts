@@ -5,6 +5,7 @@ import {
   type PullRequestView,
   UAT_PARK,
 } from "@mc/core";
+import { externalPrControl } from "./external-pr-control.ts";
 import type { Store } from "./store.ts";
 
 /** One bounded overlay per repo, shared by the queue and Board PR list. */
@@ -28,7 +29,12 @@ export function prAcceptanceFor(store: Store, repoId: string) {
     waiting.set(loop.prNumber, { sha: loop.uat.sha, since });
   }
   return (pr: PullRequestView) => {
-    const uat = waiting.get(pr.number);
+    let uat = waiting.get(pr.number);
+    if (!uat && pr.headSha) {
+      const control = externalPrControl(store, repoId, pr.number, pr.headSha);
+      if (control?.uatRequired && !control.uatAccepted)
+        uat = { sha: pr.headSha, since: control.since };
+    }
     return pr.state === "open" && uat?.sha === pr.headSha ? { uat } : {};
   };
 }
@@ -65,7 +71,14 @@ function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
     .activeLoopRuns(pr.repoId)
     .find((r) => r.repoId === pr.repoId && r.endedAt === null && r.loop?.prNumber === pr.number);
   const loop = run?.loop;
-  if (run === undefined || !loop) return { waiting: false, since: null, note: null };
+  if (run === undefined || !loop) {
+    const control = pr.headSha ? externalPrControl(store, pr.repoId, pr.number, pr.headSha) : null;
+    return {
+      waiting: control?.uatRequired === true && !control.uatAccepted,
+      since: control?.since ?? null,
+      note: control?.note ?? null,
+    };
+  }
   const waiting = loop.parked?.kind === UAT_PARK && !loop.uat?.accepted;
   const since = waiting
     ? (store

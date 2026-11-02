@@ -502,6 +502,7 @@ describe("cards", () => {
       "shop-app #3349 on GitHub",
       "shop-app PR #40",
       "shop-app PR #40 on GitHub",
+      "QA report for shop-app PR #40",
       "shop-app #2",
       "shop-app #2 on GitHub",
     ]);

@@ -9,6 +9,7 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { CodeRisk } from "./CodeRisk.tsx";
 import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dialogs.tsx";
 import { date, label } from "./format.ts";
 import { Categories, Comparison, ReviewRounds } from "./ReviewQuality.tsx";
@@ -17,7 +18,8 @@ import "./code-health.css";
 const Legacy = lazy(() =>
   import("../pages/LegacyAudit.tsx").then((m) => ({ default: m.LegacyAudit })),
 );
-type Tab = "overview" | "review";
+const TABS = ["overview", "review", "risk"] as const;
+type Tab = (typeof TABS)[number];
 /** The shared operator question, with one bounded read for the selected repo/window/tab. */
 export function CodeHealth() {
   const config = useResource<ConfigView>(RESOURCES.config),
@@ -227,7 +229,7 @@ export function CodeHealth() {
         </button>
       </div>
       <div role="tablist" aria-label="Code-health view" className="ch-tabs">
-        {(["overview", "review"] as const).map((t, i) => (
+        {TABS.map((t, i) => (
           <button
             type="button"
             key={t}
@@ -242,9 +244,10 @@ export function CodeHealth() {
             onClick={() => changeScope(() => setTab(t))}
             onKeyDown={(e) => {
               let next: number | undefined;
-              if (e.key === "ArrowRight" || e.key === "ArrowLeft") next = 1 - i;
+              if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
+              if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
               if (e.key === "Home") next = 0;
-              if (e.key === "End") next = 1;
+              if (e.key === "End") next = TABS.length - 1;
               if (next !== undefined) {
                 e.preventDefault();
                 tabRefs.current[next]?.click();
@@ -252,11 +255,11 @@ export function CodeHealth() {
               }
             }}
           >
-            {t === "overview" ? "Overview" : "Review quality"}
+            {t === "overview" ? "Overview" : t === "review" ? "Review quality" : "Code risk"}
           </button>
         ))}
         <span className="ch-links">
-          <a href="/map">File risk in Map</a>
+          <a href={repo ? `/map/${encodeURIComponent(repo)}` : "/map"}>Repo context in Map</a>
           <a href="/qa">PR readiness and tests in QA</a>
         </span>
       </div>
@@ -291,6 +294,15 @@ export function CodeHealth() {
         </p>
       )}
       <div id="ch-panel" role="tabpanel" aria-labelledby={`ch-tab-${tab}`} aria-busy={res.loading}>
+        {view && tab === "risk" && view.data.tab === "risk" && (
+          <CodeRisk
+            data={view.data}
+            window={window}
+            coverage={view.coverage}
+            repo={repo}
+            onInspect={inspect}
+          />
+        )}
         {view &&
           review &&
           (tab === "overview" && view.data.tab === "overview" ? (

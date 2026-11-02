@@ -9,6 +9,9 @@ import {
   firstCommitNotifier,
   firstNamedRef,
   firstPrNotifier,
+  flightShellBreakerWrite,
+  flightShellWrite,
+  flightTicketWrites,
   GUARD_RULES,
   GUARD_TOO_LONG_TEXT,
   GUARD_UNREADABLE_TEXT,
@@ -102,6 +105,7 @@ const readOnly: GuardContext = {
   flightPowers: "standard",
   fullSuite: FULL,
 };
+const flightFull: GuardContext = { ...readOnly, fullAccess: true };
 const bash = (command: string, extra: Partial<GuardEvent["input"]> = {}): GuardEvent => ({
   tool: "Bash",
   input: { command, ...extra },
@@ -110,6 +114,309 @@ const ruleOf = (e: GuardEvent, ctx = writer) => {
   const v = guardDecision(e, ctx);
   return v.kind === "deny" ? v.rule : v.kind;
 };
+
+describe("FLIGHT's full profile", () => {
+  it.each([
+    "gh pr close 12",
+    "git worktree remove ../old",
+    "git -C /other branch -D feature/old",
+    'curl -X POST -H "x-mc-operator: $MC_OPERATOR_TOKEN" $MC_HUB/api/runs/run/resume',
+    "gh api repos/o/r/issues/7 -X PATCH -f state=closed",
+    "gh project item-edit --id ITEM",
+    'sqlite3 copied.db "create table example(id)"',
+    "cat ~/.local/share/mission-control/operator-token",
+    "git push origin feature/x:feature/x",
+    "git push origin --delete feature/old",
+    "curl https://example.test",
+    "sleep 1 &",
+    "env GIT_CONFIG_GLOBAL=/tmp/config git status",
+  ])("permits controller authority: %s", (command) => {
+    expect(guardDecision(bash(command), flightFull)).toEqual({ kind: "allow" });
+  });
+
+  it.each([
+    ["git push origin main", "merge-push"],
+    ["git push --force-with-lease origin feature/x:feature/x", "merge-push"],
+    ["git push origin +feature/x:feature/x", "merge-push"],
+    ["git push --mirror", "merge-push"],
+    ["git push origin HEAD:main", "merge-push"],
+    ["git checkout -B main feature/x", "merge-push"],
+    ["git checkout -Bmain feature/x", "merge-push"],
+    ["git switch -C main feature/x", "merge-push"],
+    ["git switch --force-create=main feature/x", "merge-push"],
+    ["git branch -M main", "merge-push"],
+    ["git branch --move feature/x main", "merge-push"],
+    ["git branch -D feature/old main", "merge-push"],
+    ["git branch --delete feature/old main", "merge-push"],
+    ["gh pr merge 12 --squash", "merge-push"],
+    ["gh api repos/o/r/pulls/12/merge -X PUT", "merge-push"],
+    ["gh api repos/o/r/branches/main/protection -X PUT", "repo-rules"],
+    ["gh api repos/o/r/rulesets -f name=x", "repo-rules"],
+    ["echo x > .github/workflows/ci.yml", "repo-rules"],
+    ["rm -r .github", "repo-rules"],
+    ["echo x > CLAUDE.md", "repo-rules"],
+    ["curl -X POST $MC_HUB/api/flight/approvals -d '{}'", "repo-rules"],
+  ])("retains the repository floor: %s", (command, rule) => {
+    expect(ruleOf(bash(command), flightFull)).toBe(rule);
+  });
+
+  it("allows commits on feature branches and refuses main using the actual checkout", () => {
+    expect(
+      guardDecision(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => "feature/x" }),
+    ).toEqual({ kind: "allow" });
+    expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => "main" })).toBe(
+      "merge-push",
+    );
+    expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => null })).toBe(
+      "merge-push",
+    );
+  });
+
+  it.each([
+    "git checkout -B feature/x main",
+    "git switch -C feature/x main",
+    "git branch -M feature/x",
+    "git branch -f feature/x main",
+    "git branch -D feature/old",
+  ])("retains the feature equivalent: %s", (command) => {
+    expect(
+      guardDecision(bash(command), { ...flightFull, flightGitBranch: () => "feature/current" }),
+    ).toEqual({ kind: "allow" });
+  });
+  it("does not rename the checked-out main branch away", () => {
+    expect(
+      ruleOf(bash("git branch -M feature/x"), { ...flightFull, flightGitBranch: () => "main" }),
+    ).toBe("merge-push");
+  });
+
+  it("protects only the Mission Control block when editing CLAUDE.md", () => {
+    const event = { tool: "Edit", input: { file_path: "/repo/CLAUDE.md" } };
+    expect(ruleOf(event, flightFull)).toBe("repo-rules");
+    expect(guardDecision(event, { ...flightFull, flightFileAllowed: () => true })).toEqual({
+      kind: "allow",
+    });
+    expect(
+      ruleOf({ tool: "Write", input: { file_path: "/repo/.github/workflows/ci.yml" } }, flightFull),
+    ).toBe("repo-rules");
+  });
+
+  it("keeps ordinary crew restrictions", () => {
+    expect(ruleOf(bash("gh pr close 12"), writer)).not.toBe("allow");
+    expect(ruleOf(bash("curl http://x"), writer)).toBe("network");
+  });
+});
+
+describe("flightTicketWrites", () => {
+  it("finds the tickets a gh issue write names, and a project item write", () => {
+    expect(flightTicketWrites("gh issue edit 7 --add-label x")).toEqual({
+      issues: [7],
+      project: false,
+      unreadable: false,
+    });
+    expect(flightTicketWrites("gh issue close 8 && gh issue reopen 9")).toEqual({
+      issues: [8, 9],
+      project: false,
+      unreadable: false,
+    });
+    expect(
+      flightTicketWrites("gh issue edit https://github.com/o/r/issues/12 --title x").issues,
+    ).toEqual([12]);
+    expect(flightTicketWrites("gh project item-edit --id X").project).toBe(true);
+    // flags before the numbers, a flag value that looks like a word, and several numbers
+    expect(flightTicketWrites("gh issue close -c done 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue close --comment done 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit -R o/r 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit --add-label x 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh issue edit 8 7 --add-label x").issues).toEqual([8, 7]);
+    // the REST route to a ticket, a leading -R, and GraphQL
+    expect(flightTicketWrites("gh api -X PATCH repos/o/r/issues/7 -f state=closed").issues).toEqual(
+      [7],
+    );
+    expect(flightTicketWrites("gh api repos/o/r/issues/7/labels -f labels[]=x").issues).toEqual([
+      7,
+    ]);
+    expect(
+      flightTicketWrites("gh api -X DELETE repos/o/r/issues/7/labels/approval:x").issues,
+    ).toEqual([7]);
+    expect(flightTicketWrites("gh api repos/o/r/issues/7").issues).toEqual([]);
+    expect(flightTicketWrites("gh -R o/r issue close 7").issues).toEqual([7]);
+    expect(flightTicketWrites("gh --repo o/r issue edit 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites("gh --repo=o/r issue edit 7 --add-label x").issues).toEqual([7]);
+    expect(flightTicketWrites('gh api graphql -f query="mutation{x}"').project).toBe(true);
+    // attached short flags, a leading slash and a full URL are the same call
+    expect(
+      flightTicketWrites('gh api graphql -fquery="mutation{closeIssue(input:{issueId:1}){x}}"')
+        .project,
+    ).toBe(true);
+    expect(flightTicketWrites('gh api /graphql -f query="mutation{x}"').project).toBe(true);
+    expect(
+      flightTicketWrites("gh api https://api.github.com/repos/o/r/issues/7 -XPATCH -fstate=closed")
+        .issues,
+    ).toEqual([7]);
+    expect(flightTicketWrites('gh api graphql -f query="query{x}"').project).toBe(false);
+    // a write whose ticket cannot be read is unreadable, and refused
+    expect(flightTicketWrites("gh issue edit --add-label x").unreadable).toBe(true);
+    expect(flightTicketWrites("gh issue close some-branch").unreadable).toBe(true);
+    expect(flightTicketWrites("gh issue close 7").unreadable).toBe(false);
+    expect(flightTicketWrites("gh issue view 7")).toEqual({
+      issues: [],
+      project: false,
+      unreadable: false,
+    });
+    expect(flightTicketWrites("gh pr close 7")).toEqual({
+      issues: [],
+      project: false,
+      unreadable: false,
+    });
+  });
+});
+
+describe("flightShellBreakerWrite", () => {
+  it.each([
+    "cp input /outside/file",
+    "mv /outside/source inside",
+    "rm /outside/file",
+    "touch /outside/file",
+    "sed -i s/a/b/ /outside/file",
+    "sort -o /outside/file input",
+    "curl -o /outside/file https://example.test",
+    "curl -so /outside/file https://example.test",
+    "curl -sSo/outside/file https://example.test",
+    "mv -t /worktree /outside/source",
+    "cd /outside && touch file",
+    "bash -c 'touch /outside/file'",
+    "touch $DESTINATION",
+  ])("audits and counts an explicit outside file write: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      true,
+    );
+  });
+  it.each([
+    "cp input output",
+    "mv input output",
+    "rm output",
+    "touch output",
+    "sed -i s/a/b/ output",
+    "sort --output=output input",
+    "curl --output output https://example.test",
+    "mv -t /worktree input",
+  ])("audits ordinary worktree edits without adding them to the breaker: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      false,
+    );
+  });
+  it("counts a write through a symlink to an outside destination", () => {
+    expect(
+      flightShellBreakerWrite("touch linked/file", {
+        cwd: "/worktree",
+        worktree: "/worktree",
+        resolvePath: (path) => path.replace("/worktree/linked", "/outside"),
+      }),
+    ).toBe(true);
+  });
+  it.each([
+    "git fetch origin",
+    "git status",
+    "git log --oneline",
+    "git tag",
+    "git branch -a",
+    'sqlite3 -readonly mc.sqlite "select 1"',
+    'sqlite3 -readonly mc.sqlite "select id from runs where started_at > 0"',
+    "gh pr list --json number --jq '.[] | select(.number > 5)'",
+    "git log --format='%h -> %s'",
+    "gh search issues stuck",
+    "gh project item-list 1 --owner o",
+    "gh project field-list 1 --owner o",
+    `bash -c "jq '.a > 1' f"`,
+    "bash -c 'git fetch origin'",
+    "find . -name '*.log'",
+    "gh -R o/r pr view 12",
+    "gh pr list",
+    "gh api repos/o/r/pulls",
+    "curl -s http://127.0.0.1:7420/api/flight",
+    "ls /nope 2>/dev/null",
+    "echo hi 2>&1",
+  ])("does not count %s", (command) => {
+    expect(flightShellBreakerWrite(command)).toBe(false);
+  });
+
+  it.each([
+    "git push origin mc/7",
+    "git commit -m x",
+    "git merge mc/7",
+    "git rebase main",
+    "git reset --hard",
+    "git tag v1",
+    "git branch -D mc/7",
+    "git worktree remove ../wt",
+    "git update-ref refs/heads/x HEAD",
+    "gh pr close 12",
+    "gh -R o/r issue comment 7 -b x",
+    "gh api -X POST repos/o/r/issues",
+    "gh api repos/o/r/issues -f title=x",
+    "curl -X POST http://127.0.0.1:7420/api/runs/r/resume",
+    "curl -d x http://h",
+    "echo a > f",
+    'echo a > "f x"',
+    "echo 'a > b' > f",
+    "echo a | tee f",
+    "bash -c 'echo x > f'",
+    "sh -c 'echo x > f'",
+    "zsh -c 'echo x > f'",
+    "eval 'echo x > f'",
+    "bash -c 'echo x | tee f'",
+    "bash -lc 'echo x >> f'",
+    `bash -c "bash -c 'echo x > f'"`,
+  ])("counts %s", (command) => {
+    expect(flightShellBreakerWrite(command)).toBe(true);
+  });
+
+  it("a read is still a read behind -R in the audit classifier", () => {
+    expect(flightShellWrite("gh -R o/r pr view 12")).toBe(false);
+    expect(flightShellWrite("gh -R o/r pr close 12")).toBe(true);
+    expect(flightShellWrite("bash -c 'echo x > f'")).toBe(true);
+  });
+});
+
+describe("flightShellWrite", () => {
+  it.each([
+    "ls -la",
+    "git status --short",
+    "git log --oneline -5",
+    "gh pr view 3",
+    "gh pr list --state open",
+    "gh api repos/o/r/pulls",
+    "gh api -X GET repos/o/r/pulls",
+    "curl -s http://127.0.0.1:7420/api/flight",
+    "cat a | grep b",
+    "echo hi 2>&1",
+    "ls /nope 2>/dev/null",
+    "cd /x && git diff",
+  ])("reads: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(false);
+  });
+
+  it.each([
+    "gh pr close 3",
+    "gh issue comment 3 --body x",
+    "gh api -X POST repos/o/r/issues",
+    "gh api repos/o/r/issues -f title=x",
+    "git push origin mc/7",
+    "git worktree remove x",
+    "curl -X POST http://127.0.0.1:7420/api/runs/r/resume",
+    "curl -d x http://h",
+    "rm -rf x",
+    "echo a > f",
+    "echo a | tee f",
+    "sed -i s/a/b/ f",
+    "pnpm install",
+    "sqlite3 mc.db 'select 1'",
+  ])("writes: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+  });
+});
 
 describe("scratch mode", () => {
   const scratch: GuardContext = {
@@ -215,7 +522,7 @@ describe("GUARD_RULES", () => {
     );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });

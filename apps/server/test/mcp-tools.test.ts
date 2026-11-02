@@ -4702,6 +4702,52 @@ describe("report_findings", () => {
     });
   });
 
+  it("persists the immutable report before notifying the engine and returns its exact permalink", async () => {
+    let notified = false;
+    rt = make({
+      onFindings: () => {
+        expect(store.qaReportForReview(reviewId)?.headSha).toBe(AUTHOR_SHA);
+        expect(store.review(reviewId)?.state).toBe("reported");
+        notified = true;
+      },
+    });
+    const reply = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        worksWell: ["Boundary cases covered."],
+        limitations: ["Live deployment was not observed."],
+        followUps: [
+          {
+            text: "Observe deployment.",
+            disposition: "ticket",
+            ticket: "#925",
+            basis: "Requires the controller.",
+          },
+        ],
+        visualReason: "Server-only behavior.",
+      }),
+    );
+    const saved = store.qaReportForReview(reviewId);
+    expect(saved?.source).toBe("native");
+    expect(saved?.nativeRunId).toBe(REVIEW_RUN);
+    expect(reply.text).toContain(saved?.permalink);
+    expect(notified).toBe(true);
+  });
+
+  it("leaves the review running and emits no completion when the durable secret scan fails", async () => {
+    rt = make({
+      knownSecrets: async () => {
+        throw new Error("fixture unavailable");
+      },
+      onFindings: (s, r) => told.push([s, r]),
+    });
+    expect((await report()).isError).toBe(true);
+    expect(store.review(reviewId)?.state).toBe("running");
+    expect(store.qaReportForReview(reviewId)).toBeNull();
+    expect(told).toEqual([]);
+  });
+
   it("describes every structured review field to MCP clients", () => {
     expect(tool("report_findings", rt).inputSchema).toMatchObject({
       properties: {
@@ -4763,7 +4809,7 @@ describe("report_findings", () => {
         findings: [finding({ category: "correctness" })],
       }),
     );
-    expect(first).toEqual({ text: FINDINGS_RECORDED });
+    expect(first).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     const second = store.requestReview({
       authorRunId: RUN,
       repoId: "mc",
@@ -4786,7 +4832,7 @@ describe("report_findings", () => {
         }),
         { seatId: "retro", runId: "retro:round-2" },
       ),
-    ).toEqual({ text: FINDINGS_RECORDED });
+    ).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     expect(store.reviewChecks(reviewId)).toEqual([
       { check: "design", result: "pass", note: "hud-shot:design-pair" },
       { check: "new-behaviour-tests", result: "pass", note: "covered" },
@@ -4831,7 +4877,7 @@ describe("report_findings", () => {
   });
 
   it("stores a resolution given by position alone against the previous review", async () => {
-    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     const second = store.requestReview({
       authorRunId: RUN,
       repoId: "mc",
@@ -4848,7 +4894,7 @@ describe("report_findings", () => {
     const resolution = { findingRef: { pos: 0 }, outcome: "fixed" } as const;
     expect(
       await report(args({ verdict: passing, findings: [], resolutions: [resolution] }), roundTwo),
-    ).toEqual({ text: FINDINGS_RECORDED });
+    ).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     expect(store.reviewResolutions(second)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
     expect(store.findingsOf(reviewId)[0]).toMatchObject({
       resolution: "fixed",
@@ -4870,11 +4916,11 @@ describe("report_findings", () => {
         at,
       }) as number;
     // the epoch-0 round-1 review is the one `reviewId` already holds; a later epoch repeats round 1
-    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     const later = mk(1, 1, NOW + 1);
     store.setReviewState(later, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
     expect(await report(args(), reviewRun("retro:e1r1", later))).toEqual({
-      text: FINDINGS_RECORDED,
+      text: expect.stringContaining(FINDINGS_RECORDED),
     });
     const second = mk(1, 2, NOW + 2);
     store.setReviewState(second, ["queued"], "running", { at: NOW + 2, runId: "retro:e1r2" });
@@ -4887,14 +4933,14 @@ describe("report_findings", () => {
         }),
         reviewRun("retro:e1r2", second),
       ),
-    ).toEqual({ text: FINDINGS_RECORDED });
+    ).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     expect(store.reviewResolutions(second)).toEqual([
       { reviewId: later, pos: 0, outcome: "fixed" },
     ]);
   });
 
   it("rejects a positional and an explicit reference to the same prior finding", async () => {
-    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     const second = store.requestReview({
       authorRunId: RUN,
       repoId: "mc",
@@ -4924,7 +4970,7 @@ describe("report_findings", () => {
   });
 
   it("rejects duplicate prior-round resolution references before storage", async () => {
-    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     const second = store.requestReview({
       authorRunId: RUN,
       repoId: "mc",
@@ -5033,7 +5079,7 @@ describe("report_findings", () => {
 
   it("records findings, an Activity row, a bus change and the supervisor event", async () => {
     const before = emitted.length;
-    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
     expect(store.review(reviewId)).toMatchObject({
       state: "reported",
       blocking: 1,
@@ -5058,7 +5104,7 @@ describe("report_findings", () => {
 
   it("records an empty report with passing verdicts", async () => {
     expect(await report(args({ verdict: passing, findings: [] }))).toEqual({
-      text: FINDINGS_RECORDED,
+      text: expect.stringContaining(FINDINGS_RECORDED),
     });
     expect(store.review(reviewId)).toMatchObject({ state: "reported", blocking: 0, minor: 0 });
   });

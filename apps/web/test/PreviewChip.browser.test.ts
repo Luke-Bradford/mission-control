@@ -7,6 +7,23 @@ const { renderAt } = browserSession();
 const WIDTHS = [1280, 1600, 1920] as const;
 
 describeRendered("Preview chips on Board and Agent", () => {
+  it(
+    "opens the saved QA reader above the Board card's title cover",
+    async () => {
+      const page = await renderAt({
+        page: "test/previewChipBrowser.html",
+        width: 1280,
+        search: "?state=start",
+        api: { "/api/config": { repos: [] } },
+      });
+      await page.click('[data-surface="board"] .qa-report-link');
+      expect(
+        await page.evaluate(() => window.location.pathname + window.location.search, null),
+      ).toBe("/qa?repo=mission-control&pr=1174");
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it.each(
     WIDTHS.flatMap((width) =>
       (["none", "start", "preview"] as const).map((state) => [width, state] as const),

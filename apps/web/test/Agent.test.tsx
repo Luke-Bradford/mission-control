@@ -1296,7 +1296,15 @@ describe("Agent page: runs", () => {
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const cell = $(container, "#loopP .runrow:not(.head) .rticket") as HTMLElement;
-    expect(cell.textContent).toBe("#3349PR #3240");
+    expect(within(cell).getByRole("link", { name: "shop-app #3349" }).textContent).toBe("#3349");
+    expect(within(cell).getByRole("link", { name: "shop-app PR #3240" }).textContent).toBe(
+      "PR #3240",
+    );
+    expect(
+      within(cell)
+        .getByRole("link", { name: "QA report for shop-app PR #3240" })
+        .getAttribute("href"),
+    ).toBe("/qa?repo=shop-app&pr=3240");
     expect(cell.querySelector(".rchip")).toBeNull();
   });
 

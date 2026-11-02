@@ -3,9 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { endKeeper } from "../src/runtime/keeper.ts";
-import { type CrewSession, endsAtResult, startSession } from "../src/runtime/session.ts";
+import {
+  type CrewSession,
+  endsAtResult,
+  startKeeperSession,
+  startSession,
+} from "../src/runtime/session.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
@@ -105,6 +110,38 @@ const isResult = (e: SessionEvent) => e.kind === "result";
 const isExit = (e: SessionEvent) => e.kind === "exit";
 
 describe("startSession against the fake CLI", () => {
+  it("inherits private credentials without persisting or replaying their values", async () => {
+    const privateToken = "fixture-private-token-123456789";
+    const privateGit = "fixture-github-token-987654321";
+    const input = keeperInput();
+    const s = startKeeperSession({
+      ...input,
+      command: process.execPath,
+      args: [
+        "-e",
+        `console.log(JSON.stringify({type:"result",result:process.env.MC_OPERATOR_TOKEN,gh:process.env.GH_TOKEN})); console.error(process.env.MC_OPERATOR_TOKEN);`,
+      ],
+      cwd: dir,
+      transcriptPath: transcript,
+      env: { PATH: process.env.PATH ?? "" },
+      privateEnv: { MC_OPERATOR_TOKEN: privateToken, GH_TOKEN: privateGit },
+    });
+    sessions.push(s);
+    const received: string[] = [];
+    s.on((event) => received.push(JSON.stringify(event)));
+    await vi.waitFor(() => expect(received.some((line) => line.includes("[redacted]"))).toBe(true));
+    await vi.waitFor(() => expect(s.alive).toBe(false));
+    const saved = readFileSync(join(input.dir, "spec.json"), "utf8");
+    expect(JSON.parse(saved).privateEnvKeys).toEqual(["MC_OPERATOR_TOKEN", "GH_TOKEN"]);
+    for (const value of [privateToken, privateGit]) {
+      expect(saved).not.toContain(value);
+      expect(readFileSync(transcript, "utf8")).not.toContain(value);
+      expect(readFileSync(join(input.dir, "exit.json"), "utf8")).not.toContain(value);
+      expect(received.join("\n")).not.toContain(value);
+    }
+    expect(readFileSync(transcript, "utf8")).toContain('"gh":"[redacted]"');
+  });
+
   it("a turn emits init, turn-start and result, and the transcript holds every line", async () => {
     const { s, events, until } = start();
     expect(s.alive).toBe(true);

@@ -50,6 +50,7 @@ import {
   controllerCheckFailText,
   controllerCheckParkText,
   controllerCheckUnreadableText,
+  crewProfileOf,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -60,13 +61,14 @@ import {
   evidenceNoteKey,
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
-  FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_CONTROLLER_CHECK_PATHS,
   fillLoopText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
   gateView,
+  globMatches,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
@@ -152,6 +154,7 @@ import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
+import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
@@ -316,9 +319,9 @@ export interface Engine {
     },
   ): Promise<OperatorResult>;
   /**
-   * The operator's verdict on a run parked on its ticket's controller check. `pass` (only while the
-   * PR head is still the parked head) lets the next pass merge; `fail` sends the note to the seat
-   * as rework and ends the park.
+   * The operator's verdict on a requested controller check, while parked or awaiting FLIGHT's
+   * clearance. A pass belongs to that exact current head; it still needs any outstanding FLIGHT
+   * clearance. A fail sends the note to the seat as rework.
    */
   controllerCheck(
     runId: string,
@@ -600,6 +603,15 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
+  function requiresIndependentController(loop: RunLoop, sha: string): boolean {
+    return (
+      loop.touches?.sha === sha &&
+      loop.touches.paths.some((path) =>
+        FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
+      )
+    );
+  }
+
   /** The same safety gate the planner uses before waking an otherwise idle seat. */
   function mayWakeSeat(run: Run): boolean {
     const loop = run.loop;
@@ -835,6 +847,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map((row) => ({
         ...reviewFact(row),
+        reportPermalink: store.qaReportForReview(row.id)?.permalink,
         design: store.reviewChecks(row.id).find((check) => check.check === "design") ?? null,
       }));
       const cur = pushed
@@ -926,6 +939,8 @@ export function createEngine(deps: EngineDeps): Engine {
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
       flightHeld: flightHeld(run),
+      floorApproved:
+        pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -1072,7 +1087,12 @@ export function createEngine(deps: EngineDeps): Engine {
       ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
       : [];
     return review && findings.length > 0
-      ? fixText({ retro: seatCallSign(review.seatId), sha: review.sha, findings })
+      ? fixText({
+          retro: seatCallSign(review.seatId),
+          sha: review.sha,
+          findings,
+          reportPermalink: store.qaReportForReview(review.id)?.permalink,
+        })
       : `FLIGHT requests rework: ${reason}`;
   }
 
@@ -1392,6 +1412,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 retro: seatCallSign(review.seatId),
                 sha: review.sha,
                 findings: store.findingsOf(review.id),
+                reportPermalink: store.qaReportForReview(review.id)?.permalink,
               }),
             );
           }
@@ -1993,10 +2014,29 @@ export function createEngine(deps: EngineDeps): Engine {
         log(`${runId}: could not read the merge gate: ${g.text}`);
       }
     }
+    const fullFlight = config.crew?.sessions.some(
+      (session) =>
+        session.repoId === run.repoId &&
+        session.seats.some(
+          (seat) => crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full",
+        ),
+    );
+    // The full-profile self-approval floor belongs to that runtime, not the global repo defaults.
+    const classifiedRules =
+      rules === null
+        ? null
+        : [
+            ...new Set([
+              ...effectiveHardRules(rules, flightPowers),
+              ...(fullFlight ? FLIGHT_CONTROLLER_CHECK_PATHS : []),
+            ]),
+          ];
     const hardRulesHash =
       rules === null
         ? null
-        : createHash("sha256").update(JSON.stringify(rules.hardRules)).digest("hex");
+        : createHash("sha256")
+            .update(JSON.stringify(fullFlight ? classifiedRules : rules.hardRules))
+            .digest("hex");
     if (
       run.endedAt === null &&
       pushed !== null &&
@@ -2005,13 +2045,9 @@ export function createEngine(deps: EngineDeps): Engine {
         input.touches.hardRulesHash !== hardRulesHash)
     ) {
       input.touches = null; // unreadable rules must not reuse the old clearance
-      if (rules !== null) {
+      if (classifiedRules !== null) {
         try {
-          const paths = await publisher.hardRuleTouches(
-            run,
-            pushed.sha,
-            effectiveHardRules(rules, flightPowers),
-          );
+          const paths = await publisher.hardRuleTouches(run, pushed.sha, classifiedRules);
           input.touches = {
             sha: pushed.sha,
             paths,
@@ -2041,6 +2077,16 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
+    // FLIGHT cannot clear its own authority changes. Request the independent verdict while
+    // clearance is pending, before the merge action that used to create this check too late.
+    if (
+      cur.phase === "review" &&
+      cur.awaitingFlight &&
+      requiresIndependentController(cur, cur.awaitingFlight) &&
+      !(cur.controllerCheck?.sha === cur.awaitingFlight && cur.controllerCheck.pass)
+    ) {
+      cur.controllerCheck = { sha: cur.awaitingFlight, from: "review", pass: false };
+    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2807,11 +2853,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
-          if (
-            (by === "CAPCOM" && opts.action !== "accept") ||
-            (by === "FLIGHT" && flightPowersOf(config, run.repoId) !== "superuser")
-          )
-            return refuse("not-permitted");
+          if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (!pushed) return refuse("head-moved");
@@ -2840,7 +2882,7 @@ export function createEngine(deps: EngineDeps): Engine {
             const paths = await publisher.hardRuleTouches(
               run,
               pushed.sha,
-              FLIGHT_FLOOR_ENFORCING_PATHS,
+              FLIGHT_CONTROLLER_CHECK_PATHS,
             );
             if (paths.length === 0) return refuse("wrong-action");
             const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
@@ -2863,7 +2905,7 @@ export function createEngine(deps: EngineDeps): Engine {
               const paths = await publisher.hardRuleTouches(
                 run,
                 pushed.sha,
-                FLIGHT_FLOOR_ENFORCING_PATHS,
+                FLIGHT_CONTROLLER_CHECK_PATHS,
               );
               if (paths.length > 0) return refuse("floor-enforced");
             }
@@ -2996,11 +3038,19 @@ export function createEngine(deps: EngineDeps): Engine {
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
         const held = loop.controllerCheck;
+        const awaiting =
+          loop.phase === "review" &&
+          held !== undefined &&
+          held !== null &&
+          !held.pass &&
+          loop.awaitingFlight === held.sha &&
+          requiresIndependentController(loop, held.sha);
         if (
           run.endedAt !== null ||
-          loop.phase !== "parked" ||
-          loop.parked?.kind !== CONTROLLER_CHECK_PARK ||
-          loop.parked.ended ||
+          (!awaiting &&
+            (loop.phase !== "parked" ||
+              loop.parked?.kind !== CONTROLLER_CHECK_PARK ||
+              loop.parked.ended)) ||
           !held
         )
           return refuse("not-parked");
@@ -3223,18 +3273,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live()) return false;
         await pass(runId);
         const run = store.run(runId);
-        if (
-          !run?.loop ||
-          run.endedAt !== null ||
-          flightPowersOf(config, run.repoId) !== "superuser" ||
-          flightHeld(run)
-        )
-          return false;
+        if (!run?.loop || run.endedAt !== null || flightHeld(run)) return false;
         const sha = run.loop.awaitingFlight;
         if (
           !sha ||
           (expectedSha !== undefined && sha !== expectedSha) ||
-          sha !== store.runPush(runId)?.sha
+          sha !== store.runPush(runId)?.sha ||
+          (requiresIndependentController(run.loop, sha) &&
+            !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass))
         )
           return false;
         store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });
@@ -3247,13 +3293,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const no = (text: string) => ({ ok: false, text });
       return onChainResult(runId, no("The engine is off."), async () => {
         const run = store.run(runId);
-        if (
-          !live() ||
-          !run?.loop ||
-          run.endedAt !== null ||
-          flightPowersOf(config, run.repoId) !== "superuser" ||
-          flightHeld(run)
-        )
+        if (!live() || !run?.loop || run.endedAt !== null || flightHeld(run))
           return no("Run is held or unavailable.");
         const pr = findPr(run, run.loop);
         const sha = pr?.headSha;

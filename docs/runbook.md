@@ -1186,7 +1186,7 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 `{"action":"release"}` on the same route, which returns it to the phase it left. A plain resume or
 message does not lift this park. A new push keeps the hold.
 
-FLIGHT has the same power on a superuser repo with `mc hold_pr { runId, action, reason, basis }`, logged
+FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
 may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
 to hold, or the hold is the controller's and the caller is FLIGHT.
@@ -1245,7 +1245,7 @@ every reason it lists is handled, not when some later audit is clean. The audit 
 ### FLIGHT adds a controller check to a ticket
 
 Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`
-itself (superuser repos): `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
+itself: `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
 that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
 removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
@@ -1277,21 +1277,113 @@ it has waited. A chain that has stood still for 30 minutes raises a `chain_stall
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
-repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
-repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
-guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
-operator.
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are FLIGHT shortcuts; each change is a logged decision. The floor is the repo's own rules (guard rules,
+hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
+[FLIGHT approvals](#flight-approvals)) is what lifts one.
 
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). Any FLIGHT write to the pause only edits the seats of a record someone else set: it never clears or replaces it, a refused write leaves the record and goes in the hub log, and a change is logged as FLIGHT's. A start that fails puts the stop and the pause back |
-| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a superuser repo, a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
-| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
+| `resume_seat` | Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart); a build or plan seat in FLIGHT's session and a run in its lane. It lifts the seat's stop or crew pause and the decision names it (`FLIGHT lifted the crew pause on X (reason); the operator had stopped the seat`). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), a seat with a live or starting session, and a machine without headroom. It counts a resume only when the seat is running afterwards; a failed resume ends the run once and puts the stop and pause back unless the operator changed them meanwhile |
+| `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
 | `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+
+Three further tools give FLIGHT the controller's routine actions (#1214). Each landed call is a
+FLIGHT decision on the Audit ledger with its route or verb, body and basis, and each is refused during Away:
+
+| Tool | What it does |
+|---|---|
+| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token and authenticated FLIGHT actor added by the hub. `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; an external PR's `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots. Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
+| `gh_write` | `{ action, target, number, ... }` runs one `gh` verb on FLIGHT's session repo only: `comment`, `label`, `edit`, `close`, `reopen`, `ready`, or `delete_branch`. Text is scanned for secrets and @mentions as `create_ticket` does; `always_ask` and other-lane tickets are not edited, labelled or closed; a branch is never deleted when it is `main`, `archive/*`, on the repo's keep list, has an open PR or a live run, or when the open PRs could not be read. Merging stays `merge_pr`, board fields `set_fields`. Decision kind `github`. |
+| `crew_tidy` | `remove_worktree { runId }` removes the clean worktree an ended run's branch is checked out in (under the crew's worktree folder, with no live run on the branch and no seat holding it) and keeps the branch, so a seat can start the ticket again; a dirty worktree is refused with nothing removed. `prune_branches` drops the seat clones' local branches that are merged or whose remote is gone. Decision kind `tidy`. |
+
+### FLIGHT's full access
+
+FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted`, a Bash
+sandbox or per-tool allow-lists; its guard hooks stay installed. Codex requests and verifies a
+`dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
+existing filesystem, network and tool restrictions.
+
+FLIGHT receives `GH_TOKEN`, `MC_HUB` and `MC_OPERATOR_TOKEN` in its process environment.
+Credential values pass through the keeper's inherited environment, never its spec file. The keeper
+redacts them before saving or replaying stdout and stderr. A credential revision hash makes a
+surviving FLIGHT run resume with fresh credentials after a hub restart; other keepers still attach
+normally. The `mc` tools remain convenient shortcuts, with role authentication, repo/lane checks,
+merge gates and recorded operator holds. Per-repo power tiers do not withhold FLIGHT shortcuts.
+
+The guard checks repository floors: no history writes on main, no force-push, no direct PR merge
+that bypasses `merge_pr`, protected GitHub settings, `.github/**`, the Mission Control section in
+CLAUDE.md, and edits of known `always_ask` tickets. It reads the actual checkout branch for history
+writes, permits ordinary CLAUDE.md edits when that section stays identical, and accepts a matching
+recorded controller approval for a rule override. Approval grants and breaker lifts belong to the
+controller. Full machine authority means these hooks are guardrails, not an operating-system
+security boundary against arbitrary code; the operator accepted that risk in #1214.
+
+Shell writes are recorded after execution with command, cwd and exit code. A missing failure code
+or background launch is recorded as unknown, never as a successful completion. Duplicate completion
+notifications do not duplicate the audit. Secrets are redacted. Claude uses PostToolUse and
+PostToolUseFailure; Codex uses command completion facts. Counted writes feed the existing runaway
+breaker; a tripped breaker holds further counted writes until a controller lifts it. Common file
+writers and explicit output flags count outside the watch worktree (or when their destinations are
+unknown); ordinary edits inside the worktree remain audited without an additional breaker cap.
+
+FLIGHT may move unstarted Ready or Refinement work back to Backlog, hold an item for its named
+condition, reverse a mistaken closure with `gh_write`, and retain its own brief without an arbitrary
+one-day expiry. None of that lifts an operator instruction or supplies a missing approval.
+
+The controller still checks the widened runtime before merge. After Update, verify the real FLIGHT
+provider can perform the authorised actions and is refused a push to main. Keep #1214 open through
+its one-day observation of cleared stalls and counted manual controller actions.
+
+### External PR merge and sign-off
+
+`mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
+same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
+GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
+with `--match-head-commit`; branch protection stays in force. A crew-owned branch keeps its normal
+engine path. No build run is invented and no board card is marked Done by this path.
+
+Protected repository rules require the existing head-bound `merge-floor` controller approval.
+Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
+unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
+controller check. FLIGHT cannot give itself that verdict through `mc operator`; the in-process
+request retains its authenticated FLIGHT actor instead of impersonating an anonymous operator.
+For a crew PR awaiting FLIGHT clearance, the engine requests this check before clearance. The
+operator can pass the current head through `/api/runs/:id/controller-check`, after which FLIGHT
+clears the PR through its ordinary merge path. A new head requires a new verdict.
+
+External PR acceptance and controller checks have head-bound records. A required acceptance
+appears in the existing QA queue and uses the existing operator route:
+
+- `POST /api/prs/:repo/:number/uat { action: "accept" | "send_back", sha, note? }`.
+- `POST /api/prs/:repo/:number/controller-check { verdict: "pass" | "fail", sha, note? }`.
+- `POST /api/prs/:repo/:number/merge-hold { action: "hold" | "release", sha, reason? }`.
+
+A failure or send-back needs its note. Each route rechecks the current head and PR provenance;
+an old verdict does not apply after a push. A merge hold remains on the PR across pushes and can
+only be changed from the head the caller has checked. Operator acceptance stays with the operator.
+FLIGHT may manage its own holds and ordinary evidence checks, while operator holds and checks on
+FLIGHT's own access remain the independent controller's. These records do not replace CI or QA,
+and they never stand in for #1214's day-long post-Update observation.
+
+### FLIGHT approvals
+
+A controller (the controller session or the operator) lets FLIGHT go past one rule for one scope until a
+time. Only the operator token can record one; FLIGHT's `operator` tool cannot reach the route:
+
+```
+POST /api/flight/approvals { "rule": "merge-floor" | "repo-rules" | "merge-push",
+                             "scope": "...", "until": "<ISO time, within 7 days>", "reason": "..." }
+```
+
+- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
+- `repo-rules`, `merge-push`: a call the guard refused. The scope is the exact command, or the exact file path for Edit and Write. It lets that one call through once, then it is used up.
+
+Each grant and each use is a decision of kind `approval` on the Audit ledger. The refusal text names the rule.
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
@@ -1601,7 +1693,7 @@ scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
 ### HUD screenshots
 
-FLIGHT's `screenshot_hud` tool (superuser repos only) renders one HUD page at 1600×1000 in the
+FLIGHT's `screenshot_hud` tool renders one HUD page at 1600×1000 in the
 system Chrome. The render runs in an owned helper process in its own process group with a minimal
 environment (no tokens); the hub kills the whole group when the render ends or its 30 s deadline
 passes, so no Chrome outlives a call. Chrome is started with `launch()` (a private pipe, no control
@@ -1609,7 +1701,7 @@ socket) and every request it makes, loopback included, goes through a loopback-o
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
 The shot is taken after the shell is ready, the lazy page's `Loading…` placeholder has gone and the
-page's requests have been quiet for 400 ms. Renders are one at a time per host, and the repo's powers are rechecked just before launch.
+page's requests have been quiet for 400 ms. Renders are one at a time per host.
 
 Each screenshot is kept under `hud-screenshots/` in the data dir (directory `0700`, files `0600`,
 an opaque 128-bit id), at most 50 files and one week. The tool's answer ends with `Reference:
@@ -2249,3 +2341,48 @@ If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the
 branch ref rather than changing the required command. The hub never executes the seat's check
 code in the server process. Its existing exception for engine-only clean merges of main is
 unchanged; this check gates seat-authored pushes and does not certify that separate publish path.
+
+
+### Durable QA reports
+
+Each new native `report_findings` call saves its findings and immutable QA snapshot in one database
+transaction before notifying the engine. The content-addressed JSON report records its exact PR/head,
+reviewer and model, review time, registration time, original verdict, checklist, test receipt provenance,
+findings/resolutions, works-well observations, limitations and follow-up dispositions. A saved verdict
+is historical evidence; it never grants current merge approval or replaces CI, acceptance or repo rules.
+
+`GET /api/qa-reports?repoId=<repo>&prNumber=<number>&headSha=<40-sha>` lists up to 100 saved reports.
+The head filter is optional; repo and PR are required. `GET /api/qa-reports/<64-hash>` reads one JSON
+report, and `/api/qa-reports/<64-hash>/markdown` exports its Markdown. These reads require a configured
+repository and work after merge without an open queue row. The UI permalink is
+`/qa?repo=<repo>&pr=<number>&report=<64-hash>`. Native rework/Comms and existing PR-body/review-comment
+paths cite that report. The server does not introduce another GitHub write path.
+
+`POST /api/qa-reports/import` requires the actual operator token and refuses seat credentials. The
+bounded body names repoId, prNumber, exact headSha, reviewer, nullable reviewedAt, sourceRef (this PR's
+GitHub review/comment permalink), verdict and summary. Optional worksWell, coverage, findings,
+resolutions, tests, limitations, followUps and visual fields retain gaps honestly. Imports create no
+Run or native review. Registration time is current; an unknown original review time remains null.
+The server verifies the exact current GitHub PR head, including merged PRs, and observes CI afresh
+on that head. The observation time and source stay with the snapshot.
+
+Test counts supplied by a reviewer remain `reviewer-reported`. Hub command completions are
+`hub-receipt`, bound to the review run and head. Shared-lock receipts prove a tool invocation, but
+keep numeric exit/counts/source cleanliness unknown when those were not recorded. A controller may
+register `controller-recorded` receipts with their actual time, exit and retained evidence. Counts
+alone never fulfill the execution-receipt requirement. Missing receipts, checklist coverage, original
+time or required images make the report incomplete; they are not displayed as a clean sign-off.
+
+The report embeds the native image manifest and copies before/after and browser PNGs into private
+content-addressed `qa-report-assets/` storage. `/api/qa-report-assets/<sha256>` serves a referenced
+retained PNG independently of the native three-head/age sweep. PNG reads keep the existing
+operator-header protection and private/no-store policy; archive metadata does not expose their bytes. Report JSON lives in the private
+`qa_reports` table, outside the operational review/run sweep. It is never rewritten. Controller
+image links must be same-repository immutable Git commit PNG URLs with capture provenance.
+Reconstructed controlled fixtures are labelled as such; they never become live captures or original
+approvals. Known web changes require before/after pairs even if a reviewer supplies a nonvisual reason.
+
+Report import and native snapshot secret scans fail closed when known credentials cannot be read.
+Raw strings are scanned before JSON escaping, and rejected secrets are neither saved nor echoed.
+Only bounded validated report fields and PNG assets enter this archive; no submitted path is read
+from the controller's filesystem. Images still need a human check for sensitive visible data.

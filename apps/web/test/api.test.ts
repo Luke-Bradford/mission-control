@@ -7,6 +7,7 @@ import {
   apiOperatorGet,
   apiPost,
   apiPut,
+  apiQaReportImage,
   apiReviewImage,
   errorNote,
   forgetOperatorToken,
@@ -86,6 +87,29 @@ describe("api", () => {
       }),
     );
     await expect(apiReviewImage("../../secret")).rejects.toThrow("Invalid review image");
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
+  it("keeps retained QA screenshots authenticated and never sends the token to an external image", async () => {
+    const id = "d".repeat(64);
+    const mock = vi.fn(async (path: string) =>
+      path === OPERATOR_BOOTSTRAP_PATH
+        ? json(200, { token: "qa-image-token" })
+        : new Response(new Uint8Array([137, 80, 78, 71]), {
+            headers: { "content-type": "image/png" },
+          }),
+    );
+    vi.stubGlobal("fetch", mock);
+    expect((await apiQaReportImage(id)).type).toBe("image/png");
+    expect(mock).toHaveBeenLastCalledWith(
+      `/api/qa-report-assets/${id}`,
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: { [OPERATOR_HEADER]: "qa-image-token" },
+      }),
+    );
+    await expect(apiQaReportImage("https://example.test/image.png")).rejects.toThrow(
+      "Invalid QA report image",
+    );
     expect(mock).toHaveBeenCalledTimes(2);
   });
   it("bootstraps once with same-origin credentials, authenticates POSTs, and leaves GETs bare", async () => {

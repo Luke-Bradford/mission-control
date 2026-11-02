@@ -1,0 +1,142 @@
+.qa-report,
+.qa-report-current {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-4);
+}
+.qa-report {
+  overflow-wrap: anywhere;
+}
+.qa-report > *,
+.qa-report .uat-grid-two > * {
+  min-width: 0;
+}
+.qa-report-heading,
+.qa-report-links,
+.qa-report-checklist :where(li) > div,
+.qa-report-list :where(li) > div,
+.qa-report-test-list header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.qa-report-heading h2 {
+  margin: 0;
+  font-size: var(--fs-panel);
+  line-height: var(--lh);
+}
+.qa-report-links {
+  justify-content: flex-start;
+  gap: var(--sp-2) var(--sp-4);
+}
+.qa-report a {
+  display: inline-block;
+  min-height: 24px;
+}
+.qa-report p,
+.qa-report h3 {
+  margin: 0;
+}
+.qa-report h3 {
+  font-size: var(--fs);
+}
+.qa-report-meta {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.qa-report-meta > div {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+.qa-report-meta dt,
+.qa-report-note {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.qa-report-meta dd {
+  margin: 0;
+  min-width: 0;
+}
+.qa-report code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.qa-report-checklist,
+.qa-report-list,
+.qa-report-text-list {
+  list-style: none;
+  margin: 0;
+}
+.qa-report-checklist,
+.qa-report-list {
+  padding: 0;
+}
+.qa-report-checklist li,
+.qa-report-list li,
+.qa-report-test-list section {
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.qa-report-list li {
+  padding-left: 0;
+  padding-right: 0;
+}
+.qa-report-text-list p {
+  margin-top: var(--sp-1);
+}
+.qa-report-checklist li p,
+.qa-report-list li p {
+  color: var(--fg-2);
+  margin-top: var(--sp-1);
+}
+.qa-report-scroll {
+  max-height: 480px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.qa-report-text-list {
+  display: grid;
+  gap: var(--sp-3);
+  padding-left: 0;
+}
+.qa-report .pb.qa-report-text-list {
+  padding: var(--sp-4);
+}
+.qa-report .uat-shots img {
+  max-width: 100%;
+  height: auto;
+}
+.qa-report .uat-shots figure {
+  min-width: 0;
+}
+.qa-report .uat-shots figcaption {
+  flex-wrap: wrap;
+}
+.qa-report-test-list {
+  padding: 0;
+}
+.qa-report-test-list section {
+  display: grid;
+  gap: var(--sp-1);
+}
+.qa-report-test-list header code {
+  min-width: 0;
+}
+.qa-report-history summary,
+.qa-report details > summary {
+  cursor: pointer;
+  min-height: 24px;
+}
+.qa-report-history {
+  padding: var(--sp-2) var(--sp-4);
+}
+@media (max-width: 1100px) {
+  .qa-report .uat-grid-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

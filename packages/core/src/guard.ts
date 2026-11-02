@@ -23,6 +23,8 @@ export const GUARD_RULES = {
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
+  "repo-rules":
+    "FLIGHT must keep this repository's protected paths and Mission Control rules; ask a controller to approve an override",
   unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;
@@ -59,6 +61,10 @@ export interface GuardEvent {
     offset?: number;
     limit?: number;
     pages?: string;
+    content?: string;
+    old_string?: string;
+    new_string?: string;
+    replace_all?: boolean;
   };
 }
 
@@ -77,6 +83,9 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.screenshotHud,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
+  MC_TOOL_NAMES.operator,
+  MC_TOOL_NAMES.ghWrite,
+  MC_TOOL_NAMES.crewTidy,
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
@@ -85,6 +94,18 @@ export const needsSuperuserText = (repo: string): string =>
 
 export interface GuardContext {
   mode: CrewMode;
+  /** FLIGHT's controller-equivalent watch profile. */
+  fullAccess?: boolean;
+  /** Resolve the checkout a FLIGHT git command will use; null is detached or unreadable. */
+  flightGitBranch?: (directories: readonly string[], global: readonly string[]) => string | null;
+  flightGitAlias?: (
+    name: string,
+    directories: readonly string[],
+    global: readonly string[],
+  ) => string | null;
+  /** Compare a CLAUDE.md edit against the current Mission Control section. */
+  flightFileAllowed?: (event: GuardEvent) => boolean;
+  flightFilePath?: (path: string) => string;
   /** Only "dev" for now; repo permission levels (spec §8c) slot in here. */
   repo: "dev";
   /** The repo's current `flight_powers`, read from the live config on each call. */
@@ -2133,16 +2154,381 @@ const deny = (rule: GuardRule, what: string): GuardVerdict => ({
   text: `${GUARD_RULES[rule]}: ${what}`,
 });
 
+/** The files whose change is a controller's: CI workflows and `CLAUDE.md` (with its Mission Control block). */
+/** Programs that write the files they are given. */
+const FILE_WRITERS = new Set([
+  "tee",
+  "cp",
+  "mv",
+  "rm",
+  "install",
+  "truncate",
+  "ln",
+  "touch",
+  "chmod",
+  "dd",
+  "patch",
+]);
+/** `gh api` endpoints a writing call may not reach: the repo's protection, settings and access. */
+const GH_PROTECTED_ENDPOINT =
+  /^\/?repos\/[^/]+\/[^/]+(?:$|\?|\/(?:branches\/.+\/protection|rulesets|collaborators|invitations|hooks|keys|environments|pages|transfer|actions\/(?:permissions|secrets|variables)|codespaces\/secrets|dependabot\/secrets)(?:\/|\?|$))/;
+/** `%xx` escapes decoded, so `flight/%61pprovals` is read as the route the hub will route it to. */
+const decodePercent = (s: string): string =>
+  s.replace(/%([0-9a-f]{2})/gi, (_, h: string) => String.fromCharCode(Number.parseInt(h, 16)));
+/** A path with `%xx` decoded and `/./`, `/seg/../` and `//` folded away, as curl and the hub's router read it. */
+const normPath = (w: string): string => {
+  let x = decodePercent(w);
+  let y: string;
+  do {
+    y = x;
+    x = x
+      .replace(/\/\.(?=\/|$)/g, "")
+      .replace(/\/[^/]+\/\.\.(?=\/|$)/g, "")
+      .replace(/\/{2,}/g, "/");
+  } while (x !== y);
+  return x;
+};
+/** The word after `git push`'s flags, as the refs it pushes. */
+function pushRefusal(rest: readonly string[]): string | null {
+  for (const w of rest) {
+    if (/^(?:--force(?:-with-lease)?(?:=.*)?|--mirror|--prune|-f|-[a-zA-Z]*f[a-zA-Z]*)$/.test(w))
+      return "git push with --force or --mirror";
+    if (w.startsWith("+")) return "git push with a forced refspec";
+    if (/^--delete$|^-d$/.test(w) && rest.some((x) => /(?:^|[:/])main$/.test(x)))
+      return "git push deleting main";
+    if (/(?:^|[:/])main$/.test(w)) return "git push to main";
+    if (w === "--all") return "git push --all (it includes main)";
+  }
+  // the checkout FLIGHT works in is on main: a push must name its branch, not push the current one
+  const positional: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const w = rest[i] ?? "";
+    if (/^(?:-o|--push-option|--receive-pack|--exec|--repo)$/.test(w)) i++;
+    else if (!w.startsWith("-")) positional.push(w);
+  }
+  const hint = "git push needs an explicit branch on both sides: git push origin <branch>:<branch>";
+  if (positional.length < 2) return hint;
+  const deleting = rest.some((w) => w === "--delete" || w === "-d");
+  for (const ref of positional.slice(1)) {
+    // a literal HEAD, or a name built at run time, may be the checked-out branch (main in the hub checkout)
+    if (ref.split(":").some((side) => side === "HEAD" || side === "@" || /[$`]|@\{/.test(side)))
+      return hint;
+    // a bare name leaves the destination to remote.<name>.push, which a config file can point at main
+    if (!deleting && !/^[^:]+:[^:]+$/.test(ref)) return hint;
+  }
+  return null;
+}
+
+/** `gh`'s leading global flags (`-R o/r`, `--repo o/r`, `--repo=o/r`) dropped, so the verb is first. */
+function ghStripGlobal(args: readonly string[]): string[] {
+  const out = [...args];
+  while (out.length > 0) {
+    const a = out[0] ?? "";
+    if (a === "-R" || a === "--repo") out.splice(0, 2);
+    else if (a.startsWith("--repo=") || /^-R./.test(a)) out.splice(0, 1);
+    else break;
+  }
+  return out;
+}
+
+/** The method, endpoint and whether a `gh api ...` call writes (args start at `api`). */
+function ghApiCall(args: readonly string[]): {
+  method: string;
+  /** The endpoint as the API reads it: no host, `%xx` decoded, `./`, `x/../` and `//` folded, no outer `/`. */
+  endpoint: string | null;
+  /** The endpoint without its query string. */
+  path: string | null;
+  writes: boolean;
+  /** Every -f/-F/--field/--raw-field value, as `key=value`, and whether --input gives the body. */
+  fieldValues: string[];
+  input: boolean;
+} {
+  const valued = new Set([
+    "-H",
+    "--header",
+    "-q",
+    "--jq",
+    "-t",
+    "--template",
+    "--hostname",
+    "--cache",
+    "-p",
+    "--preview",
+    "-f",
+    "-F",
+    "--field",
+    "--raw-field",
+    "--input",
+    "-X",
+    "--method",
+  ]);
+  let method: string | null = null;
+  let fields = false;
+  let input = false;
+  const fieldValues: string[] = [];
+  let endpoint: string | null = null;
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i] ?? "";
+    let flag: string | undefined = a;
+    let inline: string | undefined;
+    if (a.startsWith("--")) [flag, inline] = a.split(/=(.*)/s);
+    // pflag takes a short flag's value attached: -XPATCH, -fsha=abc, -Fforce=true
+    else if (/^-[XfFHqtp]./.test(a)) {
+      flag = a.slice(0, 2);
+      inline = a.slice(2);
+    }
+    if (flag === "-X" || flag === "--method") method = (inline ?? args[++i] ?? "").toUpperCase();
+    else if (["-f", "-F", "--field", "--raw-field", "--input"].includes(flag ?? "")) {
+      fields = true;
+      const value = inline ?? args[++i] ?? "";
+      if (flag === "--input") input = true;
+      else fieldValues.push(value);
+    } else if (valued.has(flag ?? "")) {
+      if (inline === undefined) i++;
+    } else if (!a.startsWith("-") && endpoint === null) endpoint = a;
+  }
+  const used = method ?? (fields ? "POST" : "GET");
+  const clean = endpoint === null ? null : normEndpoint(endpoint);
+  return {
+    method: used,
+    endpoint: clean,
+    path: clean === null ? null : (clean.split("?")[0] ?? clean),
+    writes: used !== "GET",
+    fieldValues,
+    input,
+  };
+}
+
+/** A `gh api` endpoint folded to the route the API serves: gh reads anything but the bare `graphql` as a path. */
+function normEndpoint(raw: string): string {
+  let x = decodePercent(raw).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\//i, "");
+  x = x.replace(/^\/*(?:api\/v3\/)?/i, "");
+  const q = x.indexOf("?");
+  let path = q === -1 ? x : x.slice(0, q);
+  const query = q === -1 ? "" : x.slice(q);
+  let prev: string;
+  do {
+    prev = path;
+    path = path
+      .replace(/(^|\/)\.(?=\/|$)/g, "$1")
+      .replace(/(^|\/)[^/]+\/\.\.(?=\/|$)/g, "$1")
+      .replace(/\/{2,}/g, "/")
+      .replace(/^\//, "");
+  } while (path !== prev);
+  return `${path.replace(/\/$/, "")}${query}`;
+}
+
+/** The REST routes that move main, merge without `merge_pr`, or commit a floor file to the repo. */
+const GH_FLOOR_ENDPOINT =
+  /^\/?repos\/[^/]+\/[^/]+\/(?:git\/refs\/heads\/main(?:$|[/?])|merges(?:$|\?)|contents\/(?:\.github(?:\/|$|\?)|CLAUDE\.md)|branches\/main\/rename)/i;
+/** The GraphQL mutations that do the same. */
+const GH_FLOOR_MUTATION =
+  /createCommitOnBranch|updateRefs?\b|deleteRef|mergeBranch|mergePullRequest|enablePullRequestAutoMerge/;
+
+/** Why `gh api ...` may not run (a writing call on protection, settings, access or main), or null. */
+function ghApiRefusal(args: readonly string[]): { rule: GuardRule; text: string } | null {
+  const call = ghApiCall(args);
+  if (call.path === "graphql") {
+    // a query read from a file, or sent as the whole body, cannot be read here
+    if (call.input || call.fieldValues.some((v) => /^[^=]*=@/.test(v)))
+      return {
+        rule: "repo-rules",
+        text: "a gh api graphql call whose query the guard cannot read",
+      };
+    if (
+      call.fieldValues.some((v) => GH_FLOOR_MUTATION.test(v)) ||
+      args.some((a) => GH_FLOOR_MUTATION.test(a))
+    )
+      return { rule: "merge-push", text: "a GraphQL mutation that commits, merges or moves a ref" };
+    return null;
+  }
+  if (!call.writes || call.endpoint === null) return null;
+  if (GH_FLOOR_ENDPOINT.test(call.endpoint))
+    return {
+      rule: "merge-push",
+      text: "a gh api write that moves main, merges or commits a floor file",
+    };
+  if (GH_PROTECTED_ENDPOINT.test(call.endpoint))
+    return {
+      rule: "repo-rules",
+      text: "gh api write to branch protection, rulesets, settings or collaborators",
+    };
+  return null;
+}
+
+/** FLIGHT retains repository floors, not the crew's shell/tool restrictions. */
+function flightGuardDecision(e: GuardEvent, ctx: GuardContext, depth = 0): GuardVerdict {
+  if (depth > 8)
+    return deny(
+      "repo-rules",
+      "a recursive git alias cannot be checked against the repository rules",
+    );
+  if (e.tool !== "Bash") {
+    if (["Edit", "Write", "NotebookEdit"].includes(e.tool)) {
+      const supplied = e.input.file_path ?? "";
+      const path = normPath(ctx.flightFilePath?.(supplied) ?? supplied);
+      if (/(?:^|\/)\.github(?:\/|$)/.test(path)) return deny("repo-rules", ".github/**");
+      if (/(?:^|\/)CLAUDE\.md$/.test(path) && ctx.flightFileAllowed?.(e) !== true)
+        return deny("repo-rules", "the Mission Control block in CLAUDE.md");
+    }
+    return { kind: "allow" };
+  }
+  const command = e.input.command ?? "";
+  const walk = newWalk();
+  const directories: string[] = [];
+  let lock: string | null = null;
+  for (const { argv, directories: wrapped = [] } of lineCommands(command, walk)) {
+    const [program, ...args] = argv;
+    if (!program) continue;
+    if (program === "cd" && args.length === 1) directories.push(args[0]);
+    if (program === "git") {
+      const git = gitSubcommand(args);
+      if (git !== null) {
+        const global = args.slice(0, args.length - git.rest.length - 1);
+        if (
+          [
+            "commit",
+            "reset",
+            "rebase",
+            "merge",
+            "cherry-pick",
+            "revert",
+            "am",
+            "filter-branch",
+          ].includes(git.sub)
+        ) {
+          const branch = ctx.flightGitBranch?.([...directories, ...wrapped], global);
+          if (branch === "main" || branch == null)
+            return deny("merge-push", "a git history write on main or an unreadable checkout");
+        }
+        const mainRef = (arg: string | undefined) => arg === "main" || arg === "refs/heads/main";
+        const branchOperands = git.rest.filter((arg) => !arg.startsWith("-"));
+        const movingBranch = git.rest.some((arg) => /^--move$|^-[a-zA-Z]*[mM]/.test(arg));
+        const copyingBranch = git.rest.some((arg) => /^--copy$|^-[a-zA-Z]*[cC]/.test(arg));
+        const deletingBranch = git.rest.some((arg) => /^--delete$|^-[a-zA-Z]*[dD]/.test(arg));
+        const replacingBranch = git.rest.some((arg) => /^--force$|^-[a-zA-Z]*f/.test(arg));
+        const createdMain =
+          ["checkout", "switch"].includes(git.sub) &&
+          git.rest.some(
+            (arg, index) =>
+              (["-B", "-C", "--force-create"].includes(arg) && mainRef(git.rest[index + 1])) ||
+              /^-(?:B|C)(?:main|refs\/heads\/main)$|^--force-create=(?:main|refs\/heads\/main)$/.test(
+                arg,
+              ),
+          );
+        if (
+          createdMain ||
+          (git.sub === "update-ref" && git.rest.some(mainRef)) ||
+          (git.sub === "branch" &&
+            ((deletingBranch && branchOperands.some(mainRef)) ||
+              (replacingBranch && mainRef(branchOperands[0])) ||
+              ((movingBranch || copyingBranch) && mainRef(branchOperands.at(-1))) ||
+              (movingBranch &&
+                (branchOperands.length > 1
+                  ? mainRef(branchOperands[0])
+                  : ctx.flightGitBranch?.([...directories, ...wrapped], global) === "main"))))
+        )
+          return deny("merge-push", "a direct git rewrite of main");
+        const alias = !GIT_KNOWN.has(git.sub)
+          ? ctx.flightGitAlias?.(git.sub, [...directories, ...wrapped], global)
+          : null;
+        if (alias) {
+          const expanded = alias.startsWith("!") ? alias.slice(1) : `git ${alias}`;
+          const verdict = flightGuardDecision(
+            { tool: "Bash", input: { command: `${expanded} ${git.rest.join(" ")}` } },
+            {
+              ...ctx,
+              flightGitBranch: (nestedDirectories, nestedGlobal) =>
+                ctx.flightGitBranch?.(
+                  [...directories, ...wrapped, ...nestedDirectories],
+                  [...global, ...nestedGlobal],
+                ) ?? null,
+              flightGitAlias: (name, nestedDirectories, nestedGlobal) =>
+                ctx.flightGitAlias?.(
+                  name,
+                  [...directories, ...wrapped, ...nestedDirectories],
+                  [...global, ...nestedGlobal],
+                ) ?? null,
+            },
+            depth + 1,
+          );
+          if (verdict.kind === "deny") return verdict;
+        }
+        if (git.sub === "push") {
+          const refused = pushRefusal(git.rest);
+          if (refused) return deny("merge-push", refused);
+        }
+        if (
+          ["send-pack", "http-push"].includes(git.sub) &&
+          args.some((a) => /(?:^|[:/])main$/.test(a))
+        )
+          return deny("merge-push", "a direct git write to main");
+      }
+    }
+    if (program === "gh") {
+      const gh = ghStripGlobal(args);
+      if (gh[0] === "pr" && gh[1] === "merge")
+        return deny("merge-push", "merge through mc merge_pr");
+      if (gh[0] === "api") {
+        const refused = ghApiRefusal(gh);
+        if (refused) return deny(refused.rule, refused.text);
+        const call = ghApiCall(gh);
+        if (call.writes && /(?:^|\/)pulls\/\d+\/merge$/.test(call.path ?? ""))
+          return deny("merge-push", "merge through mc merge_pr");
+      }
+    }
+    if (["curl", "wget"].includes(program)) {
+      if (
+        args.some((arg) =>
+          /\/api\/(?:prs|runs)\/.+\/(?:controller-check|uat|merge-hold)(?:[/?]|$)/.test(
+            normPath(arg),
+          ),
+        )
+      )
+        return deny(
+          "repo-rules",
+          "use mc operator to retain FLIGHT's role for controller checks and holds; operator acceptance remains the operator's",
+        );
+      if (args.some((arg) => /\/flight\/(?:approvals|runaway\/lift)(?:[/?]|$)/.test(normPath(arg))))
+        return deny("repo-rules", "controller approval and breaker lifts belong to the controller");
+      if (args.some((arg) => /\/pulls\/\d+\/merge(?:[/?]|$)/.test(normPath(arg))))
+        return deny("merge-push", "merge through mc merge_pr");
+    }
+    if (
+      /(?:^|[^>])>>?\s*["']?[^\s;&|"']*\.github\//.test(command) ||
+      ((FILE_WRITERS.has(program) ||
+        (["sed", "perl"].includes(program) && args.some((a) => /^-[a-zA-Z]*i/.test(a)))) &&
+        args.some((a) => /(?:^|\/)\.github(?:\/|$)/.test(normPath(a))))
+    )
+      return deny("repo-rules", ".github/**");
+    if (
+      flightShellWrite(command) &&
+      /CLAUDE\.md/.test(command) &&
+      (/(?:^|[^>])>[^>]/.test(command) ||
+        /Mission Control|\bmc:/.test(command) ||
+        ["sed", "perl", "rm", "mv", "cp", "tee"].includes(program))
+    )
+      return deny("repo-rules", "a shell replacement of CLAUDE.md's Mission Control block");
+    lock ??= matchedSuite(argv, ctx.fullSuite);
+  }
+  return lock === null ? { kind: "allow" } : { kind: "lock", command: lock };
+}
+
 /** The verdict for one tool call. A deny anywhere in a command line beats a lock. */
 export function guardDecision(
   e: GuardEvent,
   ctx: GuardContext,
   superuserTools: readonly McToolName[] = MC_SUPERUSER_TOOLS,
 ): GuardVerdict {
-  if (superuserTools.some((name) => mcTool(name) === e.tool) && ctx.flightPowers !== "superuser") {
+  if (ctx.fullAccess) return flightGuardDecision(e, ctx);
+  if (
+    !ctx.fullAccess &&
+    superuserTools.some((name) => mcTool(name) === e.tool) &&
+    ctx.flightPowers !== "superuser"
+  ) {
     return deny("flight-powers", `${e.tool} (needs flight_powers: superuser)`);
   }
-  if (ctx.mode === "read-only") {
+  if (!ctx.fullAccess && ctx.mode === "read-only") {
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {
       return deny("read-only", e.tool);
     }
@@ -2153,10 +2539,18 @@ export function guardDecision(
       return deny("read-only", e.tool);
     }
   }
-  if (ctx.mode === "scratch" && (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
+  if (
+    !ctx.fullAccess &&
+    ctx.mode === "scratch" &&
+    (MC_WRITER_TOOLS as readonly string[]).includes(e.tool)
+  ) {
     return deny("read-only", `${e.tool} (a scratch copy is never committed)`);
   }
-  if (ctx.mode === "scratch" && (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)) {
+  if (
+    !ctx.fullAccess &&
+    ctx.mode === "scratch" &&
+    (MC_SCRATCH_DENIED_TOOLS as readonly string[]).includes(e.tool)
+  ) {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") return { kind: "allow" };
@@ -2234,11 +2628,12 @@ export function guardDecision(
       const g = gitSubcommand(args);
       if (g?.sub === "difftool" && g.rest.includes("--no-index"))
         return deny("git-env", "git --no-index");
-      if (g !== null && !gitReadOnly(g.sub, g.rest))
+      if (!ctx.fullAccess && g !== null && !gitReadOnly(g.sub, g.rest))
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
-      if (indirectGit) return deny("git-env", "git inside a command wrapper");
+      if (!ctx.fullAccess && indirectGit) return deny("git-env", "git inside a command wrapper");
       const directories = [...cwdDirectories];
-      if (expandedCwd || (unknownCwd && ctx.gitPathAllowed))
+      // FLIGHT's git reaches the hub checkout and the crew clones, so it is not held to one worktree
+      if (!ctx.fullAccess && (expandedCwd || (unknownCwd && ctx.gitPathAllowed)))
         return deny("git-env", "git directory outside worktree");
       for (const directory of wrapperDirectories) {
         if (
@@ -2255,15 +2650,16 @@ export function guardDecision(
         if (arg === "-C" || arg.startsWith("-C")) {
           const path = arg === "-C" ? prefix[++i] : arg.slice(2);
           if (
-            path === undefined ||
-            gitPathExpands(path) ||
-            (path !== "" && ctx.gitPathAllowed?.(path, directories) === false)
+            !ctx.fullAccess &&
+            (path === undefined ||
+              gitPathExpands(path) ||
+              (path !== "" && ctx.gitPathAllowed?.(path, directories) === false))
           )
             return deny("git-env", "git directory outside worktree");
           if (path !== "") directories.push(path);
         }
       }
-      if (ctx.gitDirectoryAllowed?.(directories) === false)
+      if (!ctx.fullAccess && ctx.gitDirectoryAllowed?.(directories) === false)
         return deny("git-env", "git repository differs from seat repository");
       if (g?.sub === "diff") {
         let paths = false;
@@ -2313,7 +2709,7 @@ export function guardDecision(
     } else if (program === "gh") {
       githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
-      return deny("network", program);
+      if (!ctx.fullAccess) return deny("network", program);
     }
     const suite =
       matchedSuite(argv, ctx.fullSuite) ??
@@ -2950,4 +3346,378 @@ export function rereadVerdict(
       `${Math.round(now.size / 1024)} KB). That read still stands: scroll back to it, or read a range ` +
       `(Read with offset and limit, or sed -n 'A,Bp').`,
   };
+}
+
+/** The command with its quoted text blanked, so a `>` inside a query or a format string is not a redirect. */
+const unquoted = (command: string): string =>
+  command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''").replace(/\d*>&\d+|\d*>\s*\/dev\/null/g, "");
+
+/** A script handed to a shell wrapper: `bash -c '...'`, `sh -c`, `zsh -c`, or `eval '...'`. */
+const SHELL_WRAPPED =
+  /(?:\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c|\beval)\s+('[^']*'|"(?:[^"\\]|\\.)*"|\S+)/g;
+
+/**
+ * Whether a command redirects or tees to a file, outside quoted text and inside the script a shell
+ * wrapper runs (that script's own quoted text blanked in turn).
+ */
+function shellFileWrite(command: string, depth = 0): boolean {
+  if (/(?<![<>&])>|\btee\b/.test(unquoted(command))) return true;
+  if (depth >= 3) return false;
+  for (const m of command.matchAll(SHELL_WRAPPED)) {
+    const script = m[1] ?? "";
+    const inner = /^(['"])[\s\S]*\1$/.test(script) ? script.slice(1, -1) : script;
+    if (shellFileWrite(inner, depth + 1)) return true;
+  }
+  return false;
+}
+
+/** Whether `gh <args>` (global flags already stripped) only reads: search, auth, a view, a list, a status. */
+const ghReadVerb = (args: readonly string[]): boolean =>
+  args[0] === "search" ||
+  args[0] === "auth" ||
+  SHELL_GH_READS.has(args[1] ?? "") ||
+  /-list$/.test(args[1] ?? "");
+
+/** Programs that only read, whatever their arguments (a redirect or `tee` is checked apart). */
+const SHELL_READERS = new Set([
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "rg",
+  "wc",
+  "pwd",
+  "echo",
+  "printf",
+  "sort",
+  "uniq",
+  "diff",
+  "stat",
+  "which",
+  "date",
+  "jq",
+  "tr",
+  "cut",
+  "basename",
+  "dirname",
+  "realpath",
+  "true",
+  "false",
+  "test",
+  "[",
+  "file",
+  "du",
+  "df",
+  "ps",
+  "lsof",
+  "cd",
+  "sleep",
+  "id",
+  "whoami",
+  "uname",
+  "hostname",
+  "tree",
+  "less",
+  "more",
+  "pgrep",
+  "nl",
+  "column",
+  "comm",
+  "readlink",
+  "type",
+  "command",
+  "wait",
+]);
+const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "search", "watch"]);
+
+/** Explicit file destinations. Null is a read; an empty list is a write with unknown targets. */
+function shellWriteTargets(program: string, args: readonly string[]): string[] | null {
+  const output = (short: string, long: string): string[] => {
+    const paths: string[] = [];
+    for (let n = 0; n < args.length; n++) {
+      const arg = args[n] ?? "";
+      if (arg === short || arg === long) paths.push(args[++n] ?? "");
+      else if (arg.startsWith(`${long}=`)) paths.push(arg.slice(long.length + 1));
+      else if (arg.startsWith(short) && arg.length > short.length)
+        paths.push(arg.slice(short.length));
+      else if (short === "-o") {
+        const cluster = /^-[a-zA-Z]*?o(.*)$/.exec(arg);
+        if (cluster) paths.push(cluster[1] || args[++n] || "");
+      }
+    }
+    return paths;
+  };
+  if (program === "sort") {
+    const paths = output("-o", "--output");
+    return paths.length ? paths : null;
+  }
+  if (program === "curl") {
+    const paths = output("-o", "--output");
+    if (args.some((arg) => /^--(?:remote-name|output-dir)(?:=|$)|^-[a-zA-Z]*O/.test(arg)))
+      return [];
+    const files = paths.filter((path) => path !== "-");
+    return files.length ? files : null;
+  }
+  if (program === "wget") return output("-O", "--output-document");
+  if (program === "sed" || program === "perl") {
+    if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
+    const files: string[] = [];
+    let script = false;
+    for (let n = 0; n < args.length; n++) {
+      const arg = args[n] ?? "";
+      if (["-e", "--expression", "-f", "--file"].includes(arg)) {
+        n++;
+        script = true;
+      } else if (/^-[a-zA-Z]*[ef].+|^--(?:expression|file)=/.test(arg)) script = true;
+      else if (arg.startsWith("-") || arg === "") continue;
+      else if (!script) script = true;
+      else files.push(arg);
+    }
+    return files;
+  }
+  if (
+    ![
+      "cp",
+      "mv",
+      "rm",
+      "rmdir",
+      "touch",
+      "mkdir",
+      "install",
+      "ln",
+      "chmod",
+      "chown",
+      "chgrp",
+      "truncate",
+    ].includes(program)
+  )
+    return null;
+  if (args.includes("--help") || args.includes("--version")) return null;
+  const target = output("-t", "--target-directory");
+  if (target.length)
+    return program === "mv" ? [...target, ...args.filter((arg) => !arg.startsWith("-"))] : target;
+  const paths = args.filter((arg) => arg !== "--" && !arg.startsWith("-"));
+  if (["cp", "install", "ln"].includes(program)) return paths.length > 1 ? paths.slice(-1) : [];
+  return paths;
+}
+
+export interface FlightShellContext {
+  cwd?: string;
+  worktree?: string;
+  /** Resolve real path identities so a worktree symlink cannot hide an outside write. */
+  resolvePath?: (path: string) => string | null;
+}
+
+function outsideShellWorktree(
+  paths: readonly string[],
+  cwd: string | undefined,
+  context: FlightShellContext,
+): boolean {
+  if (!paths.length || !cwd || !context.worktree) return true;
+  const root = normPath(context.resolvePath?.(context.worktree) ?? context.worktree).replace(
+    /\/$/,
+    "",
+  );
+  return paths.some((path) => {
+    if (!path || /[$`*?[~]/.test(path)) return true;
+    const absolute = normPath(path.startsWith("/") ? path : `${cwd}/${path}`);
+    const real = context.resolvePath ? context.resolvePath(absolute) : absolute;
+    return real === null || !(real === root || real.startsWith(`${root}/`));
+  });
+}
+
+/**
+ * Whether a shell command can change anything: FLIGHT's audit records the ones that can (#1214).
+ * A command the guard cannot read to the end counts as a write, as does any redirect to a file.
+ */
+export function flightShellWrite(command: string): boolean {
+  if (shellFileWrite(command)) return true;
+  for (const { argv } of lineCommands(command, newWalk())) {
+    const [program, ...rawArgs] = argv;
+    if (program === undefined) continue;
+    if (shellWriteTargets(program, rawArgs) !== null) return true;
+    if (SHELL_READERS.has(program)) continue;
+    const args = program === "gh" ? ghStripGlobal(rawArgs) : rawArgs;
+    if (program === "git") {
+      const g = gitSubcommand(args);
+      if (g !== null && gitReadOnly(g.sub, g.rest)) continue;
+      return true;
+    }
+    if (program === "gh") {
+      if (args[0] === "api") {
+        const writing = args.some((a) =>
+          /^(?:-X|--method|-f|-F|--field|--raw-field|--input)/.test(a),
+        );
+        const get = args.some(
+          (a, i) => /^(?:-X|--method)$/.test(a) && /^get$/i.test(args[i + 1] ?? ""),
+        );
+        if (!writing || get) continue;
+        return true;
+      }
+      if (ghReadVerb(args)) continue;
+      return true;
+    }
+    if (program === "curl") {
+      if (args.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
+        return true;
+      continue;
+    }
+    if ((program === "sed" || program === "perl") && !args.some((a) => /^-[a-zA-Z]*i/.test(a)))
+      continue;
+    return true;
+  }
+  return false;
+}
+
+const GH_ISSUE_WRITES = new Set([
+  "edit",
+  "close",
+  "reopen",
+  "delete",
+  "transfer",
+  "lock",
+  "unlock",
+  "pin",
+  "unpin",
+]);
+/** The `gh issue` flags that take a value in the next word (`--flag=value` carries its own). */
+const GH_ISSUE_VALUE_FLAGS = new Set([
+  "-c",
+  "--comment",
+  "-r",
+  "--reason",
+  "-R",
+  "--repo",
+  "-t",
+  "--title",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "-m",
+  "--milestone",
+  "-a",
+  "--add-assignee",
+  "--remove-assignee",
+  "-l",
+  "--add-label",
+  "--remove-label",
+  "--add-project",
+  "--remove-project",
+]);
+const GH_PROJECT_WRITES = new Set([
+  "item-edit",
+  "item-archive",
+  "item-delete",
+  "item-add",
+  "item-create",
+]);
+
+/**
+ * The tickets a shell command edits through `gh issue`, and whether it writes a project item
+ * (#1214): the guard holds `always_ask` tickets and the board to FLIGHT's tools.
+ */
+export function flightTicketWrites(command: string): {
+  issues: number[];
+  project: boolean;
+  /** A write verb whose ticket numbers could not all be read: the guard refuses it. */
+  unreadable: boolean;
+} {
+  const issues: number[] = [];
+  let project = false;
+  let unreadable = false;
+  for (const { argv } of lineCommands(command, newWalk())) {
+    const [program, ...rawArgs] = argv;
+    if (program !== "gh") continue;
+    const args = ghStripGlobal(rawArgs);
+    if (args[0] === "project" && GH_PROJECT_WRITES.has(args[1] ?? "")) project = true;
+    if (args[0] === "api") {
+      // the REST route to a ticket (`repos/o/r/issues/7...`) and any GraphQL mutation are ticket and board writes
+      const call = ghApiCall(args);
+      const n = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)(?:[/?]|$)/i.exec(call.endpoint ?? "")?.[1];
+      if (call.writes && n !== undefined) issues.push(Number(n));
+      if (call.path === "graphql" && args.some((a) => /\bmutation\b/.test(a))) project = true;
+    }
+    if (args[0] === "issue" && GH_ISSUE_WRITES.has(args[1] ?? "")) {
+      // gh takes its flags before or after the numbers, and several numbers: collect every positional
+      const rest = args.slice(2);
+      const found: number[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i] ?? "";
+        if (GH_ISSUE_VALUE_FLAGS.has(a)) i++;
+        else if (a.startsWith("-")) continue;
+        else {
+          const n = /^(\d+)$/.exec(a)?.[1] ?? /\/issues\/(\d+)$/.exec(a)?.[1];
+          if (n === undefined) unreadable = true;
+          else found.push(Number(n));
+        }
+      }
+      if (found.length === 0) unreadable = true;
+      issues.push(...found);
+    }
+  }
+  return { issues, project, unreadable };
+}
+
+const BREAKER_GIT_WRITES = new Set(["push", "commit", "merge", "rebase", "reset", "update-ref"]);
+
+/**
+ * Whether a shell command is a write the runaway breaker counts (#1214): a redirect or tee to a
+ * file; a git push, commit, merge, rebase, reset, ref update, tag, branch delete or worktree
+ * remove; a gh verb that writes (after `-R o/r`); a gh api call with a writing method; and a curl
+ * with a method, body or upload. Explicit file writers also count when a destination (or a move's
+ * source) is outside the watch worktree or cannot be resolved. Ordinary worktree edits stay audited
+ * without adding a new cap. Reads such as `git fetch`, `find` or `sqlite3 -readonly` are not counted.
+ */
+export function flightShellBreakerWrite(
+  command: string,
+  context: FlightShellContext = {},
+): boolean {
+  if (shellFileWrite(command)) return true;
+  let cwd = context.cwd;
+  for (const { argv, directories = [] } of lineCommands(command, newWalk())) {
+    const [program, ...raw] = argv;
+    if (program === undefined) continue;
+    if (program === "cd") {
+      const path = raw[0];
+      cwd =
+        path && !/[$`*?[~]/.test(path)
+          ? normPath(path.startsWith("/") ? path : `${cwd ?? ""}/${path}`)
+          : undefined;
+      continue;
+    }
+    let effective = cwd;
+    for (const directory of directories)
+      effective =
+        effective && !/[$`*?[~]/.test(directory)
+          ? normPath(directory.startsWith("/") ? directory : `${effective}/${directory}`)
+          : undefined;
+    const targets = shellWriteTargets(program, raw);
+    if (targets !== null && outsideShellWorktree(targets, effective, context)) return true;
+    if (program === "git") {
+      const g = gitSubcommand(raw);
+      if (g === null) continue;
+      if (BREAKER_GIT_WRITES.has(g.sub)) return true;
+      if (g.sub === "tag" && g.rest.some((a) => !a.startsWith("-")) && !g.rest.includes("-l"))
+        return true;
+      if (
+        g.sub === "branch" &&
+        g.rest.some((a) => /^-[a-zA-Z]*[dDmM]/.test(a) || /^--(?:delete|move)/.test(a))
+      )
+        return true;
+      if (g.sub === "worktree" && g.rest[0] === "remove") return true;
+    } else if (program === "gh") {
+      const args = ghStripGlobal(raw);
+      if (args[0] === "api") {
+        if (ghApiCall(args).writes) return true;
+      } else if (args.length > 1 && !ghReadVerb(args)) {
+        return true;
+      }
+    } else if (program === "curl") {
+      if (raw.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
+        return true;
+    }
+  }
+  return false;
 }

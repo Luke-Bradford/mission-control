@@ -57,11 +57,14 @@ import {
   conflictText,
   crewCliArgs,
   crewMcpConfig,
+  crewProfileOf,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   doneWhenItems,
   eligibleToStart,
   errorText as errText,
+  flightShellBreakerWrite,
+  flightShellWrite,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   grantRefusedText,
@@ -149,6 +152,8 @@ import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
+import { flightFloor, flightShellContext } from "../flight/floor.ts";
+import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -207,6 +212,7 @@ import {
 import {
   existingCheckout,
   existingDetached,
+  existingFlightCheckout,
   existingReadOnlyCheckout,
   existingScratch,
   findHandoffCheckout,
@@ -444,6 +450,8 @@ export interface SupervisorDeps {
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
   codexAuthPath?: string;
   superuserTools?: readonly McToolName[];
+  /** FLIGHT alone inherits controller credentials; kept out of keeper specs and transcripts. */
+  flightEnvironment?: () => Promise<Record<string, string>>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Fresh same-repository/default-branch provenance, only for a non-crew review subject. */
   externalReviewSubject?: (
@@ -862,6 +870,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const transfers = new Map<string, Promise<AccountTransferResult>>();
   const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
+  const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
+  const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
+  const FLIGHT_RUNTIME_PROFILE = "controller-v1";
+  const credentialRevision = (env: Record<string, string> | undefined): string =>
+    createHash("sha256")
+      .update(JSON.stringify(Object.entries(env ?? {}).sort()))
+      .digest("hex");
   const profileDenies = () =>
     config.accounts.flatMap((a) => {
       const profile = a.vendor === "codex" ? codexProfile(a) : a.cliProfile;
@@ -1202,6 +1217,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!l.parkedTurn) setState(l, "running", null);
         break;
       case "tool-result":
+        if (
+          crewProfileOf(l.info.seat.role, seatDef(l.info.seat).loop) === "flight-full" &&
+          e.command !== undefined &&
+          flightShellWrite(e.command)
+        ) {
+          const key = `flight-shell-audit:${l.run.id}:${e.toolUseId}`;
+          if (store.getSetting(key) === null) {
+            store.addFlightDecision({
+              at: now(),
+              kind: "shell",
+              seatId: l.info.seat.id,
+              targetRunId: l.run.id,
+              ref: null,
+              questionId: null,
+              about: cleanText(e.command, 1500),
+              decision: `Shell ${e.ok ? "completed" : "failed"}; exit ${e.exitCode ?? "not supplied"}; cwd ${cleanText(e.cwd ?? "unknown", 1000)}`,
+              basis: "The Codex command completion recorded this result.",
+            });
+            store.setSetting(key, "recorded");
+            if (flightShellBreakerWrite(e.command, flightShellContext(store, l.run.id, e.cwd)))
+              noteFlightWrite(store, bus, now(), "shell", { command: cleanText(e.command, 1500) });
+            bus.emit("flight");
+          }
+        }
         // the call has ended, however it ended: its hold goes (a Post hook may never come)
         deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
@@ -1352,7 +1391,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
-  function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
+  function crewEnv(seatId: string, tmp: string, fullGit = false): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
@@ -1365,7 +1404,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = sharedPnpmStoreDir(crew?.worktrees ?? "");
     Object.assign(env, crewPythonEnv(tmp, seatId));
-    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
+    // FLIGHT's full profile pushes as the operator does: their git config and credential helper
+    // apply (the seats' GIT_CONFIG_GLOBAL=/dev/null would leave `git push` with no credentials).
+    // Repo hooks and the filesystem monitor stay off.
+    const git: NodeJS.ProcessEnv = { ...CREW_GIT_ENV };
+    if (fullGit) {
+      delete git.GIT_CONFIG_GLOBAL;
+      delete git.GIT_CONFIG_NOSYSTEM;
+      delete git.GIT_ATTR_NOSYSTEM;
+    }
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...git };
   }
 
   /**
@@ -1553,6 +1601,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping) throw new Error(SHUTTING_DOWN);
     const bindingProblem = accountBindingProblem(config.accounts);
     if (bindingProblem) throw new SupervisorError(409, bindingProblem);
+    const privateEnv =
+      crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full"
+        ? await deps.flightEnvironment?.()
+        : undefined;
+    if (stopping) throw new Error(SHUTTING_DOWN);
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
     return launch(
@@ -1565,6 +1618,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       references,
       keepPrompt,
       beforeSpawn,
+      privateEnv,
     );
   }
 
@@ -1578,10 +1632,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     references = "",
     keepPrompt = false,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
+    privateEnv?: Record<string, string>,
   ): Live {
     const pause = pausedSeat(store, info.seat.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
+    const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
+    const upgradeFlight =
+      fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
     const model =
       resume || keepPrompt
         ? resumeModel(info, run)
@@ -1600,8 +1658,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
     const promptPath = crewPromptPath(deps.dbPath, run.id);
     let system: PromptPiece[] | null = null;
-    if ((!resume && !keepPrompt) || !existsSync(promptPath)) {
-      if (resume) {
+    if ((!resume && !keepPrompt) || !existsSync(promptPath) || upgradeFlight) {
+      if (resume && !upgradeFlight) {
         log(
           `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md, AGENTS.md or reference index`,
         );
@@ -1729,6 +1787,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
+        hubRoot: existsSync(deps.hubRoot) ? realpathSync(deps.hubRoot) : deps.hubRoot,
         pnpmStoreDir: pnpmStore,
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
@@ -1786,7 +1845,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const home = join(runDir, "codex-home");
         const zdotdir = join(runDir, "zsh-empty");
         const env = Object.fromEntries(
-          Object.entries(crewEnv(info.seat.id, tmp)).filter(
+          Object.entries(
+            crewEnv(info.seat.id, tmp, crewProfileOf(info.seat.role, def.loop) === "flight-full"),
+          ).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
         );
@@ -1811,6 +1872,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: ["app-server", "-c", marker],
           cwd,
           env,
+          privateEnv,
+          fullAccess: crewProfileOf(info.seat.role, def.loop) === "flight-full",
           transcriptPath: run.transcriptPath,
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
@@ -1835,7 +1898,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
               // Codex root-read base would otherwise reach them. Codex's own temp root is in
               // its worktree, so this deny no longer sits above anything the seat resolves.
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
+              codexSeatConfig(
+                sandbox,
+                def.mode,
+                `${hub}${MCP_PATH}`,
+                tmp,
+                crewProfileOf(info.seat.role, def.loop) === "flight-full",
+              ).replace(
                 '":root"="read"',
                 ['":root"="read"', `${JSON.stringify(claudeTmpParent)}="deny"`].join("\n"),
               ),
@@ -1862,6 +1931,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           effort: info.seat.effort,
           maxBudgetUsd: run.profile?.profile.budgetUsd,
           mode: def.mode,
+          profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
           runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(
             (tool) => !def.mcTools.includes(tool),
@@ -1890,7 +1960,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: [...(deps.commandArgs ?? []), ...args],
           cwd,
           transcriptPath: run.transcriptPath,
-          env: crewEnv(info.seat.id, tmpPath),
+          privateEnv,
+          env: crewEnv(
+            info.seat.id,
+            tmpPath,
+            crewProfileOf(info.seat.role, def.loop) === "flight-full",
+          ),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
           dir: crewKeeperDir(deps.dbPath, run.id),
@@ -1906,6 +1981,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw e;
     }
     store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
+    if (privateEnv !== undefined)
+      store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
+    if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
@@ -1927,6 +2005,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       seatId: info.seat.id,
       runId: run.id,
       mode: seatDef(info.seat).mode,
+      fullAccess: crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full",
+      floor: (event, verdict, commandCwd) =>
+        flightFloor({
+          store,
+          bus,
+          repoId: info.repo.id,
+          runId: run.id,
+          seatId: info.seat.id,
+          event,
+          verdict,
+          now: now(),
+          cwd: commandCwd ?? cwd,
+          rules: deps.rules,
+        }),
       area: info.seat.area,
       granted: runPathGrants(store, run.id),
       cwd,
@@ -2388,7 +2480,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return;
         }
         const denied = JSON.parse(store.getSetting(profilePolicyKey(run.id)) ?? "[]") as string[];
-        if (profileDenies().some((profile) => !denied.includes(profile))) {
+        const flight = crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full";
+        const credentialsChanged =
+          flight &&
+          deps.flightEnvironment !== undefined &&
+          store.getSetting(credentialPolicyKey(run.id)) !==
+            credentialRevision(await deps.flightEnvironment());
+        if (
+          credentialsChanged ||
+          (flight && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE) ||
+          profileDenies().some((profile) => !denied.includes(profile))
+        ) {
           if (!(await endKeeper(dir, keeperEndWait(), log))) return;
           dropGrant(row.seatId, run.id);
           if (
@@ -2476,7 +2578,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const path = row.worktree;
     if (path === null) throw new Error("no worktree recorded");
     return inClone(info.session.checkout, async () => {
-      const checkout = await existingReadOnlyCheckout(info.session.checkout, path, run.branch);
+      const checkout =
+        crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full"
+          ? await existingFlightCheckout(info.session.checkout, path)
+          : await existingReadOnlyCheckout(info.session.checkout, path, run.branch);
       if (runGone(run.id, row.seatId)) throw new Error("run ended during checkout validation");
       if (run.branch !== null) {
         const current = store.run(run.id);
@@ -2648,6 +2753,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               {
                 from: cursor?.spawn === hello.spawn ? cursor.line : 0,
                 threadId: row.cliSessionId as string,
+                fullAccess:
+                  crewProfileOf(info.seat.role, seatDef(info.seat).loop) === "flight-full",
                 cwd: row.worktree as string,
                 developerInstructions,
                 model: resumeModel(info, run),

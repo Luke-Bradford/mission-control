@@ -98,9 +98,19 @@ export async function apiOperatorGet<T>(path: string): Promise<T> {
 /** Review images require the same operator token as their metadata's private retrieval route. */
 export async function apiReviewImage(id: string): Promise<Blob> {
   if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid review image.");
+  return operatorPng(`/api/qa/review-shots/${id}`);
+}
+
+/** Retained screenshots keep the original review image's operator authentication. */
+export async function apiQaReportImage(id: string): Promise<Blob> {
+  if (!/^[0-9a-f]{64}$/.test(id)) throw new Error("Invalid QA report image.");
+  return operatorPng(`/api/qa-report-assets/${id}`);
+}
+
+async function operatorPng(path: string): Promise<Blob> {
   await loadOperatorToken();
   const read = () =>
-    fetch(`/api/qa/review-shots/${encodeURIComponent(id)}`, {
+    fetch(path, {
       credentials: "same-origin",
       headers: operatorToken ? { [OPERATOR_HEADER]: operatorToken } : {},
     });

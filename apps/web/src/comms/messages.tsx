@@ -10,10 +10,13 @@ import { Fragment } from "react";
 import { seatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
+import { followLink } from "../router.ts";
 
 /** The mention the mockup picks out in a message. */
 export const CAPCOM_TAG = "@CAPCOM";
-const COMMS_TOKEN = /((?<![\w.])@[\w-]+|(?<![A-Za-z0-9])(?:#\d+|PR \d+)(?![A-Za-z0-9]))/;
+const COMMS_TOKEN =
+  /((?<!\S)\/qa\?repo=[A-Za-z0-9._%~-]+&pr=[1-9]\d{0,9}&report=[a-f0-9]{64}(?![a-f0-9])|(?<![\w.])@[\w-]+|(?<![A-Za-z0-9])(?:#\d+|PR \d+)(?![A-Za-z0-9]))/;
+const QA_REPORT_REF = /^\/qa\?repo=[A-Za-z0-9._%~-]+&pr=[1-9]\d{0,9}&report=[a-f0-9]{64}$/;
 const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 
 export const isComms = (r: ActivityRow): r is CommsEvent => r.kind === "comms";
@@ -62,7 +65,15 @@ export function MentionText({ text, onRef }: { text: string; onRef?: (ref: strin
       {parts.map((part, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
         <Fragment key={i}>
-          {COMMS_REF.test(part) && onRef ? (
+          {QA_REPORT_REF.test(part) ? (
+            <a
+              href={part}
+              style={{ display: "inline-block", minHeight: 24 }}
+              onClick={(event) => followLink(event, part)}
+            >
+              Open saved QA report
+            </a>
+          ) : COMMS_REF.test(part) && onRef ? (
             <button
               type="button"
               className="comms-ref"

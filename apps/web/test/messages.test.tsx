@@ -5,6 +5,18 @@ import { stubFetch } from "./fetchStub.ts";
 import { CONFIG } from "./fixtures.ts";
 
 describe("MentionText", () => {
+  it("links the exact saved QA report in rework Comms without enabling arbitrary URLs", () => {
+    stubFetch({ "/api/config": CONFIG });
+    const path = `/qa?repo=mission-control&pr=1365&report=${"a".repeat(64)}`;
+    const { container } = render(
+      <MentionText
+        text={`QA report: ${path}. Fix the finding. javascript:alert(1) https://untrusted.test/x`}
+      />,
+    );
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(path);
+    expect(container.textContent).toContain("Open saved QA report. Fix the finding.");
+  });
   it.each(["octocat", null, undefined])(
     "matches whole mentions with login %s",
     async (githubLogin) => {

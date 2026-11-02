@@ -96,6 +96,8 @@ export interface KeeperSpec {
   args: string[];
   cwd: string;
   env: Record<string, string>;
+  /** Names only: values arrive in the keeper process environment, never on disk. */
+  privateEnvKeys?: string[];
   transcriptPath: string;
   stdoutLineMax: number;
   stderrLineMax: number;
@@ -391,6 +393,20 @@ export function runKeeper(
   opts: { write?: (fd: number, data: Uint8Array) => number } = {},
 ): { done: Promise<void>; terminate: () => void } {
   const spec = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8")) as KeeperSpec;
+  const privateEnv = Object.fromEntries(
+    (spec.privateEnvKeys ?? []).flatMap((key) => {
+      const value = process.env[key];
+      return typeof value === "string" ? [[key, value]] : [];
+    }),
+  );
+  const secrets = Object.entries(privateEnv)
+    .filter(([key, value]) => /TOKEN|SECRET|KEY/.test(key) && value !== "")
+    .map(([, value]) => value)
+    .sort((a, b) => b.length - a.length);
+  const redact = (text: string): string => {
+    for (const value of secrets) text = text.split(value).join("[redacted]");
+    return text;
+  };
   const write = opts.write ?? ((f: number, d: Uint8Array) => writeSync(f, d));
   const secret = (name: string, text: string) => {
     const tmp = join(dir, `${name}.tmp-${process.pid}`);
@@ -440,13 +456,13 @@ export function runKeeper(
     // its own process group: the keeper ends the CLI's children with it (`killCli`)
     child = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
-      env: spec.env,
+      env: { ...spec.env, ...privateEnv },
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     });
   } catch (e) {
     if (fd >= 0) closeSync(fd);
-    endReason = `could not start the CLI: ${(e as Error).message}`;
+    endReason = redact(`could not start the CLI: ${(e as Error).message}`);
     writeExit(null, null);
     resolveDone();
     return { done, terminate: () => {} };
@@ -596,6 +612,7 @@ export function runKeeper(
     step();
   };
   const addLine = (line: string) => {
+    line = redact(line);
     if (spec.turnEnd === "codex") {
       try {
         const m = JSON.parse(line) as Json | null;
@@ -672,6 +689,7 @@ export function runKeeper(
   });
 
   const stderrLine = (line: string) => {
+    line = redact(line);
     if (line.trim() !== "") {
       lastStderr = line.trim();
       lastStderrAt = Date.now();

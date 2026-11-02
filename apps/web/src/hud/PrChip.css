@@ -9,9 +9,16 @@
 }
 
 .preview-link,
-.preview-start {
+.preview-start,
+.qa-report-link {
   min-width: 24px;
   min-height: 24px;
+}
+
+.qa-report-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .preview-start {

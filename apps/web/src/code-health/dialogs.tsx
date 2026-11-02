@@ -177,6 +177,18 @@ export function EvidenceDialog({
             {date(reference?.coverage.from ?? null)} to {date(reference?.coverage.until ?? null)}.{" "}
             {reference?.coverage.note}
           </p>
+          {github &&
+            reference?.coverage.analysedSha &&
+            /^[a-f0-9]{40}$/i.test(reference.coverage.analysedSha) && (
+              <a
+                href={`https://github.com/${github}/commit/${reference.coverage.analysedSha}`}
+                target="_blank"
+                rel="noreferrer"
+                title={reference.coverage.analysedSha}
+              >
+                Open analysed commit {reference.coverage.analysedSha.slice(0, 8)}
+              </a>
+            )}
         </>
       )}
       {loading && <p role="status">Loading bounded evidence…</p>}
@@ -232,6 +244,15 @@ export function EvidenceDialog({
                       Open PR {row.pr}
                     </a>
                   )}
+                {github && typeof row.sha === "string" && /^[a-f0-9]{40}$/i.test(row.sha) && (
+                  <a
+                    href={`https://github.com/${github}/commit/${row.sha}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open snapshot commit {row.sha.slice(0, 8)}
+                  </a>
+                )}
                 {typeof row.url === "string" && row.url.startsWith("https://github.com/") && (
                   <a href={row.url} target="_blank" rel="noreferrer">
                     Open source result

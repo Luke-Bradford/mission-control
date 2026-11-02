@@ -1,7 +1,7 @@
 /** The guard reads repo powers and tool restrictions here, on every call. */
 
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
   type CrewMode,
@@ -12,6 +12,7 @@ import {
   type McToolName,
 } from "@mc/core";
 import { type CcConfig, flightPowersOf } from "../config.ts";
+import { mcSection } from "../engine/rules.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import { codexReadAllowed, realPathOrParent } from "../runtime/codex-floor.ts";
 
@@ -24,11 +25,68 @@ export function crewGuardDecision(
   mcTools: readonly string[] = [],
   worktree?: string,
   commandCwd?: string,
+  fullAccess = false,
 ): GuardVerdict {
   return guardDecision(
     event,
     {
       mode,
+      fullAccess,
+      flightFilePath: (path) =>
+        realPathOrParent(resolve(commandCwd ?? worktree ?? ".", path)) ?? path,
+      flightGitAlias: (name, directories, global) => {
+        try {
+          let cwd = commandCwd ?? worktree;
+          if (!cwd) return null;
+          for (const directory of directories) cwd = resolve(cwd, directory);
+          return (
+            execFileSync("git", [...global, "config", "--get", `alias.${name}`], {
+              cwd,
+              encoding: "utf8",
+              timeout: GIT_TIMEOUT_MS,
+              env: gitEnv(process.env),
+            }).trim() || null
+          );
+        } catch {
+          return null;
+        }
+      },
+      flightGitBranch: (directories, global) => {
+        try {
+          let cwd = commandCwd ?? worktree;
+          if (!cwd) return null;
+          for (const directory of directories) cwd = resolve(cwd, directory);
+          return execFileSync("git", [...global, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+            cwd,
+            encoding: "utf8",
+            timeout: GIT_TIMEOUT_MS,
+            env: gitEnv(process.env),
+          }).trim();
+        } catch {
+          return null;
+        }
+      },
+      flightFileAllowed: ({ tool, input }) => {
+        try {
+          const path = resolve(commandCwd ?? worktree ?? ".", input.file_path ?? "");
+          const before = readFileSync(path, "utf8");
+          let after: string;
+          if (tool === "Write" && input.content !== undefined) after = input.content;
+          else if (
+            tool === "Edit" &&
+            input.old_string &&
+            input.new_string !== undefined &&
+            before.includes(input.old_string)
+          )
+            after = input.replace_all
+              ? before.replaceAll(input.old_string, input.new_string)
+              : before.replace(input.old_string, input.new_string);
+          else return false;
+          return mcSection(before) === mcSection(after);
+        } catch {
+          return false;
+        }
+      },
       gitDirectoryAllowed:
         worktree === undefined
           ? undefined
