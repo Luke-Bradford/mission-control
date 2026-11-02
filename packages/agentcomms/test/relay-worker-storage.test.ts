@@ -114,16 +114,22 @@ it("bounds reads and retention without loading ciphertext into room state", asyn
   const { db, backing } = backingStore();
   const f = await fixture();
   const storage = createDOStorage(backing);
+  let postAt = Date.now();
   const core = createRoomCore({
     room: "test-room",
     owner: f.a.member,
     directory: f.directory,
-    now: Date.now,
+    now: () => postAt,
     maxPerMinute: LOG_LIMIT + 2,
     storage,
   });
   const sealed = await f.post(1);
-  for (let i = 0; i < LOG_LIMIT + 2; i++) core.post(sealed);
+  // Exercise retained history across posting windows. A 5,002-post instant burst also grows
+  // and serializes an unrelated rate-limit timestamp array on every real SQLite write.
+  for (let i = 0; i < LOG_LIMIT + 2; i++) {
+    postAt += POST_WINDOW_MS + 1;
+    core.post(sealed);
+  }
   expect(core.oldestSeq()).toBe(3);
   expect(db.prepare("SELECT count(*) AS n FROM room_log").get()?.n).toBe(LOG_LIMIT);
   expect(storage.load()?.log).toEqual([]);
