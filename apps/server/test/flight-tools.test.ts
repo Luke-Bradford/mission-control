@@ -4262,6 +4262,84 @@ describe("create_ticket", () => {
     okGh();
   });
 
+  function acceptedRecommendation() {
+    store.refreshCodeHealthRecommendations("mc", NOW);
+    const row = store.codeHealthRecommendations("mc")[0];
+    if (!row) throw Error("fixture recommendation missing");
+    store.decideCodeHealthRecommendation(
+      "mc",
+      row.id,
+      {
+        requestId: "12345678-1234-4234-8234-123456789abc",
+        basis: "Fixture evidence",
+        expectedUpdatedAt: row.updatedAt,
+        change: { action: "accept", owner: "owner", reviewAt: NOW + 10000 },
+      },
+      "operator",
+      NOW,
+    );
+    return row.id;
+  }
+  it("links accepted recommendation work before a project failure and never recreates it on retry", async () => {
+    const recommendationId = acceptedRecommendation();
+    readImpl = (n) => card(n, { status: "" });
+    let creates = 0,
+      failProject = true;
+    ghImpl = async (a) =>
+      a[1] === "list"
+        ? { code: 0, stdout: "[]", stderr: "" }
+        : a[1] === "create"
+          ? (creates++, { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" })
+          : { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
+    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
+    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toBe(
+      "https://github.com/o/mc/issues/42",
+    );
+    failProject = false;
+    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
+      "Recovered existing",
+    );
+    expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
+    expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
+    expect(creates).toBe(1);
+  });
+  it("recovers a created issue marker after a lost response without a second issue write", async () => {
+    const recommendationId = acceptedRecommendation();
+    readImpl = (n) => card(n, { status: "In progress" });
+    let body = "",
+      creates = 0;
+    ghImpl = async (a) => {
+      if (a[1] === "list")
+        return {
+          code: 0,
+          stdout: JSON.stringify(
+            body ? [{ number: 42, title: "Server: fix the flake", body }] : [],
+          ),
+          stderr: "",
+        };
+      if (a[1] === "create") {
+        creates++;
+        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
+        return { code: 1, stdout: "", stderr: "response lost" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
+    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
+      "Recovered existing",
+    );
+    expect(creates).toBe(1);
+    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toContain(
+      "issues/42",
+    );
+  });
+  it("refuses an unaccepted or foreign recommendation before GitHub reads", async () => {
+    store.refreshCodeHealthRecommendations("mc", NOW);
+    const recommendationId = store.codeHealthRecommendations("mc")[0]?.id;
+    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
   it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
     let n = 40;
     ghImpl = async (a) => {

@@ -12,6 +12,7 @@ export function installCodeHealthRevisions(db: Db): void {
     repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0
   )`);
   const tables = [
+    ["code_health_recommendations", "direct"],
     ["reviews", "direct"],
     ["review_findings", "review"],
     ["review_resolutions", "review"],

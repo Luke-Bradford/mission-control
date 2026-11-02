@@ -28,13 +28,9 @@ interface EvidenceQuery {
   file?: string;
 }
 
-export class CodeHealthReadError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+export { CodeHealthReadError } from "./error.ts";
+
+import { CodeHealthReadError } from "./error.ts";
 
 /** One bounded calculation shared by the HUD and the later read-only tool handler. */
 export class CodeHealthReader {
@@ -45,6 +41,7 @@ export class CodeHealthReader {
     string,
     { revision: string; expires: number; value: CodeHealthView }
   >();
+  private readonly recommendationRefresh = new Map<string, { revision: string; at: number }>();
   private readonly evidenceQueries = new Map<string, EvidenceQuery>();
 
   constructor(store: Store, config: CcConfig, now: () => number = Date.now) {
@@ -88,6 +85,23 @@ export class CodeHealthReader {
   }
 
   read(repoId: string, window: CodeHealthWindow, tab: CodeHealthTab): CodeHealthView {
+    this.repo(repoId);
+    if (tab === "overview") {
+      const revision = this.store.codeHealthRevision(repoId),
+        cached = this.recommendationRefresh.get(repoId),
+        at = this.now();
+      if (!cached || cached.revision !== revision || at - cached.at >= CACHE_MS) {
+        this.store.refreshCodeHealthRecommendations(repoId, at);
+        if (this.recommendationRefresh.size >= CACHE_MAX) {
+          const first = this.recommendationRefresh.keys().next().value;
+          if (first) this.recommendationRefresh.delete(first);
+        }
+        this.recommendationRefresh.set(repoId, {
+          revision: this.store.codeHealthRevision(repoId),
+          at,
+        });
+      }
+    }
     return this.store.codeHealthSnapshot(() => this.build(repoId, window, tab));
   }
 
@@ -155,14 +169,35 @@ export class CodeHealthReader {
         ),
       );
       if (tab === "overview") {
+        const recommendations = this.store
+          .codeHealthRecommendations(repoId)
+          .filter(
+            (row) =>
+              row.active &&
+              (row.state.kind === "proposed" ||
+                (row.state.kind === "snoozed" && row.state.until <= at)),
+          );
+        const priority = (rule: string) =>
+          rule === "recurring-correction" ? 0 : rule === "repeated-rounds" ? 1 : 2;
+        recommendations.sort(
+          (a, b) =>
+            priority(a.rule) - priority(b.rule) ||
+            (b.target.baseline ?? 0) - (a.target.baseline ?? 0) ||
+            a.id.localeCompare(b.id),
+        );
         describe(
           "recommendations",
-          null,
-          null,
-          "Recommendations have not been generated for this repo.",
-          "not-collected",
+          at,
+          at,
+          "Up to three conservative 30-day triage proposals. Durable decisions and accepted baselines are available from the recommendation history reader. No causal effect is inferred.",
         );
-        data = { tab, recommendations: [], review };
+        data = {
+          tab,
+          recommendations: recommendations
+            .slice(0, 3)
+            .map((row) => ({ ...row, evidence: [...evidence] })),
+          review,
+        };
       } else data = { tab, review };
     } else if (tab === "risk") {
       const checkout = this.checkout(repoId);

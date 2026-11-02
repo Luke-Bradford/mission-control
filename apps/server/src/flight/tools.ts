@@ -764,6 +764,10 @@ const CreateTicketArgs = z.strictObject({
   size: z.enum(TICKET_SIZES).optional(),
   priority: z.enum(PRIORITIES).optional(),
   basis: basisArg,
+  recommendationId: z
+    .string()
+    .regex(/^chr_[a-f0-9]{32}$/)
+    .optional(),
 });
 const CommentTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -1921,7 +1925,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function createTicket(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, CreateTicketArgs, args);
     if (!c.ok) return c.result;
-    const { title, body, labels, size, priority, basis } = c.args;
+    const { title, labels, size, priority, basis, recommendationId } = c.args;
+    const marker = recommendationId ? `<!-- code-health:${recommendationId} -->` : null;
+    const body = marker ? `${c.args.body}\n\n${marker}` : c.args.body;
     const repo = repoOf();
     if (repo === undefined) return fail(CREATE_NO_REPO);
     if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
@@ -1966,6 +1972,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
       const stopped = breakerRefusal();
       if (stopped) return stopped;
+      let existingWork: string | null = null,
+        workReady = false;
+      if (recommendationId) {
+        const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        if (recommendation?.state.kind !== "accepted")
+          return fail("Code-health work requires an accepted recommendation in this repo.");
+        existingWork = recommendation.linkedWork;
+        workReady = recommendation.workReady;
+      }
       const at = now();
       const cwd = crewDir(deps.dbPath);
       const failed = (step: string, r: { code: number | null; stderr: string }): Result => {
@@ -1974,18 +1989,105 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
         return fail(createFailedText(step));
       };
+      const finish = async (issue: number, url: string, recovered = false): Promise<Result> => {
+        const ref = `${repo.id}#${issue}`;
+        const [owner = ""] = repo.github.split("/");
+        if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+        const added = await deps.gh(
+          ["project", "item-add", String(repo.project), `--owner=${owner}`, `--url=${url}`],
+          { cwd },
+        );
+        if (added.code !== 0) {
+          failed("project item-add", added);
+          return fail(notOnProjectText(ref));
+        }
+        // a draft repo's board is never written: moveCard would answer ok and change nothing
+        if (repo.autonomy !== "merge") {
+          if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
+          return { text: createdDraftText(ref, repo.id) };
+        }
+        if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+        if (setsFields) {
+          const edited = await deps.board.edit?.(repo.id, issue, fields);
+          if (!edited?.ok) {
+            deps.log?.(
+              `mc create_ticket: setting fields on ${ref} failed: ${edited?.reason ?? ""}`,
+            );
+            return fail(createdFieldsFailedText(ref));
+          }
+        }
+        if (recovered && deps.board.read) {
+          const card = await deps.board.read(repo.id, issue).catch(() => null);
+          if (!card)
+            return fail(
+              "Issue exists; could not check its current board status. Retry the same recommendation.",
+            );
+          if (card.closed || card.status.trim()) {
+            if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
+            return {
+              text: `Recovered existing accepted recommendation work: ${url}; kept its current board status.`,
+            };
+          }
+        }
+        const moved = await deps.board.move({
+          runId: ctx.runId,
+          repoId: repo.id,
+          issue,
+          column: "Backlog",
+        });
+        if (moved.ok && recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
+        return {
+          text:
+            (recovered ? "Recovered existing accepted recommendation work. " : "") +
+            createdText(ref, moved.ok),
+        };
+      };
+      if (existingWork) {
+        if (workReady) return { text: `Accepted recommendation already links ${existingWork}.` };
+        const prefix = `https://github.com/${repo.github}/issues/`,
+          number = existingWork.slice(prefix.length);
+        if (!existingWork.startsWith(prefix) || !/^[1-9][0-9]*$/.test(number))
+          return fail(
+            "Stored recommendation work link is invalid; inspect its audit before retrying.",
+          );
+        return finish(Number(number), existingWork, true);
+      }
       const listed = await deps.gh(
         [
           "issue",
           "list",
           `--repo=${repo.github}`,
-          "--state=open",
-          "--json=number,title",
+          recommendationId ? "--state=all" : "--state=open",
+          recommendationId ? "--json=number,title,body" : "--json=number,title",
           "--limit=1000",
         ],
         { cwd },
       );
       if (listed.code !== 0) return failed("issue list", listed);
+      if (recommendationId && marker) {
+        let rows: unknown;
+        try {
+          rows = JSON.parse(listed.stdout);
+        } catch {
+          return failed("issue list", { code: 0, stderr: "malformed issue list" });
+        }
+        if (!Array.isArray(rows))
+          return failed("issue list", { code: 0, stderr: "malformed issue list" });
+        const linked = rows.find(
+          (row) =>
+            row &&
+            typeof row.body === "string" &&
+            row.body === body &&
+            row.title === title &&
+            Number.isSafeInteger(row.number) &&
+            row.number > 0,
+        );
+        if (linked) {
+          const url = `https://github.com/${repo.github}/issues/${linked.number}`;
+          store.linkCodeHealthRecommendation(repo.id, recommendationId, url, ctx.seatId, at);
+          return finish(linked.number, url, true);
+        }
+      }
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
@@ -2013,6 +2115,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       )?.[1];
       if (number === undefined) return failed("issue create", { code: 0, stderr: "no issue URL" });
       const issue = Number(number);
+      if (recommendationId)
+        store.linkCodeHealthRecommendation(repo.id, recommendationId, url, ctx.seatId, at);
       const ref = `${repo.id}#${issue}`;
       // the issue exists now: whatever follows, it is logged
       record(at, {
@@ -2023,33 +2127,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         basis,
       });
       bus.emit("flight");
-      const [owner = ""] = repo.github.split("/");
-      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
-      const added = await deps.gh(
-        ["project", "item-add", String(repo.project), `--owner=${owner}`, `--url=${url}`],
-        { cwd },
-      );
-      if (added.code !== 0) {
-        failed("project item-add", added);
-        return fail(notOnProjectText(ref));
-      }
-      // a draft repo's board is never written: moveCard would answer ok and change nothing
-      if (repo.autonomy !== "merge") return { text: createdDraftText(ref, repo.id) };
-      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
-      if (setsFields) {
-        const edited = await deps.board.edit?.(repo.id, issue, fields);
-        if (!edited?.ok) {
-          deps.log?.(`mc create_ticket: setting fields on ${ref} failed: ${edited?.reason ?? ""}`);
-          return fail(createdFieldsFailedText(ref));
-        }
-      }
-      const moved = await deps.board.move({
-        runId: ctx.runId,
-        repoId: repo.id,
-        issue,
-        column: "Backlog",
-      });
-      return { text: createdText(ref, moved.ok) };
+      return finish(issue, url);
     });
   }
 
@@ -3846,6 +3924,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. Work cut from or built on an open PR needs a Depends on line for that PR's ticket (or After PR N); without one the call is refused. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
       inputSchema: objectSchema(
         {
+          recommendationId: {
+            type: "string",
+            pattern: "^chr_[a-f0-9]{32}$",
+            description:
+              "Optional accepted code-health recommendation. Durable link and recovery prevent duplicate work on retry.",
+          },
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
           labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 },
