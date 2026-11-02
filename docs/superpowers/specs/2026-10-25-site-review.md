@@ -35,3 +35,8 @@ Telemetry visual accuracy, all graph-selection combinations and keyboard/validat
 ## Approval and mockup register
 
 Existing approved/reference mockups remain in `docs/mockups/` and `apps/web/mockups/`; this research does not change their approval status. New page redesigns will be self-contained and linked here when ready. None has been produced or approved by this PR. Before new density mockups, #1193 requires an approved plan; before Audit mockups, #1185 requires its own approved plan. Each mockup then needs operator review before one-area build tickets are filed. #677 and #1193 stay open through those stages.
+
+
+### Density proposal register — 2 November
+
+The operator approved the #1193 plan in PR #1351. Its first three density mockups are now [Overview](../../mockups/2026-10/overview-density.html), [Agent](../../mockups/2026-10/agent-density.html), and [Setup — Repos & seats](../../mockups/2026-10/setup-sessions-density.html). [Screenshots and interaction checks](../../evidence/desktop-density-mockups/index.md) cover both themes and six viewports. These proposals await separate operator approval before build tickets. Other page mockups required by #677 remain outstanding.
