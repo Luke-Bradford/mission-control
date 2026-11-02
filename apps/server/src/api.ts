@@ -4070,7 +4070,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? error.message
               : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
         });
-      // Readers: the approved code-health dashboard and its bounded evidence drawer.
+      // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
       api.get("/code-health", async (req, reply) => {
         if (
           operatorToken !== undefined &&
@@ -4087,6 +4087,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return codeHealthFailure(error, reply);
         }
       });
+      // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
       api.get("/code-health/evidence/:id", async (req, reply) => {
         if (
           operatorToken !== undefined &&
