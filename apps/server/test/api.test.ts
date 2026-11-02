@@ -112,6 +112,7 @@ import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
+import { qaNativeIdentity } from "../src/qa-history-key.ts";
 import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
@@ -1354,6 +1355,8 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
+  ["GET", "/api/qa/history"],
+  ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
   ["POST", "/api/qa-reports/import", {}],
   ["GET", "/api/qa-reports/:id"],
@@ -2411,6 +2414,40 @@ describe("local access", () => {
       if (url === "/api/flight/runaway/lift") {
         // nothing is tripped in this fixture
         expect(r.statusCode).toBe(409);
+        continue;
+      }
+      if (url === "/api/qa/history/native/:id") {
+        // An unbound placeholder is unknown, not an authentication refusal. Prove the real
+        // configured-record path remains cookie-free without relaxing identity validation.
+        expect(r.statusCode).toBe(404);
+        const id = store.requestReview({
+          authorRunId: "native-history-access",
+          repoId: "shop-app",
+          seatId: "retired-reviewer",
+          prNumber: 12,
+          sha: "b".repeat(40),
+          epoch: 1,
+          attempt: 1,
+          round: 1,
+          at: NOW - 1000,
+        });
+        if (id === null) throw new Error("Native history fixture was not created");
+        store.setReviewState(id, ["queued"], "failed", {
+          at: NOW,
+          failure: "No verdict recorded.",
+        });
+        const review = store.review(id);
+        if (!review) throw new Error("Native history fixture is missing");
+        const path = `/api/qa/history/native/${id}`;
+        const identity = qaNativeIdentity(review);
+        expect((await get(path)).statusCode).toBe(404);
+        expect((await get(`${path}?identity=${"0".repeat(64)}`)).statusCode).toBe(404);
+        expect(
+          (await get(`/api/qa/history/native/${id + 1}?identity=${identity}`)).statusCode,
+        ).toBe(404);
+        const valid = await get(`${path}?identity=${identity}`);
+        expect(valid.statusCode).toBe(200);
+        expect(valid.json()).toMatchObject({ review: { id, repoId: "shop-app", sha: review.sha } });
         continue;
       }
       if (url.startsWith("/api/qa/review-shots/")) {

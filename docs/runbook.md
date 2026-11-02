@@ -2411,3 +2411,31 @@ Report import and native snapshot secret scans fail closed when known credential
 Raw strings are scanned before JSON escaping, and rejected secrets are neither saved nor echoed.
 Only bounded validated report fields and PNG assets enter this archive; no submitted path is read
 from the controller's filesystem. Images still need a human check for sensitive visible data.
+
+## QA history
+
+Open **QA → History** to browse saved report versions and older completed native review records.
+The index includes configured repositories only, with at most 50 entries per page. Select a repository
+or use **Older reviews**. Registration time orders saved reports; native completion time orders original
+records, with creation time as an explicit fallback when completion was not retained. Full identity
+expands with the keyboard. Opening a row loads its detail; browsing the index loads no images.
+
+Saved reports keep their original PR/head, reviewer, review time (or unknown), CI snapshot and evidence.
+They survive native review pruning and open even after a PR closes or leaves the queue. Their historical
+verdict never grants acceptance or deployment readiness for another head. Use **Current** for current work.
+
+Original native records include reported, failed and superseded review attempts that have no matching
+saved snapshot. They retain their actual seat, exact head, summary, findings, coverage and reported test
+counts where available. Original resolutions and retained hub command records are shown separately;
+lock-only records keep their unknown exit/outcome and source-cleanliness limitations. Failed attempts without a verdict stay unknown. Reads do not reconstruct reports,
+fetch current CI, or change history. Native records still follow existing retention; already pruned records
+cannot be recovered here. Legacy screenshot references load only on request with existing operator auth;
+the original bytes may have expired. Missing CI, checklist coverage, applicability or images is stated,
+not treated as a pass. Finding resolutions on these legacy records reflect the currently retained state.
+
+The read-only API is `GET /api/qa/history?repoId=<configured-id>&limit=50&cursor=<nextCursor>`
+(all configured repos when `repoId` is omitted), plus `GET /api/qa/history/native/:id?identity=<full-record-hash>` for original records.
+Use the returned native permalink; an identity mismatch or pruned record returns 404, so a reused row
+ID cannot silently open another review.
+Only page summaries are returned by the index. Existing immutable report and protected image routes
+keep their permission checks.

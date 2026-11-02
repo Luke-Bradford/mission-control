@@ -1,0 +1,14 @@
+
+ RUN  v3.2.7 [controller]/codex-qa-history
+
+ ✓ |web| test/QaHistory.browser.test.ts (3 tests) 13006ms
+   ✓ QA history in the application shell > keeps history columns readable at required widths/themes and both rail states  9759ms
+   ✓ QA history in the application shell > opens older versions and native records by keyboard without current approval controls  458ms
+   ✓ QA history in the application shell > names empty, one, loading, error and disconnected history states  1520ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  20:06:56
+   Duration  13.65s (transform 191ms, setup 269ms, collect 185ms, tests 13.01s, environment 0ms, prepare 32ms)
+
+JSON report written to /tmp/mc-925-history-browser-corrected.json
