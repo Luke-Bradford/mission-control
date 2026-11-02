@@ -203,14 +203,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
           colorScheme,
           api,
         });
-        await page.evaluate(() => {
-          const filter = document.querySelector<HTMLSelectElement>(
-            '[aria-label="Activity filter"]',
-          );
-          if (!filter) throw new Error("Activity filter missing");
-          filter.value = "all";
-          filter.dispatchEvent(new Event("change", { bubbles: true }));
-        }, undefined);
+        await page.click('[aria-label="Activity filter"] button:text-is("All")');
         await page.box("#actList .arow");
         const activity = await page.box("#actP");
         // A populated log must scroll instead of setting its row to the height of 120 messages.
