@@ -41,7 +41,10 @@ Global orders remain global; do not invent cross-repo restrictions contrary to #
 Use existing seat/session authority and authenticated declared provenance.
 Header presence remains FLIGHT provenance after common validation, including when its run ends during parsing.
 The UI preserves its current hierarchy and shared form patterns. Major visual changes need a mockup first,
-as the repo already requires. Coordinate Agent/form files with #1361 and #1362.
+offered to the operator with a recommendation. This adds no mandatory approval wait.
+Coordinate Agent/form files with #1361 and #1362.
+The plan's new input/capacity bounds are implementation proposals. Reject over-limit writes before saving;
+never silently truncate, omit or evict accepted orders.
 
 ## Done when
 

@@ -87,9 +87,12 @@ Display/edit means append a replacement and revoke the old row in one transactio
 An optional `replacesId` on creation provides this operation with target/author checks.
 Do not mutate existing text or backdate an edit.
 
-Use a 4,000 UTF-16-code-unit maximum per plain text entry, with trimmed nonempty validation.
-Existing focus retains its 500-character validator. Limit each target to 64 active entries and
-64 KiB of fully rendered active instruction content. Check limits inside the write transaction;
+Proposed implementation bounds: 4,000 UTF-16 code units per plain text entry, 64 active entries per target,
+and 64 KiB of fully rendered active instruction content per target. These are new bounds for this feature,
+not existing standing-order limits. The 4,000 value follows existing memory/decision text bounds
+(`packages/core/src/flight.ts:199,366`); the active-count and aggregate-byte bounds are new proposals.
+Existing focus retains its 500-character validator (`apps/server/src/focus.ts:11`).
+Validate trimmed nonempty plain text and check capacity inside the write transaction;
 reject an oversized change before saving, with a useful error. Never silently trim, omit or evict an accepted entry.
 Retain revoked history outside ordinary memory/decision pruning.
 
@@ -166,7 +169,9 @@ Preserve original message origin and content inside the envelope, plus existing 
 
 Read `docs/direction.md` with verified Git objects at the watch checkout's selected base, alongside current repo-doc loading.
 Persist `{sha,text}` as run-scoped direction context so restart/resume can reproduce it.
-An absent direction file has an explicit absent marker. A symlink, invalid object, or file above 64 KiB
+An absent direction file has an explicit absent marker. A proposed 64 KiB direction bound follows
+the existing repo-doc budget (`runtime/brief.ts:37`), but is new for direction-file injection.
+A symlink, invalid object, or direction file above that proposed bound
 is an explicit delivery/setup error, not a silently truncated direction. Surface the error with recovery steps.
 On a fresh or rotated watch session, load its selected current base. On resume, use the retained source;
 if missing, rebuild from a verified base and label that source. Do not read agent-editable worktree text as trusted direction.
@@ -244,5 +249,7 @@ No open PR implements orders or instructions; the only open PR at audit time was
 
 No product decision is required for the basic contract above. Global orders avoid invented repo scoping.
 Use the existing hard-rule review and independent current-head controller checks for changes to FLIGHT's own authority.
-A major web redesign follows the existing mockup approval requirement. Do not create another product approval or live-check gate.
+A major web redesign gets a mockup first, offered to the operator with a recommendation
+(`docs/direction.md:25`, `roles/FLIGHT.md:85`). These sources add no mandatory approval wait.
+Do not create another product approval or live-check gate.
 This draft does not claim any implementation, test pass, provider observation, merge or deployment.
