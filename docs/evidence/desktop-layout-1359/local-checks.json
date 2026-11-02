@@ -1017,16 +1017,18 @@
     {
       "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
       "phase": "Final CI correction and main integration",
-      "command": "pnpm exec vitest run [17 explicitly named shell/QA integration files]",
+      "command": "pnpm exec vitest run apps/web/test/Dock.test.tsx apps/web/test/App.test.tsx apps/web/test/Header.test.tsx apps/web/test/pageRenderCounts.test.tsx apps/web/test/loadFetches.test.tsx apps/web/test/clock.test.tsx apps/web/test/hudTokens.test.ts apps/web/test/AgentsPanelCss.test.ts apps/web/test/MapPerformance.test.tsx apps/web/test/ItemPanel.test.tsx apps/web/test/OverviewLayoutCss.test.ts apps/web/test/doingCss.test.ts apps/web/test/OverviewClipping.browser.test.ts apps/web/test/RunTrace.browser.test.ts apps/web/test/DesktopLayout.browser.test.ts apps/web/test/TicketPage.browser.test.ts apps/web/test/TicketQaReports.test.tsx",
       "outcome": "passed",
       "exitCode": 0,
-      "completedAt": 1793641318343,
-      "receiptSha256": "a538546f631bd88506f6b5b835c7bc940886b8380d34ca6c13e53736c4ad120f",
       "passed": 322,
       "failed": 0,
       "skipped": 0,
       "files": 17,
-      "scope": "Dock, App, Header, pageRenderCounts, loadFetches, clock, hudTokens, AgentsPanelCss, MapPerformance, ItemPanel, OverviewLayoutCss, doingCss, OverviewClipping.browser, RunTrace.browser, DesktopLayout.browser, TicketPage.browser, TicketQaReports"
+      "scope": "Dock, App, Header, pageRenderCounts, loadFetches, clock, hudTokens, AgentsPanelCss, MapPerformance, ItemPanel, OverviewLayoutCss, doingCss, OverviewClipping.browser, RunTrace.browser, DesktopLayout.browser, TicketPage.browser, TicketQaReports",
+      "origin": "controller-recorded",
+      "at": 1793641318343,
+      "artifactSha256": "a538546f631bd88506f6b5b835c7bc940886b8380d34ca6c13e53736c4ad120f",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
     },
     {
       "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
@@ -1034,8 +1036,10 @@
       "command": "pnpm -s lint",
       "outcome": "passed",
       "exitCode": 0,
-      "completedAt": 1793641320464,
-      "receiptSha256": "41f4e504fdd9ec7b1d5564f5271b315456b3cc08adc211d0d6ea49e4b1203aa0"
+      "origin": "controller-recorded",
+      "at": 1793641320464,
+      "artifactSha256": "41f4e504fdd9ec7b1d5564f5271b315456b3cc08adc211d0d6ea49e4b1203aa0",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
     },
     {
       "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
@@ -1043,8 +1047,10 @@
       "command": "pnpm -s typecheck",
       "outcome": "passed",
       "exitCode": 0,
-      "completedAt": 1793641324468,
-      "receiptSha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e"
+      "origin": "controller-recorded",
+      "at": 1793641324468,
+      "artifactSha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
     },
     {
       "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
@@ -1052,8 +1058,10 @@
       "command": "pnpm -s build",
       "outcome": "passed",
       "exitCode": 0,
-      "completedAt": 1793641326963,
-      "receiptSha256": "0573308638d6abfe31872d5a0e562659c8caf13915b2c697d0256975fd9de636"
+      "origin": "controller-recorded",
+      "at": 1793641326963,
+      "artifactSha256": "0573308638d6abfe31872d5a0e562659c8caf13915b2c697d0256975fd9de636",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
     }
   ]
 }
