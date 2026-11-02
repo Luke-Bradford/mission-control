@@ -1,8 +1,8 @@
 import type { AttentionItem, CrewRow, LimitRow, RunDigest } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import * as crewModule from "../src/crew.ts";
+import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";

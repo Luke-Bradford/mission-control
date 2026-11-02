@@ -1,5 +1,5 @@
 import type { OverviewSummary, PipelineStage } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { cardTitle, PipelinePanel } from "../src/overview/PipelinePanel.tsx";

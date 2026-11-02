@@ -8,7 +8,7 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { overviewDensityFixture, type OverviewScenario } from "./overviewDensityFixtures.ts";
+import { type OverviewScenario, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;

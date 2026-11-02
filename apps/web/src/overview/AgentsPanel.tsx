@@ -671,9 +671,9 @@ export function AgentsPanel() {
           Crew refresh failed. Showing the last received rows.
         </p>
       )}
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded roster supports keyboard scrolling. */}
       <div
         role="table"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded roster supports keyboard scrolling.
         tabIndex={0}
         aria-label="Crew"
         id="agentsList"

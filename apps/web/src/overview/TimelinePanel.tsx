@@ -3,9 +3,9 @@ import { type CSSProperties, useId } from "react";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
+import { elapsed } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { elapsed } from "../fmt.ts";
 import { agentPath, followLink, PAGE_PATHS } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { useStore } from "../shell/store.ts";
@@ -146,6 +146,7 @@ export function TimelinePanel() {
           {spans}
           {ticks.map((at, i) => (
             <i
+              // biome-ignore lint/suspicious/noArrayIndexKey: multiple identical stateless marks can share the recorded millisecond.
               key={`${at}-${i}`}
               className="overview-instant"
               style={{ left: `${geometry.position(at)}%` }}
@@ -178,9 +179,9 @@ export function TimelinePanel() {
       }
     >
       <div className="pb timeline-body">
-        {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded lanes support keyboard scrolling while their shared axis stays visible. */}
         <section
           className="overview-lane-scroll scroll"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling keeps the shared axis visible.
           tabIndex={0}
           aria-label="Measured agent timeline"
         >
@@ -220,9 +221,9 @@ export function TimelinePanel() {
         {timeline.data && active && (
           <details className="overview-timeline-evidence">
             <summary>Measured intervals · UTC</summary>
-            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: complete measured evidence has a bounded keyboard scroll region. */}
             <section
               className="scroll"
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: complete measured evidence supports bounded keyboard scrolling.
               tabIndex={0}
               aria-label="Complete measured timeline evidence"
             >

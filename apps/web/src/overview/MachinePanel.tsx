@@ -354,7 +354,9 @@ export function MachinePanel() {
                 view.transcripts.seats.length === 0
                   ? "No transcripts"
                   : view.transcripts.seats
-                      .map((seat) => `${seat.seatId} ${binaryBytes(seat.bytes)} · ${seat.files} files`)
+                      .map(
+                        (seat) => `${seat.seatId} ${binaryBytes(seat.bytes)} · ${seat.files} files`,
+                      )
                       .join("\n")
               }
             >
