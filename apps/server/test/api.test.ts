@@ -1354,6 +1354,8 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
+  ["GET", "/api/qa/history"],
+  ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
   ["POST", "/api/qa-reports/import", {}],
   ["GET", "/api/qa-reports/:id"],

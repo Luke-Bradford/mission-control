@@ -31,6 +31,13 @@ window.fetch = (input, init) => {
     );
     return Promise.resolve(new Response(png, { headers: { "content-type": "image/png" } }));
   }
+  if (path.startsWith("/api/qa/history") && params.get("qaState")) {
+    if (params.get("qaState") === "loading") return new Promise(() => {});
+    if (params.get("qaState") === "error")
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "Controlled history unavailable" }), { status: 503 }),
+      );
+  }
   if (["/api/attention", "/api/flight/summary"].includes(path)) {
     if (params.get("state") === "loading") return new Promise(() => {});
     if (params.get("state") === "error")

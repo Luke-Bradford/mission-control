@@ -17,6 +17,7 @@ import { hub, streamStatus, useResource } from "../data.ts";
 import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { NativeQaHistory, QaHistory, QaNavigation } from "../qa/QaHistory.tsx";
 import { ArchivedQaReport, CurrentQaReport, QaReportArchive } from "../qa/QaReport.tsx";
 import { mapPath, navigate, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
@@ -35,6 +36,47 @@ const refresh = () => {
 
 /** One queue read; detailed evidence loads only for the selected head. */
 export function QaReadiness() {
+  const params = new URLSearchParams(useSearch());
+  const history =
+    params.get("view") === "history" ||
+    params.has("report") ||
+    params.has("native") ||
+    params.get("history") === "1";
+  const connection = useStore(streamStatus);
+  const report = params.get("report");
+  const native = params.get("native");
+  return (
+    <>
+      {history && <QaNavigation history />}
+      {report !== null ? (
+        <section id="page-qa-readiness" className="uat-page">
+          <header className="uat-title">
+            <h1>QA · Saved report</h1>
+            <a href="/qa?view=history">Return to review history</a>
+          </header>
+          {!connection.connected && (
+            <p className="uat-banner" role="status">
+              Disconnected from the hub. Saved evidence may be unavailable.
+            </p>
+          )}
+          <ArchivedQaReport id={report} repo={params.get("repo")} pr={params.get("pr")} />
+        </section>
+      ) : native !== null ? (
+        <NativeQaHistory
+          key={`${native}:${params.get("identity")}`}
+          id={native}
+          identity={params.get("identity")}
+        />
+      ) : params.get("view") === "history" ? (
+        <QaHistory />
+      ) : (
+        <CurrentQaReadiness />
+      )}
+    </>
+  );
+}
+
+function CurrentQaReadiness() {
   const queue = useResource<Queue>({ path: "/api/qa/queue", topic: QA_TOPICS });
   const connection = useStore(streamStatus);
   const search = useSearch();
@@ -79,90 +121,102 @@ export function QaReadiness() {
       ));
   if (reportId || archivedPr)
     return (
+      <>
+        {params.get("history") !== "1" && <QaNavigation history />}
+        <section id="page-qa-readiness" className="uat-page">
+          <header className="uat-title">
+            <h1>QA · Saved report</h1>
+            <a href="/qa">Return to the current QA queue</a>
+          </header>
+          {!connection.connected && (
+            <p className="uat-banner" role="status">
+              Disconnected from the hub. Saved evidence may be unavailable.
+            </p>
+          )}
+          {reportId ? (
+            <ArchivedQaReport id={reportId} repo={requestedRepo} pr={requestedPr} />
+          ) : (
+            <QaReportArchive
+              repo={requestedRepo ?? ""}
+              pr={Number(requestedPr)}
+              head={requestedHead}
+            />
+          )}
+        </section>
+      </>
+    );
+  return (
+    <>
+      <QaNavigation history={false} />
       <section id="page-qa-readiness" className="uat-page">
         <header className="uat-title">
-          <h1>QA · Saved report</h1>
-          <a href="/qa">Return to the current QA queue</a>
+          <h1>QA · Waiting for your acceptance</h1>
+          <p>
+            Evidence, rework and try-it commands for each pull request. Waiting ages start when it
+            enters acceptance.
+          </p>
         </header>
         {!connection.connected && (
           <p className="uat-banner" role="status">
-            Disconnected from the hub. Saved evidence may be unavailable.
+            Disconnected from the hub. Decisions and messages are disabled until it reconnects.
           </p>
         )}
-        {reportId ? (
-          <ArchivedQaReport id={reportId} repo={requestedRepo} pr={requestedPr} />
-        ) : (
-          <QaReportArchive
-            repo={requestedRepo ?? ""}
-            pr={Number(requestedPr)}
-            head={requestedHead}
-          />
+        {queue.error && (
+          <p className="uat-banner crit-t" role="alert">
+            {queue.data ? "Showing the last queue. " : "The queue did not load. "}
+            {queue.error.message}{" "}
+            <button type="button" onClick={refresh}>
+              Try again
+            </button>
+          </p>
         )}
-      </section>
-    );
-  return (
-    <section id="page-qa-readiness" className="uat-page">
-      <header className="uat-title">
-        <h1>QA · Waiting for your acceptance</h1>
-        <p>
-          Evidence, rework and try-it commands for each pull request. Waiting ages start when it
-          enters acceptance.
-        </p>
-      </header>
-      {!connection.connected && (
-        <p className="uat-banner" role="status">
-          Disconnected from the hub. Decisions and messages are disabled until it reconnects.
-        </p>
-      )}
-      {queue.error && (
-        <p className="uat-banner crit-t" role="alert">
-          {queue.data ? "Showing the last queue. " : "The queue did not load. "}
-          {queue.error.message}{" "}
-          <button type="button" onClick={refresh}>
-            Try again
-          </button>
-        </p>
-      )}
-      <div className="uat-layout">
-        <Panel
-          title="Queue"
-          sub={`${waiting.length} in UAT · ${review.length} in review`}
-          className="uat-queue"
-        >
-          {queue.loading && !queue.data && (
-            <p className="pb" role="status">
-              Loading the acceptance queue…
-            </p>
-          )}
-          {!queue.loading && !queue.error && !waiting.length && (
-            <div className="pb uat-empty">
-              <h3>Nothing is waiting for you</h3>
-              <p>
-                {review.length
-                  ? "Work still in review is listed below. Pick a PR to inspect its evidence."
-                  : "The next PR to reach acceptance will appear here."}
+        <div className="uat-layout">
+          <Panel
+            title="Queue"
+            sub={`${waiting.length} in UAT · ${review.length} in review`}
+            className="uat-queue"
+          >
+            {queue.loading && !queue.data && (
+              <p className="pb" role="status">
+                Loading the acceptance queue…
               </p>
+            )}
+            {!queue.loading && !queue.error && !waiting.length && (
+              <div className="pb uat-empty">
+                <h3>Nothing is waiting for you</h3>
+                <p>
+                  {review.length
+                    ? "Work still in review is listed below. Pick a PR to inspect its evidence."
+                    : "The next PR to reach acceptance will appear here."}
+                </p>
+              </div>
+            )}
+            <QueueGroup
+              title="Waiting for you"
+              prs={waiting}
+              selected={selected}
+              now={now}
+              waiting
+            />
+            <QueueGroup title="Also in review" prs={review} selected={selected} now={now} />
+          </Panel>
+          {selected ? (
+            <Detail
+              key={`${keyOf(selected)}:${selected.headSha}`}
+              pr={selected}
+              flightId={queue.data?.flightId ?? null}
+              enabled={connection.connected && !queue.error}
+              now={now}
+            />
+          ) : (
+            <div className="uat-empty panel">
+              <h2>Pick a pull request</h2>
+              <p>Its evidence will appear here.</p>
             </div>
           )}
-          <QueueGroup title="Waiting for you" prs={waiting} selected={selected} now={now} waiting />
-          <QueueGroup title="Also in review" prs={review} selected={selected} now={now} />
-        </Panel>
-        {selected ? (
-          <Detail
-            key={`${keyOf(selected)}:${selected.headSha}`}
-            pr={selected}
-            flightId={queue.data?.flightId ?? null}
-            enabled={connection.connected && !queue.error}
-            now={now}
-          />
-        ) : (
-          <div className="uat-empty panel">
-            <h2>Pick a pull request</h2>
-            <p>Its evidence will appear here.</p>
-          </div>
-        )}
-      </div>
-    </section>
+        </div>
+      </section>
+    </>
   );
 }
 

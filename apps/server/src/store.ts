@@ -10,6 +10,7 @@ import type {
   PromptSection,
   PromptSectionCost,
   PromptWakeCost,
+  QaHistoryEntry,
   QaReport,
   RunHandoff,
 } from "@mc/core";
@@ -192,6 +193,7 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
+import { qaNativeIdentity } from "./qa-history-key.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -345,6 +347,8 @@ CREATE TABLE IF NOT EXISTS qa_reports (
   report TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS qa_reports_subject ON qa_reports(repo_id, pr_number, head_sha, registered_at DESC);
+CREATE INDEX IF NOT EXISTS qa_reports_history ON qa_reports(repo_id, registered_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS reviews_history ON reviews(repo_id, COALESCE(ended_at, created_at) DESC, id DESC) WHERE state IN ('reported', 'failed', 'superseded');
 CREATE TABLE IF NOT EXISTS review_shots (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, shot_id TEXT NOT NULL, label TEXT NOT NULL,
   width INTEGER NOT NULL, theme TEXT NOT NULL, at INTEGER NOT NULL
@@ -4918,6 +4922,110 @@ export class Store {
         return [];
       }
     });
+  }
+
+  /** Lightweight union, paginated before detail/asset reads. Archived native rows appear once. */
+  qaHistory(
+    repoIds: readonly string[],
+    limit: number,
+    cursor?: { at: number; key: string },
+  ): QaHistoryEntry[] {
+    if (!repoIds.length) return [];
+    const marks = repoIds.map(() => "?").join(",");
+    // Select identities before parsing report JSON or reading child evidence. Work per page is bounded.
+    const identities = this.db
+      .prepare(`WITH history AS (
+      SELECT 'r:' || id AS key, 'report' AS kind, id, registered_at AS recorded_at
+        FROM qa_reports WHERE repo_id IN (${marks})
+      UNION ALL
+      SELECT 'n:' || v.id, 'native', v.id, COALESCE(v.ended_at, v.created_at)
+        FROM reviews v WHERE v.repo_id IN (${marks})
+        AND v.state IN ('reported', 'failed', 'superseded')
+        AND NOT EXISTS (SELECT 1 FROM qa_reports q WHERE q.native_review_id = v.id
+          AND q.repo_id = v.repo_id AND q.pr_number = v.pr_number AND q.head_sha = v.sha
+          AND json_extract(q.report, '$.reviewer.id') = v.seat_id
+          AND COALESCE(json_extract(q.report, '$.nativeRunId'), '') = COALESCE(v.run_id, ''))
+    ) SELECT * FROM history ${cursor ? "WHERE recorded_at < ? OR (recorded_at = ? AND key < ?)" : ""}
+      ORDER BY recorded_at DESC, key DESC LIMIT ?`)
+      .all(
+        ...repoIds,
+        ...repoIds,
+        ...(cursor ? [cursor.at, cursor.at, cursor.key] : []),
+        Math.max(1, Math.min(51, limit)),
+      ) as Row[];
+    const reportSummary =
+      this.db.prepare(`      SELECT 'r:' || q.id AS key, 'report' AS kind, q.repo_id, q.pr_number, q.head_sha,
+        json_extract(q.report, '$.prTitle') AS title, json_extract(q.report, '$.source') AS source,
+        json_extract(q.report, '$.reviewer') AS reviewer,
+        json_extract(q.report, '$.reviewedAt') AS reviewed_at,
+        q.registered_at AS recorded_at, 'saved' AS state,
+        json_extract(q.report, '$.verdict') AS verdict,
+        json_extract(q.report, '$.completeness.state') AS evidence,
+        CASE WHEN json_extract(q.report, '$.ci.source') = 'unavailable'
+          OR json_extract(q.report, '$.ci.headSha') IS NOT q.head_sha
+          OR COALESCE(json_array_length(q.report, '$.ci.checks'), 0) = 0 THEN 'unavailable'
+          WHEN EXISTS (SELECT 1 FROM json_each(q.report, '$.ci.checks') c
+            WHERE json_extract(c.value, '$.state') = 'failing') THEN 'failing'
+          WHEN EXISTS (SELECT 1 FROM json_each(q.report, '$.ci.checks') c
+            WHERE json_extract(c.value, '$.state') != 'passing') THEN 'pending'
+          ELSE 'passing' END AS ci,
+        json_extract(q.report, '$.visual.applicability') AS visual,
+        COALESCE(json_array_length(q.report, '$.visual.pairs'), 0) AS pairs,
+        COALESCE(json_array_length(q.report, '$.visual.screenshots'), 0) AS shots,
+        json_extract(q.report, '$.permalink') AS permalink
+      FROM qa_reports q WHERE q.id = ? AND json_valid(q.report)
+`);
+    const nativeSummary =
+      this.db.prepare(`SELECT 'n:' || v.id AS key, 'native' AS kind, 'native' AS source,
+      v.repo_id, v.pr_number, v.sha AS head_sha, v.id, v.author_run_id, v.created_at, v.seat_id, v.run_id, v.epoch, v.attempt, v.round,
+      'Native review · round ' || v.round AS title,
+      json_object('id', v.seat_id, 'label', v.seat_id) AS reviewer,
+      CASE WHEN v.state = 'reported' THEN v.ended_at END AS reviewed_at,
+      COALESCE(v.ended_at, v.created_at) AS recorded_at, v.state, v.verdict,
+      'legacy' AS evidence, 'unavailable' AS ci, 'unknown' AS visual, 0 AS pairs,
+      (SELECT COUNT(*) FROM review_shots s WHERE s.review_id = v.id) AS shots,
+      '/qa?view=history&native=' || v.id AS permalink FROM reviews v WHERE v.id = ?`);
+    const rows = identities.flatMap((identity) => {
+      const row = (identity.kind === "report" ? reportSummary : nativeSummary).get(
+        identity.id as SQLInputValue,
+      ) as Row | undefined;
+      return row ? [row] : [];
+    });
+    return rows.map((r) => ({
+      key: r.key as string,
+      kind: r.kind as QaHistoryEntry["kind"],
+      source: r.source as QaHistoryEntry["source"],
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      headSha: r.head_sha as string,
+      title: r.title as string,
+      reviewer: JSON.parse(r.reviewer as string),
+      reviewedAt: r.reviewed_at as number | null,
+      recordedAt: r.recorded_at as number,
+      state: r.state as string,
+      verdict: r.verdict ? JSON.parse(r.verdict as string) : null,
+      evidence: r.evidence as QaHistoryEntry["evidence"],
+      ci: r.ci as QaHistoryEntry["ci"],
+      visual: r.visual as QaHistoryEntry["visual"],
+      pairCount: r.pairs as number,
+      screenshotCount: r.shots as number,
+      permalink:
+        r.kind === "native"
+          ? `${r.permalink}&identity=${qaNativeIdentity({
+              id: r.id as number,
+              repoId: r.repo_id as string,
+              prNumber: r.pr_number as number,
+              sha: r.head_sha as string,
+              seatId: r.seat_id as string,
+              runId: r.run_id as string | null,
+              authorRunId: r.author_run_id as string,
+              createdAt: r.created_at as number,
+              epoch: r.epoch as number,
+              attempt: r.attempt as number,
+              round: r.round as number,
+            })}`
+          : (r.permalink as string),
+    }));
   }
 
   qaReportForReview(reviewId: number): QaReport | null {
