@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { type GitExec, readOnlyBase, realGitExec } from "../files.ts";
+import { type GitExec, readOnlyObjectBase, realGitExec } from "../files.ts";
 import { RISK_MEMBERSHIP_MAX, RISK_PR_MAX, riskPath } from "./risk.ts";
 
 export const GIT_FILE_SOURCE_VERSION = 1;
@@ -161,7 +161,7 @@ async function noLocalOverrides(checkout: string, base: string[], exec: GitExec)
 
 /** Committed objects only. The caller persists the result under repo, checkout and immutable SHA. */
 export async function gitFileHead(checkout: string, exec: GitExec = realGitExec) {
-  const base = ["--no-replace-objects", ...(await readOnlyBase(checkout, exec))];
+  const base = await readOnlyObjectBase(checkout, exec);
   const sha = (await exec([...base, "rev-parse", "--verify", "origin/HEAD^{commit}"])).trim();
   if (!SHA.test(sha)) throw Error("Invalid git evidence head");
   await noLocalOverrides(checkout, base, exec);
@@ -174,7 +174,7 @@ export async function collectGitFileSource(
   immutableSha?: string,
 ) {
   const started = performance.now(),
-    base = ["--no-replace-objects", ...(await readOnlyBase(checkout, exec))];
+    base = await readOnlyObjectBase(checkout, exec);
   const sha = immutableSha ?? (await gitFileHead(checkout, exec));
   if (!SHA.test(sha) || !Number.isSafeInteger(from) || from < 0)
     throw Error("Invalid git evidence scope");

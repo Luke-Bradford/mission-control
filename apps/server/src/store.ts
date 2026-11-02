@@ -167,6 +167,14 @@ import {
   reviewedFileMembership,
 } from "./code-health/risk.ts";
 import {
+  checkFileSizes,
+  failFileSizes,
+  fileSizeHistory,
+  fileSizeSource,
+  installFileSizes,
+  recordFileSizes,
+} from "./code-health/size-store.ts";
+import {
   codeHealthCiSource,
   codeHealthEvidenceSource,
   codeHealthReviewSource,
@@ -1249,6 +1257,7 @@ export class Store {
     this.backfillAuditHistory();
     installRiskMemberships(this.db);
     installGitFileSources(this.db);
+    installFileSizes(this.db);
     installRecommendations(this.db);
     installCodeHealthRevisions(this.db);
   }
@@ -1429,6 +1438,33 @@ export class Store {
 
   codeHealthSizes(checkout: string) {
     return codeHealthSizeSource(this.db, checkout);
+  }
+  codeHealthSizeSnapshot(repoId: string, checkout: string) {
+    return fileSizeSource(this.db, repoId, checkout);
+  }
+  recordCodeHealthSizeSnapshot(
+    repoId: string,
+    checkout: string,
+    snapshot: Parameters<typeof recordFileSizes>[3],
+    at: number,
+  ) {
+    this.transaction(() => recordFileSizes(this.db, repoId, checkout, snapshot, at));
+  }
+  checkCodeHealthSizes(repoId: string, checkout: string, sha: string, at: number) {
+    checkFileSizes(this.db, repoId, checkout, sha, at);
+  }
+  failCodeHealthSizes(repoId: string, checkout: string, sha: string | null, at: number) {
+    failFileSizes(this.db, repoId, checkout, sha, at);
+  }
+  codeHealthSizeHistory(
+    repoId: string,
+    checkout: string,
+    paths: readonly string[],
+    from: number,
+    until: number,
+    sha: string,
+  ) {
+    return fileSizeHistory(this.db, repoId, checkout, paths, from, until, sha);
   }
 
   codeHealthEvidence(query: Parameters<typeof codeHealthEvidenceSource>[1]) {

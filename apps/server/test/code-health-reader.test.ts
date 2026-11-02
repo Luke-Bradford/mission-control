@@ -224,15 +224,17 @@ describe("bounded code-health reads", () => {
     insert.run(1, "author-1", 1, "src/other.ts");
     insert.run(2, "author-2", 0, "src/example.ts");
     const checkout = "/example/checkouts/sample";
-    store.mapCachePut(
-      "tree",
+    store.recordCodeHealthSizeSnapshot(
+      "sample",
       checkout,
-      "a".repeat(40),
-      JSON.stringify({
-        tree: [{ path: "src/example.ts", lines: 100 }],
-        imports: [],
-      }),
-      true,
+      {
+        version: 1,
+        analysedSha: "a".repeat(40),
+        files: [{ path: "src/example.ts", lines: 100 }],
+        excludedBinaryFiles: 0,
+        elapsedMs: 1,
+      },
+      NOW - 1000,
     );
     const reader = new CodeHealthReader(
       store,
@@ -266,17 +268,20 @@ describe("bounded code-health reads", () => {
     }));
     for (const [i, session] of sessions.entries()) {
       review(i + 1, session.repoId);
-      store.mapCachePut(
-        "tree",
+      store.recordCodeHealthSizeSnapshot(
+        session.repoId,
         session.checkout,
-        "a".repeat(40),
-        JSON.stringify({
-          tree: Array.from({ length: 50 }, (_, n) => ({
+        {
+          version: 1,
+          analysedSha: "a".repeat(40),
+          files: Array.from({ length: 50 }, (_, n) => ({
             path: `src/file-${n}.ts`,
             lines: 100 - n,
           })),
-        }),
-        true,
+          excludedBinaryFiles: 0,
+          elapsedMs: 1,
+        },
+        NOW - 1000,
       );
     }
     const reader = new CodeHealthReader(

@@ -3,6 +3,7 @@ import type { CcConfig } from "../config.ts";
 import { type GitExec, realGitExec } from "../files.ts";
 import type { Store } from "../store.ts";
 import { collectGitFileSource, gitFileHead } from "./git-source.ts";
+import { collectFileSizes, SIZE_SCOPE_VERSION } from "./size-source.ts";
 
 /** One serial background reader. No fetch, checkout, branch, index or observed worktree write. */
 export function createGitFileCollector(deps: {
@@ -53,6 +54,29 @@ export function createGitFileCollector(deps: {
         } catch {
           if (stopped) break;
           deps.store.failCodeHealthGitSource(repo.id, checkout, sha, now());
+          deps.bus.emit("health");
+        }
+        try {
+          if (!sha) {
+            deps.store.failCodeHealthSizes(repo.id, checkout, null, now());
+            continue;
+          }
+          const previous = deps.store.codeHealthSizeSnapshot(repo.id, checkout);
+          if (
+            previous?.status === "available" &&
+            previous.version === SIZE_SCOPE_VERSION &&
+            previous.analysedSha === sha
+          ) {
+            deps.store.checkCodeHealthSizes(repo.id, checkout, sha, now());
+          } else {
+            const snapshot = await collectFileSizes(checkout, sha, { exec });
+            if (stopped) break;
+            deps.store.recordCodeHealthSizeSnapshot(repo.id, checkout, snapshot, now());
+          }
+          deps.bus.emit("health");
+        } catch {
+          if (stopped) break;
+          deps.store.failCodeHealthSizes(repo.id, checkout, sha, now());
           deps.bus.emit("health");
         }
       }
