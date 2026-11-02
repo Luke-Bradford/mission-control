@@ -2646,6 +2646,7 @@ describe("local access", () => {
       { seats: "all", reason: " " },
       { seats: [], reason: "Save tokens" },
       { seats: ["missing-seat"], reason: "Save tokens" },
+      { seats: "all", reason: "Save tokens", except: ["guido-1"] },
     ]) {
       expect((await postBody("/api/settings/crew-pause", body)).statusCode).toBe(400);
     }

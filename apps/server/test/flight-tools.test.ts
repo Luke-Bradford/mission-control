@@ -141,7 +141,7 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
@@ -458,7 +458,14 @@ beforeEach(() => {
       },
       startRun: async (...a) => {
         startCalls.push(a);
-        return startImpl();
+        const result = await startImpl();
+        if (a[2]?.beforeLaunch) {
+          const actual = run(result.runId || `r-start-${a[1]}`, a[0], { ticket: `mc#${a[1]}` });
+          store.upsertRun(actual);
+          a[2].beforeLaunch(actual);
+          return { ...result, runId: actual.id };
+        }
+        return result;
       },
       resumeRun: async (runId) => {
         resumeCalls.push(runId);
@@ -720,7 +727,7 @@ describe("resume_seat", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.text).toBe(
-      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci); the operator had stopped the seat.",
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci) for run r-guido; the operator had stopped the seat.",
     );
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
@@ -733,7 +740,8 @@ describe("resume_seat", () => {
         ),
       }),
     ]);
-    expect(readCrewPause(store)).toBeNull();
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+    expect(pausedSeat(store, "guido-1", "r-guido")).toBeNull();
   });
 
   it("does not resume a seat whose session is already alive or busy", async () => {
@@ -966,7 +974,7 @@ describe("resume_seat", () => {
     const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
 
     expect(result.text).toBe(
-      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci).",
+      "GUIDO-1's run is not running; put back: the operator's stop. Not put back, as the operator changed it since: FLIGHT lifted the crew pause for GUIDO-1 (set by op at 13:00: ci) for run r-guido.",
     );
   });
 
@@ -1014,7 +1022,8 @@ describe("resume_seat", () => {
     expect(result).toEqual({
       text: "GUIDO-1 let out of the pause; its session was already live.",
     });
-    expect(readCrewPause(store)).toBeNull();
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+    expect(pausedSeat(store, "guido-1", "r-guido")).toBeNull();
     expect(resumeCalls).toEqual([]);
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
@@ -9079,7 +9088,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(result.text).toContain("lifted the crew pause for GUIDO-1 (set by op at 13:00: ci)");
       // the record stays the operator's
       expect(readCrewPause(store)).toMatchObject({
-        seats: ["inco-1"],
+        seats: ["guido-1", "inco-1"],
         by: "op",
         reason: "ci",
         liftedBy: "FLIGHT",
@@ -9094,20 +9103,23 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       // an all-seats pause stays "all" (seats added later are held too), with this seat let out
       expect(readCrewPause(store)).toMatchObject({
         seats: "all",
-        except: ["guido-1"],
+        except: [
+          expect.objectContaining({ seat: "guido-1", runId: "r-start-8", by: "FLIGHT", at: NOW }),
+        ],
         by: "op",
         liftedBy: "FLIGHT",
       });
-      // and the log says FLIGHT changed the operator's pause, not that the crew was paused anew
+      // The event identifies the grant's actor, actual run and reason.
       expect(store.hubEvents(0).map((e) => e.text)).toContain(
-        "Crew pause by op changed by FLIGHT: all",
+        "FLIGHT let GUIDO-1 out of the crew pause for mc#8 (run r-start-8): operator is away; the ticket is urgent",
       );
     });
     it("can apply an authorised pause lift without a powers tier gate", async () => {
       need(cfg.repos[0]).flightPowers = "standard";
       writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
       expect((await start()).isError).toBeUndefined();
-      expect(readCrewPause(store)).toBeNull();
+      expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+      expect(pausedSeat(store, "guido-1", "r-start-7")).toBeNull();
       expect(startCalls).toHaveLength(1);
     });
     it("puts everything back when the start itself fails", async () => {
@@ -9123,6 +9135,17 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
       expect((await start()).isError).toBe(true);
       expect(readCrewPause(store)).toMatchObject({ seats: ["guido-1"], by: "op" });
+    });
+    it("keeps a new operator pause applied before the actual run is prepared", async () => {
+      const original = { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" };
+      const newer = { seats: "all" as const, reason: "new freeze", at: NOW + 1, by: "op" };
+      writeCrewPause(store, original, NOW);
+      startImpl = async () => {
+        writeCrewPause(store, newer, NOW + 1);
+        return { runId: "actual-new-run", branch: "feature/7-fix" };
+      };
+      expect((await start()).isError).toBe(true);
+      expect(readCrewPause(store)).toEqual(newer);
     });
     it("a failed start leaves a pause or stop the operator set meanwhile", async () => {
       writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);

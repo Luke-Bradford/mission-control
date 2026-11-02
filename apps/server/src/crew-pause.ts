@@ -1,4 +1,10 @@
-import { CREW_PAUSE_SETTING, type CrewPause, sameCrewPauseRecord, seatIsPaused } from "@mc/core";
+import {
+  CREW_PAUSE_SETTING,
+  type CrewPause,
+  FLIGHT_BASIS_MAX,
+  sameCrewPauseRecord,
+  seatIsPaused,
+} from "@mc/core";
 import { z } from "zod";
 import { type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
@@ -11,9 +17,23 @@ export const CrewPauseBody = z.union([
 const record = z.strictObject({
   seats,
   reason: z.string().trim().min(1).max(500),
-  at: z.number().finite().nonnegative(),
+  at: z.number().finite().nonnegative().max(8_640_000_000_000_000),
   by: z.string().min(1),
-  except: z.array(z.string().min(1)).optional(),
+  except: z
+    .array(
+      z.union([
+        z.string().min(1), // Old seat-wide grants expire rather than authorising another run.
+        z.strictObject({
+          seat: z.string().min(1),
+          runId: z.string().min(1),
+          by: z.string().min(1),
+          at: z.number().finite().nonnegative().max(8_640_000_000_000_000),
+          reason: z.string().trim().min(1).max(FLIGHT_BASIS_MAX),
+        }),
+      ]),
+    )
+    .optional(),
+  legacyExcept: z.array(z.string().min(1)).optional(),
   liftedBy: z.string().min(1).optional(),
 });
 
@@ -22,16 +42,43 @@ export function readCrewPause(store: Store): CrewPause | null {
   if (raw === null || raw === "null") return null;
   try {
     const parsed = record.safeParse(JSON.parse(raw));
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      const { except, legacyExcept, ...base } = parsed.data;
+      const oldSeats = [
+        ...new Set([
+          ...(legacyExcept ?? []),
+          ...(except ?? []).flatMap((item) => (typeof item === "string" ? [item] : [])),
+        ]),
+      ];
+      return {
+        ...base,
+        ...(oldSeats.length ? { legacyExcept: oldSeats } : {}),
+        ...(except === undefined
+          ? {}
+          : {
+              except: except.flatMap((item) => {
+                if (typeof item === "string") return [];
+                const run = store.run(item.runId);
+                return run !== null && run.agentId === item.seat && run.endedAt === null
+                  ? [item]
+                  : [];
+              }),
+            }),
+      };
+    }
   } catch {
     // An unreadable pause must not allow new starts.
   }
   return { seats: "all", reason: "Crew pause setting is unreadable", at: 0, by: "operator" };
 }
 
-export function pausedSeat(store: Store, seatId: string): CrewPause | null {
+export function pausedSeat(
+  store: Store,
+  seatId: string,
+  runId: string | null = store.seatSession(seatId)?.runId ?? null,
+): CrewPause | null {
   const pause = readCrewPause(store);
-  return seatIsPaused(pause, seatId) ? pause : null;
+  return seatIsPaused(pause, seatId, runId) ? pause : null;
 }
 
 /** The direct start boundary used by the operator and FLIGHT. */
@@ -40,8 +87,10 @@ export async function startUnpausedRun(
   supervisor: Pick<Supervisor, "startRun">,
   ...args: Parameters<Supervisor["startRun"]>
 ): ReturnType<Supervisor["startRun"]> {
-  const pause = pausedSeat(store, args[0]);
-  if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+  const pause = pausedSeat(store, args[0], null);
+  // FLIGHT's internal hook can grant only the actual prepared run. The supervisor still checks
+  // that run's pause immediately before launch, so a missing or refused grant never starts it.
+  if (pause && !args[2]?.beforeLaunch) throw new SupervisorError(409, `Paused: ${pause.reason}`);
   return supervisor.startRun(...args);
 }
 
@@ -53,7 +102,7 @@ export function pauseAwareSupervisor<T extends Pick<Supervisor, "startWatch">>(
   return {
     ...supervisor,
     startWatch: async (...args: Parameters<Supervisor["startWatch"]>) => {
-      const pause = pausedSeat(store, args[0]);
+      const pause = pausedSeat(store, args[0], null);
       if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
       return supervisor.startWatch(...args);
     },
@@ -93,7 +142,7 @@ export function reviewPausedMs(store: Store, row: ReviewClock, at: number): numb
 
 /**
  * Settle the old interval and open the new one even if no engine tick fell between edits.
- * A `writer` other than the record's `by` (FLIGHT) may only edit the seats of the record another
+ * A `writer` other than the record's `by` (FLIGHT) may only edit run exceptions of the record another
  * actor set: it never clears or replaces it. A refused write leaves the record and logs why;
  * the result says whether the write went through.
  */
@@ -103,6 +152,7 @@ export function writeCrewPause(
   at: number,
   reviews: ReviewClock[] = store.reviewsIn(["running"]),
   writer?: string,
+  eventText?: string,
 ): boolean {
   const prev = readCrewPause(store);
   if (writer !== undefined && prev !== null && prev.by !== writer) {
@@ -117,11 +167,12 @@ export function writeCrewPause(
   for (const row of reviews) reviewPausedMs(store, row, at);
   store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
   store.addHubEvent(
-    pause === null
-      ? "Crew resumed"
-      : writer !== undefined && prev !== null && prev.by !== writer
-        ? `Crew pause by ${prev.by} changed by ${writer}: ${pause.reason}`
-        : `Crew paused: ${pause.reason}`,
+    eventText ??
+      (pause === null
+        ? "Crew resumed"
+        : writer !== undefined && prev !== null && prev.by !== writer
+          ? `Crew pause by ${prev.by} changed by ${writer}: ${pause.reason}`
+          : `Crew paused: ${pause.reason}`),
     at,
   );
   for (const row of reviews) reviewPausedMs(store, row, at);

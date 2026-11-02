@@ -13,6 +13,7 @@ import {
   type MachineSample,
   NEW_LOOP,
   type PullRequestView,
+  pauseWithout,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
   type RepoRules,
@@ -25,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import type { CcConfig } from "../src/config.ts";
+import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
@@ -821,6 +823,35 @@ describe("takeNext", () => {
     store.replaceBoard(REPO, cards);
     await refill();
   };
+
+  it("does not deal another ticket after an excepted run ends while the crew pause holds", async () => {
+    await queued(card(1));
+    const grantedRun = run({ id: "granted-run", agentId: SERVER, ticket: `${REPO}#9` });
+    store.upsertRun(grantedRun);
+    seatRow("idle", grantedRun.id);
+    const pause = { seats: [SERVER], reason: "Keep the queue paused", at: NOW, by: "operator" };
+    writeCrewPause(
+      store,
+      pauseWithout(pause, SERVER, {
+        runId: grantedRun.id,
+        by: "FLIGHT",
+        at: NOW + 1,
+        reason: "Finish ticket 9 only",
+      }),
+      NOW + 1,
+    );
+    expect(pausedSeat(store, SERVER, grantedRun.id)).toBeNull();
+    // Even before it ends, the grant is not permission to take unrelated work.
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    store.upsertRun({ ...grantedRun, endedAt: NOW + 2, status: "ok" });
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
+    writeCrewPause(store, null, NOW + 3);
+    await take();
+    expect(started).toHaveLength(1);
+  });
 
   it("starts nothing when the fresh read finds the card In progress, and untakes the row", async () => {
     await queued(card(1));
