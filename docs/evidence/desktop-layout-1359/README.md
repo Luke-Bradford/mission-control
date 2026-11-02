@@ -89,3 +89,25 @@ Main integration includes the delivered ticket QA links and Test health backend 
 All 82 before/after pairs were regenerated from the corrected product source named above, not
 relabelled from the earlier captures. This gallery replaces the original c88 renders; the original
 CI failure and correction disposition remain in the PR QA record.
+
+## Settled populated Quota and activity proof
+
+The original clipping-test screenshots could be captured while data was loading. The final test
+now waits for the actual **41%, 63% and 12%** values and activity resolution before measuring or
+capturing. It freezes the fixture clock, so forecast/warning text is part of the check. Both
+baseline and corrected source pass all six settled cases; the short window selects All and proves
+the 120-event activity log stays bounded and reachable.
+
+These supplementary before/after images show the **Overview component viewport** with production
+CSS and the same controlled API data. They exclude the global header and FLIGHT rail; use the
+full-App gallery above for that context. They are viewport images, not full-scroll captures.
+[Source, scope, timestamps and image hashes](settled-quota-checks.json).
+
+| Viewport | Theme | Before | After |
+| --- | --- | --- | --- |
+| 1600×1000 | light | [Before](images/settled-overview-clip-1600-light-before.png) | [After](images/settled-overview-clip-1600-light-after.png) |
+| 1600×1000 | dark | [Before](images/settled-overview-clip-1600-dark-before.png) | [After](images/settled-overview-clip-1600-dark-after.png) |
+| 1280×1000 | light | [Before](images/settled-overview-clip-1280-light-before.png) | [After](images/settled-overview-clip-1280-light-after.png) |
+| 1280×1000 | dark | [Before](images/settled-overview-clip-1280-dark-before.png) | [After](images/settled-overview-clip-1280-dark-after.png) |
+| 1600×700 | light | [Before](images/settled-overview-populated-1600x700-light-before.png) | [After](images/settled-overview-populated-1600x700-light-after.png) |
+| 1600×700 | dark | [Before](images/settled-overview-populated-1600x700-dark-before.png) | [After](images/settled-overview-populated-1600x700-dark-after.png) |

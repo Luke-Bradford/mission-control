@@ -1062,6 +1062,34 @@
       "at": 1793641326963,
       "artifactSha256": "0573308638d6abfe31872d5a0e562659c8caf13915b2c697d0256975fd9de636",
       "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
+    },
+    {
+      "origin": "controller-recorded",
+      "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
+      "command": "MC_SHOT_DIR=<private> pnpm exec vitest run apps/web/test/OverviewClipping.browser.test.ts",
+      "phase": "Settled quota fixture baseline",
+      "outcome": "passed",
+      "exitCode": 0,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "at": 1793642094980,
+      "artifactSha256": "1143c786cbe1bca639876b5b1b3e2ddf2ddbea64280a566c6f40b90af0ac90b1",
+      "artifactLocation": "Private controller log; baseline uses current common test/harness and unchanged2b production source."
+    },
+    {
+      "origin": "controller-recorded",
+      "sourceSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3",
+      "command": "MC_SHOT_DIR=<private> pnpm exec vitest run apps/web/test/OverviewClipping.browser.test.ts",
+      "phase": "Settled quota fixture after",
+      "outcome": "passed",
+      "exitCode": 0,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "at": 1793641945724,
+      "artifactSha256": "365360efa649502cb6479a12b23b0af83ff08b32095a2cb535751d10b6f066cf",
+      "artifactLocation": "Private controller log; baseline uses current common test/harness and unchanged2b production source."
     }
   ]
 }
