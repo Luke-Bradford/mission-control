@@ -61,10 +61,11 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
-import { createEngine } from "./engine/engine.ts";
+import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
@@ -83,7 +84,13 @@ import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
-import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
+import {
+  createMcTools,
+  KNOWN_SECRETS_TIMEOUT_MS,
+  type McToolsDeps,
+  prTextProblem,
+  readKnown,
+} from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
@@ -463,6 +470,40 @@ export async function main(): Promise<void> {
     profiles,
     checks: checkRecorder,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    externalReviewSubject: async (repo, review) => {
+      const subject = await readExternalSubject(
+        gh,
+        hubRoot ?? process.cwd(),
+        repo,
+        review.prNumber,
+        review.sha,
+      );
+      if (!subject) return null;
+      const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
+      if (
+        pr?.headSha !== review.sha ||
+        store.runsOnBranch(repo.id, subject.branch).some((run) => run.reviewId == null)
+      )
+        return null;
+      const linked = pr?.ticket?.startsWith(`${repo.id}#`)
+        ? Number(pr.ticket.slice(repo.id.length + 1))
+        : null;
+      if (linked !== null && Number.isSafeInteger(linked) && linked > 0) {
+        const ticket = await fetchTicket(repo, linked, makeGql(await githubToken()));
+        if (!ticket) throw new Error("The linked review ticket could not be read.");
+        const body = `${ticket.body}\n\n## PR description (untrusted author context)\n\n${subject.ticket.body}`;
+        subject.ticket = {
+          ...ticket,
+          body: Array.from(body).slice(0, 20_000).join(""),
+          bodyTruncated:
+            ticket.bodyTruncated ||
+            subject.ticket.bodyTruncated ||
+            Array.from(body).length > 20_000,
+          bodyLength: Math.max(Array.from(body).length, ticket.bodyLength ?? 0),
+        };
+      }
+      return subject;
+    },
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
     enabled: crewEnabled,
@@ -580,12 +621,38 @@ export async function main(): Promise<void> {
       return moved;
     },
   };
-  const engine = createEngine({
+  const engine: Engine = createEngine({
     config,
     store,
     bus,
     supervisor,
     publisher: createPublisher(mcDeps),
+    externalReviews: createExternalReviews({
+      config,
+      store,
+      gh,
+      cwd: hubRoot ?? process.cwd(),
+      reviewer: (repoId) => {
+        const session = config.crew?.sessions.find((value) => value.repoId === repoId);
+        const first = session?.seats[0];
+        return first
+          ? (reviewerOf(config, first.id, undefined, { store, now: Date.now() })?.id ?? null)
+          : null;
+      },
+      ...(prEvidence === undefined ? {} : { evidence: prEvidence }),
+      evidenceManifest: (repo, pr, sha) => evidenceStore.manifest(repo, pr, sha),
+      enabled: () => engine.status().on,
+      now: Date.now,
+      log: (text) => log(text),
+      textAllowed: async (text, repo, pr) =>
+        prTextProblem(text, {
+          repo,
+          issue: pr,
+          known: await readKnown(mcDeps, "external_review"),
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null,
+    }),
     ...(prEvidence === undefined ? {} : { evidence: prEvidence }),
     board: engineBoard,
     pollGithub: () => scheduler.refreshBoards(),

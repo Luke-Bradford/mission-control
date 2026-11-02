@@ -103,6 +103,7 @@ import {
 import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
+import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
@@ -624,6 +625,12 @@ function buildCrew(
   const eventIndex = summary ? null : runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
+  const queuedReviews = new Map<string, ReviewRow>();
+  for (const review of reviewsInFlight) {
+    if (review.state !== "queued" || queuedReviews.has(review.seatId)) continue;
+    const pr = pullRequests.get(review.repoId)?.find((p) => p.number === review.prNumber);
+    if (pr?.state === "open" && pr.headSha === review.sha) queuedReviews.set(review.seatId, review);
+  }
   const rows = loopViews(config, store, now, lock, runsByAgent, seatRows, digestByRun).map(
     ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
       const digests = digestByRun;
@@ -710,6 +717,28 @@ function buildCrew(
               )
             : null,
         reviewing: reviewingOf(store, latest),
+        ...(agent.kind !== "crew" || reviewingOf(store, latest) !== null
+          ? {}
+          : (() => {
+              const queued = queuedReviews.get(agent.id);
+              if (!queued) return {};
+              const pr = pullRequests.get(queued.repoId)?.find((p) => p.number === queued.prNumber);
+              return {
+                queuedReview: {
+                  repoId: queued.repoId,
+                  prNumber: queued.prNumber,
+                  sha: queued.sha,
+                  ref: pr?.ticket ?? null,
+                  position: 1,
+                  reason:
+                    pausedSeat(store, agent.id)?.reason ??
+                    view.stop?.reason ??
+                    (accountAtStop(config, store, agent.accountId, now)
+                      ? "The reviewer's account is at its stop threshold."
+                      : "Waiting for the reviewer to become available."),
+                },
+              };
+            })()),
         paused: view.paused,
         note: view.note,
         stop: view.stop,

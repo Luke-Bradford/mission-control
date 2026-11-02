@@ -140,7 +140,14 @@ export function prUat(input: PrUatInput): PrUatView {
     sha: pr.headSha,
     qaSummary: currentReview?.summary ?? null,
     files: store.prFilePaths(pr.repoId, pr.number),
-    tests: report?.tests ?? [],
+    tests:
+      report?.tests ??
+      (currentReview
+        ? store.reviewTests(currentReview.id).map(({ file, ...test }) => ({
+            ...test,
+            ...(file === null ? {} : { file }),
+          }))
+        : []),
     testsAdded: report?.testsAdded ?? [],
     screenshots: currentReview ? store.reviewShots(currentReview.id) : [],
     flightId: input.flightId ?? null,

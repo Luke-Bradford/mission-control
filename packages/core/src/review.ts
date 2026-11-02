@@ -599,11 +599,16 @@ export type ReviewCheckLoop = Pick<
 /** Who holds a reviewed PR back from merging, or null when nothing does. */
 function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
   if (loop === null) return null;
-  if (loop.controllerCheck && !loop.controllerCheck.pass) return { kind: "held", by: "operator" };
-  if (loop.uat && !loop.uat.accepted) return { kind: "held", by: "operator" };
-  if (loop.mergeHold) return { kind: "held", by: loop.mergeHold.by };
-  if (loop.awaitingFlight) return { kind: "held", by: "FLIGHT" };
-  if (loop.phase === "parked") return { kind: "held", by: "hub" };
+  const held = (by: "FLIGHT" | "CAPCOM" | "operator" | "hub"): ReviewCheckState => ({
+    kind: "held",
+    by,
+    ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+  });
+  if (loop.controllerCheck && !loop.controllerCheck.pass) return held("operator");
+  if (loop.uat && !loop.uat.accepted) return held("operator");
+  if (loop.mergeHold) return held(loop.mergeHold.by);
+  if (loop.awaitingFlight) return held("FLIGHT");
+  if (loop.phase === "parked") return held("hub");
   return null;
 }
 

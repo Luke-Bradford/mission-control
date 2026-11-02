@@ -302,6 +302,7 @@ function make(
   over: {
     enabled?: boolean;
     fetchTicket?: FetchTicket;
+    externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
     command?: string;
     codexCommand?: string;
     codexAuthPath?: string;
@@ -381,6 +382,9 @@ function make(
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
+    ...(over.externalReviewSubject === undefined
+      ? {}
+      : { externalReviewSubject: over.externalReviewSubject }),
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),

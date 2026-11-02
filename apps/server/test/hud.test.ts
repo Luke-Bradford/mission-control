@@ -1319,6 +1319,80 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.reviewing).toBeNull();
   });
 
+  it("exposes the oldest queued review separately from execution for a paused reviewer", () => {
+    const c = withCrew();
+    const sha = "c".repeat(40);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 12,
+          title: "Review target",
+          url: "https://github.com/example/sample/pull/12",
+          branch: "feature/12",
+          ticket: "shop-app#90",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: sha,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    store.requestReview({
+      authorRunId: "external-pr:shop-app#12",
+      repoId: "shop-app",
+      seatId: "RETRO-1",
+      prNumber: 12,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - MIN,
+    });
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({
+        seats: ["RETRO-1"],
+        reason: "Review paused",
+        at: NOW - MIN,
+        by: "operator",
+      }),
+    );
+    const row = rowOf(c, "RETRO-1");
+    expect(row?.reviewing).toBeNull();
+    expect(row?.queuedReview).toEqual({
+      repoId: "shop-app",
+      prNumber: 12,
+      sha,
+      ref: "shop-app#90",
+      position: 1,
+      reason: "Review paused",
+    });
+    store.setSetting("crew.paused", "null");
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      pct: 99,
+      at: NOW,
+      resetAt: NOW + HOUR,
+      source: "fixture",
+    });
+    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toContain("stop threshold");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...store.pullRequests("shop-app")[0]!, headSha: "d".repeat(40) }],
+      NOW + 1,
+    );
+    expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
+  });
+
   it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
     const c = withCrew();
     const seatCfg = c.crew?.sessions[0]?.seats[0];
