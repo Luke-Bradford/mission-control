@@ -53,3 +53,5 @@ Each screenshot is the exact viewport, without full-page stretching. Pages scrol
 Interaction checks exercise one, many (50 rows), empty, long, loading, error, stale and disconnected fixtures. Stale/disconnected writes are disabled. FLIGHT toggle retains its draft and returns focus to the rail. The representative form rejects a duplicate callsign, accepts a valid fictional entry, and changes area/scratch controls for the review role. These checks validate this prototype, not the live application.
 
 This covers the three representative density mockups required by the approved plan. The remaining per-page design work in #677 stays open. No product code, backend behaviour, crew state, observed loop, GitHub workflow or Mission Control rule changes here.
+
+Independent review fixes: the queued-review action matches its seat, connection badges follow the fixture state, and crew tables have a working seat sort and sticky headings. All 48 screenshots were refreshed after these fixes.
