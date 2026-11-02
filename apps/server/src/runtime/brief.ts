@@ -206,6 +206,8 @@ export function ticketBrief(i: BriefInput): string {
 }
 
 export interface ReviewBriefInput {
+  /** A PR without a crew author; its body supplies context rather than a fabricated ticket. */
+  external?: boolean;
   /** The reviewer's call sign (`RETRO`). */
   call: string;
   /** `owner/name`. */
@@ -285,7 +287,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
   const notes = newestNotes(i.notes);
   const table = i.doneWhen ?? [];
   const lines = [
-    `You are ${i.call}, the reviewer on ${i.repo}. Review PR #${i.prNumber} for ${i.repo}#${i.issue}: ${i.title}. Its head is ${i.sha} (review round ${i.round}).`,
+    `You are ${i.call}, the reviewer on ${i.repo}. Review PR #${i.prNumber}${i.external ? " (no crew author run)" : ` for ${i.repo}#${i.issue}`}: ${i.title}. Its head is ${i.sha} (review round ${i.round}).`,
     "",
     i.commands.length > 0
       ? `Your working copy is a scratch checkout of that commit, made for this review and deleted when it ends. Configured review checks are ${codeList(i.commands)}; use them with a test file path where possible, and use ordinary local inspection commands as needed.${fullSuiteText(i.fullSuite)} Nothing you change is committed or reaches the author. You cannot commit, push or write with git.`

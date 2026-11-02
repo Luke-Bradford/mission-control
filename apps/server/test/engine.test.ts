@@ -135,6 +135,7 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
+import { externalReviewKey } from "../src/external-reviews.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -797,6 +798,71 @@ afterEach(() => {
   h.engine.stop();
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("controller PR scratch reviews", () => {
+  it("starts a review without an author run and supersedes it when the head changes", async () => {
+    h.engine.stop();
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const identity = externalReviewKey(REPO, 77);
+    const pr: PullRequestView = {
+      repoId: REPO,
+      number: 77,
+      title: "Controller change",
+      url: "https://github.com/example/sample/pull/77",
+      branch: "controller/change",
+      ticket: null,
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci: "passing",
+      createdAt: clock,
+      updatedAt: clock,
+      mergedAt: null,
+      headSha: SHA,
+      mergeable: null,
+    };
+    store.upsertPullRequests(REPO, [pr], clock);
+    const id = store.requestReview({
+      authorRunId: identity,
+      repoId: REPO,
+      seatId: RETRO,
+      prNumber: 77,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: clock,
+    })!;
+    h.engine = h.make({
+      externalReviews: {
+        sync: async () => {},
+        wanted: (row) =>
+          store
+            .pullRequests(REPO)
+            .some((p) => p.number === row.prNumber && p.state === "open" && p.headSha === row.sha),
+      },
+    });
+    h.engine.start();
+    await h.engine.tick();
+    expect(h.starts).toContainEqual({ seat: RETRO, id });
+    expect(store.review(id)?.state).toBe("running");
+    expect(store.run(identity)).toBeNull();
+    const reviewRun = store.review(id)?.runId;
+    store.upsertPullRequests(REPO, [{ ...pr, headSha: SHA_B }], ++clock);
+    await h.engine.tick();
+    expect(store.review(id)?.state).toBe("superseded");
+    expect(h.ended).toContain(reviewRun);
+    expect(h.steps).not.toContain("merge");
+    expect(h.moves.some((move) => move.issue === 77)).toBe(false);
+  });
 });
 
 describe("idle-seat wakes", () => {

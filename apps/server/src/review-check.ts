@@ -1,9 +1,11 @@
 import {
+  carriedFrom,
   type PullRequestView,
   type ReviewCheckState,
   type ReviewRow,
   reviewCheckOf,
 } from "@mc/core";
+import { isExternalReview } from "./external-reviews.ts";
 import type { Store } from "./store.ts";
 
 /**
@@ -22,9 +24,25 @@ export function reviewCheckFor(
     .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
   return (pr) => {
     if (pr.state !== "open") return null;
-    const rows = store.reviewsOfPr(repoId, pr.number);
+    const rows = store.reviewsOfPr(repoId, pr.number).filter((row) => {
+      if (pr.headSha === null || row.sha === pr.headSha) return true;
+      const loop = store.run(row.authorRunId)?.loop;
+      return (
+        loop != null &&
+        loop.epoch === row.epoch &&
+        carriedFrom(loop.carry, loop.reviewWaivedSha, pr.headSha) === row.sha
+      );
+    });
     const last = rows.findLast((r) => r.state !== "superseded");
     if (last === undefined) return null;
+    // Crew failures can retry through the author loop. External failures remain terminal.
+    if (isExternalReview(last) && last.state === "failed")
+      return {
+        kind: "held",
+        by: "hub",
+        reason:
+          last.failure ?? "The QA review did not complete. Push a new head for another review.",
+      };
     // each review seat serves its own oldest queued row: the queue is the seat's, not the repo's
     const ahead = waiting
       .filter((r) => r.seatId === last.seatId)
