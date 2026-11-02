@@ -79,6 +79,9 @@ export class CodeHealthReader {
     if (this.evidenceQueries.size >= EVIDENCE_MAX) {
       const oldest = this.evidenceQueries.keys().next().value;
       if (oldest) this.evidenceQueries.delete(oldest);
+      // Cached summaries can hold this reference inside a file row as well as at the top level.
+      // A refresh must build new references after eviction.
+      this.cache.clear();
     }
     this.evidenceQueries.set(reference.id, { ...query, reference });
     return reference;

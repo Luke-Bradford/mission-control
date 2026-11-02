@@ -255,4 +255,53 @@ describe("bounded code-health reads", () => {
     expect(findings?.rows).toHaveLength(1);
     expect(findings?.rows[0]).toMatchObject({ file: "src/example.ts", pr: 1 });
   });
+
+  it("refreshes cached summaries after nested evidence references are evicted", () => {
+    const repos = Array.from({ length: 14 }, (_, i) => ({ ...config.repos[0], id: `repo-${i}` }));
+    const sessions = repos.map((repo) => ({
+      id: repo.id,
+      repoId: repo.id,
+      checkout: `/example/checkouts/${repo.id}`,
+      seats: [],
+    }));
+    for (const [i, session] of sessions.entries()) {
+      review(i + 1, session.repoId);
+      store.mapCachePut(
+        "tree",
+        session.checkout,
+        "a".repeat(40),
+        JSON.stringify({
+          tree: Array.from({ length: 50 }, (_, n) => ({
+            path: `src/file-${n}.ts`,
+            lines: 100 - n,
+          })),
+        }),
+        true,
+      );
+    }
+    const reader = new CodeHealthReader(
+      store,
+      {
+        ...config,
+        repos,
+        crew: {
+          worktrees: "/example/worktrees",
+          maxSeats: 4,
+          sessions,
+        },
+      },
+      () => at,
+    );
+    const first = reader.read("repo-0", "7d", "risk");
+    if (first.data.tab !== "risk") throw new Error("Wrong tab");
+    const old = first.data.files[0].evidence[1].id;
+    for (const repo of repos)
+      for (const window of ["7d", "30d", "90d"] as const) reader.read(repo.id, window, "risk");
+    expect(() => reader.evidence("repo-0", old, undefined)).toThrow(/unavailable/);
+    const refreshed = reader.read("repo-0", "7d", "risk");
+    if (refreshed.data.tab !== "risk") throw new Error("Wrong tab");
+    const current = refreshed.data.files[0].evidence[1].id;
+    expect(current).not.toBe(old);
+    expect(() => reader.evidence("repo-0", current, undefined)).not.toThrow();
+  });
 });
