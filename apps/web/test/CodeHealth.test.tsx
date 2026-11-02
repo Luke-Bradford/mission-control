@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { hub, streamStatus } from "../src/data.ts";
+import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { stubFetch } from "./fetchStub.ts";
 
 const NOW = Date.UTC(2026, 10, 2, 12),
@@ -109,6 +110,20 @@ function setup(extra: Parameters<typeof stubFetch>[0] = {}) {
     ...extra,
   });
 }
+it("fetches Code risk on selection and preserves repo/window while inspecting evidence", async () => {
+  const fixture = codeRiskFixture(NOW);
+  const fetch = setup(fixture.api);
+  render(<CodeHealth />);
+  await screen.findByRole("tab", { name: "Code risk" });
+  expect(fetch.mock.calls.some(([url]) => String(url).includes("tab=risk"))).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Code risk" }));
+  await screen.findByRole("region", { name: "File risk measurements" });
+  fireEvent.click(screen.getAllByRole("button", { name: "src/domain/state.ts" })[0]);
+  await screen.findByRole("dialog", { name: "src/domain/state.ts" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("tab", { name: "Code risk" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("button", { name: "30 days" }).getAttribute("aria-pressed")).toBe("true");
+});
 beforeEach(() => {
   hub.clear();
   forgetOperatorToken();
