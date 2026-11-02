@@ -26,7 +26,9 @@ export function NextActionsPanel() {
         {items.slice(0, 3).map((item) => (
           <article className="overview-next-item" key={item.key}>
             <h3>
-              {ATTENTION_LABEL[item.kind]} · {item.agentId}
+              {[ATTENTION_LABEL[item.kind], item.agentId ?? item.ticket ?? item.repoId]
+                .filter(Boolean)
+                .join(" · ")}
             </h3>
             <p title={item.text}>{item.text}</p>
             <button
