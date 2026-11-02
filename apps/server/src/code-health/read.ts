@@ -25,6 +25,7 @@ interface EvidenceQuery {
   revision: string;
   reference: CodeHealthEvidenceRef;
   sha?: string;
+  file?: string;
 }
 
 export class CodeHealthReadError extends Error {
@@ -168,7 +169,7 @@ export class CodeHealthReader {
       for (const finding of observedReviews.findings) {
         if (finding.file) byFile.set(finding.file, (byFile.get(finding.file) ?? 0) + 1);
       }
-      describe(
+      const findingCoverage = describe(
         "findings on recorded file paths",
         observedReviews.observedFrom,
         observedReviews.observedUntil,
@@ -204,16 +205,29 @@ export class CodeHealthReader {
       data = {
         tab,
         files:
-          sizes?.files.map((file) => ({
-            ...file,
-            analysedSha: sizes.analysedSha,
-            mergedPrTouches: null,
-            additions: null,
-            deletions: null,
-            findings: observedReviews.reviews.length ? (byFile.get(file.path) ?? 0) : null,
-            incidence: null,
-            evidence: sizeRef ? [sizeRef] : [],
-          })) ?? [],
+          sizes?.files.map((file) => {
+            const refs = sizeRef ? [sizeRef] : [];
+            if (observedReviews.reviews.length) {
+              const findingRef = this.reference(
+                { ...base, kind: "findings", file: file.path },
+                `Findings: ${file.path}`,
+                "Findings recorded for this file in the selected reported-review window.",
+                findingCoverage,
+              );
+              evidence.push(findingRef);
+              refs.push(findingRef);
+            }
+            return {
+              ...file,
+              analysedSha: sizes.analysedSha,
+              mergedPrTouches: null,
+              additions: null,
+              deletions: null,
+              findings: observedReviews.reviews.length ? (byFile.get(file.path) ?? 0) : null,
+              incidence: null,
+              evidence: refs,
+            };
+          }) ?? [],
         sizeHistory: [],
         coupling: [],
       };

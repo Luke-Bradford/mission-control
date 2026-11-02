@@ -213,4 +213,46 @@ describe("bounded code-health reads", () => {
       await broken.close();
     }
   });
+
+  it("gives each file's counted findings their own repo/window/path-scoped evidence", () => {
+    review(1);
+    review(2, "other");
+    const insert = db.prepare(`INSERT INTO review_findings (review_id, author_run_id, pos,
+      severity, file, line, summary, scenario, fix, state)
+      VALUES (?, ?, ?, 'Minor', ?, 1, 'Example', 'Example', 'Example', 'logged')`);
+    insert.run(1, "author-1", 0, "src/example.ts");
+    insert.run(1, "author-1", 1, "src/other.ts");
+    insert.run(2, "author-2", 0, "src/example.ts");
+    const checkout = "/example/checkouts/sample";
+    store.mapCachePut(
+      "tree",
+      checkout,
+      "a".repeat(40),
+      JSON.stringify({
+        tree: [{ path: "src/example.ts", lines: 100 }],
+        imports: [],
+      }),
+      true,
+    );
+    const reader = new CodeHealthReader(
+      store,
+      {
+        ...config,
+        crew: {
+          worktrees: "/example/worktrees",
+          maxSeats: 4,
+          sessions: [{ id: "sample", repoId: "sample", checkout, seats: [] }],
+        },
+      },
+      () => at,
+    );
+    const view = reader.read("sample", "30d", "risk");
+    if (view.data.tab !== "risk") throw new Error("Wrong tab");
+    const file = view.data.files[0];
+    expect(file.findings).toBe(1);
+    const pages = file.evidence.map((ref) => reader.evidence("sample", ref.id, undefined));
+    const findings = pages.find((page) => page.kind === "findings");
+    expect(findings?.rows).toHaveLength(1);
+    expect(findings?.rows[0]).toMatchObject({ file: "src/example.ts", pr: 1 });
+  });
 });

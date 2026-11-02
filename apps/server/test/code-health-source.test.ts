@@ -141,4 +141,32 @@ describe("code-health source projections", () => {
       expect(() => store.codeHealthSizes(scope)).toThrow(/snapshot/);
     }
   });
+
+  it("validates size evidence beyond the summary's first fifty files", () => {
+    const scope = "/example/checkouts/sample",
+      sha = "a".repeat(40);
+    const valid = Array.from({ length: 50 }, (_, i) => ({
+      path: `src/file-${i}.ts`,
+      lines: 100 + i,
+    }));
+    for (const invalid of [
+      { path: "/private/example/home/secret.txt", lines: 1 },
+      { path: "src/invalid.ts", lines: -1 },
+    ]) {
+      store.mapCachePut("tree", scope, sha, JSON.stringify({ tree: [...valid, invalid] }), true);
+      expect(store.codeHealthSizes(scope)?.files).toHaveLength(50);
+      expect(() =>
+        store.codeHealthEvidence({
+          repoId: "sample",
+          kind: "sizes",
+          from: 0,
+          until: 200,
+          offset: 50,
+          limit: 50,
+          checkout: scope,
+          sha,
+        }),
+      ).toThrow(/invalid file/);
+    }
+  });
 });

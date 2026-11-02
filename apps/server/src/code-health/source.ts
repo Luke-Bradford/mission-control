@@ -136,6 +136,21 @@ export function codeHealthCiSource(db: Db, repoId: string, from: number, until: 
   };
 }
 
+function validateSizeRows(rows: readonly { path: unknown; lines: unknown }[]): void {
+  for (const row of rows) {
+    if (
+      typeof row.path !== "string" ||
+      !row.path ||
+      row.path.startsWith("/") ||
+      row.path.split("/").includes("..") ||
+      typeof row.lines !== "number" ||
+      !Number.isSafeInteger(row.lines) ||
+      row.lines < 0
+    )
+      throw new Error("Code-health size snapshot contains invalid file data");
+  }
+}
+
 /** Read only the configured checkout's cached tree, projecting bounded size rows in SQLite. */
 export function codeHealthSizeSource(db: Db, checkout: string) {
   const cache = db
@@ -151,16 +166,7 @@ export function codeHealthSizeSource(db: Db, checkout: string) {
     json_extract(j.value, '$.lines') AS lines FROM map_cache c, json_each(c.value, '$.tree') j
     WHERE c.kind = 'tree' AND c.scope = ? AND c.key = ? ORDER BY lines DESC, path LIMIT 50`)
     .all(checkout, cache.key) as { path: string; lines: number }[];
-  for (const row of rows) {
-    if (
-      typeof row.path !== "string" ||
-      row.path.startsWith("/") ||
-      row.path.split("/").includes("..") ||
-      !Number.isSafeInteger(row.lines) ||
-      row.lines < 0
-    )
-      throw new Error("Code-health size snapshot contains invalid file data");
-  }
+  validateSizeRows(rows);
   return { analysedSha: cache.key, files: rows };
 }
 
@@ -176,6 +182,7 @@ export function codeHealthEvidenceSource(
     limit: number;
     checkout?: string;
     sha?: string;
+    file?: string;
   },
 ): Row[] {
   if (
@@ -202,9 +209,16 @@ export function codeHealthEvidenceSource(
     f.line, f.summary, f.scenario, f.fix, f.category, f.state, f.resolution,
     f.resolved_review_id AS resolvedReviewId, v.ended_at AS reportedAt
     FROM review_findings f JOIN reviews v ON v.id = f.review_id
-    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
+    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ? ${query.file === undefined ? "" : "AND f.file = ?"}
     ORDER BY v.ended_at, f.id LIMIT ? OFFSET ?`)
-      .all(...args) as Row[];
+      .all(
+        query.repoId,
+        query.from,
+        query.until,
+        ...(query.file === undefined ? [] : [query.file]),
+        query.limit + 1,
+        query.offset,
+      ) as Row[];
   if (query.kind === "ci")
     return db
       .prepare(`SELECT run_key AS observationId, sha,
@@ -221,13 +235,19 @@ export function codeHealthEvidenceSource(
     WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
     ORDER BY v.ended_at, t.id LIMIT ? OFFSET ?`)
       .all(...args) as Row[];
-  if (query.kind === "sizes" && query.checkout && query.sha)
-    return db
+  if (query.kind === "sizes" && query.checkout && query.sha) {
+    const rows = db
       .prepare(`SELECT
     json_extract(j.value, '$.path') AS path, json_extract(j.value, '$.lines') AS lines
     FROM map_cache c, json_each(c.value, '$.tree') j
     WHERE c.kind = 'tree' AND c.scope = ? AND c.key = ?
     ORDER BY lines DESC, path LIMIT ? OFFSET ?`)
-      .all(query.checkout, query.sha, query.limit + 1, query.offset) as Row[];
+      .all(query.checkout, query.sha, query.limit + 1, query.offset) as {
+      path: string;
+      lines: number;
+    }[];
+    validateSizeRows(rows);
+    return rows;
+  }
   throw new Error("Invalid code-health evidence source");
 }
