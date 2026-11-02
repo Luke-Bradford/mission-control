@@ -129,6 +129,7 @@
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 .ch-test-classification {
   font-size: var(--fs-s);

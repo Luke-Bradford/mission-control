@@ -2,12 +2,50 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import {
+  BROWSER_TEST_TIMEOUT_MS,
+  browserSession,
+  describeRendered,
+  type RenderedPage,
+} from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import { NOW } from "./fixtures.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
 
 const { renderAt } = browserSession();
+async function metadataOverflow(page: RenderedPage) {
+  return page.evaluate(() => {
+    const overflow: {
+      text: string;
+      left: number;
+      right: number;
+      cellLeft: number;
+      cellRight: number;
+    }[] = [];
+    for (const element of document.querySelectorAll(".ch-test-scroll tbody th .ch-test-detail")) {
+      const cell = element.closest("th");
+      if (!cell) continue;
+      const bounds = cell.getBoundingClientRect(),
+        walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const rect of range.getClientRects())
+          if (rect.width > 0 && (rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5))
+            overflow.push({
+              text: (node.textContent ?? "").slice(0, 80),
+              left: rect.left,
+              right: rect.right,
+              cellLeft: bounds.left,
+              cellRight: bounds.right,
+            });
+        node = walker.nextNode();
+      }
+    }
+    return overflow;
+  }, undefined);
+}
 describeRendered("Test health measured layout", () => {
   it(
     "fits the delivered App with FLIGHT folded or open and preserves keyboard evidence access",
@@ -96,6 +134,7 @@ describeRendered("Test health measured layout", () => {
               expect(metrics.clippedNumbers).toBe(0);
               expect(metrics.clippedHeaders).toBe(0);
               expect(metrics.durationUnitTransform).toBe("none");
+              expect(await metadataOverflow(page)).toEqual([]);
               if (width === 1600 && height === 1000) {
                 expect(metrics.bottom).toBeLessThanOrEqual(1000);
                 expect(
@@ -278,6 +317,7 @@ describeRendered("Test health measured layout", () => {
             await page.boxes(".ch-recommendation");
             await page.click("#ch-tab-test");
             await page.boxes(".ch-test");
+            expect(await metadataOverflow(page)).toEqual([]);
             expect(
               (await page.unclipped(".ch-test,.ch-test-cohort,.ch-test-identity")).every(Boolean),
             ).toBe(true);
@@ -309,6 +349,55 @@ describeRendered("Test health measured layout", () => {
                     undefined,
                   ),
                 ).toBe(true);
+              if (count === 50) {
+                await page.press("Escape");
+                await page.evaluate(
+                  () =>
+                    new Promise<void>((resolve) =>
+                      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+                    ),
+                  undefined,
+                );
+                await page.evaluate(
+                  () =>
+                    (
+                      document.querySelector(".ch-test-durations button") as HTMLButtonElement
+                    ).focus(),
+                  undefined,
+                );
+                await page.press("Enter");
+                await page.boxes(".ch-evidence-rows summary");
+                await page.evaluate(
+                  () =>
+                    (document.querySelector(".ch-evidence-rows summary") as HTMLElement).focus(),
+                  undefined,
+                );
+                await page.press("Enter");
+                await page.press("End");
+                await page.evaluate(
+                  () => new Promise((resolve) => setTimeout(resolve, 100)),
+                  undefined,
+                );
+                const fullEnvironment = await page.evaluate((expected) => {
+                  const value = [
+                    ...document.querySelectorAll(".ch-evidence-rows details[open] dd"),
+                  ].find((node) => node.textContent === expected);
+                  const bounds = value?.getBoundingClientRect(),
+                    body = document.querySelector(".ch-dialog-body")?.getBoundingClientRect();
+                  return {
+                    text: value?.textContent,
+                    contained:
+                      !!bounds && !!body && bounds.left >= body.left && bounds.right <= body.right,
+                    visible:
+                      !!bounds && !!body && bounds.top >= body.top && bounds.bottom <= body.bottom,
+                  };
+                }, fixture.data.durations[0].environment);
+                expect(fullEnvironment).toEqual({
+                  text: fixture.data.durations[0].environment,
+                  contained: true,
+                  visible: true,
+                });
+              }
             }
           } finally {
             await page.close();
