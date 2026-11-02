@@ -19,6 +19,8 @@ import {
   CI_TRIES,
   type CiRunsView,
   type CliAccountStatus,
+  CODE_HEALTH_TABS,
+  CODE_HEALTH_WINDOWS,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -165,6 +167,8 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
+import { cleanCodeHealth } from "./code-health/clean.ts";
+import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -413,6 +417,8 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** Shared bounded reader; the MCP read handler can use this same instance. */
+  codeHealth?: CodeHealthReader;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
@@ -748,6 +754,7 @@ type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const codeHealth = deps.codeHealth ?? new CodeHealthReader(store, config, now);
   let transcriptFootprintCache: {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
@@ -4045,6 +4052,65 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })),
           generatedAt: now(),
         };
+      });
+      const CodeHealthQuery = z.strictObject({
+        repo: z.string().trim().min(1).max(128),
+        window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+        tab: z.enum(CODE_HEALTH_TABS).default("overview"),
+      });
+      const codeHealthOutput = async (value: unknown) =>
+        cleanCodeHealth(value, [
+          operatorToken ?? "",
+          ...(await (deps.knownSecrets?.() ?? Promise.resolve([]))),
+        ]);
+      const codeHealthFailure = (error: unknown, reply: FastifyReply) =>
+        reply.code(error instanceof CodeHealthReadError ? error.status : 503).send({
+          error:
+            error instanceof CodeHealthReadError
+              ? error.message
+              : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
+        });
+      // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
+      api.get("/code-health", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = CodeHealthQuery.safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { repo, window, tab } = parsed.data;
+          return await codeHealthOutput(codeHealth.read(repo, window, tab));
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
+      api.get("/code-health/evidence/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const params = z.strictObject({ id: z.string().min(1).max(64) }).safeParse(req.params);
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            cursor: z.string().min(1).max(5).optional(),
+          })
+          .safeParse(req.query);
+        if (!params.success || !parsed.success)
+          return reply.code(400).send({ error: "Invalid code-health evidence query" });
+        reply.header("cache-control", "no-store");
+        try {
+          return await codeHealthOutput(
+            codeHealth.evidence(parsed.data.repo, params.data.id, parsed.data.cursor),
+          );
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
       });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>

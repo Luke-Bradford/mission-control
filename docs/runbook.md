@@ -1,5 +1,26 @@
 # Mission Control runbook
 
+## Code-health reads
+
+`GET /api/code-health?repo=<id>&window=30d&tab=overview` requires the operator token.
+Windows are `7d`, `30d` and `90d`; tabs are `overview`, `review`, `risk` and `test`.
+Each response states its observed dates, source and collection gaps. Rework rates describe
+distinct reported PRs. Job observations are not test attempts, and mixed outcomes remain
+candidates. Current file sizes have an analysed SHA; historical growth and line churn need
+their own collection. Raw command durations with unknown units remain unnormalised.
+
+The response issues repo-scoped evidence references. Read one through
+`GET /api/code-health/evidence/<id>?repo=<id>`, passing its returned `cursor` for later pages.
+A page holds at most 50 rows; the bounded reader stops after 20,000. A changed source answers
+409 and asks for a fresh summary. References lost after restart or bounded-cache eviction
+answer 404 with the same recovery. These reads send no GitHub or config writes.
+
+Summary caches follow relevant review, CI, PR and Map writes, including writes from another
+SQLite connection. Unrelated settings and machine samples leave them intact. Collection reads
+use a consistent deferred SQLite snapshot. Responses redact credentials and bound evidence
+text; a failed secret-provider read fails closed. Recommendations and named-test ingestion
+retain their explicit collection states until their dependent services are available.
+
 Mission Control is a local hub that watches the autonomous loops on this Mac. It reads their state
 files, transcripts, usage limits and GitHub boards, and shows them in one web app, the HUD. In
 phase 1 it **observes only**. Its one write into a loop's files is the TA loop's `PAUSE` sentinel,

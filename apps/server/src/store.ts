@@ -140,6 +140,14 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import {
+  codeHealthCiSource,
+  codeHealthEvidenceSource,
+  codeHealthReviewSource,
+  codeHealthSizeSource,
+  codeHealthSourceRevision,
+  installCodeHealthRevisions,
+} from "./code-health/source.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -1213,6 +1221,36 @@ export class Store {
       );
     this.migrate();
     this.backfillAuditHistory();
+    installCodeHealthRevisions(this.db);
+  }
+
+  codeHealthRevision(repoId: string): string {
+    return codeHealthSourceRevision(this.db, repoId);
+  }
+
+  /** A consistent, deferred read snapshot; WAL writers remain independent. */
+  codeHealthSnapshot<T>(read: () => T): T {
+    let result: T | undefined;
+    this.transaction(() => {
+      result = read();
+    });
+    return result as T;
+  }
+
+  codeHealthReviews(repoId: string, from: number, until: number) {
+    return codeHealthReviewSource(this.db, repoId, from, until);
+  }
+
+  codeHealthCi(repoId: string, from: number, until: number) {
+    return codeHealthCiSource(this.db, repoId, from, until);
+  }
+
+  codeHealthSizes(checkout: string) {
+    return codeHealthSizeSource(this.db, checkout);
+  }
+
+  codeHealthEvidence(query: Parameters<typeof codeHealthEvidenceSource>[1]) {
+    return codeHealthEvidenceSource(this.db, query);
   }
 
   /** One-time-safe reconstruction from sources that already survived retention. */
