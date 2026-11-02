@@ -9,7 +9,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
-import { Audit } from "../src/pages/Audit.tsx";
+import { LegacyAudit as Audit } from "../src/pages/LegacyAudit.tsx";
 import { stubFetch } from "./fetchStub.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -230,7 +230,7 @@ it("labels retained evidence as stale and reports a failed newly-selected range"
 it("renders the audit panels, links each trace, and keeps the selected range shared", async () => {
   render(<Audit />);
 
-  await screen.findByRole("heading", { level: 1, name: "Audit" });
+  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
   for (const name of [
     "Improvements to consider",
     "PR size",
@@ -455,7 +455,7 @@ it("Hotspots tab shows History and Review findings for the picked repo", async (
     "/api/repos/other/map": map("other", "lib/other.ts"),
   });
   render(<Audit />);
-  await screen.findByRole("heading", { level: 1, name: "Audit" });
+  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
   fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
 
   const history = await screen.findByRole("region", { name: "History lens" });
@@ -484,7 +484,7 @@ it("Hotspots tab says so when no repo has a crew session", async () => {
     "/api/crew?shape=summary": { rows: [] },
   });
   render(<Audit />);
-  await screen.findByRole("heading", { level: 1, name: "Audit" });
+  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
   fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
   expect(
     await screen.findByText(

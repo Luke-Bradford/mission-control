@@ -139,6 +139,18 @@ export const RESOURCES = {
       (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
   }),
+  codeHealth: (repo: string, window = "30d", tab = "overview"): ResourceRef => ({
+    path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
+    topic: ["agents", "boards", "flight"],
+  }),
+  codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
+    path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
+    topic: null,
+  }),
+  codeHealthHistory: (repo: string, cursor = "0"): ResourceRef => ({
+    path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
+    topic: ["agents", "flight"],
+  }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
@@ -266,6 +278,8 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  codeHealthDecision: (repo: string, id: string) =>
+    `/api/code-health/recommendations/${enc(id)}?repo=${enc(repo)}`,
   /** Body `{ pr }`; starts a branch preview and returns its URL. */
   startPreview: "/api/previews",
   /** Body `{ base, profile }`; returns the refreshed template profiles. */
@@ -411,7 +425,9 @@ const readResource = async <T>(path: string): Promise<T> => {
     mapSnapshots.set(path, next);
     return next as T;
   }
-  return path === RESOURCES.prFlow.path ? apiOperatorGet<T>(path) : apiGet<T>(path);
+  return path === RESOURCES.prFlow.path || path.startsWith("/api/code-health")
+    ? apiOperatorGet<T>(path)
+    : apiGet<T>(path);
 };
 
 class Hub {
