@@ -194,6 +194,7 @@ import {
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
 import { qaNativeIdentity } from "./qa-history-key.ts";
+import { StandingInstructions } from "./standing-instructions.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -1120,6 +1121,7 @@ const toBoardItem = (r: Row): BoardItem => ({
 });
 
 const toFlightDecision = (r: Row): FlightDecision => ({
+  ...(r.order_id == null ? {} : { orderId: Number(r.order_id) }),
   id: r.id as number,
   at: r.at as number,
   kind: r.kind as FlightDecisionKind,
@@ -1251,6 +1253,7 @@ export class Store {
   /** `busyTimeoutMs` is shortened only by tests that hold a lock on purpose. */
   /** The database file. */
   readonly path: string;
+  readonly instructions: StandingInstructions;
 
   constructor(path: string, busyTimeoutMs = BUSY_TIMEOUT_MS) {
     this.path = path;
@@ -1275,6 +1278,7 @@ export class Store {
         "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
       );
     this.migrate();
+    this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
     installRiskMemberships(this.db);
     installGitFileSources(this.db);
@@ -1625,6 +1629,7 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
@@ -7677,8 +7682,8 @@ export class Store {
     const r = this.db
       .prepare(
         `INSERT INTO flight_decisions
-           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         d.at,
@@ -7690,6 +7695,7 @@ export class Store {
         d.about,
         d.decision,
         d.basis,
+        d.orderId ?? null,
       );
     return Number(r.lastInsertRowid);
   }
@@ -7709,18 +7715,7 @@ export class Store {
         "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
       )
       .all(kind, ref) as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      at: r.at as number,
-      kind: r.kind as FlightDecisionKind,
-      seatId: r.seat_id as string | null,
-      targetRunId: r.target_run_id as string | null,
-      ref: r.ref as string | null,
-      questionId: r.question_id as number | null,
-      about: r.about as string,
-      decision: r.decision as string,
-      basis: r.basis as string,
-    }));
+    return rows.map(toFlightDecision);
   }
 
   /** Replaces one section of a session's brief. */

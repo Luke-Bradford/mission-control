@@ -680,6 +680,7 @@ export function flightState(i: {
     .filter((d) => d.kind !== "brief")
     .slice(0, FLIGHT_RECENT_LISTED)
     .map((d) => ({
+      ...(d.orderId === undefined ? {} : { orderId: d.orderId }),
       id: d.id,
       time: clockHm(d.at, tz),
       kind: d.kind,
@@ -1182,6 +1183,7 @@ export function flightState(i: {
       }),
       now,
     }),
+    instructionRevision: store.instructions.revision(),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
@@ -1413,6 +1415,8 @@ export function wakeFacts(
     (s.reviewQueue?.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS &&
     s.reviewQueue?.seats.some((seat) => seat.idle);
   return JSON.stringify({
+    instructions:
+      s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
     retrospective: s.retrospective ? [s.retrospective.day] : [],
     signals: s.signals
       .filter((s) => !s.told)

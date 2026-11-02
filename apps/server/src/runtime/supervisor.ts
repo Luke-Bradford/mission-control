@@ -117,6 +117,7 @@ import {
   seatBusyText,
   seatCallSign,
   seatDef,
+  seatInstructionBlock,
   type TicketView,
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
@@ -210,6 +211,7 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
+  cloneGitDir,
   existingCheckout,
   existingDetached,
   existingFlightCheckout,
@@ -235,8 +237,14 @@ import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
-import { assertSeatGitConfig, assertSeatGitVersion, SeatGitError } from "./git.ts";
+import { assertSeatGitConfig, assertSeatGitVersion, crewGit, SeatGitError } from "./git.ts";
 import { runSeatGrants } from "./grants.ts";
+import {
+  type DeliveryEnvelope,
+  directionKey,
+  instructionEnvelope,
+  readDirectionContext,
+} from "./instruction-context.ts";
 import {
   CODEX_DELIVERY,
   endKeeper,
@@ -1337,17 +1345,37 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
-  function writeLine(l: Live, text: string): void {
+  function writeLine(l: Live, text: string): DeliveryEnvelope {
+    const envelope = instructionEnvelope(
+      store,
+      l.info.seat,
+      l.run.id,
+      seatDef(l.info.seat).loop === "watch",
+      text,
+    );
     try {
-      l.session.send(text);
+      l.session.send(envelope.text);
     } catch {
       throw noLive(l.info);
+    }
+    store.setSetting(`instruction.delivered:${l.run.id}`, envelope.revision);
+    const pending = pendingPromptVersions.get(l.run.id);
+    if (pending) {
+      pendingPromptVersions.delete(l.run.id);
+      savePromptVersion(
+        l.run,
+        pending.rolePath,
+        envelope.text,
+        [...envelope.pieces, ...pending.briefPieces],
+        pending.system,
+      );
     }
     l.inTurn = true;
     l.parkedTurn = false;
     l.rateLimitedUntil = null;
     // A completed Codex interrupt leaves the seat idle until the replacement is sent.
     if (l.run.vendor === "codex") setState(l, "running", null);
+    return envelope;
   }
 
   async function sendInterrupt(l: Live): Promise<void> {
@@ -1446,8 +1474,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
-  /** The audit identity includes both generated developer instructions and the first user brief. */
+  const pendingPromptVersions = new Map<
+    string,
+    { rolePath: string; briefPieces: readonly PromptPiece[]; system: readonly PromptPiece[] | null }
+  >();
   function recordPromptVersion(
+    run: Run,
+    rolePath: string,
+    _brief: string,
+    briefPieces: readonly PromptPiece[],
+    system: readonly PromptPiece[] | null,
+  ): void {
+    pendingPromptVersions.set(run.id, { rolePath, briefPieces, system });
+  }
+  /** Record the actual first delivery, after resolving current instructions inside its queue. */
+  function savePromptVersion(
     run: Run,
     rolePath: string,
     brief: string,
@@ -1615,6 +1656,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? await deps.flightEnvironment?.()
         : undefined;
     if (stopping) throw new Error(SHUTTING_DOWN);
+    if (seatDef(info.seat).loop === "watch" && store.getSetting(directionKey(run.id)) === null) {
+      const sha = (
+        await crewGit(
+          checkout.path,
+          ["rev-parse", "HEAD"],
+          await cloneGitDir(info.session.checkout),
+          { gitDir: checkout.gitDir },
+        )
+      ).trim();
+      store.setSetting(
+        directionKey(run.id),
+        JSON.stringify(await readDirectionContext(info.session.checkout, sha, resume)),
+      );
+    }
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
     return launch(
@@ -1711,6 +1766,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           repoDocs?.claudeMd ?? null,
           [advice, references].filter(Boolean).join("\n\n"),
           repoDocs?.agentsMd ?? null,
+          store.instructions.active(info.seat.id).length
+            ? seatInstructionBlock(store.instructions.active(info.seat.id))
+            : "",
         ),
         {
           mode: 0o600,
@@ -1719,7 +1777,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const block = (heading: string, body: string | null | undefined): number =>
         body == null || body.trim() === "" ? 0 : textBytes(`\n\n${heading}\n\n${body}`);
       system = [
-        { section: "orders", bytes: textBytes(advice) },
+        {
+          section: "orders",
+          bytes:
+            textBytes(advice) +
+            (store.instructions.active(info.seat.id).length
+              ? textBytes(seatInstructionBlock(store.instructions.active(info.seat.id)))
+              : 0),
+        },
         {
           section: "rules",
           bytes:
@@ -2615,7 +2680,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const def = seatDef(info.seat);
       if (def.mode === "read-only" && def.loop !== "plan") {
         try {
-          await readOnlyCheckout(info, row, run);
+          const checkout = await readOnlyCheckout(info, row, run);
+          if (def.loop === "watch" && store.getSetting(directionKey(run.id)) === null) {
+            const sha = (
+              await crewGit(
+                checkout.path,
+                ["rev-parse", "HEAD"],
+                await cloneGitDir(info.session.checkout),
+                { gitDir: checkout.gitDir },
+              )
+            ).trim();
+            store.setSetting(
+              directionKey(run.id),
+              JSON.stringify(await readDirectionContext(info.session.checkout, sha, true)),
+            );
+          }
         } catch {
           if (runGone(runId, row.seatId)) return;
           // Discover the keeper first: an exit keeps its reason; a missing keeper goes through resume.
@@ -4509,7 +4588,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!claimed) return "dup";
       try {
         const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
-        writeLine(l, inbox.text);
+        const envelope = writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {
           try {
@@ -4517,7 +4596,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               runId,
               cost.wake,
               now(),
-              promptSections(inbox.text, cost.pieces, "orders"),
+              promptSections(envelope.text, [...envelope.pieces, ...cost.pieces], "orders"),
             );
           } catch (e) {
             log(`${seatId}: could not record the wake's sections: ${errText(e)}`);

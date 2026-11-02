@@ -285,7 +285,6 @@ import {
   grantApproval,
   useApproval,
 } from "./flight-approvals.ts";
-import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
@@ -365,7 +364,7 @@ import {
   runUsage,
   runView,
 } from "./runview.ts";
-import { setSeatFocus } from "./seat-focus.ts";
+import { registerInstructionRoutes } from "./standing-instructions-api.ts";
 import {
   type CommsReadScope,
   commsMessageNumber,
@@ -3886,36 +3885,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/pages/Agent.tsx (Queue focus)
-      api.get<{ Params: { id: string } }>("/seats/:id/focus", async (req, reply) => {
-        const seat = config.crew?.sessions
-          .flatMap((s) => s.seats)
-          .find((s) => s.id === req.params.id);
-        if (!seat) return reply.code(404).send({ error: "Seat unavailable." });
-        return { focus: seat.focus ?? null };
-      });
-
-      // Reader: apps/web/src/pages/Agent.tsx (Queue focus Change)
-      api.post<{ Params: { id: string } }>("/seats/:id/focus", async (req, reply) => {
-        const body = z.strictObject({ focus: seatFocus }).safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        if (!deps.seatWrites || !deps.configPath || !deps.crewReloader)
-          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
-        try {
-          return await setSeatFocus(
-            config,
-            deps.configPath,
-            deps.crewReloader,
-            req.params.id,
-            body.data.focus,
-            now(),
-          );
-        } catch (e) {
-          return reply
-            .code(e instanceof ConfigWriteError && e.kind === "missing" ? 404 : 409)
-            .send({ error: e instanceof ConfigWriteError ? e.message : CONFIG_WRITE_FAILED });
-        }
-      });
+      registerInstructionRoutes(api, deps);
 
       // Reader: apps/web/src/pages/Agent.tsx (Queue move-up approval item)
       api.post<{ Params: { id: string } }>("/seats/:id/queue/reorder", async (req, reply) => {

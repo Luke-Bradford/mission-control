@@ -472,6 +472,7 @@ export function rolePrompt(
   claudeMd: string | null,
   references = "",
   agentsMd: string | null = null,
+  seatInstructions = "",
 ): string {
   let out = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n${references === "" ? "" : `\n${references}\n`}`;
   for (const [heading, body] of [
@@ -480,6 +481,7 @@ export function rolePrompt(
   ] as const) {
     if (body !== null && body.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${body}`;
   }
+  if (seatInstructions !== "") out = `${out.trimEnd()}\n\n${seatInstructions}`;
   return out;
 }
 

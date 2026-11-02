@@ -680,7 +680,7 @@ function buildCrew(
         ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
           ? { displayCallSign: agent.seat.displayCallSign }
           : {}),
-        ...(agent.kind === "crew" ? { focus: agent.seat.focus ?? null } : {}),
+        ...(agent.kind === "crew" ? { focus: store.instructions.syncFocus(agent.seat, now) } : {}),
         repoId: agent.repoId,
         index,
         hudState: state,

@@ -111,7 +111,7 @@ async function validate(
       card.priority === null ||
       !/^P[0-9]+$/.test(card.priority) ||
       hudColumnOf(card) !== "Ready" ||
-      !matchesFocus(seat.focus, card) ||
+      !matchesFocus(deps.store.instructions.syncFocus(seat), card) ||
       deps.store.activeTickets().has(ref) ||
       deps.store.queue(seatId).some((q) => q.issue === card.issueNumber && q.takenAt !== null)
     )

@@ -329,7 +329,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
           issue: card.issueNumber,
           label,
           seats: group
-            .filter(({ seat }) => matchesFocus(seat.focus, card))
+            .filter(({ seat }) => matchesFocus(store.instructions.syncFocus(seat), card))
             .map(({ seat }) => seat.id),
         });
     }
@@ -428,7 +428,7 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
     const l = areaLabelsOf(rules, c);
     const label = l[0];
     return (
-      matchesFocus(seat.focus, c) &&
+      matchesFocus(store.instructions.syncFocus(seat), c) &&
       holder.has(c.issueNumber) &&
       l.length === 1 &&
       label !== undefined &&
@@ -509,7 +509,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   // The card may have moved since the poll, and another seat may have been started on it by hand.
   if (
     card === undefined ||
-    !matchesFocus(found.seat.focus, card) ||
+    !matchesFocus(store.instructions.syncFocus(found.seat), card) ||
     hudColumnOf(card) !== "Ready" ||
     store.activeTickets().has(ref)
   ) {
@@ -583,7 +583,10 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (
     pausedSeat(store, seatId, null) ||
     !current ||
-    !matchesFocus(current.seat.focus, { ...card, labels: latest.labels ?? [] })
+    !matchesFocus(store.instructions.syncFocus(current.seat), {
+      ...card,
+      labels: latest.labels ?? [],
+    })
   ) {
     store.untake(seatId, repoId, issue);
     return;
