@@ -48,8 +48,10 @@ function solve(tracks: Track[], avail: number, gap: number): number[] {
 }
 
 /** The nth px length after `prop:` in a rule (`max(16px, …)` and `8px 14px` both read). */
-const pxOf = (r: string, prop: string, nth = 1) =>
-  Number(r.match(new RegExp(`${prop}: (?:max\\()?(\\d+)px(?: (\\d+)px)?`))?.[nth]);
+const pxOf = (r: string, prop: string, nth = 1) => {
+  const values = r.match(new RegExp(`${prop}: (?:max\\()?(\\d+)px(?: (\\d+)px)?`));
+  return Number(values?.[nth] ?? values?.[1]);
+};
 
 /**
  * The Overview's ticket column at `viewport` wide, worked out from the stylesheet: the app's

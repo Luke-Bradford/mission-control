@@ -1,0 +1,1095 @@
+{
+  "schemaVersion": 1,
+  "receipts": [
+    {
+      "origin": "controller-recorded",
+      "command": "pnpm exec vitest run apps/web/test/Dock.test.tsx apps/web/test/App.test.tsx apps/web/test/Header.test.tsx apps/web/test/pageRenderCounts.test.tsx apps/web/test/loadFetches.test.tsx apps/web/test/clock.test.tsx apps/web/test/hudTokens.test.ts apps/web/test/AgentsPanelCss.test.ts apps/web/test/MapPerformance.test.tsx --maxWorkers=3 --retry=0",
+      "exitCode": 0,
+      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "at": 1793639183048,
+      "passed": 173,
+      "failed": 0,
+      "skipped": 0,
+      "artifactSha256": "5d3805f7af8004654d25f19366f15c56f7f5242ffe59e88469df8909a58521f0",
+      "files": [
+        {
+          "file": "apps/web/test/AgentsPanelCss.test.ts",
+          "startTime": 1793639187266,
+          "endTime": 1793639187274.2915,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "bounds the Overview rows and lets panel bodies scroll internally",
+              "status": "passed",
+              "durationMs": 4.525416000000007
+            },
+            {
+              "name": "keeps seven compact columns with needs beside the work title on one line",
+              "status": "passed",
+              "durationMs": 0.7586670000000026
+            },
+            {
+              "name": "gives the Work track the free width and clips its free text",
+              "status": "passed",
+              "durationMs": 0.2731670000000008
+            },
+            {
+              "name": "keeps State pills and their age from shrinking",
+              "status": "passed",
+              "durationMs": 0.35737499999999045
+            },
+            {
+              "name": "drops token graphs before tightening columns with FLIGHT open",
+              "status": "passed",
+              "durationMs": 0.44533400000000256
+            },
+            {
+              "name": "gives the live log an identity column beside the message and references",
+              "status": "passed",
+              "durationMs": 0.31150000000002365
+            },
+            {
+              "name": "keeps charts aligned when the live dot or rate text changes",
+              "status": "passed",
+              "durationMs": 0.4315000000000282
+            },
+            {
+              "name": "lets phone users scroll every Crew column while keeping the agent pinned",
+              "status": "passed",
+              "durationMs": 0.5305000000000177
+            },
+            {
+              "name": "constrains the crew pause portal to the viewport with scrolling",
+              "status": "passed",
+              "durationMs": 0.29162500000001046
+            },
+            {
+              "name": "sizes the review-waiver menu from spacing tokens",
+              "status": "passed",
+              "durationMs": 0.22812499999997726
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/App.test.tsx",
+          "startTime": 1793639184023,
+          "endTime": 1793639187559.0405,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "App marks the document ready only after the shell's initial data has rendered",
+              "status": "passed",
+              "durationMs": 49.02499999999998
+            },
+            {
+              "name": "App does not re-render the application on a clock tick",
+              "status": "passed",
+              "durationMs": 16.389499999999998
+            },
+            {
+              "name": "App / has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 355.815292
+            },
+            {
+              "name": "App /flight has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 315.61579199999983
+            },
+            {
+              "name": "App /board has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 314.57175000000007
+            },
+            {
+              "name": "App /agent has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 309.9449159999999
+            },
+            {
+              "name": "App /map/sample has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 310.27445799999987
+            },
+            {
+              "name": "App /comms has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 314.806791
+            },
+            {
+              "name": "App /telemetry has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 319.58337500000016
+            },
+            {
+              "name": "App /audit has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 329.5190419999999
+            },
+            {
+              "name": "App /setup/loops has one page heading and the shell landmarks",
+              "status": "passed",
+              "durationMs": 321.26324999999997
+            },
+            {
+              "name": "App skips from the Board link to the board content",
+              "status": "passed",
+              "durationMs": 26.22866699999986
+            },
+            {
+              "name": "App / renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 35.4384170000003
+            },
+            {
+              "name": "App /flight renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 18.71720899999991
+            },
+            {
+              "name": "App /board renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 16.971000000000004
+            },
+            {
+              "name": "App /agent renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 16.147875000000113
+            },
+            {
+              "name": "App /map/sample renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 14.217208000000028
+            },
+            {
+              "name": "App /comms renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 22.996166999999787
+            },
+            {
+              "name": "App /telemetry renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 19.75262500000008
+            },
+            {
+              "name": "App /audit renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 10.799125000000004
+            },
+            {
+              "name": "App /setup/loops renders its page and marks its tab",
+              "status": "passed",
+              "durationMs": 11.484083999999712
+            },
+            {
+              "name": "App an unknown path shows Overview at /",
+              "status": "passed",
+              "durationMs": 19.360625000000255
+            },
+            {
+              "name": "App redirects old path /agents/shop-app-ta to /agent/shop-app-ta",
+              "status": "passed",
+              "durationMs": 5.7092079999993075
+            },
+            {
+              "name": "App redirects old path /needs/shop-app%233227 to /comms/esc%3Ashop-app%233227",
+              "status": "passed",
+              "durationMs": 9.097625000000335
+            },
+            {
+              "name": "App redirects old path /config to /setup/sources#glossary",
+              "status": "passed",
+              "durationMs": 11.124166000000514
+            },
+            {
+              "name": "App redirects old path /settings#glossary to /setup/sources#glossary",
+              "status": "passed",
+              "durationMs": 13.95049999999992
+            },
+            {
+              "name": "App redirects old path /settings to /setup",
+              "status": "passed",
+              "durationMs": 7.080958000000464
+            },
+            {
+              "name": "App redirects old path /boards/shop-app to /board/shop-app",
+              "status": "passed",
+              "durationMs": 5.758083999999144
+            },
+            {
+              "name": "App redirects old path /metrics to /telemetry",
+              "status": "passed",
+              "durationMs": 10.191584000000148
+            },
+            {
+              "name": "App g then b goes to the Board; ? opens the help",
+              "status": "passed",
+              "durationMs": 16.374042000000372
+            },
+            {
+              "name": "App expands the site-wide FLIGHT rail from Setup without leaving the form page",
+              "status": "passed",
+              "durationMs": 50.062707999999475
+            },
+            {
+              "name": "App keeps Map navigation and its site-wide FLIGHT rail separate",
+              "status": "passed",
+              "durationMs": 29.740458000000217
+            },
+            {
+              "name": "App starts the dock collapsed on the Board and expands it on click",
+              "status": "passed",
+              "durationMs": 23.448875000000044
+            },
+            {
+              "name": "App hides the dock on the FLIGHT page, which says what it would, and f opens FLIGHT in Comms",
+              "status": "passed",
+              "durationMs": 22.668625000000247
+            },
+            {
+              "name": "App i off the agent page toasts",
+              "status": "passed",
+              "durationMs": 29.234166999999616
+            },
+            {
+              "name": "App the footer carries the key hints, Setup included, and no sample-data chip",
+              "status": "passed",
+              "durationMs": 22.34937499999978
+            },
+            {
+              "name": "App the build-status toggle shows the legend and hides phase badges",
+              "status": "passed",
+              "durationMs": 17.56433399999969
+            },
+            {
+              "name": "App a popped-out agent (?popout=1) renders only the Agent page, titled with its id",
+              "status": "passed",
+              "durationMs": 8.577125000000706
+            },
+            {
+              "name": "App a pop-out ignores the g page keys and has no Pop out control",
+              "status": "passed",
+              "durationMs": 15.736249999999927
+            },
+            {
+              "name": "App a pop-out stays one when it moves to another agent, which drops ?popout=1",
+              "status": "passed",
+              "durationMs": 23.05500000000029
+            },
+            {
+              "name": "App the full app's Agent header has Pop out",
+              "status": "passed",
+              "durationMs": 30.049791999999798
+            },
+            {
+              "name": "App the Setup sidebar follows the URL",
+              "status": "passed",
+              "durationMs": 15.04045799999949
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/Dock.test.tsx",
+          "startTime": 1793639185004,
+          "endTime": 1793639185523.1162,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "Dock content keeps waiting asks above an independently scrolling message stream",
+              "status": "passed",
+              "durationMs": 6.329750000000047
+            },
+            {
+              "name": "Dock content keeps Head agent visible in the dock header on phones",
+              "status": "passed",
+              "durationMs": 19.78649999999999
+            },
+            {
+              "name": "Dock content says no FLIGHT seat is configured, with no conversation and the input switched off",
+              "status": "passed",
+              "durationMs": 53.91108299999996
+            },
+            {
+              "name": "Dock content carries no P2 badge in its header; the build-status chips show when on",
+              "status": "passed",
+              "durationMs": 10.916334000000006
+            },
+            {
+              "name": "Dock on a wide screen focuses the expanded heading and returns to the rail without losing a failed draft or selection",
+              "status": "passed",
+              "durationMs": 43.358375000000024
+            },
+            {
+              "name": "Dock on a wide screen starts open above 2200px and preserves an explicit session choice after remount",
+              "status": "passed",
+              "durationMs": 8.50345900000002
+            },
+            {
+              "name": "Dock on a wide screen keeps the rail usable when session storage is unavailable",
+              "status": "passed",
+              "durationMs": 9.54320800000005
+            },
+            {
+              "name": "Dock on a wide screen starts collapsed to its title row, expands on click, and remembers the choice",
+              "status": "passed",
+              "durationMs": 8.127333000000021
+            },
+            {
+              "name": "Dock on a wide screen is shown by default; Hide hides it and remembers, showing again remembers that",
+              "status": "passed",
+              "durationMs": 8.353167000000099
+            },
+            {
+              "name": "Dock on a wide screen starts hidden when it was hidden last time",
+              "status": "passed",
+              "durationMs": 2.6846669999999904
+            },
+            {
+              "name": "Dock on a wide screen has no scrim",
+              "status": "passed",
+              "durationMs": 2.581957999999986
+            },
+            {
+              "name": "Dock on a wide screen does not trap Tab: it is a column, not a drawer",
+              "status": "passed",
+              "durationMs": 5.347874999999931
+            },
+            {
+              "name": "Dock on a narrow screen is a drawer, closed by default, that Esc closes and nothing remembers",
+              "status": "passed",
+              "durationMs": 4.266499999999951
+            },
+            {
+              "name": "Dock on a narrow screen closes when the scrim or Hide is pressed",
+              "status": "passed",
+              "durationMs": 6.6628749999999854
+            },
+            {
+              "name": "Dock on a narrow screen gives focus back to the control that opened it, on Hide and on Esc",
+              "status": "passed",
+              "durationMs": 9.739167000000066
+            },
+            {
+              "name": "Dock on a narrow screen keeps Tab and Shift+Tab inside the drawer, wrapping between its first and last stop",
+              "status": "passed",
+              "durationMs": 6.790875000000028
+            },
+            {
+              "name": "Dock on a narrow screen closes when the window crosses the breakpoint",
+              "status": "passed",
+              "durationMs": 3.7222080000000233
+            },
+            {
+              "name": "live FLIGHT includes the repo PR's title in the doing line while the seat is in review",
+              "status": "passed",
+              "durationMs": 7.171499999999924
+            },
+            {
+              "name": "live FLIGHT colours known agents in waiting asks and leaves unknown ids as plain text",
+              "status": "passed",
+              "durationMs": 10.614833999999973
+            },
+            {
+              "name": "live FLIGHT shows the account, model, turns, context and doing line in its meta line",
+              "status": "passed",
+              "durationMs": 6.758916999999997
+            },
+            {
+              "name": "live FLIGHT omits missing turns, account and context without empty separators",
+              "status": "passed",
+              "durationMs": 5.999584000000027
+            },
+            {
+              "name": "live FLIGHT the dock shows no decisions and no wake lines, and has no tabs",
+              "status": "passed",
+              "durationMs": 8.000792000000047
+            },
+            {
+              "name": "live FLIGHT shows its state, the conversation in order, and sends a message",
+              "status": "passed",
+              "durationMs": 11.532707999999957
+            },
+            {
+              "name": "live FLIGHT does not send a blank message",
+              "status": "passed",
+              "durationMs": 6.900957999999946
+            },
+            {
+              "name": "live FLIGHT shows a failure and keeps the text",
+              "status": "passed",
+              "durationMs": 10.401125000000093
+            },
+            {
+              "name": "live FLIGHT highlights @CAPCOM in a FLIGHT row",
+              "status": "passed",
+              "durationMs": 7.756708000000003
+            },
+            {
+              "name": "Waiting on you bounds a fifty-item summary to the highest three and does not open for a new item",
+              "status": "passed",
+              "durationMs": 17.23275000000001
+            },
+            {
+              "name": "Waiting on you names stale and disconnected cached summaries and lets a failed refresh retry",
+              "status": "passed",
+              "durationMs": 15.64466600000003
+            },
+            {
+              "name": "Waiting on you shows the whole Needs-you set, most urgent first, with Open on each",
+              "status": "passed",
+              "durationMs": 7.9785830000000715
+            },
+            {
+              "name": "Waiting on you labels FLIGHT not triaging as FLIGHT and sends Show them to Needs you's home (#758)",
+              "status": "passed",
+              "durationMs": 9.078540999999973
+            },
+            {
+              "name": "Waiting on you shows what waits on you even with no FLIGHT seat",
+              "status": "passed",
+              "durationMs": 5.310083000000077
+            },
+            {
+              "name": "Waiting on you repins on ask mount and growth, while preserving a reader's scroll position",
+              "status": "passed",
+              "durationMs": 14.510041999999999
+            },
+            {
+              "name": "Waiting on you names the empty waiting set",
+              "status": "passed",
+              "durationMs": 7.082333000000062
+            },
+            {
+              "name": "stopped FLIGHT switches the input off and offers Start FLIGHT",
+              "status": "passed",
+              "durationMs": 10.983457999999928
+            },
+            {
+              "name": "stopped FLIGHT shows a failed start",
+              "status": "passed",
+              "durationMs": 14.835333000000105
+            },
+            {
+              "name": "Esc closes only the topmost overlay: the Item panel over the dock drawer",
+              "status": "passed",
+              "durationMs": 4.591042000000016
+            },
+            {
+              "name": "the conversation shows a sent message at once, marked you and pending, and keeps it",
+              "status": "passed",
+              "durationMs": 7.0626250000000255
+            },
+            {
+              "name": "the conversation settles a pending message once FLIGHT's stream has it",
+              "status": "passed",
+              "durationMs": 8.686707999999953
+            },
+            {
+              "name": "the conversation asks for FLIGHT's last 20 events and pages older ones in ahead of them",
+              "status": "passed",
+              "durationMs": 13.300583999999958
+            },
+            {
+              "name": "the conversation loads older events when the reader scrolls to the top of the dock",
+              "status": "passed",
+              "durationMs": 6.403165999999942
+            },
+            {
+              "name": "the conversation offers no older events when the stream has none",
+              "status": "passed",
+              "durationMs": 6.809166000000005
+            },
+            {
+              "name": "the conversation drops the pending message when the send fails",
+              "status": "passed",
+              "durationMs": 8.42041699999993
+            },
+            {
+              "name": "the conversation keeps only the operator's and FLIGHT's messages on Chat",
+              "status": "passed",
+              "durationMs": 4.6170000000000755
+            },
+            {
+              "name": "the conversation renders a reply as Markdown",
+              "status": "passed",
+              "durationMs": 3.050292000000013
+            },
+            {
+              "name": "the conversation counts a new reply as unread while the dock is hidden, and clears it once shown",
+              "status": "passed",
+              "durationMs": 9.30925000000002
+            },
+            {
+              "name": "the conversation counts a reply as unread while the visible dock is collapsed, and clears it on Expand",
+              "status": "passed",
+              "durationMs": 9.715750000000071
+            },
+            {
+              "name": "the conversation follows new messages on expansion without moving a reader who had scrolled up",
+              "status": "passed",
+              "durationMs": 28.899208000000044
+            },
+            {
+              "name": "the conversation keeps the scroll position while reading up, and follows again near the bottom",
+              "status": "passed",
+              "durationMs": 11.337958999999955
+            },
+            {
+              "name": "the conversation does not rebuild the conversation while the operator types",
+              "status": "passed",
+              "durationMs": 7.116209000000026
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/Header.test.tsx",
+          "startTime": 1793639183900,
+          "endTime": 1793639184489.9043,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "Header chat button badges the Needs-you count, briefed or not, and names it",
+              "status": "passed",
+              "durationMs": 87.28162499999996
+            },
+            {
+              "name": "Header chat button shows no badge for unread replies alone",
+              "status": "passed",
+              "durationMs": 9.043540999999891
+            },
+            {
+              "name": "Header shows the brand, the pages in order and marks the current one",
+              "status": "passed",
+              "durationMs": 14.773582999999917
+            },
+            {
+              "name": "Header shows the highest 7-day usage across a provider's accounts",
+              "status": "passed",
+              "durationMs": 12.489833999999973
+            },
+            {
+              "name": "Header puts no lamps on the page tabs: Needs you is the one lamp",
+              "status": "passed",
+              "durationMs": 19.313292000000047
+            },
+            {
+              "name": "Header clicking Needs you while already there brings Operator actions back into view",
+              "status": "passed",
+              "durationMs": 13.521582999999964
+            },
+            {
+              "name": "Header counts what needs you and says whether any is unacknowledged",
+              "status": "passed",
+              "durationMs": 10.95737500000007
+            },
+            {
+              "name": "Header counts only the operator's items; one with no owner counts",
+              "status": "passed",
+              "durationMs": 10.468250000000012
+            },
+            {
+              "name": "Header the Needs-you pill exposes one title: the lamp inside adds none",
+              "status": "passed",
+              "durationMs": 21.606667000000016
+            },
+            {
+              "name": "Header all acknowledged, and nothing at all",
+              "status": "passed",
+              "durationMs": 20.474292000000105
+            },
+            {
+              "name": "Header MET is a dash before the first run today",
+              "status": "passed",
+              "durationMs": 4.538000000000011
+            },
+            {
+              "name": "Header MET counts from the first run today",
+              "status": "passed",
+              "durationMs": 54.45904200000018
+            },
+            {
+              "name": "Header keeps machine status reachable by keyboard and opens Overview",
+              "status": "passed",
+              "durationMs": 11.370000000000118
+            },
+            {
+              "name": "Header turns the machine button to warn with the reason while starts are held",
+              "status": "passed",
+              "durationMs": 10.00045799999998
+            },
+            {
+              "name": "Header the Lock span names the holder and the queue",
+              "status": "passed",
+              "durationMs": 8.980541999999787
+            },
+            {
+              "name": "Header puts a stalled lock warning in the machine tooltip",
+              "status": "passed",
+              "durationMs": 9.339707999999973
+            },
+            {
+              "name": "Header the machine button shows dashes without a sample",
+              "status": "passed",
+              "durationMs": 8.573415999999952
+            },
+            {
+              "name": "Header away button 0",
+              "status": "passed",
+              "durationMs": 3.760082999999895
+            },
+            {
+              "name": "Header away button 1",
+              "status": "passed",
+              "durationMs": 54.896792000000005
+            },
+            {
+              "name": "Header away button 2",
+              "status": "passed",
+              "durationMs": 54.17770900000005
+            },
+            {
+              "name": "Header away button 3",
+              "status": "passed",
+              "durationMs": 53.20545900000002
+            },
+            {
+              "name": "Header the theme button cycles system \u2192 light \u2192 dark \u2192 system, remembers it and toasts",
+              "status": "passed",
+              "durationMs": 9.340541999999914
+            },
+            {
+              "name": "Header starts the theme button from the stored choice",
+              "status": "passed",
+              "durationMs": 5.000291000000061
+            },
+            {
+              "name": "Header a theme change made after the first render but before the button subscribes still shows",
+              "status": "passed",
+              "durationMs": 5.031416999999919
+            },
+            {
+              "name": "Header the same gap with storage blocked still shows the choice made in it",
+              "status": "passed",
+              "durationMs": 4.867332999999917
+            },
+            {
+              "name": "Header the theme button follows a change made in another tab",
+              "status": "passed",
+              "durationMs": 6.052959000000101
+            },
+            {
+              "name": "Header offers All sessions and each configured crew session, and sets the session filter",
+              "status": "passed",
+              "durationMs": 54.94049999999993
+            },
+            {
+              "name": "Header keeps Setup in the top-right settings button and opens FLIGHT from it",
+              "status": "passed",
+              "durationMs": 10.904416999999967
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/MapPerformance.test.tsx",
+          "startTime": 1793639186009,
+          "endTime": 1793639186173.9573,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "keeps tree, rules and analysis identities across live changes and equivalent rules objects",
+              "status": "passed",
+              "durationMs": 4.445291999999995
+            },
+            {
+              "name": "closes the stream and stops reads while hidden, then reconciles on return",
+              "status": "passed",
+              "durationMs": 56.123332999999946
+            },
+            {
+              "name": "does not request a graph until analysis is opened, then reuses it by its tree/history key",
+              "status": "passed",
+              "durationMs": 51.65300000000002
+            },
+            {
+              "name": "reconciles the base map when main advances before its lazy graph read",
+              "status": "passed",
+              "durationMs": 5.892417000000023
+            },
+            {
+              "name": "bounds repeated graph-key conflicts and lets a person retry after the tree settles",
+              "status": "passed",
+              "durationMs": 20.504249999999956
+            },
+            {
+              "name": "refreshes map time when a newly received seat already crossed a boundary",
+              "status": "passed",
+              "durationMs": 2.3299580000000333
+            },
+            {
+              "name": "pauses an open detail clock while hidden and reconciles on return",
+              "status": "passed",
+              "durationMs": 22.634624999999915
+            },
+            {
+              "name": "bounds unused graph entries while retaining active and settling readers",
+              "status": "passed",
+              "durationMs": 0.9571670000000267
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/clock.test.tsx",
+          "startTime": 1793639186740,
+          "endTime": 1793639186751.635,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "shared clocks useSecond ticks every second and useNow every 5 s",
+              "status": "passed",
+              "durationMs": 11.634957999999983
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/hudTokens.test.ts",
+          "startTime": 1793639186743,
+          "endTime": 1793639186821.1895,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "hud.css tokens defines exactly the type scale and its line heights",
+              "status": "passed",
+              "durationMs": 4.004207999999949
+            },
+            {
+              "name": "hud.css tokens defines exactly the spacing scale",
+              "status": "passed",
+              "durationMs": 0.2403749999999718
+            },
+            {
+              "name": "the web source uses only the tokens scans the app's files",
+              "status": "passed",
+              "durationMs": 0.13808399999993526
+            },
+            {
+              "name": "the web source uses only the tokens flags a raw font size, spacing and colour",
+              "status": "passed",
+              "durationMs": 1.4817089999999098
+            },
+            {
+              "name": "the web source uses only the tokens sets no raw font size, spacing or colour",
+              "status": "passed",
+              "durationMs": 70.82070800000008
+            },
+            {
+              "name": "readable content is at least 12px hud/shared.css pre.diff",
+              "status": "passed",
+              "durationMs": 0.3627920000000131
+            },
+            {
+              "name": "readable content is at least 12px agent/agent.css .ev.tool .txt",
+              "status": "passed",
+              "durationMs": 0.1561659999999847
+            },
+            {
+              "name": "readable content is at least 12px agent/agent.css .ev details pre",
+              "status": "passed",
+              "durationMs": 0.13370900000006714
+            },
+            {
+              "name": "readable content is at least 12px flight/flight.css .wif-branch",
+              "status": "passed",
+              "durationMs": 0.16733300000009876
+            },
+            {
+              "name": "readable content is at least 12px flight/flight.css .wif-checkpoint",
+              "status": "passed",
+              "durationMs": 0.18954199999996035
+            },
+            {
+              "name": "readable content is at least 12px lenses/lenses.css .map-lens",
+              "status": "passed",
+              "durationMs": 0.11266599999999016
+            },
+            {
+              "name": "readable content is at least 12px lenses/lenses.css .map-conflict-detail",
+              "status": "passed",
+              "durationMs": 0.09637500000008004
+            },
+            {
+              "name": "readable content is at least 12px map/map.css .map-results",
+              "status": "passed",
+              "durationMs": 0.09966700000006767
+            },
+            {
+              "name": "readable content is at least 12px map/map.css .map-results button",
+              "status": "passed",
+              "durationMs": 0.08454200000005585
+            },
+            {
+              "name": "readable content is at least 12px components/config/Glossary.css .gloss code",
+              "status": "passed",
+              "durationMs": 0.08537499999999909
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/loadFetches.test.tsx",
+          "startTime": 1793639185892,
+          "endTime": 1793639186184.157,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "load-time fetches Overview fetches each resource once on load",
+              "status": "passed",
+              "durationMs": 168.55925000000002
+            },
+            {
+              "name": "load-time fetches Agent fetches each resource once on load",
+              "status": "passed",
+              "durationMs": 123.15695799999992
+            }
+          ]
+        },
+        {
+          "file": "apps/web/test/pageRenderCounts.test.tsx",
+          "startTime": 1793639184573,
+          "endTime": 1793639185362.7976,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "page-root render counts keeps Overview within its idle render budget",
+              "status": "passed",
+              "durationMs": 110.399541
+            },
+            {
+              "name": "page-root render counts keeps Flight within its idle render budget",
+              "status": "passed",
+              "durationMs": 66.9364579999999
+            },
+            {
+              "name": "page-root render counts keeps Board within its idle render budget",
+              "status": "passed",
+              "durationMs": 31.775375000000167
+            },
+            {
+              "name": "page-root render counts keeps Agent within its idle render budget",
+              "status": "passed",
+              "durationMs": 14.366250000000036
+            },
+            {
+              "name": "page-root render counts keeps Map within its idle render budget",
+              "status": "passed",
+              "durationMs": 12.604499999999916
+            },
+            {
+              "name": "page-root render counts keeps Comms within its idle render budget",
+              "status": "passed",
+              "durationMs": 81.27391699999998
+            },
+            {
+              "name": "page-root render counts keeps Telemetry within its idle render budget",
+              "status": "passed",
+              "durationMs": 34.14991699999996
+            },
+            {
+              "name": "page-root render counts keeps Setup within its idle render budget",
+              "status": "passed",
+              "durationMs": 16.328207999999904
+            },
+            {
+              "name": "page-root render counts measures Overview with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 75.49850000000015
+            },
+            {
+              "name": "page-root render counts measures Flight with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 38.9206250000002
+            },
+            {
+              "name": "page-root render counts measures Board with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 38.103207999999995
+            },
+            {
+              "name": "page-root render counts measures Agent with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 22.993124999999964
+            },
+            {
+              "name": "page-root render counts measures Map with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 24.02066600000012
+            },
+            {
+              "name": "page-root render counts measures Comms with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 103.17395799999986
+            },
+            {
+              "name": "page-root render counts measures Telemetry with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 51.925292000000354
+            },
+            {
+              "name": "page-root render counts measures Setup with an agents event every five seconds",
+              "status": "passed",
+              "durationMs": 32.390957999999955
+            },
+            {
+              "name": "page-root render counts keeps Overview within its idle budget with an idle seat that has an open run",
+              "status": "passed",
+              "durationMs": 26.258749999999964
+            },
+            {
+              "name": "page-root render counts keeps the Agent page with an idle seat open within its idle render budget",
+              "status": "passed",
+              "durationMs": 8.797625000000153
+            }
+          ]
+        }
+      ],
+      "reporters": [
+        "default",
+        "json"
+      ],
+      "pathsSanitized": true,
+      "artifactLocation": "Private controller archive; SHA256 identifies the unchanged raw JSON receipt."
+    },
+    {
+      "origin": "controller-recorded",
+      "command": "pnpm exec vitest run apps/web/test/DesktopLayout.browser.test.ts --maxWorkers=1 --retry=0",
+      "exitCode": 0,
+      "sourceSha": "c88ab1e8c922bd28fa9448ae188c8566a8db31f6",
+      "at": 1793638760677,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "artifactSha256": "14acc8503b68b2cdff4eea31404b22de4e56e1aef70e89585cbf0f0ffa91e911",
+      "files": [
+        {
+          "file": "apps/web/test/DesktopLayout.browser.test.ts",
+          "startTime": 1793638762511,
+          "endTime": 1793638796113.3774,
+          "status": "passed",
+          "assertions": [
+            {
+              "name": "Approved compact desktop shell uses measured compact/wide geometry and a useful expandable rail at all approved viewports: light",
+              "status": "passed",
+              "durationMs": 4239.062792000001
+            },
+            {
+              "name": "Approved compact desktop shell uses measured compact/wide geometry and a useful expandable rail at all approved viewports: dark",
+              "status": "passed",
+              "durationMs": 3749.1600420000004
+            },
+            {
+              "name": "Approved compact desktop shell retains actual mounted draft, focus and session choice through collapse, viewport changes and reload",
+              "status": "passed",
+              "durationMs": 747.3026250000003
+            },
+            {
+              "name": "Approved compact desktop shell names empty, one, fifty, long, loading, error, stale and disconnected summary states",
+              "status": "passed",
+              "durationMs": 8956.716292000001
+            },
+            {
+              "name": "Approved compact desktop shell keeps filled current and archived QA evidence reachable beside folded and open FLIGHT",
+              "status": "passed",
+              "durationMs": 7778.850750000001
+            },
+            {
+              "name": "Approved compact desktop shell preserves the shared shell on QA, Audit, Map, Comms, Telemetry, Board, Agent, Overview and Setup",
+              "status": "passed",
+              "durationMs": 8131.377542000002
+            }
+          ]
+        }
+      ],
+      "reporters": [
+        "default",
+        "json"
+      ],
+      "pathsSanitized": true,
+      "artifactLocation": "Private controller archive; SHA256 identifies the unchanged raw JSON receipt."
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm exec vitest run apps/web/test/Dock.test.tsx apps/web/test/App.test.tsx apps/web/test/Header.test.tsx apps/web/test/pageRenderCounts.test.tsx apps/web/test/loadFetches.test.tsx apps/web/test/clock.test.tsx apps/web/test/hudTokens.test.ts apps/web/test/AgentsPanelCss.test.ts apps/web/test/MapPerformance.test.tsx apps/web/test/ItemPanel.test.tsx apps/web/test/OverviewLayoutCss.test.ts apps/web/test/doingCss.test.ts apps/web/test/OverviewClipping.browser.test.ts apps/web/test/RunTrace.browser.test.ts apps/web/test/DesktopLayout.browser.test.ts apps/web/test/TicketPage.browser.test.ts apps/web/test/TicketQaReports.test.tsx",
+      "outcome": "passed",
+      "exitCode": 0,
+      "passed": 322,
+      "failed": 0,
+      "skipped": 0,
+      "files": 17,
+      "scope": "Dock, App, Header, pageRenderCounts, loadFetches, clock, hudTokens, AgentsPanelCss, MapPerformance, ItemPanel, OverviewLayoutCss, doingCss, OverviewClipping.browser, RunTrace.browser, DesktopLayout.browser, TicketPage.browser, TicketQaReports",
+      "origin": "controller-recorded",
+      "at": 1793641318343,
+      "artifactSha256": "a538546f631bd88506f6b5b835c7bc940886b8380d34ca6c13e53736c4ad120f",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s lint",
+      "outcome": "passed",
+      "exitCode": 0,
+      "origin": "controller-recorded",
+      "at": 1793641320464,
+      "artifactSha256": "41f4e504fdd9ec7b1d5564f5271b315456b3cc08adc211d0d6ea49e4b1203aa0",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s typecheck",
+      "outcome": "passed",
+      "exitCode": 0,
+      "origin": "controller-recorded",
+      "at": 1793641324468,
+      "artifactSha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
+    },
+    {
+      "sourceSha": "bf48e5455933212829f6fe292e2e21e2ca93c6bd",
+      "phase": "Final CI correction and main integration",
+      "command": "pnpm -s build",
+      "outcome": "passed",
+      "exitCode": 0,
+      "origin": "controller-recorded",
+      "at": 1793641326963,
+      "artifactSha256": "0573308638d6abfe31872d5a0e562659c8caf13915b2c697d0256975fd9de636",
+      "artifactLocation": "Private controller completion log; hash identifies the unchanged command receipt."
+    },
+    {
+      "origin": "controller-recorded",
+      "sourceSha": "2b90233fa766a7ce4bfb82b03bb306cd6580c15f",
+      "command": "MC_SHOT_DIR=<private> pnpm exec vitest run apps/web/test/OverviewClipping.browser.test.ts",
+      "phase": "Settled quota fixture baseline",
+      "outcome": "passed",
+      "exitCode": 0,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "at": 1793642094980,
+      "artifactSha256": "1143c786cbe1bca639876b5b1b3e2ddf2ddbea64280a566c6f40b90af0ac90b1",
+      "artifactLocation": "Private controller log; baseline uses current common test/harness and unchanged2b production source."
+    },
+    {
+      "origin": "controller-recorded",
+      "sourceSha": "2b1a04b5b29c7d135828b7b39b83bcafb2dfd0a3",
+      "command": "MC_SHOT_DIR=<private> pnpm exec vitest run apps/web/test/OverviewClipping.browser.test.ts",
+      "phase": "Settled quota fixture after",
+      "outcome": "passed",
+      "exitCode": 0,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "at": 1793641945724,
+      "artifactSha256": "365360efa649502cb6479a12b23b0af83ff08b32095a2cb535751d10b6f066cf",
+      "artifactLocation": "Private controller log; baseline uses current common test/harness and unchanged2b production source."
+    }
+  ]
+}

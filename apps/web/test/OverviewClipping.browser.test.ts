@@ -4,7 +4,12 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { LimitRow, PipelineStage } from "@mc/core";
 import { expect, it } from "vitest";
-import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import {
+  BROWSER_TEST_TIMEOUT_MS,
+  browserSession,
+  describeRendered,
+  type RenderedPage,
+} from "./browserRunner.ts";
 import {
   CONFIG,
   crewRow,
@@ -105,7 +110,7 @@ const api = {
   "/api/limits": limits,
   "/api/limits/github": { queries: {}, pollCost: null },
   "/api/health": [],
-  "/api/activity": Array.from({ length: 12 }, (_, i) => comms(i + 1)),
+  "/api/activity": Array.from({ length: 120 }, (_, i) => comms(i + 1)),
   "/api/settings/away": { on: false, until: "", may: {} },
   "/api/config": { ...CONFIG, accounts },
   "/api/test-lock": { holder: null, waiting: [] },
@@ -114,6 +119,24 @@ const api = {
 
 /** Panels whose body is a list that scrolls with a visible scrollbar. Every other panel shows all of its content. */
 const SCROLLING_PANELS = ["agentsP", "timelineP", "actP"];
+
+/** Geometry and screenshots must describe the populated fixture, never its loading skeleton. */
+async function settled(page: RenderedPage) {
+  await page.evaluate(async () => {
+    const deadline = performance.now() + 5000;
+    const ready = () => {
+      const quota = document.querySelector("#quotaP")?.textContent ?? "";
+      return (
+        ["41%", "63%", "12%"].every((value) => quota.includes(value)) &&
+        !document.querySelector("#actList")?.textContent?.includes("Loading activity")
+      );
+    };
+    while (!ready() && performance.now() < deadline)
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (!ready()) throw new Error("Populated quota fixture did not resolve before geometry checks");
+    await document.fonts.ready;
+  }, undefined);
+}
 
 interface Problems {
   problems: string[];
@@ -136,6 +159,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
             colorScheme,
             api,
           });
+          await settled(page);
           await page.screenshot(join(SHOTS, `overview-clip-${width}-${colorScheme}.png`));
           const { problems } = await page.evaluate((scrolling: string[]): Problems => {
             const out: string[] = [];
@@ -203,9 +227,18 @@ describeRendered("Overview panels never clip or wrap their header", () => {
           colorScheme,
           api,
         });
+        await settled(page);
+        await page.click('[aria-label="Activity filter"] button:text-is("All")');
+        await page.box("#actList .arow");
+        const activity = await page.box("#actP");
+        // A populated log must scroll instead of setting its row to the height of 120 messages.
+        expect(activity.height).toBeGreaterThanOrEqual(280);
+        expect(activity.height).toBeLessThan(600);
+        expect(await page.reachable("#actList .arow", "#actList")).not.toContain(false);
         expect(await page.reachable("#pipelineP .pipeline-more")).not.toContain(false);
         expect(await page.reachable(".overview-metrics")).toEqual([true]);
         expect(await page.reachable("#pipelineP .pipeline-chip")).not.toContain(false);
+        await page.screenshot(join(SHOTS, `overview-populated-1600x700-${colorScheme}.png`));
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,

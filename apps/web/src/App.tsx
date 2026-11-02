@@ -107,14 +107,14 @@ export function App({
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
-  // Comms has its own FLIGHT conversation, and Setup and the Map need the full width (Setup's
-  // approved configuration frame; the Map's stage beside its agent rail). The dock remains
-  // available on the other operational pages.
+  // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
+  // keeps its own workspace instead of duplicating it beside the page.
   const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
     dock.wide && !dock.visible && "dock-hidden",
+    dock.visible && dock.collapsed && "dock-collapsed",
     !dock.wide && dock.visible && "dock-open",
     buildStatus && "bs-on",
   ]
@@ -311,9 +311,8 @@ function useShellKeys(current: Route, popout: boolean) {
       },
       toggleDock: () => {
         const { current: on, popout: isPopout } = latest.current;
-        // Setup and the Map open FLIGHT in its full Comms view. Comms is already that view, and
-        // neither Comms, Setup, the Map nor a pop-out mounts the dock, so never change its
-        // stored state there.
+        // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
+        // their workspace; every other page has the same site-wide rail.
         if (isPopout || on.page === "comms") return;
         if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
         else toggleDock();
