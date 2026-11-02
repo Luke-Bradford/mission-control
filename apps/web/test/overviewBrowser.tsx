@@ -10,6 +10,9 @@ import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
 import { Overview } from "../src/pages/Overview.tsx";
+import { NOW } from "./fixtures.ts";
+
+Date.now = () => NOW;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");

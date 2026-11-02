@@ -1,6 +1,6 @@
 # Desktop density mockups — 2 November 2026
 
-Proposal for #1193, following the operator-approved [density plan](../../research/2026-11-01-hud-density-plan.md) in PR #1351. **Awaiting separate operator mockup approval.** This does not authorise build tickets.
+Approved mockups for #1193, following the operator-approved [density plan](../../research/2026-11-01-hud-density-plan.md) in PR #1351. The operator approved [PR #1353](https://github.com/Luke-Bradford/mission-control/pull/1353) on 2 November 2026: “Approve the mockups for implementation”. Build tickets #1359–#1362 follow this approval. The screenshots below preserve the historical design stage.
 
 Open the self-contained prototypes. All work data is fictional; forms and actions stay in this browser. Fonts are embedded with [licences](../../mockups/2026-10/density-font-licenses.txt).
 

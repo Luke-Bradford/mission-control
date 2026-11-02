@@ -386,10 +386,10 @@ function DockButton({ page, waiting }: { page: Page; waiting: number }) {
   return (
     <button
       type="button"
-      className={`iconbtn${inComms || (!fullWidth && dock.visible) ? " on" : ""}`}
+      className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
       title={title}
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible}
+      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
       onClick={() => {
         if (fullWidth) navigate(PAGE_PATHS.comms);
         // Comms already is FLIGHT's full conversation; the dock is not mounted here.

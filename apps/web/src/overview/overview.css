@@ -36,7 +36,7 @@
   min-height: 0;
   display: grid;
   /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
-  grid-template-rows: max-content minmax(160px, 1fr) max-content 280px;
+  grid-template-rows: max-content minmax(160px, 1fr) max-content minmax(280px, max-content);
   gap: var(--sp-3);
   overflow-y: auto;
 }
@@ -594,7 +594,7 @@
   padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
   align-items: center;
-  height: calc(var(--sp-6) + var(--sp-2));
+  height: var(--table-row);
   line-height: var(--lh);
 }
 
@@ -1510,4 +1510,11 @@
   min-width: 0;
   max-width: 100%;
   min-height: var(--sp-5);
+}
+
+/* Quota and Machine set the bottom row's content height; the log scrolls within that height. */
+@media (min-width: 1000px) {
+  #actP {
+    contain: size;
+  }
 }

@@ -24,6 +24,12 @@ export interface Box {
 }
 
 export interface RenderedPage {
+  errors(): readonly string[];
+  /** Resize the actual browser viewport, including its live media-query change events. */
+  resize(width: number, height: number): Promise<void>;
+  /** Reload the harness entry in the same browser session, preserving sessionStorage. */
+  reload(): Promise<void>;
+  press(key: string): Promise<void>;
   /** The first element matching `selector`; throws if there is none. */
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
@@ -68,6 +74,9 @@ interface Route {
   fulfill(options: { status?: number; contentType?: string; body: string | Buffer }): Promise<void>;
 }
 interface Page {
+  keyboard: { press(key: string): Promise<void> };
+  on(event: "pageerror", handler: (error: Error) => void): void;
+  setViewportSize(size: { width: number; height: number }): Promise<void>;
   route(url: RegExp, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   waitForSelector(selector: string): Promise<unknown>;
@@ -203,6 +212,8 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       // One browser per page: a single-process browser (the sandbox fallback) dies with its page.
       const browser = await launch(BROWSER);
       const page = await browser.newPage({ viewport: { width, height } });
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
       await page.route(new RegExp(`^${ORIGIN}/`), async (route) => {
         const url = new URL(route.request().url());
         const key = `${url.pathname}${url.search}`;
@@ -236,7 +247,11 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
           selector,
         );
       const boxes = async (selector: string) => {
-        await page.waitForSelector(selector);
+        try {
+          await page.waitForSelector(selector);
+        } catch (error) {
+          throw new Error(errors.length ? errors.join("; ") : String(error));
+        }
         return measure(selector);
       };
       const reachable = async (selector: string, within = "") => {
@@ -293,6 +308,12 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         );
       };
       return {
+        press: (key) => page.keyboard.press(key),
+        errors: () => errors.slice(),
+        resize: (width, height) => page.setViewportSize({ width, height }),
+        reload: async () => {
+          await page.goto(`${ORIGIN}/${entry}${search}`, { waitUntil: "load" });
+        },
         boxes,
         reachable,
         unclipped,
