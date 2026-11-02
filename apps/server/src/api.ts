@@ -5647,8 +5647,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
         // This note is another breaker-recovery route. Preserve the same independent operator
-        // authority as /flight/runaway/lift, including decoded attention keys.
-        if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && flightActor(req) !== null)
+        // authority as /flight/runaway/lift, including decoded attention keys. The header was
+        // validated before body parsing: keep that provenance if the watch run has since ended.
+        if (
+          noteKey === FLIGHT_RUNAWAY_NOTE_KEY &&
+          req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined
+        )
           return reply
             .code(403)
             .send({ error: "This action belongs to the operator or independent controller." });

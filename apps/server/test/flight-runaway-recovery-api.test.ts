@@ -171,3 +171,18 @@ it("still requires the operator credential for actor-provenance attention reques
     events: [],
   });
 });
+
+it.each(recovery.slice(1))(
+  "retains declared actor provenance if the watch run ends before handling %s",
+  async (url) => {
+    app.addHook("preHandler", async () => store.setRunEnded(RUN, NOW, "ok", "engine"));
+    const before = snapshot();
+    const response = await post(url, actorHeaders);
+    expect(store.run(RUN)?.endedAt).toBe(NOW);
+    expect({ status: response.statusCode, state: snapshot(), events }).toEqual({
+      status: 403,
+      state: before,
+      events: [],
+    });
+  },
+);
