@@ -1013,6 +1013,15 @@ export interface CrewRow {
   } | null;
   /** A scratch seat's live review, else null. */
   reviewing?: { prNumber: number; sha: string; ref: string | null } | null;
+  /** Oldest current-head review waiting on this seat; separate from an executing review. */
+  queuedReview?: {
+    repoId: RepoId;
+    prNumber: number;
+    sha: string;
+    ref: string | null;
+    position: number;
+    reason: string;
+  } | null;
   paused: boolean;
   note: string | null;
   stop: DriverStop | null;

@@ -68,14 +68,14 @@ describe("reviewCheckOf", () => {
         phase: "parked",
         parked: { kind: "gate", reason: "x", ended: false },
       }),
-    ).toEqual({ kind: "held", by: "hub" });
+    ).toEqual({ kind: "held", by: "hub", reason: "x" });
     expect(
       reviewCheckOf([row({ blocking: 1 })], 0, {
         ...base,
         phase: "parked",
         parked: { kind: "review", reason: "x", ended: false },
       }),
-    ).toEqual({ kind: "held", by: "hub" });
+    ).toEqual({ kind: "held", by: "hub", reason: "x" });
     expect(reviewCheckOf([row({ blocking: 1 })], 0, base)).toEqual({ kind: "sent" });
     expect(
       reviewCheckOf([row({ state: "failed" })], 1, {
@@ -83,7 +83,7 @@ describe("reviewCheckOf", () => {
         phase: "parked",
         parked: { kind: "review-failed", reason: "x", ended: false },
       }),
-    ).toEqual({ kind: "held", by: "hub" });
+    ).toEqual({ kind: "held", by: "hub", reason: "x" });
   });
   it("running is checking, since the start else the request", () => {
     expect(reviewCheckOf([row({ state: "running", startedAt: 5000 })], 0, null)).toEqual({

@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { externalReviewKey } from "../src/external-reviews.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/review-preview.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
@@ -671,6 +672,70 @@ describe("startReview", () => {
     await until(() => expect(seatState("retro")).toBe("idle"));
     return { ...m, ...r, runId };
   }
+
+  it("reviews a trusted controller PR without a crew author run", async () => {
+    const seed = reviewOfPush();
+    const identity = externalReviewKey("mc", 10);
+    const id = store.requestReview({
+      authorRunId: identity,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 10,
+      sha: seed.sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 3,
+    })!;
+    store.setReviewState(id, ["queued"], "starting", { at: 4 });
+    const subject = vi.fn(async () => ({ sha: seed.sha, branch: "pr", ticket: TICKET }));
+    const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
+    sup.start();
+    const { runId } = await sup.startReview("retro", id);
+    expect(store.run(runId)).toMatchObject({
+      reviewId: id,
+      ticket: null,
+      model: REVIEW_FULL_MODEL,
+    });
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("PR #10 (no crew author run)");
+    expect(store.run(identity)).toBeNull();
+    const argv = recorded()[0].argv as string[];
+    expect(argv[argv.indexOf("--model") + 1]).toBe(REVIEW_FULL_MODEL);
+    expect(subject).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["changed", "unavailable"])(
+    "removes a controller scratch copy when fresh PR metadata is %s",
+    async (failure) => {
+      const seed = reviewOfPush();
+      const id = store.requestReview({
+        authorRunId: externalReviewKey("mc", 10),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seed.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      })!;
+      store.setReviewState(id, ["queued"], "starting", { at: 4 });
+      const subject = vi
+        .fn()
+        .mockResolvedValueOnce({ sha: seed.sha, branch: "pr", ticket: TICKET });
+      if (failure === "changed") subject.mockResolvedValueOnce(null);
+      else subject.mockRejectedValueOnce(new Error("network unavailable"));
+      const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
+      sup.start();
+      await expect(sup.startReview("retro", id)).rejects.toThrow(
+        failure === "changed" ? REVIEW_NOT_WANTED : "The PR review context could not be read.",
+      );
+      expect(existsSync(scratch(id))).toBe(false);
+      expect(userLines()).toHaveLength(0);
+      expect(store.runs("retro", 1)).toHaveLength(0);
+    },
+  );
 
   it("a review brief names the repo's review commands", async () => {
     const r = reviewOfPush();
