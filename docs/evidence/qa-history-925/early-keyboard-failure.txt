@@ -1,0 +1,39 @@
+
+ RUN  v3.2.7 [controller]/codex-qa-history
+
+ ✓ |web| test/QaHistory.test.tsx (6 tests) 336ms
+ ✓ |server| apps/server/test/qa-history.test.ts (7 tests) 456ms
+ ❯ |web| test/QaHistory.browser.test.ts (3 tests | 1 failed) 4073ms
+   × QA history in the application shell > keeps history columns readable at required widths/themes and both rail states 621ms
+     → expected false to be true // Object.is equality
+   ✓ QA history in the application shell > opens older versions and native records by keyboard without current approval controls  436ms
+   ✓ QA history in the application shell > names empty, one, loading, error and disconnected history states  1571ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/QaHistory.browser.test.ts > QA history in the application shell > keeps history columns readable at required widths/themes and both rail states
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/QaHistory.browser.test.ts:75:17
+     73|                   return s.scrollTop > 0;
+     74|                 }, null),
+     75|               ).toBe(true);
+       |                 ^
+     76|               await page.evaluate(() => {
+     77|                 const s = document.querySelector(".qa-history-scroll")…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 15 passed (16)
+   Start at  20:06:21
+   Duration  5.02s (transform 1.56s, setup 821ms, collect 1.97s, tests 4.87s, environment 387ms, prepare 159ms)
+
+JSON report written to /tmp/mc-925-history-browser.json
