@@ -1,10 +1,18 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { RESOURCES, useResource } from "../data.ts";
 import { type EvidenceReader, OverviewEvidence } from "./OverviewEvidence.tsx";
 import { QuotaPanel } from "./QuotaPanel.tsx";
 import { QuotaSummaryPanel } from "./QuotaSummaryPanel.tsx";
 
 /** One complete table/reader, responsive to its own column; never a second quota collection. */
 export function OverviewProvider() {
+  // These are exactly the summary/table's existing feeds. Own their visit here:
+  // replacing the responsive child must not briefly drop the last subscriber
+  // and refresh cached collector status merely because a column changed width.
+  useResource(RESOURCES.config);
+  useResource(RESOURCES.limits);
+  useResource(RESOURCES.health);
+  useResource(RESOURCES.githubRate);
   const reader = useRef<EvidenceReader>(null),
     region = useRef<HTMLDivElement>(null);
   const [inline, setInline] = useState(false);

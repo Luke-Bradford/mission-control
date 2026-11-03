@@ -91,7 +91,10 @@ interface Page {
   close(): Promise<void>;
 }
 interface Browser {
-  newPage(options: { viewport: { width: number; height: number }; deviceScaleFactor?: number }): Promise<Page>;
+  newPage(options: {
+    viewport: { width: number; height: number };
+    deviceScaleFactor?: number;
+  }): Promise<Page>;
   close(): Promise<void>;
 }
 interface Chromium {

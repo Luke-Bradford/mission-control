@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import { OverviewMeasuredPanel } from "../src/overview/OverviewAnalyticalPanels.tsx";
 import { OverviewCanvas, useOverviewLayout } from "../src/overview/OverviewLayout.tsx";
+import { OverviewProvider } from "../src/overview/OverviewProvider.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
@@ -26,7 +27,7 @@ function observeCanvas() {
       }
     },
   );
-  return (width: number, remaining: number) => {
+  return (width: number, remaining: number, providerWidth = 500) => {
     const grid = document.querySelector<HTMLElement>(".overview-grid");
     const workspace = document.querySelector<HTMLElement>(".overview-workspace");
     if (!grid || !workspace) throw Error("Canvas not mounted");
@@ -34,6 +35,9 @@ function observeCanvas() {
       clientWidth: { configurable: true, value: width },
       clientHeight: { configurable: true, value: remaining + 110 },
     });
+    const provider = grid.querySelector(".overview-provider");
+    if (provider)
+      Object.defineProperty(provider, "clientWidth", { configurable: true, value: providerWidth });
     grid.getBoundingClientRect = () => ({ top: 50 }) as DOMRect;
     workspace.getBoundingClientRect = () => ({ top: 160 }) as DOMRect;
     act(() => {
@@ -77,6 +81,37 @@ it("uses actual canvas width and post-KPI height, without rebuilding stable rost
   resize(2076, 1120);
   expect(flags().hostEvidence).toBe(true);
   expect(renders).toHaveBeenCalledTimes(1);
+});
+
+it("keeps existing allowance resource visits alive when its own column changes from summary to full table", async () => {
+  const resize = observeCanvas();
+  const originalClose = HTMLDialogElement.prototype.close;
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+  try {
+    const fetch = stubFetch(overviewDensityFixture().api);
+    render(
+      <OverviewCanvas>
+        <div className="overview-metrics" />
+        <div className="overview-workspace">
+          <OverviewProvider />
+        </div>
+      </OverviewCanvas>,
+    );
+    await screen.findByText("37% left");
+    await act(async () => {
+      await Promise.all(fetch.mock.results.map((r) => r.value));
+    });
+    const before = fetch.mock.calls.map(([path]) => String(path));
+    resize(3368, 1923, 1093);
+    await waitFor(() => expect(document.querySelector(".evidence-inline #quotaP")).toBeTruthy());
+    resize(1800, 843, 588);
+    await screen.findByText("37% left");
+    expect(fetch.mock.calls.map(([path]) => String(path))).toEqual(before);
+  } finally {
+    HTMLDialogElement.prototype.close = originalClose;
+  }
 });
 
 it("reflows one selected history into five unique measured histories and back without another collection", async () => {

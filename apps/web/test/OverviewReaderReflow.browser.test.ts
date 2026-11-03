@@ -55,6 +55,64 @@ describeRendered(
   () => {
     for (const scheme of ["light", "dark"] as const) {
       it(
+        `retains the same loaded allowance feeds across column reflow, ${scheme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/overviewDensityBrowser.html",
+            width: 1920,
+            height: 1080,
+            colorScheme: scheme,
+            api: overviewDensityFixture("normal-loops").api,
+          });
+          try {
+            await settle(page);
+            const counts = () =>
+              page.evaluate(
+                () =>
+                  performance
+                    .getEntriesByType("resource")
+                    .map((entry) => new URL(entry.name))
+                    .filter((url) => url.pathname.startsWith("/api/"))
+                    .map((url) => url.pathname + url.search)
+                    .sort(),
+                undefined,
+              );
+            const before = await counts();
+            for (const [width, height, expanded] of [
+              [3840, 2160, true],
+              [1920, 1080, false],
+            ] as const) {
+              await page.resize(width, height);
+              await page.evaluate(async (expanded) => {
+                const ready = () =>
+                  document.querySelector<HTMLElement>(".overview-grid")?.dataset.allHistories ===
+                    String(expanded) &&
+                  (expanded
+                    ? !!document.querySelector(".evidence-inline #quotaP")
+                    : !!document.querySelector("#quotaSummaryP"));
+                const end = performance.now() + 1000;
+                while (!ready() && performance.now() < end)
+                  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                if (!ready()) throw Error("Column reflow did not settle");
+                await new Promise<void>((resolve) =>
+                  requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+                );
+              }, expanded);
+            }
+            const after = await counts();
+            await record(page, `allowance-reflow-${scheme}`, { before, after });
+            expect(after).toEqual(before);
+            expect(before).toContain("/api/health");
+            expect(before).toContain("/api/limits/github");
+            expect(page.errors()).toEqual([]);
+          } finally {
+            await page.close();
+          }
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+
+      it(
         `reflows KPI history actions beside enlarged values, ${scheme}`,
         async () => {
           const page = await renderAt({
