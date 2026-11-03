@@ -47,10 +47,23 @@ function ReportScroll({
   );
 }
 
-function EvidenceLink({ url, children }: { url: string; children: ReactNode }) {
+function EvidenceLink({
+  url,
+  children,
+  imageControl,
+}: {
+  url: string;
+  children: ReactNode;
+  imageControl?: boolean;
+}) {
   const href = qaEvidenceUrl(url);
   return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-qa-image-control={imageControl || undefined}
+    >
       {children}
     </a>
   ) : (
@@ -316,9 +329,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
       displacedFocus.current = null;
       return;
     }
-    const replacement = figure.current?.querySelector<HTMLElement>(
-      "a[href], button:not(:disabled)",
-    );
+    const replacement = figure.current?.querySelector<HTMLElement>("[data-qa-image-control]");
     // A retained-image retry can still be loading. Restore only if the user has not moved on.
     if (replacement) {
       displacedFocus.current = null;
@@ -334,7 +345,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
         </span>
       </figcaption>
       {url && source ? (
-        <a href={url} target="_blank" rel="noopener noreferrer">
+        <a href={url} target="_blank" rel="noopener noreferrer" data-qa-image-control>
           <img
             src={source}
             alt={label}
@@ -355,9 +366,12 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
           ) : failedLink === target ? (
             <>
               <span>The linked image could not be loaded.</span>{" "}
-              <EvidenceLink url={image.sourceUrl ?? target}>Open image source</EvidenceLink>{" "}
+              <EvidenceLink url={image.sourceUrl ?? target} imageControl>
+                Open image source
+              </EvidenceLink>{" "}
               <button
                 type="button"
+                data-qa-image-control
                 aria-label={`Retry linked image · ${label}`}
                 onClick={(event) => {
                   rememberFocus(event.currentTarget);
@@ -372,6 +386,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
               <span>The retained image could not be loaded.</span>{" "}
               <button
                 type="button"
+                data-qa-image-control
                 aria-label={`Retry image · ${label}`}
                 onClick={(event) => {
                   rememberFocus(event.currentTarget);

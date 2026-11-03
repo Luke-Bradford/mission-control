@@ -24,6 +24,7 @@ function retainedImage() {
   const read = vi.spyOn(api, "apiQaReportImage").mockResolvedValue(blob);
   const report = qaReportFixture();
   report.visual.pairs[0].before.url = `/api/qa-report-assets/${"f".repeat(64)}`;
+  report.visual.pairs[0].before.sourceUrl = "https://evidence.example/original-before.png";
   return { report, blob, read };
 }
 it("keeps keyboard focus on an image source and its retried preview", () => {
