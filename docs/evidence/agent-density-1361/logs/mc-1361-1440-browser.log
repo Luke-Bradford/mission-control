@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentDensity.browser.test.ts (16 tests | 14 skipped) 6159ms
+   ✓ Agent density in the production App > keeps the answer first at 1440 × 900, both rail states and schemes  2386ms
+   ✓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes  2500ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 14 skipped (16)
+   Start at  10:10:23
+   Duration  6.82s (transform 197ms, setup 300ms, collect 181ms, tests 6.16s, environment 0ms, prepare 34ms)
+

@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-11-03T10:09:07.755609+00:00",
+  "head": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+  "buildSource": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+  "buildFileHashesVerified": 68,
+  "matchedCorrectionContexts": [
+    {
+      "scheme": "dark",
+      "oldImage": "agent-long-1280x700-dark-open-context-after.png",
+      "newImage": "long-dark-initial.png",
+      "sameApi": true
+    },
+    {
+      "scheme": "light",
+      "oldImage": "agent-long-1280x700-light-open-context-after.png",
+      "newImage": "long-light-initial.png",
+      "sameApi": true
+    }
+  ],
+  "independentReceipt": "[controller]/1361-independent-summary-correction/receipt.json",
+  "minorResolved": true,
+  "remainingFindings": [],
+  "errors": []
+}

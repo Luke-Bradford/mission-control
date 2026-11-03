@@ -47,6 +47,13 @@ cases, with real production fonts and settled controlled API values. Its per-sur
 record column allocation, text wrapping, scrolling, actions and retained drafts. Earlier genuine
 reader/title defects, failed experiments and fixture mistakes are retained separately.
 
-Selected units passed in two stages (488 +240 distinct cases); exact final source passed20 browser
-cases plus web types, lint and build. This is author verification. Fresh independent whole-branch
-review and exact-head CI remain required before delivery; no independent approval is claimed here.
+Selected units passed in two earlier stages (488 +240 distinct cases); source746 passed20 browser
+cases plus web types, lint and build. Fresh independent whole-branch review of artifact624 found
+one Minor: narrow long previews exceeded four lines. Source `beb6e04421bc44502b9966d380dc15c9a14edd6a`
+measures actual visual overflow and preserves full readers even below the character limits.
+Its193 affected units, web types and two targeted browser cases passed. The same reviewer passed
+the correction and rendered design at3November10:09:07UTC. The required1440×900 both-theme/rail
+supplement is retained separately; the earlier1440×1000 images keep their actual dimensions.
+
+The gallery preserves these separate source phases and the original Minor evidence. Final artifact
+verification and exact-head CI remain required before delivery; no CI or live-data pass is claimed.

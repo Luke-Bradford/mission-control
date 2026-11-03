@@ -1,16 +1,48 @@
 # Agent density · #1361
 
-Author evidence, not independent approval. Fresh whole-branch review and exact-head CI remain pending. No live provider, seat or observed-loop behavior was exercised.
+Phase-bound source and review evidence. Fresh whole-branch review of624 found one Minor/no Important. The same reviewer confirmed the corrected product `beb6e04421bc44502b9966d380dc15c9a14edd6a` clean, design pass, at3Nov10:09:07UTC. Final artifact/test-only verification and exact-head CI remain pending. No live provider, seat or observed-loop behavior was exercised.
 
-Baseline product `6f0df12e1112ace4bae4fa869117b3464e58f4a7` → frozen Agent product `746430541045d52a41cf350e50544615254293bc`. Delivered main `99e8404ea2e78e442dee828092f6b997582ddbe7` is integrated. The branch also contains the already-delivered #1379 formatter; the Agent change does not modify that formatter. Approved design: PR #1353 / `ace336c3209af1fd0fd7a20bd5423f8f8886159a`, [Agent mockup](../../mockups/2026-10/agent-density.html) and [content inventory](../../research/2026-11-03-agent-density-implementation.md).
+Baseline product `6f0df12e1112ace4bae4fa869117b3464e58f4a7` → earlier Agent product `746430541045d52a41cf350e50544615254293bc`. Delivered main `99e8404ea2e78e442dee828092f6b997582ddbe7` is integrated. The branch also contains the already-delivered #1379 formatter; the Agent change does not modify that formatter. Approved design: PR #1353 / `ace336c3209af1fd0fd7a20bd5423f8f8886159a`, [Agent mockup](../../mockups/2026-10/agent-density.html) and [content inventory](../../research/2026-11-03-agent-density-implementation.md).
 
 Actual capture UTC: **2026-11-03T02:38:23.260Z → 2026-11-03T02:38:52.891Z**. Fixture clock **2026-10-17T12:00:00.000Z**. Values are labelled fictional controlled API values using existing contracts. The same current harness is copied into the isolated baseline; baseline product files stay unchanged. This harness-only baseline change is not shipped product. Real production App/fonts, 1× device scale, no injected CSS, GET-only intercepted `http://mc.test` origin; no live hub connection.
 
-**64 actual pairs +8 after-only proofs =200 final PNGs.** Three separately labelled historical failure/experiment images bring the repository total to203 PNGs. The 64 pairs comprise 46 full-App initial viewport comparisons and18 component comparisons within that App. These context images do not claim to show full page scroll height. Each focused image uses its natural component size and native screenshot scrolling; diffs use a common canvas where dimensions differ. The new availability panel has no separate baseline counterpart; context pairs show the original identity facts and new explicit placement.
+**Earlier746 phase:64 actual pairs +8 after-only proofs =200 PNGs**, plus three separately labelled historical failure/experiment images. These are not relabelled as correctedbeb6 captures. The 64 pairs comprise 46 full-App initial viewport comparisons and18 component comparisons within that App. These context images do not claim to show full page scroll height. Each focused image uses its natural component size and native screenshot scrolling; diffs use a common canvas where dimensions differ. The new availability panel has no separate baseline counterpart; context pairs show the original identity facts and new explicit placement.
 
-[Render ledger](render-checks.json) binds source trees, fixture/helper/harness/API hashes, timestamps, dimensions, reads/errors/writes, fonts and PNGs. [Portable executed helper](capture.ts), [staged local checks and all retained logs](local-checks.json), [artifact hashes](artifact-checks.json). The two unit stages cover728 distinct selected cases (488 +240), not one combined run. Exact final source has20/20 browser cases, web types, lint and build green. Earlier failures and rejected experiments remain recorded.
+[Render ledger](render-checks.json) binds source trees, fixture/helper/harness/API hashes, timestamps, dimensions, reads/errors/writes, fonts and PNGs. [Portable executed helper](capture.ts), [staged local checks and all retained logs](local-checks.json), [artifact hashes](artifact-checks.json). The two earlier unit stages cover728 distinct selected cases (488 +240), not one combined run. Earlier746 has20/20 browser cases, web types, lint and build green. Correctionbeb6 has193 affected units, webtypes, changed-file lint, production harness build and two targeted browser cases green; test-onlyf79d adds the required1440×900 tuple and its selected two-case/eight-render pack. Earlier failures and rejected experiments remain recorded.
 
-## Author visual and usability observations
+## Current correction and required viewport supplement
+
+Product source is now `beb6e04421bc44502b9966d380dc15c9a14edd6a`; `f79d6b2ad59eaae929a32f9c2118f8f731416b86` changes only the1440 test-height tuple. The earlier64 pairs remain bound to746. The original [whole review](correction/whole-review-624.json) and its [initial](correction/images/review-624-long-dark-initial.png)/[full-reader](correction/images/review-624-long-dark-final.png) images retain the Minor rather than rewriting its verdict.
+
+[Correction ledger](correction/correction-checks.json), [independent native reading checks](correction/independent-correction-checks.json), [independent clean attestation](correction/independent-correction-attestation.json), [source-bound build hashes](correction/build-checks.json), [required1440×900 ledger](correction/required-1440-checks.json), [executed1440 capture helper](correction/capture-1440.ts).
+
+The actual clamped previews are80px at20px line height. Below-limit159/199-character strings also get a reader when visual wrapping exceeds four lines. Complete text and solid keyboard focus/final-line paint remain proven; native End reaches the long result. At1280×700 with the long critical identity, outer page scrolling is still needed to reach the next decision. This correction reduces summary height without dropping identity/content or shrinking type.
+
+| Current comparison | Before | After | Diff |
+| --- | --- | --- | --- |
+| four-line-long-1280x700-light-open · same API hash | [746](correction/../images/agent-long-1280x700-light-open-context-after.png) | [beb6](correction/images/independent-long-light-initial.png) | [diff](correction/images/four-line-long-1280x700-light-open-diff.png) |
+| four-line-long-1280x700-dark-open · same API hash | [746](correction/../images/agent-long-1280x700-dark-open-context-after.png) | [beb6](correction/images/independent-long-dark-initial.png) | [diff](correction/images/four-line-long-1280x700-dark-open-diff.png) |
+| agent-default-1440x900-light-folded · required height | [6f0](correction/images/agent-default-1440x900-light-folded-context-before.png) | [beb6](correction/images/agent-default-1440x900-light-folded-context-after.png) | [diff](correction/images/agent-default-1440x900-light-folded-context-diff.png) |
+| agent-default-1440x900-light-open · required height | [6f0](correction/images/agent-default-1440x900-light-open-context-before.png) | [beb6](correction/images/agent-default-1440x900-light-open-context-after.png) | [diff](correction/images/agent-default-1440x900-light-open-context-diff.png) |
+| agent-default-1440x900-dark-folded · required height | [6f0](correction/images/agent-default-1440x900-dark-folded-context-before.png) | [beb6](correction/images/agent-default-1440x900-dark-folded-context-after.png) | [diff](correction/images/agent-default-1440x900-dark-folded-context-diff.png) |
+| agent-default-1440x900-dark-open · required height | [6f0](correction/images/agent-default-1440x900-dark-open-context-before.png) | [beb6](correction/images/agent-default-1440x900-dark-open-context-after.png) | [diff](correction/images/agent-default-1440x900-dark-open-context-diff.png) |
+
+| Corrected after-only access | Image |
+| --- | --- |
+| long-dark-original-ask-end | [actual independent image](correction/images/independent-long-dark-original-ask-end.png) |
+| long-dark-reported-result-end | [actual independent image](correction/images/independent-long-dark-reported-result-end.png) |
+| long-light-original-ask-end | [actual independent image](correction/images/independent-long-light-original-ask-end.png) |
+| long-light-reported-result-end | [actual independent image](correction/images/independent-long-light-reported-result-end.png) |
+| short-dark-original-ask-end | [actual independent image](correction/images/independent-short-dark-original-ask-end.png) |
+| short-dark-reported-result-end | [actual independent image](correction/images/independent-short-dark-reported-result-end.png) |
+| short-light-original-ask-end | [actual independent image](correction/images/independent-short-light-original-ask-end.png) |
+| short-light-reported-result-end | [actual independent image](correction/images/independent-short-light-reported-result-end.png) |
+| short-dark-initial · below character limit, four-line clamp | [actual independent image](correction/images/independent-short-dark-initial.png) |
+| short-light-initial · below character limit, four-line clamp | [actual independent image](correction/images/independent-short-light-initial.png) |
+
+The required1440×900 current frames keep normal answer/next visible in both rail states/themes; all five facts/six steps remain. Earlier1440×1000 frames are retained as their actual height. The first supplemental capture was rejected because the helper replaced a real null handoff with an empty object; [failure/stack](correction/rejected-1440-null-stack.json) and [blank failed frame](correction/images/rejected-null-handoff-baseline.png) are retained. The corrected helper serializes known values verbatim; no product guard or assertion was relaxed.
+
+## Earlier-phase author visual and usability observations
 
 | Surface | Actual observation and access |
 | --- | --- |
@@ -23,7 +55,7 @@ Actual capture UTC: **2026-11-03T02:38:23.260Z → 2026-11-03T02:38:52.891Z**. F
 | Activity, context and forms | Same keyed StreamPanel, SideTabs and permissions remain. The final browser case preserves the actual composer node/draft across FLIGHT folding and resize; configured controls stay available; run history and Files load only after user request. Primary and secondary columns scroll without deleting lower panels. |
 | Shared Setup/model description | Both-theme matched Setup view displays actual effort, budget and CLI only where supplied. Other seats omit absent effort/budget. Header/Board/PrChip use primitives; only checking-age children subscribe to the clock. Unit guards retain stable cards/no fetch/order behavior. |
 
-## Matched gallery
+## Earlier746 matched gallery
 
 Each row compares the same payload hash, frozen clock, viewport, scheme, rail state and region.
 
@@ -94,7 +126,7 @@ Each row compares the same payload hash, frozen clock, viewport, scheme, rail st
 | setup-model-1600x1000-light-open / context | [before](images/setup-model-1600x1000-light-open-context-before.png) | [after](images/setup-model-1600x1000-light-open-context-after.png) | [diff](images/setup-model-1600x1000-light-open-context-diff.png) |
 | setup-model-1600x1000-dark-open / context | [before](images/setup-model-1600x1000-dark-open-context-before.png) | [after](images/setup-model-1600x1000-dark-open-context-after.png) | [diff](images/setup-model-1600x1000-dark-open-context-diff.png) |
 
-## After-only access proofs
+## Earlier746 after-only access proofs
 
 These actions have no matched pre-change capture. Their source/API hashes, actual painted bounds and retained draft values are in the ledger. They do not imply baseline behavior was broken.
 
@@ -118,4 +150,4 @@ These are rejected historical attempts, separate from the accepted final matrix.
 - [Rejected broad identity wrapping](rework/rejected-broad-identity-wrap.png): split the short Parked status. Final source scopes wrapping only to ticket metadata; final browser asserts the status is one line.
 - All original stdout outcomes, including misleading historical filenames containing “green” that still failed, are described in [local checks](local-checks.json). Failed patches are retained under `rework/`; they are not current implementation.
 
-No independent design pass or CI success is claimed by this author gallery. The source and artifact handoff is ready for the fresh reviewer.
+The same independent reviewer passed correctedbeb6 source/design; final artifact verification and CI remain separate pending steps. No live-data approval or CI success is claimed by these controlled captures.

@@ -1,8 +1,8 @@
 {
-  "runtimeSource": "746430541045d52a41cf350e50544615254293bc",
+  "runtimeSource": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
   "baselineSource": "6f0df12e1112ace4bae4fa869117b3464e58f4a7",
   "integratedMain": "99e8404ea2e78e442dee828092f6b997582ddbe7",
-  "status": "Author checks complete; fresh independent whole-branch review and CI pending. No PR/push from this handoff.",
+  "status": "Fresh whole-branch review624 had one Minor/no Important; same-reviewer correctionbeb6 clean/design pass10:09:07UTC. Final artifact/test-only review and exact-head CI pending.",
   "commandsScope": "Retained stdout is authoritative for results. Reproduction commands below name the same selected files/scripts; original shell argv for earlier stages was not recorded in stdout. No single final 728-case run is claimed.",
   "stages": [
     {
@@ -54,6 +54,58 @@
       "log": "logs/mc-1361-paired-final-74643054.log",
       "executedCommand": "node --experimental-strip-types <controller>/capture-agent-density-1361.ts <after-worktree> <baseline-worktree> <controller>/agent-1361-paired-final-74643054 > /tmp/mc-1361-paired-final-74643054.log 2>&1",
       "reproduce": "node --experimental-strip-types docs/evidence/agent-density-1361/capture.ts <after-worktree> <baseline-worktree-with-identical-harness> <output>"
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Minor correction affected Agent/clock/render units",
+      "result": "193/193 in4files,4.51s,exit0",
+      "log": "logs/mc-1361-summary-units.log",
+      "executedCommand": "pnpm exec vitest run --project web apps/web/test/AgentV2.test.tsx apps/web/test/Agent.test.tsx apps/web/test/ReviewClockIsolation.test.tsx apps/web/test/pageRenderCounts.test.tsx --maxWorkers=3 --retry=0"
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Correction webtypes",
+      "result": "passed,exit0",
+      "log": "logs/mc-1361-summary-types.log",
+      "executedCommand": "pnpm --filter @mc/web typecheck"
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Correction actual1280short long and below-limit summary readers",
+      "result": "2passed/14skipped,4actualboth-theme renders,4.99s,exit0",
+      "log": "logs/mc-1361-summary-browser.log",
+      "executedCommand": "MC_AGENT_DENSITY_SHOTS=<controller>/agent-1361-summary-correction pnpm exec vitest run --project web apps/web/test/AgentDensity.browser.test.ts -t 'keeps honest long|offers full text' --maxWorkers=1 --retry=0"
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Changed-file formatting/lint",
+      "result": "passed,exit0",
+      "log": "logs/mc-1361-summary-format.log",
+      "executedCommand": "pnpm exec biome check apps/web/src/agent/Reason.tsx apps/web/src/agent/Overview.tsx apps/web/src/agent/Overview.css apps/web/test/AgentDensity.browser.test.ts"
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Permanent production harness build",
+      "result": "passed,68builtfiles bound by correction/build-checks.json",
+      "log": "logs/mc-1361-summary-production-build.log",
+      "scope": "ViteAPI using existing viteconfig, test/agentV2Browser.html entry; source/fixture/harness/file hashes retained."
+    },
+    {
+      "source": "f79d6b2ad59eaae929a32f9c2118f8f731416b86",
+      "runtimeSource": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Required1440x900 regression",
+      "result": "2passed/14skipped,8actualviews:1440x900and2560x1440 bothschemes/rail,6.82s,exit0",
+      "log": "logs/mc-1361-1440-browser.log",
+      "executedCommand": "MC_AGENT_DENSITY_SHOTS=<controller>/agent-1361-required-1440 pnpm exec vitest run --project web apps/web/test/AgentDensity.browser.test.ts -t '1440' --maxWorkers=1 --retry=0",
+      "note": "Regex1440 also matches2560x1440 height; record both actualcases rather than claiming one."
+    },
+    {
+      "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+      "check": "Required1440x900 matched supplement",
+      "result": "4pairs/8renders/12PNGs,0errors/writes/extra reads,exit0",
+      "log": "logs/mc-1361-1440-capture-final.log",
+      "executedCommand": "node --experimental-strip-types <controller>/capture-agent-1361-1440.ts <worktree> <old6f0build> <currentbebbuild> <controller>/agent-1361-required-1440-final",
+      "scope": "No newbuild, reuse source-bound production harnesses. Serial onebrowser; first invalid null-response capture and stack diagnostic retained."
     }
   ],
   "runtimeContinuity": {
@@ -97,6 +149,16 @@
       "check": "Diagnostic reader types",
       "result": "Temporary diagnostic variable names accidentally copied into 50-seat block; types failed",
       "resolution": "Removed the diagnostic copy; subsequent reader-types2 and exact-final types passed."
+    },
+    {
+      "check": "Independent whole-branch624 Minor",
+      "result": "No Important; two previews exceeded4lines",
+      "resolution": "Currentbeb6 measuredclamp+fullreaders independently clean; original finding/images and new correction receipt retained separately."
+    },
+    {
+      "check": "1440 supplement firstcapture",
+      "result": "Baseline crashed from helper null\u2192{} substitution; no acceptedgeometry",
+      "resolution": "Serialize known API responses verbatim, including null. Keep valid404error response for unknowns. No product/settlement/geometry guard weakened."
     }
   ],
   "logs": [
@@ -595,6 +657,78 @@
       "originalBytes": 37,
       "retainedBytes": 37,
       "normalization": "Replace only absolute local home/worktree/controller paths with declared placeholders; preserve text, timestamps and outcomes."
+    },
+    {
+      "file": "logs/mc-1361-1440-browser.log",
+      "originalSha256": "0cb80d68ee3a722a784c71b0f0f595d1f779f24b50d0de314a742689239a9dee",
+      "retainedSha256": "f14d2dc41cd583a6f6080636f197e506bd6358d35b02468fdd7d6d25cc82d2b3",
+      "originalBytes": 618,
+      "retainedBytes": 550,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-1440-capture-final.log",
+      "originalSha256": "dd11771bd35de62cc14b614d28089dcbab63f0d6e1dd54806731962dd0513fc2",
+      "retainedSha256": "dd11771bd35de62cc14b614d28089dcbab63f0d6e1dd54806731962dd0513fc2",
+      "originalBytes": 56,
+      "retainedBytes": 56,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-1440-capture.log",
+      "originalSha256": "9fedfd9b6e9e05d2d2b1740e6e7043882e037c79a29ae899e62c2975d12a47c4",
+      "retainedSha256": "411675d0ce18ce1284a40e4dfa96c5cc3da43a875b86e44c3de1a8dfb9bb0e70",
+      "originalBytes": 623,
+      "retainedBytes": 529,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-1440-diagnostic.log",
+      "originalSha256": "eb6eb3a6a4f5d7192c43eda2da9275bbc15179bf22ad89d176fbfb7741f13d49",
+      "retainedSha256": "efba964d1cb304bbe0fe57a09fce575a05d5fadf5d345de2be9b67c05191cc80",
+      "originalBytes": 623,
+      "retainedBytes": 529,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-summary-browser.log",
+      "originalSha256": "11682447a3294132e567c97ea83ce9bd5840935e35efca6775f0d66851ce77d3",
+      "retainedSha256": "c3f07839dd55b7e75153d60e3db14584e06cf3a74d2714e11eff068f4215ac76",
+      "originalBytes": 617,
+      "retainedBytes": 549,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-summary-format.log",
+      "originalSha256": "74f98f75b8a414bb0af52833db367665a806f7270c572be5b32742ea5319a0ae",
+      "retainedSha256": "74f98f75b8a414bb0af52833db367665a806f7270c572be5b32742ea5319a0ae",
+      "originalBytes": 42,
+      "retainedBytes": 42,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-summary-production-build.log",
+      "originalSha256": "8defaddd47a0150dcc9a309a5f1e0fb84e824f6a632044fd11504e08b7f9edb5",
+      "retainedSha256": "e435ddb8c9b949d1c5ad1c47ee60dc67e75818230dea661d63962439faf1d81e",
+      "originalBytes": 210,
+      "retainedBytes": 163,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-summary-types.log",
+      "originalSha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+      "retainedSha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+      "originalBytes": 15,
+      "retainedBytes": 15,
+      "normalization": "Replace only declared absolute local paths."
+    },
+    {
+      "file": "logs/mc-1361-summary-units.log",
+      "originalSha256": "6bd5238053ab773ed282e077f4d93ff8aeed67de2571371b185312c629124511",
+      "retainedSha256": "55f48b465ead19dd43f41b2e15abd10d639bf67656c8b1e86ed96c6fad34446d",
+      "originalBytes": 513,
+      "retainedBytes": 445,
+      "normalization": "Replace only declared absolute local paths."
     }
   ],
   "historicalArtifacts": [
@@ -642,5 +776,6 @@
     "[baseline-worktree]": "isolated baseline product worktree",
     "[controller]": "private controller output directory",
     "[home]": "local home directory"
-  }
+  },
+  "earlierRuntimeSource": "746430541045d52a41cf350e50544615254293bc"
 }
