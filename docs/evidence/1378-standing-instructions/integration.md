@@ -129,7 +129,7 @@ set and JSON endpoints remain indexed with capture timestamps and SHA-256 hashes
 | `/tmp/mc-1378-integration-cdd8930b-types.log` | `89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e` |
 | `/tmp/mc-1378-integration-cdd8930b-units.log` | `4c3374aec4a0f03f548f3794c1d685c5512696214f975831f30599f9bb9e6f5a` |
 
-No source push, draft PR publication, merge, provider/crew/observed-loop action or live breaker
+No source push, draft PR publication, PR merge, provider/crew/observed-loop action or live breaker
 operation occurred during this integration stage. Narrow independent review, draft publication,
 controller saved QA report and fresh CI remain the next steps. Parent #993 remains open until both
 children are delivered. The controller owns merge/deployment; this task does not authorize them.
