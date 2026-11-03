@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  BLOCKING_SEVERITIES,
   EVIDENCE_KINDS,
   evidenceImageName,
   FINDING_CATEGORIES,
@@ -153,6 +154,24 @@ export class QaReportError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+/** Check declared review facts; do not infer design quality or manufacture a finding. */
+function validateDesignVerdict(
+  verdict: ReviewVerdict,
+  findings: readonly ReviewFinding[],
+  coverage: readonly ReviewCheck[],
+): void {
+  if (!coverage.some((check) => check.check === "design" && check.result === "fail")) return;
+  if (
+    (verdict.spec === "fail" || verdict.quality === "fail") &&
+    findings.some((finding) => BLOCKING_SEVERITIES.includes(finding.severity))
+  )
+    return;
+  throw new QaReportError(
+    400,
+    "A failed design check requires a failing verdict and at least one Critical or Important finding. Record the observed defect before submitting.",
+  );
 }
 
 /** Sorted keys give the same content address regardless of object construction order. */
@@ -321,6 +340,20 @@ export function createQaReports(i: {
     const missing: string[] = [];
     if (!base.worksWell.length) missing.push("Works-well observations were not recorded.");
     if (!base.coverage.length) missing.push("Checklist coverage was not recorded.");
+    if (base.visual.applicability === "required") {
+      const browser = base.coverage.find((check) => check.check === "browser");
+      const design = base.coverage.find((check) => check.check === "design");
+      if (!browser) missing.push("Browser coverage was not recorded for this visual change.");
+      else if (browser.result === "n-a")
+        missing.push("Browser rendering was not performed for this visual change.");
+      if (!design) missing.push("Design coverage was not recorded for this visual change.");
+      else {
+        if (design.result === "n-a")
+          missing.push("Design review was not performed for this visual change.");
+        if (!design.note?.trim())
+          missing.push("Design observations were not recorded for this visual change.");
+      }
+    }
     if (
       !base.tests.some(
         (test) =>
@@ -458,6 +491,7 @@ export function createQaReports(i: {
       }
     },
     async prepareNative(review, details, at) {
+      validateDesignVerdict(details.verdict, details.findings, details.checked ?? []);
       const known = await secrets();
       safe(details, known);
       const repo = i.config.repos.find((repo) => repo.id === review.repoId);
@@ -537,6 +571,7 @@ export function createQaReports(i: {
         new Set(input.coverage?.map((check) => check.check)).size !== (input.coverage?.length ?? 0)
       )
         throw new QaReportError(400, "Each checklist item may appear once.");
+      validateDesignVerdict(input.verdict, input.findings ?? [], input.coverage ?? []);
       if (
         input.findings?.some((finding) => finding.severity !== "Minor") &&
         input.verdict.spec === "pass" &&

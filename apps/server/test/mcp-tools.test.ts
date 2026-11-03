@@ -5061,6 +5061,43 @@ describe("report_findings", () => {
     expect(store.review(reviewId)?.state).toBe("running");
   });
 
+  it("refuses a failed design check with passing verdicts without recording or completing the review", async () => {
+    const result = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        checked: [
+          { check: "design", result: "fail", note: "The normal roster is below the fold." },
+        ],
+      }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/failed design check/i);
+    expect(store.review(reviewId)?.state).toBe("running");
+    expect(stored()).toBe(0);
+    expect(store.qaReportForReview(reviewId)).toBeNull();
+    expect(told).toEqual([]);
+  });
+
+  it("retains an honest failed design report with the supplied blocking finding", async () => {
+    const result = await report(
+      args({
+        verdict: failing,
+        findings: [finding({ severity: "Important", category: "spec" })],
+        checked: [
+          { check: "design", result: "fail", note: "The normal roster is below the fold." },
+        ],
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(store.qaReportForReview(reviewId)).toMatchObject({
+      verdict: failing,
+      coverage: [{ check: "design", result: "fail" }],
+      findings: [{ severity: "Important", category: "spec" }],
+    });
+    expect(told).toEqual([["retro", REVIEW_RUN]]);
+  });
+
   it("answers dropped when the review is dropped between the read and the write", async () => {
     const real = store.recordFindings.bind(store);
     store.recordFindings = (id, runId, r) => {
