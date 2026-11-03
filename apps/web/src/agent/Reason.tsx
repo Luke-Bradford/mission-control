@@ -32,7 +32,12 @@ export function Reason({
           </button>
         )}
       </div>
-      {open && full !== null && <pre className="vdetail">{full}</pre>}
+      {open && full !== null && (
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: full text can exceed the bounded disclosure.
+        <section className="vdetail" tabIndex={0} aria-label="Full reason text">
+          {full}
+        </section>
+      )}
     </>
   );
 }

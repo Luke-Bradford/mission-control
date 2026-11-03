@@ -1,5 +1,10 @@
 .agent-v2-identity {
-  padding: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+}
+.agent-v2 .picker {
+  max-height: calc(3 * var(--table-row) + 2 * var(--sp-1));
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .agent-v2-idrow {
   display: flex;
@@ -51,7 +56,7 @@
   position: relative;
 }
 .agent-v2-actions summary {
-  min-height: 28px;
+  min-height: 32px;
   min-width: 48px;
   padding: var(--sp-1) var(--sp-3);
   border: 1px solid var(--line-2);
@@ -98,6 +103,9 @@
   padding: var(--sp-3) var(--sp-4);
   border-left: 3px solid var(--warn);
 }
+.agent-v2-next > b {
+  flex-basis: 100%;
+}
 .agent-v2-next > div {
   flex: 1;
   min-width: 0;
@@ -107,11 +115,11 @@
 }
 .agent-v2-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
 }
 .agent-v2-stat {
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   min-width: 0;
 }
 .agent-v2-stat h3 {
@@ -175,7 +183,7 @@
 }
 .agent-v2-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
   gap: var(--sp-3);
   align-items: start;
 }
@@ -220,8 +228,8 @@
   scrollbar-gutter: stable;
 }
 .agent-v2-deliverables > li {
-  min-height: 40px;
-  padding: var(--sp-2) var(--sp-4);
+  min-height: var(--table-row);
+  padding: var(--sp-1) var(--sp-4);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -244,7 +252,7 @@
   display: flex;
   gap: var(--sp-2);
   align-items: baseline;
-  min-height: 28px;
+  min-height: var(--table-row);
 }
 .agent-v2-related li > div {
   display: flex;
@@ -257,8 +265,8 @@
   color: var(--fg-2);
 }
 .agent-v2 #streamP {
-  height: 440px;
-  min-height: 320px;
+  height: 400px;
+  min-height: 280px;
 }
 .agent-v2 #sideP {
   max-height: 440px;
@@ -281,7 +289,7 @@
 }
 @media (max-width: 1350px) {
   .agent-v2-columns {
-    grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr);
   }
   .agent-v2-stats {
     gap: var(--sp-2);
@@ -297,4 +305,70 @@
 
 .event-mark {
   margin-right: var(--sp-1);
+}
+
+.agent-v2-availability {
+  display: grid;
+  gap: var(--sp-2);
+  overflow-wrap: anywhere;
+}
+.agent-v2-availability p {
+  margin: 0;
+}
+.agent-v2-queued-review {
+  display: grid;
+  gap: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+.agent-list-scroll-cue {
+  padding: var(--sp-1) var(--sp-4);
+  margin: 0;
+}
+.agent-v2-story .vnow {
+  align-items: start;
+}
+.agent-v2-story .vnow .ellip {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.agent-v2-next {
+  flex-wrap: wrap;
+}
+.agent-v2-next .btn {
+  white-space: normal;
+}
+.agent-v2-left > .panel,
+.agent-v2-right > .panel {
+  min-width: 0;
+}
+.agent-v2-stat:first-child {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1) var(--sp-3);
+}
+.agent-v2-stat:first-child > h3 {
+  grid-column: 1 / -1;
+}
+.agent-v2-stat:first-child > p {
+  margin: 0;
+}
+.agent-v2-stat:first-child > div {
+  align-self: center;
+}
+@media (max-width: 1000px) {
+  .agent-v2-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agent-v2-state {
+    max-width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .agent-v2-story,
+  .agent-v2-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -6,11 +6,11 @@ import "../src/hud.css";
 import "../src/agent/agent.css";
 import "../src/overview/overview.css";
 import "../src/board/board.css";
-import { reviewCheckPill } from "@mc/core";
 import { createRoot } from "react-dom/client";
 import { Header } from "../src/agent/Header.tsx";
 import { Card } from "../src/board/Card.tsx";
 import { PrChip } from "../src/hud/PrChip.tsx";
+import { reviewStateProps } from "../src/hud/ReviewState.tsx";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { boardItem, NOW, prView, seatRow } from "./fixtures.ts";
 import { REVIEW_STATES } from "./reviewDisplayFixture.ts";
@@ -54,7 +54,11 @@ createRoot(root).render(
                   queued={null}
                   reviewer={null}
                   pr={pr}
-                  checkPill={reviewCheckPill(check, NOW)}
+                  checkLabel={reviewStateProps(check).label}
+                  checkTone={reviewStateProps(check).tone}
+                  checkingSeat={reviewStateProps(check).checkingSeat}
+                  checkingSince={reviewStateProps(check).checkingSince}
+                  checkReason={reviewStateProps(check).reason}
                   mine={false}
                   unacked={false}
                   outcome="Closed"

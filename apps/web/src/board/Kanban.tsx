@@ -4,12 +4,12 @@ import {
   HUD_COLUMNS,
   type HudColumn,
   type PullRequestView,
-  reviewCheckPill,
   statusOutOfDate,
 } from "@mc/core";
 import { useId, useMemo, useState } from "react";
 import type { NeedsYou } from "../attention.ts";
 import { agoDays, plural } from "../fmt.ts";
+import { reviewStateProps } from "../hud/ReviewState.tsx";
 import { Card, type CardProps } from "./Card.tsx";
 import {
   cardAgent,
@@ -64,6 +64,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
   const agent = cardAgent(item, ctx.crew);
   const pr = cardPr(item, prs);
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
+  const check = pr?.check ? reviewStateProps(pr.check) : null;
   return {
     item,
     showRepo: ctx.showRepo,
@@ -72,7 +73,11 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     queued: agent ? null : cardQueue(item, ctx.crew),
     reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
     pr,
-    checkPill: pr?.check ? reviewCheckPill(pr.check, ctx.now) : null,
+    checkLabel: check?.label ?? null,
+    checkTone: check?.tone ?? null,
+    checkingSeat: pr?.check?.kind === "checking" ? pr.check.seat : undefined,
+    checkingSince: pr?.check?.kind === "checking" ? pr.check.since : undefined,
+    checkReason: pr?.check?.kind === "held" ? pr.check.reason : undefined,
     mine: needs.length > 0,
     unacked: needs.some((a) => !a.acked),
     outcome: doneOutcome(item, prs),

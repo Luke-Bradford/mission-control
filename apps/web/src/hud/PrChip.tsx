@@ -1,17 +1,11 @@
-import {
-  type PullRequestPreviewFacts,
-  type PullRequestView,
-  prPill,
-  type RunPr,
-  reviewCheckPill,
-} from "@mc/core";
+import { type PullRequestPreviewFacts, type PullRequestView, prPill, type RunPr } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
-import { useNow } from "../clock.ts";
 import { ACTIONS, hub } from "../data.ts";
 import { ticketPath } from "../router.ts";
 import { Pill, PillButton } from "./Pill.tsx";
 import { parseTicket, RepoRef } from "./RepoRef.tsx";
+import { ReviewCheck, ReviewState } from "./ReviewState.tsx";
 import "./PrChip.css";
 
 /** Preview facts arrive with the Board and Agent PR rows; capability is decided by the server. */
@@ -126,14 +120,8 @@ export function PrChip({
   /** The Board owns its full PR status line, so it supplies this as false. */
   showState?: boolean;
 }) {
-  const now = useNow();
   const check = "check" in pr && pr.state === "open" ? pr.check : null;
-  const pill =
-    pr.state === "merged" || pr.state === "closed"
-      ? prPill({ state: pr.state })
-      : check
-        ? reviewCheckPill(check, now)
-        : null;
+  const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
   const hold = "hold" in pr ? pr.hold : undefined;
   const ticket = pr.ticket ? parseTicket(pr.ticket) : null;
   return (
@@ -160,6 +148,8 @@ export function PrChip({
       </span>
       {showState && pr.state === "open" && pr.uat ? (
         <Pill tone="warn">Waiting for your acceptance</Pill>
+      ) : showState && check ? (
+        <ReviewCheck check={check} />
       ) : showState && pill ? (
         <Pill tone={pill.tone}>{pill.label}</Pill>
       ) : null}
@@ -169,11 +159,7 @@ export function PrChip({
         initialPreview={initialPreview}
         startable={previewable && pr.state === "open" && initialPreview == null}
       />
-      {hold && (
-        <Pill tone="warn" title={`merge held by ${hold.by}: ${hold.reason}`}>
-          held
-        </Pill>
-      )}
+      {hold && <ReviewState tone="warn" label={`Held · ${hold.by}`} reason={hold.reason} />}
     </span>
   );
 }

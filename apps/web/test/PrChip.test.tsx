@@ -177,10 +177,14 @@ describe("PrChip", () => {
   it("shows a warn held pill naming who holds the merge and why", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(<PrChip pr={{ ...pr, hold: { by: "CAPCOM", reason: "wait for the release" } }} />);
-    const pill = await screen.findByText("held");
+    const pill = await screen.findByText("Held · CAPCOM");
     expect(pill.classList.contains("pill")).toBe(true);
     expect(pill.classList.contains("warn")).toBe(true);
-    expect(pill.getAttribute("title")).toBe("merge held by CAPCOM: wait for the release");
+    const reason = screen.getByRole("button", { name: "Reason for Held · CAPCOM" });
+    expect(reason.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(reason);
+    expect(reason.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("wait for the release").hidden).toBe(false);
   });
 
   it("keeps the QA report link without showing a merge hold", async () => {
