@@ -83,26 +83,16 @@
  .composition-v5 .capacity-body{font-size:12px}
  .composition-v5 .capacity-body p{margin-top:4px}
 }
-@media(min-width:2800px) and (min-height:1600px){
+/* 1280 + 960 + 900 + two12px gutters: all tracks must fit the actual canvas. */
+@container overview-canvas (min-width:3164px){
  .composition-v5 .workspace{grid-template-columns:1280px minmax(960px,1.126fr) minmax(900px,1fr)}
+ @media(min-height:1600px){
  .composition-v5 .timeline{height:auto;min-height:390px}
  .composition-v5 .timeline-chart{flex:initial;padding-top:8px;padding-bottom:8px}
  .composition-v5 .span-row{height:21px}
  .composition-v5 .span-row.extra-lane{display:grid}
  .composition-v5 .live-log{height:368px}
  .composition-v5 .activity-line.extra-event{display:grid}
- .composition-v5 .history-hub>header h2 small{display:inline}
- .composition-v5 .history-hub>header select{display:none}
- .composition-v5 .canonical-histories>.panel{display:flex;min-height:220px}
- .composition-v5 .canonical-histories>.panel>header{display:flex}
- .composition-v5 .history-reading{padding-top:8px}
- .composition-v5 .history-evidence{min-height:120px;align-items:start;padding-top:4px}
- .composition-v5 .history-evidence>.plot{height:120px;flex:none;width:min(64%,640px)}
- .composition-v5 .recent-readings{display:block;flex:1;min-width:0;padding:0 12px 4px}
- .composition-v5 .recent-readings h3{font-size:12px;line-height:16px;margin-bottom:4px}
- .composition-v5 .recent-readings table{width:100%;font-size:12px;border-collapse:collapse}
- .composition-v5 .recent-readings td,.composition-v5 .recent-readings th{height:18px;text-align:right;border-bottom:1px solid var(--line);padding:0 4px}
- .composition-v5 .recent-readings th:first-child,.composition-v5 .recent-readings td:first-child{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:11px}
  .composition-v5 #machine-lines{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
  .composition-v5 .machine-line{display:flex;flex-direction:column;align-items:stretch;height:auto;min-height:208px;border-right:1px solid var(--line);gap:8px;padding:8px 12px}
  .composition-v5 .machine-line:last-child{border-right:0}
@@ -115,6 +105,23 @@
  .composition-v5 .machine-foot{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
  .composition-v5 .machine-foot>span:last-child{grid-column:1/-1}
  .composition-v5 .host-detail-summary{grid-template-columns:1fr 1fr}
+ }
+ /* Full13-lane Timeline + five measured-history rows need about1670px below KPIs.
+    1920px viewport leaves1866px to the footer gutter; content ends about1851px. */
+ @media(min-height:1920px){
+ .composition-v5 .history-hub>header h2 small{display:inline}
+ .composition-v5 .history-hub>header select{display:none}
+ .composition-v5 .canonical-histories>.panel{display:flex;min-height:220px}
+ .composition-v5 .canonical-histories>.panel>header{display:flex}
+ .composition-v5 .history-reading{padding-top:8px}
+ .composition-v5 .history-evidence{min-height:120px;align-items:start;padding-top:4px}
+ .composition-v5 .history-evidence>.plot{height:120px;flex:none;width:min(64%,640px)}
+ .composition-v5 .recent-readings{display:block;flex:1;min-width:0;padding:0 12px 4px}
+ .composition-v5 .recent-readings h3{font-size:12px;line-height:16px;margin-bottom:4px}
+ .composition-v5 .recent-readings table{width:100%;font-size:12px;border-collapse:collapse}
+ .composition-v5 .recent-readings td,.composition-v5 .recent-readings th{height:18px;text-align:right;border-bottom:1px solid var(--line);padding:0 4px}
+ .composition-v5 .recent-readings th:first-child,.composition-v5 .recent-readings td:first-child{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:11px}
+ }
 }
 @media(max-width:1699px){
  .composition-v5 .workspace{grid-template-columns:minmax(0,1fr)}

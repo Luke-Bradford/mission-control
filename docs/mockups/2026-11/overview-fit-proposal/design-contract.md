@@ -25,3 +25,9 @@ At2560: three columns are useful if each analytical domain has at least500px. Th
 ## Review sequence and evidence
 
 Inspect full1920×1080 and3840×2160 both themes first. Record hierarchy, column allocation, chart meaning, unused spaces and disclosure tradeoffs before geometry/crops. Only then inspect2560/open and1920DPR2, which retains1920CSS layout. Existing interaction/filter/readers remain requirements. Actual render source hashes, viewport/theme/DPR, fictional clock, timestamps and image hashes must bind each new phase. Earlier images remain labelled rejected history. No whole-page pass follows from narrow axis or glyph checks.
+
+## Threshold correction after independent22e review
+
+Source22e is a failed intermediate phase. Independent review reproduced Crew before the scroll origin and clipped right-side actions at2800×1600 folded and3200×1800 expanded. The cause was a viewport-width rule selecting tracks with a3164px minimum despite smaller actual canvas width. It also selected all five large histories with insufficient height.
+
+The corrected threshold uses the named outer canvas: the1280/960/900 tracks plus24px gutters require at least3164px. Smaller canvases keep the existing readable three-column fallback or two-column layout, selected history, complete readers and accepted Crew geometry. The expanded thirteen-lane Timeline and larger host facts additionally require1600px viewport height. All five large history rows independently require1920px height: observed content ends about1851px, leaving the footer/gutter after it. Captions count actually displayed lanes/events instead of guessing from physical viewport width. The failing22e source/screenshots remain historical; the correction needs same-reviewer rendered recheck.
