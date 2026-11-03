@@ -1517,7 +1517,7 @@
   align-items: center;
   flex-wrap: wrap;
   flex: none;
-  gap: 4px 16px;
+  gap: var(--sp-1) var(--sp-4);
 }
 .overview-notices .overview-status button {
   min-height: 24px;
@@ -2081,7 +2081,7 @@ button.quota-details {
 }
 .overview-grid .ph {
   min-height: 36px;
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-workspace #agentsList {
   max-height: 390px;
@@ -2100,7 +2100,7 @@ button.quota-details {
 .overview-workspace .pipeline-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .overview-workspace .pipeline-stage {
   min-width: 0;
@@ -2120,10 +2120,10 @@ button.quota-details {
   min-height: 144px;
 }
 .quota-summary-definition {
-  margin: 2px 0;
+  margin: calc(var(--sp-1) / 2) 0;
 }
 #quotaSummaryP .quota-summary {
-  padding-block: 2px;
+  padding-block: calc(var(--sp-1) / 2);
 }
 #quotaSummaryP .quota-summary-row {
   min-height: 24px;
@@ -2136,7 +2136,7 @@ button.quota-details {
   min-height: 224px;
 }
 .overview-observations #timelineP .timeline-body {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-observations .overview-lane-scroll {
   max-height: 90px;
@@ -2145,11 +2145,11 @@ button.quota-details {
   margin-top: 0;
 }
 .overview-observations .overview-legend {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-s);
 }
 .overview-observations .overview-next-compact {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-observations > #overviewHistoryP {
   min-height: 184px;
@@ -2171,7 +2171,7 @@ button.quota-details {
   height: 60px;
 }
 .overview-observations .history-window {
-  margin: 4px 0 0;
+  margin: var(--sp-1) 0 0;
 }
 /* Raw readings stay an explicit expansion: opening them grows the natural stack. */
 .measured-x {
@@ -2195,7 +2195,7 @@ button.quota-details {
 .machine-summary-row {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 138px;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   min-height: 52px;
 }
@@ -2214,7 +2214,7 @@ button.quota-details {
   gap: 0;
 }
 .machine-summary .machine-history-reading {
-  font: 11px / 14px var(--mono);
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
 }
 .machine-summary .machine-history-y {
   display: none;
@@ -2226,26 +2226,26 @@ button.quota-details {
 }
 .machine-summary .machine-history-x {
   grid-column: 1;
-  font: 11px / 14px var(--mono);
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
 }
 .machine-summary-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 8px;
+  gap: 0 var(--sp-2);
 }
 .machine-summary-facts button {
   padding: 0;
   min-height: 24px;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 #contextSummaryP {
   display: none;
 }
 #contextSummaryP p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
 }
 .machine-transcript-detail {
-  margin-block: 12px;
+  margin-block: var(--sp-3);
 }
 .machine-transcript-detail table {
   width: 100%;
@@ -2253,7 +2253,7 @@ button.quota-details {
 }
 .machine-transcript-detail th,
 .machine-transcript-detail td {
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
@@ -2266,14 +2266,14 @@ button.quota-details {
   max-height: calc(100dvh - 64px);
 }
 .overview-evidence::backdrop {
-  background: var(--scrim, #0008);
+  background: var(--scrim);
 }
 .evidence-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  gap: 12px;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
 .evidence-heading h2 {
@@ -2311,7 +2311,7 @@ button.quota-details {
     min-height: 96px;
   }
   .overview-kpi {
-    padding: 4px 12px;
+    padding: var(--sp-1) var(--sp-3);
   }
 }
 @container overview-canvas (min-width: 2076px) {
@@ -2359,14 +2359,14 @@ button.quota-details {
  * full-size controls, chart scales and complete readers rather than clipping. */
 @container overview-canvas (min-width: 1562px) and (max-width: 2075px) {
   #page-overview:has(.overview-constraints) .overview-primary {
-    gap: 8px;
+    gap: var(--sp-2);
   }
   #page-overview:has(.overview-constraints) .overview-primary > #actP {
     height: 188px;
     min-height: 188px;
   }
   #page-overview:has(.overview-constraints) .overview-analytical {
-    gap: 4px;
+    gap: var(--sp-1);
   }
   #page-overview:has(.overview-constraints)
     .overview-analytical
@@ -2405,12 +2405,12 @@ button.quota-details {
 }
 .timeline-span-companions {
   grid-column: 2;
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   white-space: normal;
   color: var(--fg-2);
 }
 .overview-observations .overview-legend {
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 
 .overview-span > span {
@@ -2424,7 +2424,7 @@ button.quota-details {
   --panel-head-y: 4px;
 }
 #page-overview .panel > div.ph {
-  padding: 2px 12px;
+  padding: calc(var(--sp-1) / 2) var(--sp-3);
   min-height: 36px;
 }
 .overview-observations > #timelineP {
@@ -2439,28 +2439,28 @@ button.quota-details {
   background: none;
 }
 #quotaSummaryP .quota-summary-definition {
-  line-height: 16px;
+  line-height: var(--lh-s);
   margin: 0;
 }
 .overview-observations .overview-history {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-observations .measured-plot svg {
   height: 48px;
 }
 .overview-observations .history-window {
-  line-height: 16px;
+  line-height: var(--lh-s);
   margin-top: 0;
 }
 .timeline-key {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 .timeline-key .overview-legend {
   margin: 0;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .timeline-key .overview-timeline-evidence {
   margin-left: auto;
@@ -2486,11 +2486,11 @@ button.quota-details {
 
 /* Specific panel body budgets override the shared panel padding, without clipping content. */
 #page-overview #quotaSummaryP > .pb {
-  padding-block: 2px;
+  padding-block: calc(var(--sp-1) / 2);
 }
 #page-overview #overviewHistoryP > .pb,
 #page-overview #machineSummaryP > .pb {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 #machineSummaryP {
   min-height: 240px;
@@ -2500,7 +2500,7 @@ button.quota-details {
 }
 .overview-overflow-note {
   margin: 0;
-  line-height: 16px;
+  line-height: var(--lh-s);
 }
 .overview-overflow-note[hidden] {
   display: none;
@@ -2509,10 +2509,10 @@ button.quota-details {
 .overview-constraints {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: var(--sp-1) var(--sp-4);
   flex: none;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-summary);
 }
 .overview-constraints > span {
   max-width: 1200px;
@@ -2523,7 +2523,7 @@ button.quota-details {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0 8px;
+  gap: 0 var(--sp-2);
 }
 .quota-summary-footer .githubrate {
   flex: 1;
@@ -2531,7 +2531,7 @@ button.quota-details {
 }
 .machine-summary-processes {
   margin: 0;
-  line-height: 18px;
+  line-height: var(--lh-summary);
 }
 
 @media (max-height: 1299px), (max-width: 2199px) {
@@ -2549,7 +2549,7 @@ button.quota-details {
   top: 8px;
   left: 12px;
   max-width: var(--lane-label);
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 /* A 1050px comparison table needs its two panel borders too. Do not reserve an invisible
@@ -2598,7 +2598,7 @@ button.quota-details {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 .overview-provider-host > #machineSummaryP {
   order: 4;
@@ -2624,18 +2624,18 @@ button.quota-details {
   max-height: 360px;
 }
 .overview-provider .evidence-inline #quotaP > .pb {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-provider .evidence-inline .overview-allowance-table {
   min-width: 850px;
 }
 .overview-provider .evidence-inline .overview-allowance-table :is(th, td) {
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
 }
 .kpi-destination {
   display: grid;
   grid-template-rows: minmax(16px, auto) minmax(28px, auto) minmax(16px, auto);
-  gap: 4px;
+  gap: var(--sp-1);
   flex: 1 1 7em;
   align-self: stretch;
   min-width: 0;
@@ -2646,18 +2646,18 @@ button.quota-details {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: var(--sp-1) var(--sp-2);
 }
 .kpi-history-link {
   flex: 0 0 auto;
   align-self: center;
   min-height: 24px;
-  padding: 0 4px;
+  padding: 0 var(--sp-1);
   background: none;
   border: 0;
   color: var(--accent);
-  font-size: 12px;
-  line-height: 1.333333;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 .overview-kpi .d,
 .overview-kpi .kpi-secondary {
@@ -2675,36 +2675,36 @@ button.quota-details {
   min-width: 0;
 }
 .overview-history-domain .overview-history {
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 .overview-history-domain .history-window {
   margin: 0;
-  line-height: 16px;
+  line-height: var(--lh-s);
 }
 .overview-history-domain > .panel .measured-plot svg {
   height: 48px;
 }
 .history-recent {
   min-width: 0;
-  padding-left: 12px;
+  padding-left: var(--sp-3);
 }
 .history-recent h3 {
-  margin: 0 0 4px;
-  font-size: 12px;
-  line-height: 16px;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 .history-recent dl {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 .history-recent dl > div {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 12px;
+  gap: var(--sp-3);
   min-height: 20px;
 }
 .history-recent dt {
-  font: 11px / 20px var(--mono);
+  font: var(--fs-micro) / var(--lh) var(--mono);
 }
 .history-recent dd {
   margin: 0;
@@ -2712,20 +2712,20 @@ button.quota-details {
 }
 .machine-investigation {
   border-top: 1px solid var(--line);
-  padding-top: 8px;
-  margin-top: 8px;
+  padding-top: var(--sp-2);
+  margin-top: var(--sp-2);
 }
 .machine-investigation h3 {
-  margin: 0 0 4px;
-  font-size: 12px;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-s);
 }
 .machine-investigation table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 .machine-investigation :is(th, td) {
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
@@ -2733,13 +2733,13 @@ button.quota-details {
   text-align: right;
 }
 .machine-transcript-summary {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 .machine-transcript-summary p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--sp-1);
 }
 .machine-investigation .lock {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 @container overview-canvas (min-width: 2076px) {
   .overview-provider-host,
@@ -2777,8 +2777,8 @@ button.quota-details {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 8px 12px;
-  gap: 8px;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
   min-height: 208px;
 }
 .overview-grid[data-wide-details="true"] .machine-summary-row > .num {
@@ -2786,7 +2786,7 @@ button.quota-details {
 }
 .overview-grid[data-wide-details="true"] .machine-summary .machine-history {
   grid-template-columns: 48px minmax(0, 1fr);
-  gap: 0 8px;
+  gap: 0 var(--sp-2);
 }
 .overview-grid[data-wide-details="true"] .machine-summary .machine-history-y {
   display: flex;
@@ -2810,7 +2810,7 @@ button.quota-details {
 .overview-grid[data-all-histories="true"] .overview-history-domain .measured-evidence {
   display: grid;
   grid-template-columns: minmax(0, 640px) minmax(180px, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: start;
 }
 .overview-grid[data-all-histories="true"] .overview-history-domain > .panel .measured-plot svg {

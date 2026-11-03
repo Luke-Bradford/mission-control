@@ -1,16 +1,29 @@
 import { metricHover } from "@mc/core";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
+import { type History, OverviewHistoryPanel } from "../src/overview/OverviewHistoryPanel.tsx";
 import { SESSION_ALL, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, HOUR, item, METRICS_VIEW, NOW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
 
 const kpis = OVERVIEW.kpis;
 
+/** The KPI action selects the same cached canonical history used by Overview. */
+function KpiHistory() {
+  const [measure, setMeasure] = useState<History>("tokens");
+  return (
+    <>
+      <KpiStrip onHistory={setMeasure} />
+      <OverviewHistoryPanel measure={measure} />
+    </>
+  );
+}
+
 describe("KpiStrip", () => {
-  it("shows neutral skeletons until the first response, then renders zeros and flat sparklines", async () => {
+  it("shows neutral skeletons until the first response, then retains zeros in the canonical history", async () => {
     let release!: () => void;
     const ready = new Promise<void>((resolve) => {
       release = resolve;
@@ -34,7 +47,7 @@ describe("KpiStrip", () => {
       await ready;
       return answer(...args);
     });
-    const { container } = render(<KpiStrip />);
+    const { container } = render(<KpiHistory />);
     expect(screen.getByRole("region", { name: "Overview metrics" }).getAttribute("aria-busy")).toBe(
       "true",
     );
@@ -48,17 +61,20 @@ describe("KpiStrip", () => {
       ).toBeTruthy(),
     );
     await waitFor(() => expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0));
-    // an all-zero series is the bare baseline (y 23 of 24), labelled as no activity
+    // History leaves the compact tiles, but zero observations remain a labelled flat baseline.
+    fireEvent.click(screen.getByRole("button", { name: "Inspect In progress · now history" }));
     const graph = screen.getByRole("img", {
-      name: "In progress · now · last 30 minutes · no activity",
+      name: "In-progress tickets · tickets · last 3 complete minutes · missing samples remain gaps",
     });
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
-      "M0.0,23.0L50.0,23.0L100.0,23.0",
+      "M0.0,22.0L50.0,22.0L100.0,22.0",
     );
     expect(graph.querySelectorAll("circle")).toHaveLength(0);
+    expect(screen.getByText("No activity in the measured minutes.")).toBeTruthy();
+    fireEvent.click(screen.getByText("Recorded values · 3 points"));
     expect(
-      within(screen.getByRole("link", { name: /In progress/ })).getByText("no activity"),
-    ).toBeTruthy();
+      screen.getByRole("region", { name: "Recorded tickets observations" }).textContent,
+    ).toContain("0");
   });
 
   it("labels eight linked metrics with their windows, registry hover and honest histories", async () => {
@@ -76,7 +92,7 @@ describe("KpiStrip", () => {
         item({ key: "c", owner: "flight" }),
       ],
     });
-    render(<KpiStrip />);
+    render(<KpiHistory />);
     await screen.findByText("41.2k");
     await screen.findByText("~$24.31");
     const labels = [
@@ -127,7 +143,7 @@ describe("KpiStrip", () => {
       "PRs · +2 loops",
     ])
       expect(screen.getByText(text)).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: /complete minutes/ })).toHaveLength(1);
     for (const label of ["In progress", "CI pass rate", "Cycle time", "Merged", "Agents working"]) {
       const tile = screen.getByRole("link", { name: new RegExp(label) });
       expect(within(tile).queryByRole("img")).toBeNull();
@@ -162,22 +178,23 @@ describe("KpiStrip", () => {
     await screen.findByText("1.0k");
   });
 
-  it("labels a peak under 1 as itself, not as the scale's floor", async () => {
+  it("labels a sub-unit minute peak accurately in the canonical history", async () => {
     stubFetch({
       ...REGISTRY_ROUTES,
       "/api/overview": {
         ...OVERVIEW,
-        kpis: { ...kpis, spendToday: { usd: 0.4, perHour: [0.4], series: [0, 0.2, 0.4] } },
+        kpis: { ...kpis, spendToday: { usd: 0.4, perHour: [900], series: [0, 0.2, 0.4] } },
       },
     });
-    render(<KpiStrip />);
+    render(<KpiHistory />);
     const tile = await screen.findByRole("link", { name: /Cost · today/ });
-    // the trace, its peak and its change wear the value's "~$" (API-equivalent)
-    await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("~$0.40"));
-    expect(within(tile).getByText("+$0.40 · 30m")).toBeTruthy();
-    expect(tile.querySelector(".kpi-peak")?.getAttribute("title")).toBe(
-      "Peak in the last 30 minutes",
-    );
+    await waitFor(() => expect(within(tile).getByText("+$0.40 · 30m")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Cost · today history" }));
+    expect(screen.getByText("Peak ~$0.4")).toBeTruthy();
+    expect(screen.getByText("Latest ~$0.4 USD/min")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Cost per minute · USD\/min/ })).toBeTruthy();
+    // Neither the hourly900 nor a scale floor of1 can stand in for the measured0.4 peak.
+    expect(screen.queryByText("Peak ~$1")).toBeNull();
   });
 
   it.each([
@@ -247,20 +264,33 @@ describe("KpiStrip", () => {
         body: failed ? {} : { at, kpis },
       }),
     });
-    render(<KpiStrip />);
+    render(<KpiHistory />);
     await screen.findByText("41.2k");
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.querySelectorAll(".spark-now.live").length).toBeGreaterThan(0);
+    const graph = screen.getByRole("img", { name: /Token throughput.*complete minutes/ });
+    const readings = graph.querySelector("path")?.getAttribute("d");
+    expect(readings).toBeTruthy();
     failed = true;
     act(() => hub.refetchTopic("agents"));
     const warning = await screen.findByRole("alert");
-    // stale values keep their traces, but the now-cursors stop claiming live
-    expect(document.querySelectorAll(".spark-now.live")).toHaveLength(0);
+    // Completed-minute observations stay available with an explicit stale history warning.
+    expect(screen.getByRole("status").textContent).toBe(
+      "History refresh failed. Showing the last received minutes.",
+    );
+    expect(graph.querySelector("path")?.getAttribute("d")).toBe(readings);
+    expect(graph.getAttribute("aria-label")).not.toMatch(/live|now/);
     expect(warning.textContent).toBe("Last updated 11:25 · refresh failed. Showing stale values.");
     expect(screen.getByText("41.2k")).toBeTruthy();
     failed = false;
     act(() => hub.refetchTopic("agents"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(
+      screen
+        .getByRole("img", { name: /Token throughput/ })
+        .querySelector("path")
+        ?.getAttribute("d"),
+    ).toBe(readings);
     expect(screen.getByText("41.2k")).toBeTruthy();
   });
 
@@ -276,12 +306,21 @@ describe("KpiStrip", () => {
       "/api/overview?session=s1": withHistory,
       "/api/attention": [item({ key: "a", at: NOW - 2 * HOUR }), item({ key: "b", at: NOW })],
     });
-    render(<KpiStrip />);
+    render(<KpiHistory />);
     const tile = () => screen.getByRole("link", { name: /Needs you/ });
-    await waitFor(() => expect(within(tile()).queryByRole("img")).not.toBeNull());
+    await waitFor(() => expect(tile().querySelector(".v")?.textContent).toBe("2"));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Needs you · now history" }));
+    const history = () => screen.getByRole("img", { name: /Needs you · global inbox/ });
+    const trace = history().querySelector("path")?.getAttribute("d");
+    expect(trace).toBe("M0.0,3.0L50.0,22.0L100.0,12.5");
     act(() => setSession("s1"));
     await waitFor(() => expect(tile().querySelector(".v")?.textContent).toBe("2"));
-    expect(within(tile()).queryByRole("img")).not.toBeNull();
+    expect(history().querySelector("path")?.getAttribute("d")).toBe(trace);
+    fireEvent.click(screen.getByText("Recorded values · 3 points"));
+    const values = screen.getByRole("region", { name: "Recorded items observations" });
+    expect(
+      [...values.querySelectorAll("tbody tr td:last-child")].map((cell) => cell.textContent),
+    ).toEqual(["4", "0", "2"]);
     act(() => setSession(SESSION_ALL));
   });
 });

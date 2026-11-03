@@ -25,6 +25,8 @@ const LINE_TOKENS = {
   "--lh": "20px",
   "--lh-s": "16px",
   "--lh-micro": "16px",
+  "--lh-summary": "18px",
+  "--lh-axis": "14px",
 } as const;
 const SPACING_TOKENS = {
   "--sp-1": "4px",
@@ -58,7 +60,7 @@ const stripTs = (ts: string) =>
     .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 const FONT_SIZE_OK = /^(var\(--fs(-title|-panel|-s|-micro)?\)|inherit)$/;
-const LINE_HEIGHT_OK = /^(var\(--lh(-title|-panel|-s|-micro)?\)|inherit)$/;
+const LINE_HEIGHT_OK = /^(var\(--lh(-title|-panel|-s|-micro|-summary|-axis)?\)|inherit)$/;
 const SPACING_PROP = /^(padding|margin|gap|row-gap|column-gap)(-[a-z]+)*$/;
 
 /** Every `prop: value` of a stylesheet, with the line it is on. */

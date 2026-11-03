@@ -53,6 +53,8 @@ async function shellMetrics(page: RenderedPage) {
         .map((element) => element.getBoundingClientRect().height),
       smallControls,
       selected: document.activeElement?.id,
+      selectedLabel: document.activeElement?.textContent?.trim(),
+      overlay: dock?.getAttribute("aria-modal") === "true",
       collapsed: dock?.classList.contains("collapsed"),
       summaryItems: document.querySelectorAll(".dock-summary-item").length,
       panelHead: document.querySelector(".ph h2")
@@ -98,18 +100,20 @@ describeRendered("Approved compact desktop shell", () => {
             expect(initial.gutter).toBe(width < 1600 ? 16 : 24);
             expect(initial.gap).toBe(initial.gutter);
             expect(initial.collapsed).toBe(width < 2200);
-            expect(initial.dockWidth).toBe(width < 2200 ? 48 : 380);
+            expect(initial.dockWidth).toBe(width < 2200 ? 48 : 400);
             expect(initial.panelHead).toBe("14px");
-            expect(initial.panelPadding).toEqual([width < 2200 ? "8px" : "12px", "16px"]);
-            expect(initial.rows.every((height) => height === (width < 2200 ? 32 : 40))).toBe(true);
+            expect(initial.panelPadding).toEqual(["2px", "12px"]);
+            expect(initial.rows.length).toBeGreaterThan(0);
+            expect(initial.rows.every((height) => height === 32)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
             await page.boxes(".dock-summary-item");
             const expanded = await shellMetrics(page);
-            expect(expanded.dockWidth).toBe(380);
+            expect(expanded.dockWidth).toBe(400);
+            expect(expanded.overlay).toBe(width < 2200);
             expect(expanded.summaryItems).toBe(3);
             expect(expanded.smallControls).toEqual([]);
-            if (width < 2200) expect(expanded.selected).toBe("dockHeading");
+            if (width < 2200) expect(expanded.selectedLabel).toBe("Hide");
             expect(
               (
                 await page.reachable(
@@ -171,12 +175,33 @@ describeRendered("Approved compact desktop shell", () => {
           undefined,
         );
         await page.press("Enter");
-        expect(
-          await page.evaluate(() => {
-            const heading = document.querySelector("#dockHeading");
-            return heading ? getComputedStyle(heading).outlineStyle : null;
-          }, undefined),
-        ).toBe("solid");
+        // Overview opens as a modal at this canvas width; its initial control is Hide.
+        // Keep the keyboard focus guarantee and verify the outline is actually painted.
+        await expect
+          .poll(() =>
+            page.evaluate(() => {
+              const control = document.querySelector<HTMLButtonElement>(
+                '#dockHead button[title="Hide FLIGHT (f)"]',
+              );
+              const rect = control?.getBoundingClientRect();
+              const hit = rect
+                ? document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+                : null;
+              return {
+                focused: document.activeElement === control,
+                outline: control ? getComputedStyle(control).outlineStyle : null,
+                painted: !!control && (hit === control || (!!hit && control.contains(hit))),
+                inside:
+                  !!rect &&
+                  rect.x >= 0 &&
+                  rect.y >= 0 &&
+                  rect.right <= innerWidth &&
+                  rect.bottom <= innerHeight,
+                modal: document.querySelector("#dock")?.getAttribute("aria-modal"),
+              };
+            }, undefined),
+          )
+          .toEqual({ focused: true, outline: "solid", painted: true, inside: true, modal: "true" });
         await page.evaluate(() => {
           const input = document.querySelector<HTMLInputElement>("#dockInput");
           if (!input) throw Error("Missing composer");
@@ -184,7 +209,7 @@ describeRendered("Approved compact desktop shell", () => {
           set?.call(input, "Keep the selected decision draft");
           input.dispatchEvent(new Event("input", { bubbles: true }));
         }, undefined);
-        await page.press("Tab");
+        await page.press("Shift+Tab");
         expect(
           await page.evaluate(() => document.activeElement?.textContent?.trim(), undefined),
         ).toBe("Collapse");

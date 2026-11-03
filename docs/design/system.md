@@ -12,7 +12,12 @@ data that changes a decision; detail is one click away.
 
 Use `apps/web/src/hud.css` tokens only. Spacing is 4, 8, 12, 16, 24, 32, 48 px; gutters are 24
 px (16 below 1600); panel padding is 16. Type is 20/28 page title, 14/20 panel title, 13/20 body,
-12/16 secondary. Never use text below 12 px, except 11 px mono micro-labels. Use role colours:
+12/16 secondary. Overview wrapping source/constraint summaries use the explicit `--lh-summary`
+18 px line-height with 12 px secondary text; its 11 px mono graph axes use the explicit
+`--lh-axis` 14 px line-height. Its accepted compact table/header geometry may use
+a derived half spacing step (`calc(var(--sp-1) / 2)`, 2 px); other spacing uses the scale above.
+These named/derived values preserve the reviewed Overview geometry without raw per-component
+font or spacing values. Never use text below 12 px, except 11 px mono micro-labels. Use role colours:
 accent, ok, warn, crit, think and neutral. State always has a word or shape as well as colour.
 
 ## 5–7. Components, density and detail

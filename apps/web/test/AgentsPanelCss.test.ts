@@ -4,7 +4,7 @@ import { readStyles } from "./styles.ts";
 const css = readStyles();
 it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(
-    /\.overview-grid \{[^}]*grid-template-rows: max-content max-content max-content/,
+    /\.overview-grid \{[^}]*min-height: 0;[^}]*display: flex;[^}]*flex-direction: column;[^}]*overflow-y: auto/,
   );
   expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow-y: auto/);
   // Source-independent columns keep the bounded Live log ahead of the lower allowance table.

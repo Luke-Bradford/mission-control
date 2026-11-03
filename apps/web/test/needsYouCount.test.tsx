@@ -180,7 +180,9 @@ describe("one Needs-you count", () => {
         0,
       );
       const banner = container.querySelector("#nbanner .num")?.textContent;
-      const kpi = container.querySelector('.overview-kpi[href="/flight#askP"] .v')?.textContent;
+      const kpi = container.querySelector(
+        '.overview-kpi .kpi-destination[href="/flight#askP"] .v',
+      )?.textContent;
       const pulse = screen
         .getByRole("button", { name: /^Needs you: \d+$/ })
         .querySelector("b")?.textContent;
