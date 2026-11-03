@@ -6,7 +6,7 @@ server [#1389](https://github.com/Luke-Bradford/mission-control/issues/1389), de
 [#1390](https://github.com/Luke-Bradford/mission-control/issues/1390). The [published contracts and
 original audit](../../superpowers/plans/2026-11-03-complete-briefs-759/README.md) remain retained.
 
-**Correction ready for independent narrow recheck; not an approved candidate or CI claim.** The
+**Independent narrow correction recheck clean at c7b33e77; publication and CI remain pending.** The
 first independent whole review found three Important defects at34d52951. Its [original report](review/whole-branch-34d52951.md),
 unchanged probes and actual red logs are retained. Both failed candidates34d52951 and3ed780bf remain
 immutable commits. Source/test correction c7b33e77 follows them; evidence-only successors do not
@@ -34,12 +34,13 @@ The original I2 probe assumes the invalid record-only intake succeeds before tes
 correction deliberately refuses earlier at intake400, so that old helper assumption is obsolete.
 The original file is unchanged and is **not** relabelled as an unchanged green execution. Its
 permanent regression explicitly expects the earlier refusal and checks zero answer/ack/brief writes.
-I1/I3 original probes remain available for the independent current-source recheck.
+I1/I3 original probes passed unchanged in the independent current-source recheck. The [correction report](review/correction-c7b33e77.md) separately records the adapted early-refusal I2 case.
 
 ## Actual execution stages
 
 Stages overlap. Do not sum these rows as unique passing tests or relabel a failed full pack as green.
 All raw outputs, byte counts and SHA256 values are in [log-manifest.json](log-manifest.json).
+Runner logs use lossless gzip with both compressed and raw hashes; `gzip -dc <path.log.gz>` reads the original bytes.
 
 | Stage | Actual result | Scope/limit |
 | --- | --- | --- |
@@ -60,7 +61,8 @@ All raw outputs, byte counts and SHA256 values are in [log-manifest.json](log-ma
 | Independent review at34d | Three Important findings; no Critical/separate Minor | First setup attempt executed zero cases. Actual final send diagnostic awaited the second fake-provider input; earlier count-only observation was not sufficient delivery proof. See original report. |
 | Correction focused cases | **25pass**,3files,6.17s at20:33:51UTC | API18/private context2/actual fake-CLI5. Tests ran before final safe formatting; no functional edit followed. |
 | Correction engine group | **26pass/426filtered**,3.84s at20:34:04UTC | Existing controller/UAT/hold cases plus post-await regressions; no full452-case engine rerun. |
-| Correction workspace validation | **types0/lint0/build0** | Final formatted bytes committed as c7b33e77. Lint78warnings/7infos/0errors; core62modules/no cycles. No final CI/independent narrow acceptance claimed. |
+| Correction workspace validation | **types0/lint0/build0** | Final formatted bytes committed as c7b33e77. Lint78warnings/7infos/0errors; core62modules/no cycles. No final CI claimed. |
+| Independent correction at c7 | **5pass/16skipped**,3files,3.18s at20:41:39UTC | Original I1/I3 semantics, I2 adapted only to assert the earlier refusal, plus two unchanged private-context tests. All three Important findings closed; no new finding. [Exact independent command and limits](review/correction-c7b33e77.md). |
 
 ## Executed command receipts
 
@@ -95,5 +97,5 @@ pnpm build
 Changed-file formatter argv is printed at the start of its raw log. No unsafe fix flag, test timeout,
 assertion threshold, dependency, workflow or configuration change was used. The private source
 snapshot for tranche5 remains at `/controller/1389-tranche5-unverified-source`; it is not a claim that
-all later executions used those exact bytes. Final independent recheck/CI must identify their own
-actual source heads and scopes.
+all later executions used those exact bytes. The independent correction report identifies its actual source and scope; future CI must identify its own
+actual tested head. The original failed whole review and probes remain retained.
