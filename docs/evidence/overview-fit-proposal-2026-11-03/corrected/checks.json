@@ -39,5 +39,19 @@
       "exitCode": 0
     }
   ],
-  "scope": "These are bounded native-proposal browser checks and artifact verification, not full-App tests, a test-suite count, fresh CI or an automatic visual verdict. Actual dependency/output roots are private local inputs, represented by placeholders; no dependency install or network was performed."
+  "scope": "These are bounded native-proposal browser checks and artifact verification, not full-App tests, a test-suite count, fresh CI or an automatic visual verdict. Actual dependency/output roots are private local inputs, represented by placeholders; no dependency install or network was performed.",
+  "requiredMatrix": {
+    "command": "node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/corrected/helpers/capture-required-matrix.ts \"$ROOT\" \"$OUTPUT_MATRIX\" \"$DEPS_ROOT\"",
+    "exitCode": 0,
+    "views": 16,
+    "startedAt": "2026-11-03T15:21:37.133Z",
+    "completedAt": "2026-11-03T15:21:40.794Z",
+    "manifest": "required16/render-checks.json",
+    "summary": "required16/summary.json",
+    "log": "logs/mc-overview-fit-proposal-required16-8ce-corrected.log",
+    "harnessSha256": "125422c666497edaea3b2c8e68da921429f0544903a10267c1e5b309f95bf4c4",
+    "priorAttemptExitCode": 1,
+    "priorAttemptCause": "Incorrect hit-test applicability for intentionally inert background; preserved separately.",
+    "scope": "No filter/reader repeat, no production changes or exceptional-state matrix."
+  }
 }

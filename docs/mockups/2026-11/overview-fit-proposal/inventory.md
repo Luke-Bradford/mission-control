@@ -45,6 +45,6 @@ working observed loop. There is no API, paid-provider call, crew/config write or
 
 ## Current assessment and limits
 
-The corrected source was independently reviewed as a standalone proposal. Original22e threshold failures remain retained beside source-bound8ce rechecks. Current curation adds exact8ce normal contexts in both themes, scoped viewport crops, DPR2 and local native interaction proof. The gallery records actual timestamps, source/fixture/font/browser bindings and what was inspected.
+The corrected source was independently reviewed as a standalone proposal. Original22e threshold failures remain retained beside source-bound8ce rechecks. Current curation adds exact8ce normal contexts, scoped viewport crops and local native interaction proof. A separate required16-case matrix covers1920/2560/3840CSS plus1920DPR2 in both themes and both rail states; the original failed inert-hit predicate and corrected execution remain separate. The gallery records actual timestamps, source/fixture/font/browser bindings and what was inspected.
 
 This is not full-App, live, provider or permissions verification. No browser zoom/text-enlargement run, full exceptional-state/many/long matrix or production resource/clock performance check is claimed. A future React implementation must retain existing caches, lazy reads, permission/forms/selection/routes, source errors and clock isolation. Product checkpoint63 remains held; the old7440 preview remains frozen at0c and does not display8ce.
