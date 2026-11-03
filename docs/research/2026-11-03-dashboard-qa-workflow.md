@@ -92,4 +92,13 @@ The calibration brief described required data more clearly than the promised res
 The workflow now explicitly requires both in the handoff and distinguishes a whole-breakpoint redesign
 failure from isolated polish. Severity needs a cited acceptance criterion and impact, not a count of
 empty pixels. Actual operator holds remain authoritative regardless of a reviewer's severity judgment.
-This clarification still needs forward validation; no universal visual-quality guarantee is claimed.
+The same independent reviewer then checked that clarification against the fuller original operator
+request and agreed it distinguishes the two outcomes without forcing a severity. This is a scoped
+forward check, not another blind render review or a guarantee of future visual quality.
+
+Whole-branch review found an Important integration contradiction: the generated runtime review brief
+still demanded a fix “without redesigning anything”, unlike the corrected RETRO role. The generated
+wording now asks for a concrete correction outcome within the ticket's scope and constraints, with a
+violated requirement when recomposition is needed. The existing complete brief contract and role
+checks then passed 93/93 (75 brief, 18 role). Changed-file formatting passed. The review finding stays
+historical; independent correction review and exact-head CI remain separate gates.
