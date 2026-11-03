@@ -1186,9 +1186,11 @@ describe("a seat keeps running through a restart", () => {
   it("a seat that never got its brief is failed at attach, not resumed", async () => {
     const first = make();
     first.sup.start();
-    prep.failWrite = true; // the brief never reaches the keeper
+    // Seed a historical crash between launch and first input. A known failed send now rejects immediately.
+    prep.dropWrite = true;
     const { runId } = await first.sup.startRun("guido-1", 42);
-    prep.failWrite = false;
+    prep.dropWrite = false;
+    expect(userLines()).toEqual([]);
     expect(seatState("guido-1")).toBe("starting");
     await first.sup.stopAll();
     let release = () => {};
@@ -1214,6 +1216,35 @@ describe("a seat keeps running through a restart", () => {
     );
     expect(store.run(runId)).toMatchObject({ status: "failed" });
     expect(starts()).toHaveLength(1);
+  });
+
+  it("rejects a known failed first write and never resumes that failed run", async () => {
+    const first = make();
+    first.sup.start();
+    prep.failWrite = true;
+    let error: Awaited<ReturnType<typeof refusal>>;
+    try {
+      error = await refusal(first.sup.startRun("guido-1", 42));
+    } finally {
+      prep.failWrite = false;
+    }
+    expect(error.status).toBe(500);
+    expect(error.message).toContain("Could not deliver the first brief");
+    expect(userLines()).toEqual([]);
+    const run = store.runs("guido-1", 1)[0];
+    expect(run).toMatchObject({ status: "failed" });
+    expect(run.endedAt).not.toBeNull();
+    expect(store.getSetting(`instruction.delivered:${run.id}`)).toBeNull();
+    expect(store.promptWakes(run.id)).toEqual([]);
+    await until(() => expect(starts()).toHaveLength(1));
+    await first.sup.stopAll();
+    const { sup } = make();
+    sup.start();
+    await sup.resumeRun(run.id); // Ended runs are an intentional no-op, with no attach or new CLI.
+    expect(prep.attaches).toEqual([]);
+    expect(starts()).toHaveLength(1);
+    expect(userLines()).toEqual([]);
+    expect(store.run(run.id)).toMatchObject({ status: "failed" });
   });
 
   it("attaches to the watch seat too, which has no branch to resume on", async () => {
