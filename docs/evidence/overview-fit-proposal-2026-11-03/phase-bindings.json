@@ -1,0 +1,402 @@
+{
+  "base": "99e8404ea2e78e442dee828092f6b997582ddbe7",
+  "finalVisualSource": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+  "phases": {
+    "v1": {
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "completedAt": "2026-11-03T11:15:16.869Z",
+      "views": 20,
+      "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+    },
+    "v2": {
+      "source": "82f9487c07d736ce9857aaaabbccde7b78504e38",
+      "completedAt": "2026-11-03T11:31:05.804Z",
+      "views": 20,
+      "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+    },
+    "v3": {
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "completedAt": "2026-11-03T11:39:03.760Z",
+      "views": 20,
+      "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+    },
+    "v4": {
+      "source": "19be257795853b83ef55ff4bc9821125e9d82bc9",
+      "completedAt": "2026-11-03T11:45:06.641Z",
+      "views": 5,
+      "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+    },
+    "final": {
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "completedAt": "2026-11-03T11:51:31.088Z",
+      "views": 5,
+      "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+    }
+  },
+  "curation": "31selected fictional proposal PNGs; complete private phases remain untouched. No actual live audit PNGs copied.",
+  "retainedAssets": [
+    {
+      "file": "final/1920x1080-dpr1-dark-folded-full.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "1fb08ad4d8a73763b511f4aeb6bac7eeed1ccc76ce4302b116f3cdc261d5e630",
+      "bytes": 370830,
+      "capturedAtEpochMs": 1793706689923,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/1920x1080-dpr1-dark-folded-machine.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "b8c7e1181367222af4a52b557e8b07afdd28b9154b86e8061b22c92af51044bb",
+      "bytes": 36337,
+      "capturedAtEpochMs": 1793706690059,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/1920x1080-dpr1-dark-folded-timeline.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "8002246af798f9e512c53aaf552aa58f48ea4f672bc3d3d3f0e5ed616f177481",
+      "bytes": 22275,
+      "capturedAtEpochMs": 1793706689989,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/1920x1080-dpr1-light-folded-full.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "51f2d65807f7fc35b43ba53aabfecd7fb18b5602704b26706e7d4a2b8574349e",
+      "bytes": 365844,
+      "capturedAtEpochMs": 1793706689625,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/1920x1080-dpr1-light-folded-machine.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "abb0cdae820894c06ca39c1963d7524ebaafb09e32f295485d9e7a6e9cb1b86b",
+      "bytes": 35599,
+      "capturedAtEpochMs": 1793706689759,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/1920x1080-dpr1-light-folded-timeline.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "57c963aa84e5079604144bdcb9fdcac117a0485d982b2c95a46e11b7346d4984",
+      "bytes": 21998,
+      "capturedAtEpochMs": 1793706689689,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-dark-open-full.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "3e55b1a656019668c73ff11603b23f9312f7f5350acde6a5c7f6b31e455f5739",
+      "bytes": 524617,
+      "capturedAtEpochMs": 1793706690544,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-dark-open-machine.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "0d28d2441ddd1da1b742cf69c863ac2fa5f16f46a715cde63a5fec8c9dfe51f1",
+      "bytes": 36872,
+      "capturedAtEpochMs": 1793706690692,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-dark-open-timeline.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "1dff87e581e1259fa674376840ce94d95d47bb66a6dbfd040d318ab8806124e1",
+      "bytes": 26275,
+      "capturedAtEpochMs": 1793706690624,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-light-open-full.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "2b43b2ecca2b74800c870bc0a0a83215ae5055d2a0fbcab50fc2d3b49bf1f54f",
+      "bytes": 513040,
+      "capturedAtEpochMs": 1793706690228,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-light-open-machine.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "e3a9ff5643520ef472e06e9f39c120b21efd4d1aec61120e103bd3355ffbdbbf",
+      "bytes": 36193,
+      "capturedAtEpochMs": 1793706690375,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/2560x1440-dpr1-light-open-timeline.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "f0a786e0b78512ceb04ad8643409e02254d0b1c20a2edb11a21aa3c739911605",
+      "bytes": 26297,
+      "capturedAtEpochMs": 1793706690307,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/3840x2160-dpr1-dark-folded-full.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "1e40755dd0fa8a7b93db8c451e0ec6c25c64dd56d954fb696dd2889de27ecbe8",
+      "bytes": 639165,
+      "capturedAtEpochMs": 1793706690917,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/3840x2160-dpr1-dark-folded-machine.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "a37600aa6e40c0b35d25b18577957c708bae37885ed846f5ec284c37f42ae2bb",
+      "bytes": 49205,
+      "capturedAtEpochMs": 1793706691068,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "final/3840x2160-dpr1-dark-folded-timeline.png",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "sha256": "4c6bfff4ce334b8e383aa5c04ccbb35afa9c9735093196c14eef4cf4e3b35537",
+      "bytes": 46422,
+      "capturedAtEpochMs": 1793706690992,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/1600x700-dpr1-light-folded-full.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "fa72eb4880b063fd80536d670289bdbd6db77ddd018e0dd55fe5e45f95b26979",
+      "bytes": 180970,
+      "capturedAtEpochMs": 1793705941789,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/1920x1080-dpr2-dark-open-full.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "23ff34d875053a7d80311b405cf386932f83c8047a70d5f40c13fa24c230f83e",
+      "bytes": 892556,
+      "capturedAtEpochMs": 1793705940517,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/1920x1080-dpr2-light-folded-full.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "4d47de6e8a2275093bd242f5e274b5fa03203d9bcb246d1f0aed15e74a11da38",
+      "bytes": 859035,
+      "capturedAtEpochMs": 1793705939007,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/3840x2160-dpr1-light-open-full.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "94f14787ea252ff72279840bad68c7465e2e412f943654bf0f392bb0ca499031",
+      "bytes": 675360,
+      "capturedAtEpochMs": 1793705937562,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-machine-histories.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "8ebeb5113cd34b4dc1ce30fe8ada9458304ba0c8f4e4ee9b38ace8872729dd53",
+      "bytes": 244672,
+      "capturedAtEpochMs": 1793705943055,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-machine-lock-queue-actions-visible.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "b5349f5ffed7a1335c06bc1f26e792ae7ade8f850b4768fc350cf220af93186f",
+      "bytes": 301621,
+      "capturedAtEpochMs": 1793705943627,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-machine-processes-visible.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "dfda99b7d4c0539bb4571706ceba07471bab214f6d4ac098d117ecb2053c4dfa",
+      "bytes": 295855,
+      "capturedAtEpochMs": 1793705943381,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-machine-transcripts-visible.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "dfda99b7d4c0539bb4571706ceba07471bab214f6d4ac098d117ecb2053c4dfa",
+      "bytes": 295855,
+      "capturedAtEpochMs": 1793705943512,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-provider-provenance-end.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "7d0154387f31a7982c652b57040f92da1c534dcbcf367f02f4bb74833bea5b60",
+      "bytes": 347268,
+      "capturedAtEpochMs": 1793705943742,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v3/detail-subcent-cost.png",
+      "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+      "sha256": "cb6d77cad506f31cffaa15465733943d37c225732fdc1ea2a17d342e28ceea2f",
+      "bytes": 252192,
+      "capturedAtEpochMs": 1793705942963,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v2/1920x1080-dpr1-light-folded-full.png",
+      "source": "82f9487c07d736ce9857aaaabbccde7b78504e38",
+      "sha256": "5240ca39663d7b8c214f6677c42c6103b8c52332aa2e8089a4a307cb5b7ec649",
+      "bytes": 365752,
+      "capturedAtEpochMs": 1793705456003,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v2/2560x1440-dpr1-light-open-signals.png",
+      "source": "82f9487c07d736ce9857aaaabbccde7b78504e38",
+      "sha256": "ef77fb4664d6fdb8da09592299ea87e776d09545f70f31c8d8bf0886eea67290",
+      "bytes": 77423,
+      "capturedAtEpochMs": 1793705458342,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v2/detail-machine-lock-transcripts-end.png",
+      "source": "82f9487c07d736ce9857aaaabbccde7b78504e38",
+      "sha256": "497d323ad2d8aa89688066e2014d0ea9168a75b951e5be7a9d279067824d1991",
+      "bytes": 244122,
+      "capturedAtEpochMs": 1793705465704,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v1/1920x1080-dpr1-dark-open-full.png",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "sha256": "6f542d658ced50b12e86d8d9b64fd3604da50cf9342f8342c640cf0add06d259",
+      "bytes": 370633,
+      "capturedAtEpochMs": 1793704511032,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v1/1920x1080-dpr1-light-folded-full.png",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "sha256": "bf307432f99621e578bbe30253a0a9670534e3029424111bd3fc2162dfa8c7c2",
+      "bytes": 355809,
+      "capturedAtEpochMs": 1793704510049,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    },
+    {
+      "file": "v1/3840x2160-dpr1-dark-folded-full.png",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "sha256": "244f8e3a0f10781e699f586ac569a7b1654f96b9ba69724c3bf5ba6aab89cebb",
+      "bytes": 441447,
+      "capturedAtEpochMs": 1793704513415,
+      "scope": "Standalone fictional native prototype; actual source phase retained. Detail supplemental timestamps use original file mtime; frame timestamps are additionally in the original manifest."
+    }
+  ],
+  "normalizedManifestRecords": [
+    {
+      "file": "v1/render-checks.json",
+      "originalSha256": "2e87a207af2754b22ccdd06a165209265c9754e5d01a118995a1b5c6a00d8cfd",
+      "retainedSha256": "2e87a207af2754b22ccdd06a165209265c9754e5d01a118995a1b5c6a00d8cfd",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "v2/render-checks.json",
+      "originalSha256": "71dede85bc7b2da72d990074a428d43203d2efd07dfe8939f2a67635ce2423e1",
+      "retainedSha256": "71dede85bc7b2da72d990074a428d43203d2efd07dfe8939f2a67635ce2423e1",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "v2/interaction-checks.json",
+      "originalSha256": "c49d5e568180cba1c21c6ca0586b284dab00cd9e836955d89c26414e03e21c29",
+      "retainedSha256": "c49d5e568180cba1c21c6ca0586b284dab00cd9e836955d89c26414e03e21c29",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "v3/render-checks.json",
+      "originalSha256": "9b5aca62343bbbfd786c3c0cc35a08ea0e8056793f1c5d03fc77655376d1985c",
+      "retainedSha256": "9b5aca62343bbbfd786c3c0cc35a08ea0e8056793f1c5d03fc77655376d1985c",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "v3/interaction-checks.json",
+      "originalSha256": "1df4bab74afc421a0420b04d2a6798867e742c89358e958cf04d33d1d4af8ef0",
+      "retainedSha256": "1df4bab74afc421a0420b04d2a6798867e742c89358e958cf04d33d1d4af8ef0",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "v4/render-checks.json",
+      "originalSha256": "ae5ed0653aa6374823f0ecc03b662c6772e875c8bf0b4ff89249120899af6b26",
+      "retainedSha256": "ae5ed0653aa6374823f0ecc03b662c6772e875c8bf0b4ff89249120899af6b26",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    },
+    {
+      "file": "final/render-checks.json",
+      "originalSha256": "b681564877828b6cddcef0b56d8f2f5d19c36044794530b7d690574a16ca0964",
+      "retainedSha256": "b681564877828b6cddcef0b56d8f2f5d19c36044794530b7d690574a16ca0964",
+      "normalization": "Local absolute paths only; no data/source/timestamp changes."
+    }
+  ],
+  "helpers": [
+    {
+      "file": "helpers/capture-v1-executed.ts",
+      "sha256": "29194d9b3315a603e9271b66879d123530e1b74b7ca5749bfd7ac4d01d3e4927",
+      "scope": "Exact executed helper snapshot; retains its original controller-relative arrangement. Portable counterparts are separate and labelled."
+    },
+    {
+      "file": "helpers/capture-v2-executed.ts",
+      "sha256": "2a51ce1347529fb6de7f3ff80d872d4e9acd2850defada37f963d8287343ab8a",
+      "scope": "Exact executed helper snapshot; retains its original controller-relative arrangement. Portable counterparts are separate and labelled."
+    },
+    {
+      "file": "helpers/capture-v3-executed.ts",
+      "sha256": "c5db35fa32d112408c49d24684535bedbcc3747427c7f77c613b4977611cc740",
+      "scope": "Exact executed helper snapshot; retains its original controller-relative arrangement. Portable counterparts are separate and labelled."
+    },
+    {
+      "file": "helpers/capture-v4-executed.ts",
+      "sha256": "e4bfdeaaf5c1fc43d3ed30771de1f5511a4d2edc37b19e0c2df97aca6626e387",
+      "scope": "Exact executed helper snapshot; retains its original controller-relative arrangement. Portable counterparts are separate and labelled."
+    },
+    {
+      "file": "helpers/capture-final-executed.ts",
+      "sha256": "5cc64e8dafcc5099462086436b240dc69a956ab8d6847b11cbd435068b117b3f",
+      "scope": "Exact executed helper snapshot; retains its original controller-relative arrangement. Portable counterparts are separate and labelled."
+    },
+    {
+      "file": "capture.ts",
+      "sha256": "2854ae85704947839cb1cd5c780b5f8939462465322097a121a97caa547fd3d6",
+      "scope": "Portable ROOT/OUTPUT adapter; project-local Playwright lookup. Not executed in the recorded run; archived original is byte-identical."
+    },
+    {
+      "file": "capture-full-interactions.ts",
+      "sha256": "bd82f24bc87e9b2197c2a10adbb53f4ded593d1a9f16395dd66f6f6e8945e505",
+      "scope": "Portable ROOT/OUTPUT adapter; project-local Playwright lookup. Not executed in the recorded run; archived original is byte-identical."
+    }
+  ],
+  "logs": [
+    {
+      "file": "logs/mc-overview-fit-proposal-final-render.log",
+      "originalSha256": "65b3426c7e0b3bb69d3a92e269f2975f6398c938b6c9700f2eca8760f9feed35",
+      "retainedSha256": "43876131503a29896c75ebe18f9cc14b1c120eede4706078f2a5ba21a8a97322",
+      "normalization": "Absolute local paths only."
+    },
+    {
+      "file": "logs/mc-overview-fit-proposal-render.log",
+      "originalSha256": "e474c19c40580f300f20b20bfc89cd1d6a4c5e7609aa6fcedfec3a6869a23606",
+      "retainedSha256": "ed0ef86008a0414d6e94e83293277cd3dfc2a85397ea873ecaa88f119f4378c0",
+      "normalization": "Absolute local paths only."
+    },
+    {
+      "file": "logs/mc-overview-fit-proposal-v2-render.log",
+      "originalSha256": "7182c7e1f4322c6af8a14e022d26eb96bbb7fdfcc5f19237ae68b6f963923fd9",
+      "retainedSha256": "245ffd9ce4de7a4352cf4e83c721c763f28c84e27ea50580d3990766d9b94d0a",
+      "normalization": "Absolute local paths only."
+    },
+    {
+      "file": "logs/mc-overview-fit-proposal-v3-render.log",
+      "originalSha256": "53176bad712d12729eea8e398a154855548dcf4bbee69eca38947c121b74ba4c",
+      "retainedSha256": "af25f4c2a8b9838e327a16149457fd94a40b71fdbadf35ac3b9d2d9d59998235",
+      "normalization": "Absolute local paths only."
+    },
+    {
+      "file": "logs/mc-overview-fit-proposal-v4-render.log",
+      "originalSha256": "5e39ba3d0c120e15494003e64a79ce471051c5be296e8eb91eddaf88b081ba8d",
+      "retainedSha256": "b585886b5332a24c7e1ba0cea2b2f162f67c3b7a665911cc9f44f6265e3cceb9",
+      "normalization": "Absolute local paths only."
+    }
+  ],
+  "continuity": "Full20-view/keyboards/detail proof is actualf79(V3). V4/final change only labelled durations, Machineendpoint scope, and native row-link targets; finalfivecontexts measure those corrections. Relevant process/transcript/lock/dialog/filter code and geometry remain unchanged; do not relabel oldphotosasfinal.",
+  "scope": "Repo-native design proposal only, no production source edits, API reads, writes, provider actions or GitHub publication."
+}

@@ -1,0 +1,586 @@
+{
+  "tabs": [
+    {
+      "inFlight": true,
+      "label": "Preview send",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Close · Esc",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Read the recorded evidence",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Inspect allowance",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "FLIGHT · 11:59The current work and its evidence remain visible in the crew table. This is a fictional layout proposal.",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "draft",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Preview send",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Close · Esc",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Read the recorded evidence",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Inspect allowance",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "FLIGHT · 11:59The current work and its evidence remain visible in the crew table. This is a fictional layout proposal.",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "draft",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Preview send",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Close · Esc",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Read the recorded evidence",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "Inspect allowance",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "FLIGHT · 11:59The current work and its evidence remain visible in the crew table. This is a fictional layout proposal.",
+      "coveredBackgroundInert": true
+    },
+    {
+      "inFlight": true,
+      "label": "draft",
+      "coveredBackgroundInert": true
+    }
+  ],
+  "filters": [
+    {
+      "id": "all",
+      "visible": [
+        "review",
+        "steps",
+        "review",
+        "steps",
+        "steps",
+        "review"
+      ]
+    },
+    {
+      "id": "review",
+      "visible": [
+        "review",
+        "review",
+        "review"
+      ]
+    },
+    {
+      "id": "steps",
+      "visible": [
+        "steps",
+        "steps",
+        "steps",
+        "steps",
+        "steps"
+      ]
+    },
+    {
+      "id": "merges",
+      "visible": [
+        "merges"
+      ]
+    },
+    {
+      "id": "guard",
+      "visible": [
+        "guard"
+      ]
+    },
+    {
+      "id": "needs",
+      "visible": [
+        "needs"
+      ]
+    },
+    {
+      "id": "comms",
+      "visible": [
+        "comms"
+      ]
+    }
+  ],
+  "source": "f79cd8511b3f1b9d61c0fba2e424f5e17ad561f5",
+  "readerRestore": {
+    "readerClosed": true,
+    "inFlight": true,
+    "flightOpen": true,
+    "label": "Inspect allowance"
+  },
+  "close": {
+    "closed": true,
+    "mainInert": false,
+    "focus": "expand",
+    "draft": "Retain this fictional proposal draft."
+  },
+  "detailVisible": [
+    {
+      "id": "process-detail",
+      "box": {
+        "x": 417,
+        "y": 104.75,
+        "width": 1086,
+        "height": 212.5,
+        "top": 104.75,
+        "right": 1503,
+        "bottom": 317.25,
+        "left": 417
+      },
+      "region": {
+        "x": 401,
+        "y": 105.25,
+        "width": 1118,
+        "height": 920,
+        "top": 105.25,
+        "right": 1519,
+        "bottom": 1025.25,
+        "left": 401
+      },
+      "scrollTop": 2125,
+      "max": 2287,
+      "rows": [
+        {
+          "text": "Process groupCountCPU / total hostRAM",
+          "box": {
+            "x": 417,
+            "y": 132.25,
+            "width": 1086,
+            "height": 36,
+            "top": 132.25,
+            "right": 1503,
+            "bottom": 168.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Agent CLI processes1114%11.2 GiB",
+          "box": {
+            "x": 417,
+            "y": 168.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 168.25,
+            "right": 1503,
+            "bottom": 204.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Test processes37%1.8 GiB",
+          "box": {
+            "x": 417,
+            "y": 204.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 204.75,
+            "right": 1503,
+            "bottom": 241.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Other processes— not reported16%7.5 GiB",
+          "box": {
+            "x": 417,
+            "y": 241.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 241.25,
+            "right": 1503,
+            "bottom": 277.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": "transcript-detail",
+      "box": {
+        "x": 417,
+        "y": 333.25,
+        "width": 1086,
+        "height": 497,
+        "top": 333.25,
+        "right": 1503,
+        "bottom": 830.25,
+        "left": 417
+      },
+      "region": {
+        "x": 401,
+        "y": 105.25,
+        "width": 1118,
+        "height": 920,
+        "top": 105.25,
+        "right": 1519,
+        "bottom": 1025.25,
+        "left": 401
+      },
+      "scrollTop": 2125,
+      "max": 2287,
+      "rows": [
+        {
+          "text": "SeatTranscript bytesFiles",
+          "box": {
+            "x": 417,
+            "y": 392.25,
+            "width": 1086,
+            "height": 36,
+            "top": 392.25,
+            "right": 1503,
+            "bottom": 428.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "FLIGHT209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 428.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 428.25,
+            "right": 1503,
+            "bottom": 464.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-1209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 464.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 464.75,
+            "right": 1503,
+            "bottom": 501.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-2209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 501.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 501.25,
+            "right": 1503,
+            "bottom": 537.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-3209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 537.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 537.75,
+            "right": 1503,
+            "bottom": 574.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-4209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 574.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 574.25,
+            "right": 1503,
+            "bottom": 610.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "PLAN-1209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 610.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 610.75,
+            "right": 1503,
+            "bottom": 647.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "REVIEW-1209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 647.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 647.25,
+            "right": 1503,
+            "bottom": 683.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-5209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 683.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 683.75,
+            "right": 1503,
+            "bottom": 720.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "DEV-6209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 720.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 720.25,
+            "right": 1503,
+            "bottom": 756.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "REVIEW-2209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 756.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 756.75,
+            "right": 1503,
+            "bottom": 793.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "PLAN-2209,715,200 (200 MiB)10",
+          "box": {
+            "x": 417,
+            "y": 793.25,
+            "width": 1086,
+            "height": 36.5,
+            "top": 793.25,
+            "right": 1503,
+            "bottom": 829.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": "lock-detail",
+      "box": {
+        "x": 417,
+        "y": 739.75,
+        "width": 1086,
+        "height": 285.5,
+        "top": 739.75,
+        "right": 1503,
+        "bottom": 1025.25,
+        "left": 417
+      },
+      "region": {
+        "x": 401,
+        "y": 105.25,
+        "width": 1118,
+        "height": 920,
+        "top": 105.25,
+        "right": 1519,
+        "bottom": 1025.25,
+        "left": 401
+      },
+      "scrollTop": 2259,
+      "max": 2287,
+      "rows": [
+        {
+          "text": "Stop the run",
+          "box": {
+            "x": 421,
+            "y": 806.75,
+            "width": 89.65625,
+            "height": 25.5,
+            "top": 806.75,
+            "right": 510.65625,
+            "bottom": 832.25,
+            "left": 421
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Open DEV-2",
+          "box": {
+            "x": 526.65625,
+            "y": 806.75,
+            "width": 89.09375,
+            "height": 25.5,
+            "top": 806.75,
+            "right": 615.75,
+            "bottom": 832.25,
+            "left": 526.65625
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Open ticket#1402",
+          "box": {
+            "x": 631.75,
+            "y": 806.75,
+            "width": 125.484375,
+            "height": 25.5,
+            "top": 806.75,
+            "right": 757.234375,
+            "bottom": 832.25,
+            "left": 631.75
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "PositionSeatTicketRunWaiting",
+          "box": {
+            "x": 417,
+            "y": 879.75,
+            "width": 1086,
+            "height": 36,
+            "top": 879.75,
+            "right": 1503,
+            "bottom": 915.75,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "1DEV-3#1403r-dev320s · since 11:59:40",
+          "box": {
+            "x": 417,
+            "y": 915.75,
+            "width": 1086,
+            "height": 36.5,
+            "top": 915.75,
+            "right": 1503,
+            "bottom": 952.25,
+            "left": 417
+          },
+          "painted": true,
+          "visible": true
+        },
+        {
+          "text": "Open DEV-3 / its queued work",
+          "box": {
+            "x": 421,
+            "y": 956.75,
+            "width": 193.421875,
+            "height": 25.5,
+            "top": 956.75,
+            "right": 614.421875,
+            "bottom": 982.25,
+            "left": 421
+          },
+          "painted": true,
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "machineRetained": {
+    "transcripts": true,
+    "testProcesses": true,
+    "queue": true,
+    "stopAction": true
+  },
+  "providerRetained": {
+    "source": true,
+    "freshness": true,
+    "backoff": true
+  }
+}

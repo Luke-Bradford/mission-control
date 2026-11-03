@@ -88,37 +88,30 @@ raw samples remain available. The normal source-shaped example has eight in-prog
 (five building/checks, three review), three operator items, six working configured seats and one
 working observed loop. There is no API, paid-provider call, crew/config write or observed-loop mutation.
 
-## Render receipt still required
+## Actual render phases and implementation boundary
 
-Record actual full views first, then crew/analytical crops:1920×1080,2560×1440,3840×2160 atDPR1,
-and1920×1080 atDPR2, both themes, folded/open FLIGHT. Also inspect smaller/short views without
-claiming the complete dashboard is initially visible there. Keep source/hash, UTC, actual pixel
-size and panel bounds, plus visual observations. Geometry alone is not a design verdict.
+The [curated gallery](../../../evidence/overview-fit-proposal-2026-11-03/README.md) retains exact phases.
+The final candidate source is `0c92ee23dfe9973203167e0299a6d1950c024dbc`. Five actual final contexts
+cover both themes at 1920/folded and 2560/open, plus true 3840/dark. Their captions/last-unit glyphs,
+Machine endpoint anchors, 24px native targets and absence of outer scrolling were measured.
+The prior f79 phase retains the complete 20-view matrix (including DPR 2 and smaller/shorter views)
+and actual modal/filter/draft/visibly scrolled reader proofs. Later changes are explicitly limited to
+labels/endpoint scope and native crew/log/Pipeline target areas; old photos are never relabelled final.
 
+Timeline labels remain **inside** the shown example bars, using `chk 12m` / `rev 10m` and an explicit
+legend. A production implementation must provide external readable companion text for spans too
+short for these labels, rather than clipping a duration or its unit. The normal side stack now uses
+an analytical wrapper with natural flow, not a manually calculated top offset; it becomes
+`display: contents` only to release the same children into three useful columns.
 
-## Deliberate use of taller CSS viewports
+Actual 1920 main scrollHeight/clientHeight are 1001/1001 with scrollTop 0; the analytical stack ends
+at 1021. Current Timeline axis anchors and Machine endpoint-to-trace errors are 0px. At 2560/open,
+columns are 1050 / 507 / 507px. The actual full reader proof visibly exposes process, transcript and
+lock rows/actions, rather than relying on text-presence booleans. Earlier V1/V2 critique, sources,
+rejected proof images and their limits remain in the resolution map.
 
-At2560×1440, the third column remains available even with the400px inline conversation:
-2074px is the actual minimum (1050px crew +500px +500px +24px gaps), not a viewport guess.
-Eight Timeline lanes become visible; larger Machine traces retain time endpoints/range/current/peak.
-The complete six-window allowance comparison appears below Pipeline, with source/freshness/backoff
-and full forecast/reset columns. These are existing fields, not additional collection.
-
-At3840×2160, all13 Timeline lanes appear, with explicit no-observed-interval rows rather than invented
-spans. The live log exposes twelve actual example events, not six rows plus empty padding. Machine
-shows three larger labelled plots, per-metric current/peak/range/time endpoints. Full allowance data
-remains inline, and a lower comparison row exposes all five existing measured histories with distinct
-units and raw-sample access. This consumes useful vertical capacity; extra space does not merely
-enlarge the same sparklines. Compact crew rows and accepted fixed column allocations stay unchanged.
-
-The v1 render and its review findings remain historical. V2 corrects minimum chart type, the Timeline
-axis (0/50/100% anchors share exactly the80px lane-label offset and track width), modal focus under the
-FLIGHT overlay, the retained Activity filter set, and complete Machine/lock/provider detail.
-Transcript total/per-seat bytes/files/oldest age, agent/test/other process split, allocation warning,
-full lock holder/command/elapsed/usual-duration availability and named waiters/seat/ticket/stop actions
-are explicitly available in named complete detail. The prototype never executes those actions.
-
-History sample points use bucket centres within the labelled30-minute window. Raw tables identify
-bucket starts; missing intervals are actual gaps. The table/plot units remain the same. V2 must still
-be checked in actual full renders and keyboard interaction; these statements are not a self-awarded
-production design pass.
+This is a reviewed design proposal, not deployed App verification. Future React implementation must
+retain source ownership, route/form/permission behavior, lazy history, clock isolation and persistent
+dock draft/focus, without a new collector or duplicate read. A real-App whole-branch review and CI
+remain separate requirements. The final target correction was independently reported clean at
+11:54:46 UTC on 3 November 2026; no production pass is inferred from that proposal assessment.
