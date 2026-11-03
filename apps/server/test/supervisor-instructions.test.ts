@@ -1,8 +1,9 @@
 // All process boundaries use the repository's fake CLI/keeper fixture, never a paid provider.
 import "./supervisor-harness.ts";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { directionKey, readDirectionContext } from "../src/runtime/instruction-context.ts";
 import { crewPromptPath } from "../src/store.ts";
 import {
@@ -12,6 +13,8 @@ import {
   make,
   noKeepers,
   prep,
+  recorded,
+  refusal,
   seatState,
   store,
   until,
@@ -482,3 +485,95 @@ it.each([true, false])(
     expect(store.getSetting("crew.paused")).toBe(pause);
   },
 );
+
+it.each(["watch", "writer"])(
+  "audits the final %s envelope when guidance changes after the pre-spawn audit",
+  async (kind) => {
+    direction();
+    const { sup } = make({ extraSeat: flight });
+    const seatId = kind === "watch" ? flight.id : "guido-1";
+    const save = store.setRunPromptVersion.bind(store);
+    const versions = vi.spyOn(store, "setRunPromptVersion").mockImplementation((...args) => {
+      save(...args);
+      if (versions.mock.calls.length === 1)
+        store.instructions.create(
+          seatId,
+          { kind: "text", text: "Guidance changed after preparation" },
+          "operator",
+          Date.now(),
+        );
+    });
+    sup.start();
+    const { runId } =
+      kind === "watch" ? await sup.startWatch(seatId) : await sup.startRun(seatId, 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const initial = userLines()[0] as string;
+    expect(initial).toContain("Guidance changed after preparation");
+    const instructions = readFileSync(crewPromptPath(dbPath, runId), "utf8");
+    const expectedHash = createHash("sha256")
+      .update(["developer-instructions", instructions, "first-brief", initial].join("\0"))
+      .digest("hex");
+    expect(store.run(runId)?.promptHash).toBe(expectedHash);
+    expect(versions.mock.calls).toHaveLength(2);
+    expect(versions.mock.calls[0][1]).not.toBe(expectedHash);
+    expect(versions.mock.calls[1][4]).toBe(versions.mock.calls[0][1]);
+    expect(() =>
+      store.setRunPromptVersion(
+        runId,
+        "late-replacement",
+        "roles/late.md",
+        Date.now(),
+        expectedHash,
+      ),
+    ).toThrow("Prepared prompt identity changed before delivery");
+    expect(store.run(runId)?.promptHash).toBe(expectedHash);
+    expect(store.promptWakes(runId)[0].sections.reduce((n, section) => n + section.bytes, 0)).toBe(
+      Buffer.byteLength(instructions + initial),
+    );
+  },
+);
+
+it.each(["watch", "writer"])(
+  "refuses the first %s turn when final prompt audit storage fails",
+  async (kind) => {
+    direction();
+    const { sup } = make({ extraSeat: flight });
+    const seatId = kind === "watch" ? flight.id : "guido-1";
+    const save = store.setRunPromptVersion.bind(store);
+    vi.spyOn(store, "setRunPromptVersion").mockImplementation((...args) => {
+      if (args[4] !== undefined) throw new Error("final audit unavailable");
+      save(...args);
+    });
+    sup.start();
+    const error = await refusal(
+      kind === "watch" ? sup.startWatch(seatId) : sup.startRun(seatId, 42),
+    );
+    expect(error.status).toBe(500);
+    expect(error.message).toContain("prompt audit storage");
+    expect(recorded().some((line) => Array.isArray(line.argv))).toBe(true);
+    expect(userLines()).toEqual([]);
+    const run = store.runs(seatId, 1)[0];
+    expect(run.status).toBe("failed");
+    expect(run.endedAt).not.toBeNull();
+    expect(store.getSetting(`instruction.delivered:${run.id}`)).toBeNull();
+    expect(store.promptWakes(run.id)).toEqual([]);
+  },
+);
+
+it("refuses an unexpected prompt identity change instead of overwriting another prepared version", async () => {
+  direction();
+  const { sup } = make({ extraSeat: flight });
+  const save = store.setRunPromptVersion.bind(store);
+  vi.spyOn(store, "setRunPromptVersion").mockImplementation((...args) => {
+    save(...args);
+    if (args[4] === undefined)
+      save(args[0], "changed-by-another-writer", args[2], args[3], args[1]);
+  });
+  sup.start();
+  const error = await refusal(sup.startWatch(flight.id));
+  expect(error.status).toBe(500);
+  expect(userLines()).toEqual([]);
+  const run = store.runs(flight.id, 1)[0];
+  expect(run.promptHash).toBe("changed-by-another-writer");
+  expect(run.status).toBe("failed");
+});

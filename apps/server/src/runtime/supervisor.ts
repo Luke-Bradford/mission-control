@@ -1362,18 +1362,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       seatDef(l.info.seat).loop === "watch",
       text,
     );
+    const pending = pendingPromptVersions.get(l.run.id);
+    if (pending) {
+      // Fail closed before any provider input. A failed send keeps the prepared identity retryable.
+      pending.hash = savePromptVersion(l.run, pending.rolePath, envelope.text, pending.hash);
+    }
     try {
       l.session.send(envelope.text);
     } catch {
       throw noLive(l.info);
     }
     store.setSetting(`instruction.delivered:${l.run.id}`, envelope.revision);
-    const pending = pendingPromptVersions.get(l.run.id);
     if (pending) {
       pendingPromptVersions.delete(l.run.id);
-      savePromptVersion(
+      savePromptSections(
         l.run,
-        pending.rolePath,
         envelope.text,
         [...envelope.pieces, ...pending.briefPieces],
         pending.system,
@@ -1485,36 +1488,55 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const pendingPromptVersions = new Map<
     string,
-    { rolePath: string; briefPieces: readonly PromptPiece[]; system: readonly PromptPiece[] | null }
+    {
+      hash: string;
+      rolePath: string;
+      briefPieces: readonly PromptPiece[];
+      system: readonly PromptPiece[] | null;
+    }
   >();
   function recordPromptVersion(
-    run: Run,
-    rolePath: string,
-    _brief: string,
-    briefPieces: readonly PromptPiece[],
-    system: readonly PromptPiece[] | null,
-  ): void {
-    pendingPromptVersions.set(run.id, { rolePath, briefPieces, system });
-  }
-  /** Record the actual first delivery, after resolving current instructions inside its queue. */
-  function savePromptVersion(
     run: Run,
     rolePath: string,
     brief: string,
     briefPieces: readonly PromptPiece[],
     system: readonly PromptPiece[] | null,
   ): void {
+    const current = need(run.agentId);
+    const envelope = instructionEnvelope(
+      store,
+      current.seat,
+      run.id,
+      seatDef(current.seat).loop === "watch",
+      brief,
+    );
+    // Preserve the original no-spawn guard. Final delivery replaces only this prepared identity.
+    const hash = savePromptVersion(run, rolePath, envelope.text);
+    pendingPromptVersions.set(run.id, { hash, rolePath, briefPieces, system });
+  }
+  /** Archive the prepared brief, then replace only that identity with the final queued envelope. */
+  function savePromptVersion(
+    run: Run,
+    rolePath: string,
+    brief: string,
+    preparedHash?: string,
+  ): string {
     const instructions = readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8");
     const payload = ["developer-instructions", instructions, "first-brief", brief].join("\0");
-    store.setRunPromptVersion(
-      run.id,
-      createHash("sha256").update(payload).digest("hex"),
-      rolePath,
-      now(),
-    );
+    const hash = createHash("sha256").update(payload).digest("hex");
+    store.setRunPromptVersion(run.id, hash, rolePath, now(), preparedHash);
+    return hash;
+  }
+  function savePromptSections(
+    run: Run,
+    brief: string,
+    briefPieces: readonly PromptPiece[],
+    system: readonly PromptPiece[] | null,
+  ): void {
     // a launch that kept its prompt file (a resume, a transfer) sent nothing new
     if (system === null) return;
     try {
+      const instructions = readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8");
       store.recordPromptSections(
         run.id,
         0,
@@ -1526,6 +1548,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
     } catch (e) {
       log(`${run.agentId}: could not record the prompt's sections: ${errText(e)}`);
+    }
+  }
+
+  async function deliverFirstLine(l: Live, text: string, markRead: () => void): Promise<void> {
+    try {
+      await enqueue(l, () => {
+        writeLine(l, text);
+        markRead();
+      });
+    } catch (cause) {
+      pendingPromptVersions.delete(l.run.id);
+      log(`${l.run.agentId}: could not deliver first brief: ${errText(cause)}`);
+      await l.session.close();
+      throw new SupervisorError(
+        500,
+        "Could not deliver the first brief. Check prompt audit storage and current seat guidance before retrying.",
+        { cause },
+      );
     }
   }
 
@@ -2117,6 +2157,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function removeRunFiles(runId: string): void {
+    pendingPromptVersions.delete(runId);
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -3756,10 +3797,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(500, CANNOT_START);
       }
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId, branch: checkout.branch };
     } finally {
       if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
@@ -3913,10 +3951,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
-      await enqueue(l, () => {
-        writeLine(l, firstBrief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, firstBrief, () => markInboxRead(seatId, inbox));
       return { runId };
     } finally {
       starting.delete(seatId);
@@ -4229,10 +4264,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId };
     } finally {
       starting.delete(seatId);

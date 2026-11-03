@@ -2083,11 +2083,28 @@ export class Store {
     return n;
   }
 
-  /** Completes immutable launch metadata once the generated prompt file exists. */
-  setRunPromptVersion(runId: string, hash: string, path: string, at: number): void {
-    this.db
-      .prepare("UPDATE runs SET prompt_hash = COALESCE(prompt_hash, ?) WHERE id = ?")
-      .run(hash, runId);
+  /** A prepared first brief may be replaced at final delivery, only while its exact hash still matches. */
+  setRunPromptVersion(
+    runId: string,
+    hash: string,
+    path: string,
+    at: number,
+    preparedHash?: string,
+  ): void {
+    if (preparedHash === undefined) {
+      this.db
+        .prepare("UPDATE runs SET prompt_hash = COALESCE(prompt_hash, ?) WHERE id = ?")
+        .run(hash, runId);
+    } else {
+      const changed = this.db
+        .prepare(
+          `UPDATE runs SET prompt_hash = ? WHERE id = ? AND prompt_hash = ?
+           AND NOT EXISTS (SELECT 1 FROM settings WHERE key = ?)`,
+        )
+        .run(hash, runId, preparedHash, `instruction.delivered:${runId}`);
+      if (changed.changes !== 1)
+        throw new Error("Prepared prompt identity changed before delivery");
+    }
     this.db
       .prepare("INSERT OR IGNORE INTO prompt_versions (hash, path, first_seen) VALUES (?, ?, ?)")
       .run(hash, path, at);
