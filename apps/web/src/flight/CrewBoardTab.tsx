@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { Panel } from "../hud/Panel.tsx";
+import { Seg } from "../hud/Seg.tsx";
+import { SeatInstructionIndexPanel } from "../instructions/Instructions.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { WatchList } from "./Brief.tsx";
 import { Summary } from "./Summary.tsx";
@@ -20,16 +23,34 @@ function CrewStats() {
 
 /** Crew & board: every seat's state against its ticket, then FLIGHT's queue. */
 export function CrewBoardTab() {
+  const [context, setContext] = useState<"seats" | "instructions">("seats");
   return (
     <>
       <Panel
         id="wifP"
-        title="Seats"
-        sub="LIVE · ticket, stage, what stops each seat and FLIGHT's next action"
-        actions={<CrewStats />}
+        title={context === "seats" ? "Seats" : "Seat instructions"}
+        sub={
+          context === "seats"
+            ? "LIVE · ticket, stage, what stops each seat and FLIGHT's next action"
+            : "saved guidance, effective focus and retained history"
+        }
+        actions={
+          <>
+            <Seg
+              label="Crew context"
+              options={[
+                { value: "seats", label: "Seats" },
+                { value: "instructions", label: "Instructions" },
+              ]}
+              value={context}
+              onChange={setContext}
+            />
+            {context === "seats" && <CrewStats />}
+          </>
+        }
       >
         <div className="flight-panel-scroll">
-          <WorkInFlight />
+          {context === "seats" ? <WorkInFlight /> : <SeatInstructionIndexPanel />}
         </div>
       </Panel>
       <Panel

@@ -6,8 +6,11 @@ import {
   type CrewRow,
   DIFF_MAX_CHARS,
   type FileDiff,
+  type FocusInstructionView,
+  type InstructionMutation,
   READONLY_FILES_NOTE,
   type RunView,
+  type SeatInstructionList,
   SUBAGENT_PILL,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +21,7 @@ import { dur, kTokens, shortSha } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { instructionSource, refreshInstructions } from "../instructions/Instructions.tsx";
 import { useSearch } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 
@@ -88,14 +92,24 @@ function Plan({
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
 function Queue({ row }: { row: CrewRow }) {
   const focusRef = RESOURCES.focus(row.id);
-  const focus = useResource<{ focus: string | null }>(
+  const focus = useResource<FocusInstructionView>(
     row.kind === "crew" && row.mode === "writer" ? focusRef : null,
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ focus: string | null } | null>(null);
+  const [saved, setSaved] = useState<(FocusInstructionView & Partial<InstructionMutation>) | null>(
+    null,
+  );
+  const focusEntries = useResource<SeatInstructionList>(
+    row.kind === "crew" && row.mode === "writer" ? RESOURCES.seatInstructions(row.id) : null,
+  );
+  const focusSave = useRef(false);
+  const failureBox = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (failure) failureBox.current?.focus();
+  }, [failure]);
   const input = useRef<HTMLInputElement>(null);
   const changeButton = useRef<HTMLButtonElement>(null);
   const cancel = () => {
@@ -167,20 +181,25 @@ function Queue({ row }: { row: CrewRow }) {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              if (busy) return;
+              if (busy || focusSave.current) return;
+              focusSave.current = true;
               setBusy(true);
               setFailure(null);
               try {
-                const result = await apiPost<{ focus: string | null }>(focusRef.path, {
-                  focus: draft.trim() || null,
-                });
+                const result = await apiPost<FocusInstructionView & InstructionMutation>(
+                  focusRef.path,
+                  {
+                    focus: draft.trim() || null,
+                  },
+                );
                 setSaved(result);
                 setEditing(false);
                 hub.refetch(focusRef.path);
-                hub.refetchTopic("agents");
+                refreshInstructions();
               } catch (e) {
                 setFailure(e instanceof Error ? e.message : String(e));
               } finally {
+                focusSave.current = false;
                 setBusy(false);
               }
             }}
@@ -213,7 +232,7 @@ function Queue({ row }: { row: CrewRow }) {
           <>
             <span className="min0">
               {(saved ?? focus.data)?.focus ??
-                (focus.data || saved ? "not set · FLIGHT will ask you" : "Loading…")}
+                (focus.data || saved ? "Unrestricted · no focus filter" : "Loading…")}
             </span>
             <button
               type="button"
@@ -227,13 +246,44 @@ function Queue({ row }: { row: CrewRow }) {
           </>
         )}
       </div>
+      {(saved ?? focus.data)?.focusInstructionId != null &&
+        (() => {
+          const value = saved ?? focus.data;
+          const entry =
+            saved?.entry && saved.entry.id === value?.focusInstructionId
+              ? saved.entry
+              : focusEntries.data?.active.find((item) => item.id === value?.focusInstructionId);
+          return (
+            <>
+              <p className="note">
+                Source:{" "}
+                {entry ? instructionSource(entry) : focusEntries.error ? "unavailable" : "loading"}{" "}
+                #{value?.focusInstructionId}
+                {entry?.kind === "focus" && entry.focus === null && " · explicit clear"}. Clear
+                saves an active operator instruction; revoking it can reveal FLIGHT’s focus.
+              </p>
+              {!entry && focusEntries.error && (
+                <p className="note err" role="alert">
+                  Could not load focus source: {focusEntries.error.message}{" "}
+                  <button
+                    type="button"
+                    className="sm"
+                    onClick={() => hub.refetch(RESOURCES.seatInstructions(row.id).path)}
+                  >
+                    Retry focus source
+                  </button>
+                </p>
+              )}
+            </>
+          );
+        })()}
       {focus.error && (
         <p className="note err" role="alert">
           Could not load Focus: {focus.error.message}
         </p>
       )}
       {failure && (
-        <p className="note err" role="alert">
+        <p className="note err" role="alert" ref={failureBox} tabIndex={-1}>
           {failure}
         </p>
       )}

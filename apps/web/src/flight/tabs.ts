@@ -1,3 +1,4 @@
+import { ORDER_ANCHOR_PREFIX } from "../instructions/links.ts";
 import { NEEDS_YOU_PANEL } from "../router.ts";
 import { DECISION_ANCHOR_PREFIX } from "./conversation.ts";
 
@@ -37,6 +38,7 @@ const HASH_TAB: Readonly<Record<string, FlightTab>> = {
 /** The tab a `#fragment` link opens: the one holding it, else Needs you. */
 export function tabForHash(hash: string): FlightTab {
   const id = hash.replace(/^#/, "");
+  if (id.startsWith(ORDER_ANCHOR_PREFIX)) return "knows";
   if (id.startsWith("flight-note-")) return "knows";
   if (id.startsWith("draft-")) return "needs";
   if (id.startsWith(DECISION_ANCHOR_PREFIX)) return "did";

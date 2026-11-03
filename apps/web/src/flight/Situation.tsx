@@ -5,15 +5,17 @@ import {
   type FlightSummaryView,
   type FlightWakeStatus,
   type MetricId,
+  type StandingInstructionList,
   seatIsPaused,
 } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { dur, hhmm, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { useMetrics } from "../metrics.ts";
 import { stateWord } from "../shell/Dock.tsx";
+import { useStore } from "../shell/store.ts";
 import { type FlightSeat, type FlightView, flightOffText } from "./flightTypes.ts";
 import { needsGroups } from "./needsGroups.ts";
 import { SUMMARY_EMPTY } from "./Summary.tsx";
@@ -96,6 +98,8 @@ function Counter({
  */
 export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
   const flight = useResource<FlightView>(RESOURCES.flight);
+  const orders = useResource<StandingInstructionList>(RESOURCES.flightOrders);
+  const connection = useStore(streamStatus);
   const pause = useResource<CrewPause | null>(RESOURCES.crewPause).data;
   const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const summary = summaryResource.data;
@@ -168,6 +172,26 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
         />
         <Counter tab="needs" label="FLIGHT handling" n={handling} onOpen={onOpen} />
         <Counter tab="did" label="decided 24 h" n={decided} onOpen={onOpen} />
+        <button
+          className="flight-counter"
+          type="button"
+          onClick={() => onOpen("knows")}
+          aria-label={
+            orders.data
+              ? `Active orders: ${orders.data.active.length}${orders.error ? ", stale" : ""}`
+              : orders.error
+                ? "Orders unavailable"
+                : "Orders loading"
+          }
+        >
+          {orders.data
+            ? `${orders.data.active.length} active ${orders.data.active.length === 1 ? "order" : "orders"}`
+            : orders.error
+              ? "Orders unavailable"
+              : "Loading orders…"}
+          {orders.data && orders.error && " · stale"}
+          {!connection.connected && connection.reconnecting && " · disconnected"}
+        </button>
       </span>
     </section>
   );

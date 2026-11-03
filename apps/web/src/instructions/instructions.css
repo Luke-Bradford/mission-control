@@ -1,0 +1,96 @@
+.instruction-manager,
+.instruction-index {
+  min-width: 0;
+  padding: var(--sp-4);
+  display: grid;
+  gap: var(--sp-2);
+}
+.instruction-list {
+  max-height: 320px;
+  overflow: auto;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+.instruction-row {
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.instruction-meta,
+.instruction-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.instruction-meta {
+  justify-content: space-between;
+}
+.instruction-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.instruction-form {
+  display: grid;
+  gap: var(--sp-2);
+  max-width: 640px;
+  min-width: 0;
+}
+.instruction-form textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+}
+.instruction-manager .note {
+  margin: 0;
+}
+.instruction-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  overflow-wrap: anywhere;
+}
+.instruction-history > summary,
+.instruction-seat > summary,
+.instruction-disclosure > summary {
+  min-height: 32px;
+  padding: var(--sp-2);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.instruction-disclosure {
+  min-width: 0;
+}
+.instruction-confirm {
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+}
+.instruction-row:focus-visible,
+.instruction-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.instruction-row .expandable.open .instruction-text {
+  max-height: 160px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.instruction-row .instruction-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.instruction-manager > button {
+  justify-self: start;
+  min-height: 32px;
+}
+.instruction-form button {
+  min-height: 32px;
+}
+
+.flight-knows-orders > .panel {
+  align-self: start;
+}
+/* The Seats panel is shorter than Knows or Agent; its named reader must fit its visible body. */
+.flight-crew .instruction-manager > .instruction-list {
+  max-height: min(320px, 24vh);
+}
