@@ -9,3 +9,4 @@
 /* Actual content width decides when all eight readable KPI cells fit. */
 @container(min-width:1280px){.kpis{height:96px;min-height:96px;grid-template-columns:repeat(8,minmax(0,1fr))}.kpi{min-height:0}.kpi .mini{display:block}.kpi .value{font-size:24px;line-height:28px}.kpi .definition{font-size:12px}}
 [hidden]{display:none!important}.loops>b{font-family:"IBM Plex Mono",monospace}.rail>button{font-size:12px}.filtered-log .activity-line.extra-event{display:grid}
+.span-track .instant{transform:translateX(-50%) rotate(45deg)}
