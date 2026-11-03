@@ -3,12 +3,111 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { qaReportApi, qaReportFixture } from "./qaReportFixture.ts";
+import { desktopFixture } from "./desktopFixtures.ts";
+import { qaReportApi, qaReportAssets, qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "qa-report-shots");
 
 describeRendered("Accountable QA report", () => {
+  it.each(["light", "dark"] as const)(
+    "keeps image-error and retry controls focused in the real shell, %s",
+    async (colorScheme) => {
+      const report = qaReportFixture();
+      const shots = process.env.MC_QA_IMAGE_FOCUS_SHOTS ?? SHOTS;
+      mkdirSync(shots, { recursive: true });
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1600,
+        height: 700,
+        colorScheme,
+        search: `?path=${encodeURIComponent(report.permalink)}`,
+        api: { ...desktopFixture().api, ...qaReportApi(0) },
+        assets: {
+          ...qaReportAssets(),
+          "https://evidence.example/forced-error.png": {
+            status: 404,
+            contentType: "text/plain",
+            body: "Controlled image failure",
+          },
+        },
+      });
+      try {
+        await page.boxes("article.qa-report");
+        expect(
+          await page.evaluate(async () => {
+            await document.fonts.ready;
+            const images = [...document.querySelectorAll<HTMLImageElement>(".uat-shots img")];
+            for (const image of images) image.loading = "eager";
+            const start = performance.now();
+            while (
+              images.some((image) => !image.complete || image.naturalWidth === 0) &&
+              performance.now() - start < 1000
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            return (
+              images.length === 2 &&
+              images.every((image) => image.complete && image.naturalWidth > 0)
+            );
+          }, null),
+        ).toBe(true);
+        await page.evaluate(() => {
+          document.querySelector<HTMLAnchorElement>(".uat-shots figure a")?.focus();
+        }, null);
+        await page.screenshot(join(shots, `qa-image-${colorScheme}-preview-focus.png`));
+        await page.evaluate(() => {
+          const image = document.querySelector<HTMLImageElement>(".uat-shots figure img");
+          if (!image) throw new Error("Preview is missing");
+          image.src = "https://evidence.example/forced-error.png";
+        }, null);
+        const failed = await page.evaluate(async () => {
+          const figure = document.querySelector(".uat-shots figure");
+          const start = performance.now();
+          while (
+            !figure?.textContent?.includes("The linked image could not be loaded.") &&
+            performance.now() - start < 1000
+          )
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const source = figure?.querySelector<HTMLAnchorElement>("a");
+          return {
+            failed: figure?.textContent?.includes("The linked image could not be loaded."),
+            focused: document.activeElement === source,
+            href: source?.href,
+          };
+        }, null);
+        await page.screenshot(join(shots, `qa-image-${colorScheme}-error-source-focus.png`));
+        expect(failed).toEqual({
+          failed: true,
+          focused: true,
+          href: "https://evidence.example/before.png",
+        });
+        await page.press("Tab");
+        expect(
+          await page.evaluate(() => document.activeElement?.getAttribute("aria-label"), null),
+        ).toContain("Retry linked image");
+        await page.press("Enter");
+        expect(
+          await page.evaluate(async () => {
+            const start = performance.now();
+            let image: HTMLImageElement | null;
+            do {
+              image = document.querySelector<HTMLImageElement>(".uat-shots figure img");
+              if (image?.complete && image.naturalWidth > 0) break;
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            } while (performance.now() - start < 1000);
+            return (
+              !!image && image.naturalWidth > 0 && document.activeElement === image.closest("a")
+            );
+          }, null),
+        ).toBe(true);
+        await page.screenshot(join(shots, `qa-image-${colorScheme}-retry-preview-focus.png`));
+        expect(page.errors()).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it(
     "keeps paired evidence and command receipts inspectable at desktop widths and both themes",
     async () => {
@@ -26,6 +125,7 @@ describeRendered("Accountable QA report", () => {
             height,
             colorScheme,
             api: qaReportApi(),
+            assets: qaReportAssets(),
           });
           await page.boxes("article.qa-report");
           const facts = await page.evaluate(
@@ -62,6 +162,7 @@ describeRendered("Accountable QA report", () => {
         page: "test/qaReadinessBrowser.html",
         width: 1280,
         api: qaReportApi(0),
+        assets: qaReportAssets(),
         search: `?repo=mission-control&pr=1011&report=${r.id}`,
       });
       await page.boxes("article.qa-report");
@@ -100,6 +201,7 @@ describeRendered("Accountable QA report", () => {
         width: 1280,
         height: 700,
         api,
+        assets: qaReportAssets(),
       });
       await page.boxes("article.qa-report");
       expect(

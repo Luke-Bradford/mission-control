@@ -1,9 +1,86 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import * as api from "../src/api.ts";
 import { QaReportRead, qaEvidenceUrl } from "../src/qa/QaReport.tsx";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+function retainedImage() {
+  let serial = 0;
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static override createObjectURL() {
+        return `blob:qa-focus-${++serial}`;
+      }
+      static override revokeObjectURL() {}
+    },
+  );
+  const blob = new Blob(["controlled image bytes"], { type: "image/png" });
+  const read = vi.spyOn(api, "apiQaReportImage").mockResolvedValue(blob);
+  const report = qaReportFixture();
+  report.visual.pairs[0].before.url = `/api/qa-report-assets/${"f".repeat(64)}`;
+  return { report, blob, read };
+}
+it("keeps keyboard focus on an image source and its retried preview", () => {
+  render(<QaReportRead report={qaReportFixture()} />);
+  const before = screen.getByRole("img", { name: /Before · Overview/ });
+  const preview = before.closest("a");
+  preview?.focus();
+  expect(document.activeElement).toBe(preview);
+  fireEvent.error(before);
+  expect(document.activeElement).toBe(screen.getByRole("link", { name: "Open image source" }));
+  const retry = screen.getByRole("button", { name: /Retry linked image · Before/ });
+  retry.focus();
+  fireEvent.click(retry);
+  expect(document.activeElement).toBe(
+    screen.getByRole("img", { name: /Before · Overview/ }).closest("a"),
+  );
+});
+it("does not move another control's focus when an unrelated image fails", () => {
+  render(<QaReportRead report={qaReportFixture()} />);
+  const reference = screen.getByRole("link", { name: "Ticket reference" });
+  reference.focus();
+  fireEvent.error(screen.getByRole("img", { name: /Before · Overview/ }));
+  expect(document.activeElement).toBe(reference);
+});
+it("keeps a retained image error and its asynchronous retry keyboard reachable", async () => {
+  const { report } = retainedImage();
+  render(<QaReportRead report={report} />);
+  const preview = await screen.findByRole("img", { name: /Before · Overview/ });
+  preview.closest("a")?.focus();
+  fireEvent.error(preview);
+  const retry = screen.getByRole("button", { name: /^Retry image · Before/ });
+  expect(document.activeElement).toBe(retry);
+  fireEvent.click(retry);
+  const loaded = await screen.findByRole("img", { name: /Before · Overview/ });
+  expect(document.activeElement).toBe(loaded.closest("a"));
+});
+it("does not steal focus after the operator moves on during a retained retry", async () => {
+  const { report, blob, read } = retainedImage();
+  render(<QaReportRead report={report} />);
+  const preview = await screen.findByRole("img", { name: /Before · Overview/ });
+  preview.closest("a")?.focus();
+  fireEvent.error(preview);
+  let finish: ((value: Blob) => void) | undefined;
+  read.mockImplementationOnce(
+    () =>
+      new Promise<Blob>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Retry image · Before/ }));
+  const reference = screen.getByRole("link", { name: "Ticket reference" });
+  reference.focus();
+  if (!finish) throw new Error("Retry did not start");
+  finish(blob);
+  await screen.findByRole("img", { name: /Before · Overview/ });
+  expect(document.activeElement).toBe(reference);
+});
 it("makes a failed linked image explicit and preserves its source and retry", () => {
   render(<QaReportRead report={qaReportFixture()} />);
   const before = screen.getByRole("img", { name: /Before · Overview/ });

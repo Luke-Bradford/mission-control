@@ -1,5 +1,5 @@
 import { type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiQaReportImage } from "../api.ts";
 import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
@@ -230,6 +230,7 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
   const target = qaEvidenceUrl(image.url);
   const assetId = target?.match(/^\/api\/qa-report-assets\/([0-9a-f]{64})$/)?.[1];
   const figure = useRef<HTMLElement>(null);
+  const displacedFocus = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [failedLink, setFailedLink] = useState<string>();
@@ -304,6 +305,26 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
       ? undefined
       : target;
   const source = assetId ? (loaded?.id === loadKey ? loaded?.data : undefined) : url;
+  const rememberFocus = (control: HTMLElement) => {
+    if (document.activeElement === control) displacedFocus.current = control;
+  };
+  useLayoutEffect(() => {
+    const previous = displacedFocus.current;
+    if (!previous || previous.isConnected) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) {
+      displacedFocus.current = null;
+      return;
+    }
+    const replacement = figure.current?.querySelector<HTMLElement>(
+      "a[href], button:not(:disabled)",
+    );
+    // A retained-image retry can still be loading. Restore only if the user has not moved on.
+    if (replacement) {
+      displacedFocus.current = null;
+      replacement.focus();
+    }
+  });
   return (
     <figure ref={figure}>
       <figcaption>
@@ -319,7 +340,9 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
             alt={label}
             loading="lazy"
             referrerPolicy="no-referrer"
-            onError={() => {
+            onError={(event) => {
+              const link = event.currentTarget.closest<HTMLAnchorElement>("a");
+              if (link) rememberFocus(link);
               if (assetId && loadKey) setLoaded({ id: loadKey, error: true });
               else if (target) setFailedLink(target);
             }}
@@ -336,7 +359,10 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
               <button
                 type="button"
                 aria-label={`Retry linked image · ${label}`}
-                onClick={() => setFailedLink(undefined)}
+                onClick={(event) => {
+                  rememberFocus(event.currentTarget);
+                  setFailedLink(undefined);
+                }}
               >
                 Retry image
               </button>
@@ -347,7 +373,8 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
               <button
                 type="button"
                 aria-label={`Retry image · ${label}`}
-                onClick={() => {
+                onClick={(event) => {
+                  rememberFocus(event.currentTarget);
                   setLoaded(undefined);
                   setAttempt((a) => a + 1);
                 }}
