@@ -36,7 +36,9 @@ export function OverviewCanvas({ children }: { children: ReactNode }) {
       const next = {
         hostEvidence: width >= 2076 && available >= 1120,
         wideDetails: width >= 3164 && available >= 1152,
-        allHistories: width >= 3164 && available >= 1672,
+        // The measured all-lane Timeline (481px), five labelled/recent plots
+        // (258px each) and five 12px gaps need 1831px in the normal fixture.
+        allHistories: width >= 3164 && available >= 1840,
       };
       setLayout((previous) =>
         previous.hostEvidence === next.hostEvidence &&

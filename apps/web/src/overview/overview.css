@@ -2717,6 +2717,10 @@ button.quota-details {
 .overview-grid[data-wide-details="true"] .overview-primary > #actP {
   height: 368px;
 }
+.overview-grid[data-all-histories="true"] .overview-primary > #actP {
+  /* About 23 recorded rows, bounded independently of the analytical stacks. */
+  height: 728px;
+}
 .overview-grid[data-wide-details="true"] .overview-observations .overview-lane-scroll {
   max-height: 340px;
 }

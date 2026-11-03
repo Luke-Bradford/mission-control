@@ -233,9 +233,10 @@ describe("Overview panels", () => {
     const { container } = render(<Overview />);
     for (const id of ["agentsP", "actP", "pipelineP"])
       expect(container.querySelector(`.overview-primary > #${id}`), id).toBeTruthy();
-    for (const id of ["timelineP", "quotaSummaryP", "overviewHistoryP"])
-      expect(container.querySelector(`.overview-signals > #${id}`), id).toBeTruthy();
-    expect(container.querySelector(".overview-resources > #machineSummaryP")).toBeTruthy();
+    expect(container.querySelector(".overview-observations > #timelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-observations #overviewHistoryP")).toBeTruthy();
+    expect(container.querySelector(".overview-provider-host #quotaSummaryP")).toBeTruthy();
+    expect(container.querySelector(".overview-provider-host > #machineSummaryP")).toBeTruthy();
     expect(container.querySelector("#quotaP")).toBeNull();
     expect(container.querySelector("#machP")).toBeNull();
     await inspectAllowance(container);

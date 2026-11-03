@@ -59,16 +59,18 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("display: flex");
     expect(rule(String.raw`\.overview-grid`)).toContain("flex-direction: column");
     expect(rule(String.raw`\.overview-workspace`)).toContain(
-      "grid-template-columns: minmax(1052px, 1200px) minmax(500px, 788px)",
+      "grid-template-columns: minmax(1052px, 1200px) minmax(500px, 1fr)",
     );
     expect(css).toContain("@container overview (max-width: 1050px)");
     expect(css).toMatch(
-      /\.overview-primary,[\s\S]*?\.overview-resources \{[^}]*display: flex;[^}]*flex-direction: column/,
+      /\.overview-primary,[\s\S]*?\.overview-provider-host \{[^}]*display: flex;[^}]*flex-direction: column/,
     );
     expect(css).not.toContain("margin-top: calc(var(--crew-height");
     expect(css).not.toContain("top: calc(var(--quota-summary-height");
-    expect(css).toContain("@container overview (min-width: 2076px)");
-    expect(css).toContain("grid-template-columns: 1280px minmax(500px, 1fr) minmax(500px, 1fr)");
+    expect(css).toContain("@container overview-canvas (min-width: 2076px)");
+    expect(css).toContain(
+      "grid-template-columns: minmax(1052px, 1280px) minmax(500px, 1fr) minmax(500px, 1fr)",
+    );
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: auto");
     expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");

@@ -39,24 +39,19 @@ export const OverviewMeasuredPanel = forwardRef<MeasuredHistoryReader>(
     };
     return (
       <section ref={region} className="overview-history-domain" aria-label="Measured histories">
-        {allHistories ? (
-          MEASURES.map((measure) => (
-            <OverviewHistoryPanel
-              key={measure}
-              measure={measure}
-              compact
-              recent
-              onInspect={inspect}
-            />
-          ))
-        ) : (
+        {(allHistories ? MEASURES : [undefined]).map((measure, index) => (
           <OverviewHistoryPanel
+            // Keep one mounted subscriber across either layout. Replacing every
+            // panel would briefly end the resource's visit and trigger a reread.
+            key={index === 0 ? "primary" : measure}
+            measure={measure}
             compact
+            recent={allHistories}
             selectedHistory={selected}
             onSelectHistory={setSelected}
             onInspect={inspect}
           />
-        )}
+        ))}
         <OverviewEvidence ref={reader} title="Complete measured history">
           <OverviewHistoryPanel measure={inspected} id="overviewHistoryDetailP" />
         </OverviewEvidence>
