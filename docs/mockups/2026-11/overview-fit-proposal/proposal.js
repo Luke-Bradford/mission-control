@@ -51,7 +51,7 @@ $$('[data-filter]').forEach(button=>button.onclick=()=>{$$('[data-filter]').forE
 
 // Correction after operator rejection: independent domains and one canonical history surface.
 document.body.classList.add('composition-v5');
-const workspace=$('.workspace'), analytical=$('.analytical');
+const workspace=$('.workspace'), analytical=$('.analytical'), obsoleteHistory=$('#throughput');
 const operations=document.createElement('div');operations.className='operations';
 const observations=document.createElement('div');observations.className='observations';
 for(const id of ['allowance','full-allowance','machine','capacity'])operations.append($('#'+id));
@@ -59,7 +59,7 @@ observations.append($('#timeline'));
 const historyHub=document.createElement('section');historyHub.className='history-hub';historyHub.id='history-hub';historyHub.setAttribute('aria-label','Measured history');
 const historyHeader=document.createElement('header');historyHeader.innerHTML='<h2>Measured histories <small>30 complete minutes · same clock</small></h2>';
 historyHeader.append($('#measure'));historyHub.append(historyHeader,comparisons);observations.append(historyHub);
-analytical.replaceChildren(operations,observations);comparisonTitle.remove();$('#throughput').remove();
+analytical.replaceChildren(operations,observations);comparisonTitle.remove();obsoleteHistory.remove();
 comparisons.className='canonical-histories';comparisons.removeAttribute('aria-label');
 [...comparisons.children].forEach((panel,index)=>{const [id,h]=Object.entries(histories)[index];panel.dataset.history=id;panel.id='history-'+id;panel.querySelector('.history-reading>b').textContent='Latest '+h.format(h.values.at(-1))+' '+h.unit;const content=document.createElement('div');content.className='history-evidence';const plot=panel.querySelector('.plot');plot.replaceWith(content);content.append(plot);const exact=document.createElement('div');exact.className='recent-readings';exact.innerHTML='<h3>Latest complete minutes</h3>'+table(['UTC',h.unit],h.values.slice(-5).map((v,i)=>['11:'+String(55+i),v===null?'— missing':h.format(v)]));content.append(exact);});
 // The selector reveals a single canonical panel at compact sizes, all five at wide/tall sizes.
