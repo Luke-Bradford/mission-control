@@ -1,4 +1,5 @@
 import {
+  BUILTIN_ROLES,
   type ConfigView,
   type CrewChanges,
   GUARD_RULES,
@@ -38,9 +39,11 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
     };
   if (scenario === "long") {
     view.story.title =
-      "Preserve all operator routes and the current-head review evidence while making the Agent page answer visible. ".repeat(
-        6,
+      `Preserve current-head evidence for ${"RollbackPolicy".repeat(12)} while keeping the next decision accessible.`.slice(
+        0,
+        220,
       );
+    view.row.ticketTitle = view.story.title;
     view.story.report =
       "The implementation preserves the message draft, account permissions and original evidence links. A concrete keyboard check remains before the next decision. ".repeat(
         20,
@@ -91,6 +94,11 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
     operator: { id: "operator", timezone: "UTC" },
     crew: {
       ...crewConfig,
+      roles: Object.entries(BUILTIN_ROLES).map(([name, role]) => ({
+        name,
+        ...role,
+        tools: [...role.tools],
+      })),
       sessions: [{ id: "s1", repoId: "shop-app", checkout: "/mc/clone", seats }],
     },
   };

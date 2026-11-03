@@ -86,6 +86,10 @@
   margin-top: var(--sp-2);
   font-size: var(--fs-s);
 }
+.agent-v2-meta > b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .agent-v2-meta .mono {
   overflow-wrap: anywhere;
 }

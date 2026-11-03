@@ -122,6 +122,16 @@ describeRendered("Agent density in the production App", () => {
           ).toContain(fixture.view.story.title);
         }
         if (scenario === "long") {
+          expect(await page.unclipped(".agent-v2-identity")).not.toContain(false);
+          expect(
+            await page.evaluate(() => {
+              const label = document.querySelector(".agent-v2-state > b") as HTMLElement;
+              return (
+                label.getBoundingClientRect().height <=
+                parseFloat(getComputedStyle(label).lineHeight) + 1
+              );
+            }, null),
+          ).toBe(true);
           await page.click('[aria-label="Read full reported result"]');
           expect(
             await page.evaluate(
