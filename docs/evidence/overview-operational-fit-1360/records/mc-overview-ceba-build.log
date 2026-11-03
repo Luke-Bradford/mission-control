@@ -1,0 +1,73 @@
+$ pnpm --filter @mc/web build
+$ vite build
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 376 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                      0.86 kB │ gzip:   0.41 kB
+dist/assets/ibm-plex-mono-latin-400-normal-CvHOgSBP.woff            13.14 kB
+dist/assets/ibm-plex-mono-latin-500-normal-CB9ihrfo.woff            13.16 kB
+dist/assets/ibm-plex-mono-latin-600-normal-DWFSQ4vo.woff            13.21 kB
+dist/assets/ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2           14.71 kB
+dist/assets/ibm-plex-mono-latin-500-normal-DSY6xOcd.woff2           14.89 kB
+dist/assets/ibm-plex-mono-latin-600-normal-BgSNZQsw.woff2           15.62 kB
+dist/assets/barlow-semi-condensed-latin-500-normal-CFOoVYFH.woff    19.72 kB
+dist/assets/barlow-semi-condensed-latin-700-normal-BMyZXq_9.woff    19.94 kB
+dist/assets/barlow-semi-condensed-latin-600-normal-DyOfdMBA.woff    20.03 kB
+dist/assets/ibm-plex-sans-latin-400-normal-CYLoc0-x.woff            22.10 kB
+dist/assets/barlow-semi-condensed-latin-500-normal-G0uxJNrM.woff2   22.43 kB
+dist/assets/ibm-plex-sans-latin-400-normal-CDDApCn2.woff2           22.59 kB
+dist/assets/barlow-semi-condensed-latin-600-normal-BkLiAYu4.woff2   22.98 kB
+dist/assets/barlow-semi-condensed-latin-700-normal-BpqDG8I9.woff2   23.24 kB
+dist/assets/ibm-plex-sans-latin-600-normal-Cu4Hd6ag.woff            23.88 kB
+dist/assets/ibm-plex-sans-latin-500-normal-BgVn5rGT.woff            23.92 kB
+dist/assets/ibm-plex-sans-latin-500-normal-6ng42L7E.woff2           24.18 kB
+dist/assets/ibm-plex-sans-latin-600-normal-CuJfVYMP.woff2           24.25 kB
+dist/assets/MetricName-BkCtjVgl.css                                  0.03 kB │ gzip:   0.05 kB
+dist/assets/TicketQaReports-DbXU6Fnd.css                             0.27 kB │ gzip:   0.18 kB
+dist/assets/PrChip-CvXupRGH.css                                      0.90 kB │ gzip:   0.39 kB
+dist/assets/GithubRateRow-Jv3Je1Oi.css                               1.09 kB │ gzip:   0.50 kB
+dist/assets/LegacyAudit-DkFlXZEO.css                                 1.32 kB │ gzip:   0.54 kB
+dist/assets/reviewPark-DgEqdC3a.css                                  1.70 kB │ gzip:   0.61 kB
+dist/assets/TicketPage-D9mzTyq6.css                                  1.75 kB │ gzip:   0.65 kB
+dist/assets/Instructions-CN3pXMOm.css                                2.84 kB │ gzip:   0.90 kB
+dist/assets/lenses-JzMOoESx.css                                      3.39 kB │ gzip:   0.96 kB
+dist/assets/Telemetry-wFjn1B3o.css                                   3.81 kB │ gzip:   1.33 kB
+dist/assets/BoardPage-DDHjVKdx.css                                   4.70 kB │ gzip:   1.41 kB
+dist/assets/Audit-BybVd8SG.css                                      10.45 kB │ gzip:   2.43 kB
+dist/assets/MapPage-jR1gzlCK.css                                    11.65 kB │ gzip:   2.54 kB
+dist/assets/QaReadiness-CbXov4NB.css                                12.15 kB │ gzip:   2.55 kB
+dist/assets/Setup-BhuAD_xC.css                                      12.65 kB │ gzip:   2.93 kB
+dist/assets/Agent-B-2ziQ0J.css                                      19.29 kB │ gzip:   4.10 kB
+dist/assets/Flight-DzdGLQB5.css                                     22.81 kB │ gzip:   4.41 kB
+dist/assets/Comms-BFpuT-LB.css                                      30.65 kB │ gzip:   5.64 kB
+dist/assets/index-8i_A-Z0L.css                                      36.28 kB │ gzip:   7.83 kB
+dist/assets/Overview-Xqn9kvwb.css                                   43.59 kB │ gzip:   7.95 kB
+dist/assets/clipboard-C4_u2EMi.js                                    0.19 kB │ gzip:   0.17 kB
+dist/assets/MetricName-DrrDbMu8.js                                   0.27 kB │ gzip:   0.23 kB
+dist/assets/metrics-Cj5VXKQ8.js                                      0.78 kB │ gzip:   0.47 kB
+dist/assets/repos-DJghZl6j.js                                        1.05 kB │ gzip:   0.57 kB
+dist/assets/TicketQaReports-DZ1c5H5w.js                              2.31 kB │ gzip:   1.07 kB
+dist/assets/PipelinePanel-pdOUGD6U.js                                2.47 kB │ gzip:   1.24 kB
+dist/assets/PrChip-BMlIT1w-.js                                       3.31 kB │ gzip:   1.48 kB
+dist/assets/cards-SWNLXPXn.js                                        3.48 kB │ gzip:   1.73 kB
+dist/assets/metrics-C3lfrVQ8.js                                      4.37 kB │ gzip:   1.98 kB
+dist/assets/GithubRateRow-B2IW59L4.js                                4.74 kB │ gzip:   2.07 kB
+dist/assets/TicketPage-Dkv_t40j.js                                   6.80 kB │ gzip:   2.67 kB
+dist/assets/LegacyAudit-BdEHkCNE.js                                  8.68 kB │ gzip:   3.16 kB
+dist/assets/reviewPark-icif6gIA.js                                  12.06 kB │ gzip:   4.17 kB
+dist/assets/lenses-BPYRZgC4.js                                      12.88 kB │ gzip:   4.45 kB
+dist/assets/Instructions-Dfkwy4Ad.js                                17.61 kB │ gzip:   6.60 kB
+dist/assets/BoardPage-Codqz-0a.js                                   23.96 kB │ gzip:   8.89 kB
+dist/assets/MapPage-C5T_Ra9T.js                                     31.84 kB │ gzip:  11.50 kB
+dist/assets/Audit-DoVK5A2h.js                                       40.91 kB │ gzip:  12.42 kB
+dist/assets/QaReadiness-BKTgri0x.js                                 43.52 kB │ gzip:  12.13 kB
+dist/assets/Telemetry-DMntcLgN.js                                   47.33 kB │ gzip:  15.39 kB
+dist/assets/Agent-ugOKXrHZ.js                                       53.53 kB │ gzip:  17.08 kB
+dist/assets/Flight-CbF56YZM.js                                      54.65 kB │ gzip:  16.52 kB
+dist/assets/Comms-BT4O8n-q.js                                       59.06 kB │ gzip:  20.37 kB
+dist/assets/Overview-Dd9V11Lo.js                                    82.00 kB │ gzip:  25.88 kB
+dist/assets/Setup-DiMdQmX4.js                                       88.81 kB │ gzip:  27.11 kB
+dist/assets/index-BU4hymbc.js                                      402.24 kB │ gzip: 130.25 kB
+✓ built in 988ms

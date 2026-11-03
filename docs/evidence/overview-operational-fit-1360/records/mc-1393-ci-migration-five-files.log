@@ -1,0 +1,20 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/DesktopLayout.browser.test.ts (6 tests) 28897ms
+   ✓ Approved compact desktop shell > uses measured compact/wide geometry and a useful expandable rail at all approved viewports: light  3387ms
+   ✓ Approved compact desktop shell > uses measured compact/wide geometry and a useful expandable rail at all approved viewports: dark  3097ms
+   ✓ Approved compact desktop shell > retains actual mounted draft, focus and session choice through collapse, viewport changes and reload  723ms
+   ✓ Approved compact desktop shell > names empty, one, fifty, long, loading, error, stale and disconnected summary states  7779ms
+   ✓ Approved compact desktop shell > keeps filled current and archived QA evidence reachable beside folded and open FLIGHT  5898ms
+   ✓ Approved compact desktop shell > preserves the shared shell on QA, Audit, Map, Comms, Telemetry, Board, Agent, Overview and Setup  6757ms
+ ✓ |web| test/KpiStrip.test.tsx (11 tests) 321ms
+ ✓ |web| test/hudTokens.test.ts (15 tests) 103ms
+ ✓ |web| test/needsYouCount.test.tsx (1 test) 279ms
+ ✓ |web| test/AgentsPanelCss.test.ts (10 tests) 7ms
+
+ Test Files  5 passed (5)
+      Tests  43 passed (43)
+   Start at  18:25:53
+   Duration  32.44s (transform 561ms, setup 739ms, collect 538ms, tests 29.61s, environment 859ms, prepare 124ms)
+

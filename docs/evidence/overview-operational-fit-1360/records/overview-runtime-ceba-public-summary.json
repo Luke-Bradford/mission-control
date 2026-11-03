@@ -1,0 +1,230 @@
+{
+  "at": 1793737840207,
+  "snapshotClock": "2026-11-03T17:29:30.788949+00:00",
+  "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
+  "seats": 9,
+  "loops": 2,
+  "errors": [],
+  "writes": [],
+  "scope": "Private frozen actual-API/DB preview; six viewport/theme contexts at fresh and17-minute-aged clocks. Actual images/API responses remain private. No live deployment, paid crew, provider or observed-loop action. All non-GET/HEAD HTTP requests blocked.",
+  "rawPrivateProofSha256": "f0b1ad5951a32e9d7bb0b1d617add7f1aa484132e0c630a032b7d2841a59092d",
+  "helperSha256": "0fcc5665ec8e2d639dc4df58e69446bc4a1848e025146b25648db9420ea91599",
+  "cases": [
+    {
+      "case": "fresh-1920x1080-light-folded",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "grid": {
+        "clientHeight": 923,
+        "scrollHeight": 923,
+        "clientWidth": 1800,
+        "scrollWidth": 1800
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 1012,
+      "nextActionBottom": 561,
+      "pageBottom": 1026
+    },
+    {
+      "case": "fresh-1920x1080-dark-folded",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "grid": {
+        "clientHeight": 923,
+        "scrollHeight": 923,
+        "clientWidth": 1800,
+        "scrollWidth": 1800
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 1012,
+      "nextActionBottom": 561,
+      "pageBottom": 1026
+    },
+    {
+      "case": "fresh-2560x1200-light-folded",
+      "viewport": {
+        "width": 2560,
+        "height": 1200
+      },
+      "grid": {
+        "clientHeight": 1043,
+        "scrollHeight": 1043,
+        "clientWidth": 2440,
+        "scrollWidth": 2440
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 608,
+      "nextActionBottom": 417,
+      "pageBottom": 1146
+    },
+    {
+      "case": "fresh-2560x1200-dark-folded",
+      "viewport": {
+        "width": 2560,
+        "height": 1200
+      },
+      "grid": {
+        "clientHeight": 1043,
+        "scrollHeight": 1043,
+        "clientWidth": 2440,
+        "scrollWidth": 2440
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 608,
+      "nextActionBottom": 417,
+      "pageBottom": 1146
+    },
+    {
+      "case": "fresh-3840x1800-light-folded",
+      "viewport": {
+        "width": 3840,
+        "height": 1800
+      },
+      "grid": {
+        "clientHeight": 1643,
+        "scrollHeight": 1643,
+        "clientWidth": 3720,
+        "scrollWidth": 3720
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 887.5,
+      "nextActionBottom": 665,
+      "pageBottom": 1746
+    },
+    {
+      "case": "fresh-3840x1800-dark-folded",
+      "viewport": {
+        "width": 3840,
+        "height": 1800
+      },
+      "grid": {
+        "clientHeight": 1643,
+        "scrollHeight": 1643,
+        "clientWidth": 3720,
+        "scrollWidth": 3720
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 887.5,
+      "nextActionBottom": 665,
+      "pageBottom": 1746
+    },
+    {
+      "case": "aged-1920x1080-light-folded",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "grid": {
+        "clientHeight": 917,
+        "scrollHeight": 917,
+        "clientWidth": 1800,
+        "scrollWidth": 1800
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 1018,
+      "nextActionBottom": 567,
+      "pageBottom": 1026
+    },
+    {
+      "case": "aged-1920x1080-dark-folded",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "grid": {
+        "clientHeight": 917,
+        "scrollHeight": 917,
+        "clientWidth": 1800,
+        "scrollWidth": 1800
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 1018,
+      "nextActionBottom": 567,
+      "pageBottom": 1026
+    },
+    {
+      "case": "aged-2560x1200-light-folded",
+      "viewport": {
+        "width": 2560,
+        "height": 1200
+      },
+      "grid": {
+        "clientHeight": 1037,
+        "scrollHeight": 1037,
+        "clientWidth": 2440,
+        "scrollWidth": 2440
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 614,
+      "nextActionBottom": 423,
+      "pageBottom": 1146
+    },
+    {
+      "case": "aged-2560x1200-dark-folded",
+      "viewport": {
+        "width": 2560,
+        "height": 1200
+      },
+      "grid": {
+        "clientHeight": 1037,
+        "scrollHeight": 1037,
+        "clientWidth": 2440,
+        "scrollWidth": 2440
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 614,
+      "nextActionBottom": 423,
+      "pageBottom": 1146
+    },
+    {
+      "case": "aged-3840x1800-light-folded",
+      "viewport": {
+        "width": 3840,
+        "height": 1800
+      },
+      "grid": {
+        "clientHeight": 1637,
+        "scrollHeight": 1637,
+        "clientWidth": 3720,
+        "scrollWidth": 3720
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 893.5,
+      "nextActionBottom": 671,
+      "pageBottom": 1746
+    },
+    {
+      "case": "aged-3840x1800-dark-folded",
+      "viewport": {
+        "width": 3840,
+        "height": 1800
+      },
+      "grid": {
+        "clientHeight": 1637,
+        "scrollHeight": 1637,
+        "clientWidth": 3720,
+        "scrollWidth": 3720
+      },
+      "crewRows": 9,
+      "loops": 2,
+      "machineFactBottom": 893.5,
+      "nextActionBottom": 671,
+      "pageBottom": 1746
+    }
+  ]
+}

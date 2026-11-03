@@ -1,0 +1,51 @@
+{
+  "renderedSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
+  "baselineSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+  "current": [
+    {
+      "phase": "shared working tree before ceba freeze",
+      "command": "pnpm exec vitest run --project web apps/web/test/KpiStrip.test.tsx apps/web/test/needsYouCount.test.tsx apps/web/test/DesktopLayout.browser.test.ts apps/web/test/AgentsPanelCss.test.ts apps/web/test/hudTokens.test.ts --maxWorkers=1",
+      "result": "43/43 passed in five files, including6actual Desktop browsercases",
+      "receipt": "records/mc-1393-ci-migration-five-files.log",
+      "limit": "Working-tree execution; not relabelled as frozen-ceba run."
+    },
+    {
+      "phase": "frozen ceba",
+      "command": "MC_QA_EVIDENCE_DIR=$CONTROLLER/overview-operational-final-ceba037e pnpm exec vitest run --project web apps/web/test/OverviewOperational.browser.test.ts --maxWorkers=1",
+      "result": "1/1 browsercase;36current normalrenders",
+      "receipt": "records/mc-overview-final-ceba-normal.log"
+    },
+    {
+      "phase": "frozen ceba",
+      "command": "MC_QA_EVIDENCE_DIR=$CONTROLLER/overview-constrained-final-ceba037e pnpm exec vitest run --project web apps/web/test/OverviewConstraintBudget.browser.test.ts --maxWorkers=1",
+      "result": "8/8 browsercases;16current combined-stateframes",
+      "receipt": "records/mc-overview-final-ceba-combined.log"
+    },
+    {
+      "phase": "root frozen ceba checks",
+      "result": "workspace types/lint/build exited0",
+      "receipts": [
+        "records/mc-overview-ceba-types.log",
+        "records/mc-overview-ceba-lint.log",
+        "records/mc-overview-ceba-build.log"
+      ]
+    },
+    {
+      "phase": "root private actualAPI snapshot, exactceba",
+      "result": "12fresh/aged viewport+theme cases;zero page errors/writes",
+      "receipt": "records/overview-runtime-ceba-public-summary.json",
+      "limit": "Sanitized metadata only. Operational bodies/screenshots stay private."
+    }
+  ],
+  "historical": [
+    "records/overview-ci-attempt1-public-summary.json",
+    "records/f490-phase.json",
+    "records/overview-runtime-f490-public-summary.json"
+  ],
+  "independentReview": "records/review-1360-ceba037e.md",
+  "limits": [
+    "Minor inherited Crew200% text enlargement remains owned by#1392. No browser-zoom or enlargedCrew/Agent conformance claim.",
+    "No new full suite; earlier216affected units and reader/state/keyboard executions retain actual source phases.",
+    "Future final-head CI/deployment remains controller-owned."
+  ]
+}

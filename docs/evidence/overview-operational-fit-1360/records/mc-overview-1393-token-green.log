@@ -1,0 +1,66 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/AgentsPanelCss.test.ts (10 tests) 8ms
+ ❯ |web| test/hudTokens.test.ts (15 tests | 1 failed) 124ms
+   ✓ hud.css tokens > defines exactly the type scale and its line heights 4ms
+   ✓ hud.css tokens > defines exactly the spacing scale 0ms
+   ✓ the web source uses only the tokens > scans the app's files 0ms
+   ✓ the web source uses only the tokens > flags a raw font size, spacing and colour 1ms
+   × the web source uses only the tokens > sets no raw font size, spacing or colour 117ms
+     → expected [ …(16) ] to deeply equal []
+   ✓ readable content is at least 12px > hud/shared.css pre.diff 0ms
+   ✓ readable content is at least 12px > agent/agent.css .ev.tool .txt 0ms
+   ✓ readable content is at least 12px > agent/agent.css .ev details pre 0ms
+   ✓ readable content is at least 12px > flight/flight.css .wif-branch 0ms
+   ✓ readable content is at least 12px > flight/flight.css .wif-checkpoint 0ms
+   ✓ readable content is at least 12px > lenses/lenses.css .map-lens 0ms
+   ✓ readable content is at least 12px > lenses/lenses.css .map-conflict-detail 0ms
+   ✓ readable content is at least 12px > map/map.css .map-results 0ms
+   ✓ readable content is at least 12px > map/map.css .map-results button 0ms
+   ✓ readable content is at least 12px > components/config/Glossary.css .gloss code 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/hudTokens.test.ts > the web source uses only the tokens > sets no raw font size, spacing or colour
+AssertionError: expected [ …(16) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "overview/overview.css:2217 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2217 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2217 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2229 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2229 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2229 font: 11px / 14px var(--mono)",
++   "overview/overview.css:2408 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2408 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2408 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2552 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2552 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2552 font: 11px / 16px var(--mono)",
++   "overview/overview.css:2707 font: 11px / 20px var(--mono)",
++   "overview/overview.css:2707 font: 11px / 20px var(--mono)",
++   "overview/overview.css:2707 font: 11px / 20px var(--mono)",
++   "overview/overview.css:2269 colour #0008",
++ ]
+
+ ❯ test/hudTokens.test.ts:174:17
+    172|   it("sets no raw font size, spacing or colour", () => {
+    173|     const raw = FILES.flatMap((file) => offences(file, readFileSync(jo…
+    174|     expect(raw).toEqual([]);
+       |                 ^
+    175|   });
+    176| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 24 passed (25)
+   Start at  18:23:30
+   Duration  970ms (transform 190ms, setup 604ms, collect 23ms, tests 132ms, environment 740ms, prepare 76ms)
+

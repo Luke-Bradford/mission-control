@@ -1,6 +1,6 @@
 # Overview operational fit — current controlled evidence
 
-Rendered product `f49066503d42a1588096e9b71a17b3ed0688db7c` versus delivered baseline `d192dd83d42299dfe52aedccf2791c4ab91b0169`. All values are fictional source-shaped data; no actual operational data is published. 36 matched full-App pairs / 72 renders were captured; 24 pairs are retained here. The complete named matrix and all geometry/hash/source/clock bindings are in [render-checks.json](render-checks.json). Raw nonretained frames remain in the controller archive.
+Rendered product `ceba037e0b63760703cb91e203a91270d63dfc8f` versus delivered baseline `d192dd83d42299dfe52aedccf2791c4ab91b0169`. All values are fictional source-shaped data; no actual operational data is published. 36 matched full-App pairs / 72 renders were captured; 24 pairs are retained here. The complete named matrix and all geometry/hash/source/clock bindings are in [render-checks.json](render-checks.json). Raw nonretained frames remain in the controller archive.
 
 - normal-loops-1280x900-dpr1-light-folded: [before](baseline/normal-loops-1280x900-dpr1-light-folded.png), [after](current/normal-loops-1280x900-dpr1-light-folded.png), [diff](diff/normal-loops-1280x900-dpr1-light-folded.png).
 - normal-loops-1440x900-dpr1-dark-open: [before](baseline/normal-loops-1440x900-dpr1-dark-open.png), [after](current/normal-loops-1440x900-dpr1-dark-open.png), [diff](diff/normal-loops-1440x900-dpr1-dark-open.png).
@@ -27,11 +27,17 @@ Rendered product `f49066503d42a1588096e9b71a17b3ed0688db7c` versus delivered bas
 - normal-loops-1920x1080-dpr2-dark-folded: [before](baseline/normal-loops-1920x1080-dpr2-dark-folded.png), [after](current/normal-loops-1920x1080-dpr2-dark-folded.png), [diff](diff/normal-loops-1920x1080-dpr2-dark-folded.png).
 - normal-loops-1920x1080-dpr2-dark-open: [before](baseline/normal-loops-1920x1080-dpr2-dark-open.png), [after](current/normal-loops-1920x1080-dpr2-dark-open.png), [diff](diff/normal-loops-1920x1080-dpr2-dark-open.png).
 
+## CI correction and phase history
+
+First-head [CI41690356017](records/overview-ci-attempt1-public-summary.json) failed11tests in five files on08c6. Intermediate token-green/token-green2 logs also failed and remain named historical receipts. Ceba replaces raw CSS values with equivalent shared tokens and migrates legacy tests to the retained canonical histories and modal focus; no JavaScript/data/action behavior changed. Exact final-head CI is still required.
+
+[Original f490 phase](records/f490-phase.json), [matrix](records/f490-render-checks.json), [old file ledger](records/f490-files.json) and [gallery text](records/f490-gallery.txt) remain historical. Their prior relative PNG paths apply to immutable08c6, not current successor assets. Original private capture archives are unchanged.
+
 ## Scope and limits
 
 The normal matrix covers eleven configured seats plus two read-only loops, both themes and rail states at CSS1920×1080,2560×1440,3840×2160 and1920DPR2, plus1280/1440/1600,1600×700 and3840×1800. These are viewport captures, not full-scroll images. Baseline readiness verifies the same loaded data; only the current phase applies the redesigned fit assertions. Wide-short views intentionally retain one selected history and complete readers.
 
-The latest source review is [f490 closure](records/review-1360-f4906650.md). The [sanitized actual-data result](records/overview-runtime-f490-public-summary.json) records twelve private fresh/aged snapshot checks; actual API bodies and screenshots remain private.
+The latest [ceba correction/current-proof review](records/review-1360-ceba037e.md) carries the earlier source closures with no new finding. The [current sanitized actual-data result](records/overview-runtime-ceba-public-summary.json) records twelve private fresh/aged snapshot checks. The [f490 result](records/overview-runtime-f490-public-summary.json) remains historical; actual bodies and screenshots stay private.
 
 The inherited Crew text-enlargement limitation remains [#1392](https://github.com/Luke-Bradford/mission-control/issues/1392); see the [matched disposition](records/review-1360-enlargement-disposition.md). Controlled200% text injection is not browser zoom. The newly mounted Agent route in that proof uses normal text. No enlarged-Crew/Agent conformance is claimed.
 
@@ -46,7 +52,7 @@ All four controlled comparisons use identical API bodies and fixture clocks; ori
 
 ## Focused and historical proof
 
-Filenames and receipts retain their actual source phases. B45 readers/KPI corrections and3a9 state/keyboard evidence are earlier phases; they are not relabelled f490. Final f490 scope is the bound normal/combined matrices and reviewed current source.
+Filenames and receipts retain their actual source phases. B45 readers/KPI corrections and3a9 state/keyboard evidence are earlier phases; they are not relabelled ceba. Current ceba scope is the bound normal/combined matrices and reviewed current source.
 
 - [fresh-constraint-dark-after.png](focus/fresh-constraint-dark-after.png).
 - [fresh-constraint-light-after.png](focus/fresh-constraint-light-after.png).
@@ -91,8 +97,8 @@ Filenames and receipts retain their actual source phases. B45 readers/KPI correc
 
 ## Reproduction and checks
 
-The executed [capture helper](helpers/OverviewOperational.browser.test.ts) builds the actual App with production fonts and the controlled API fixture. Copy the helper/entry/fixture files into a detached delivered d192 worktree and the current worktree. Run it with `MC_QA_EVIDENCE_DIR`; only baseline uses `MC_OVERVIEW_CAPTURE_BASELINE=1`. Its baseline mode collects readiness and source/hash bindings without applying the current layout requirements. The [curation helper](helpers/curate.mjs) consumes both private capture directories and the repository PNG codec.
+The executed [capture helper](helpers/OverviewOperational.browser.test.ts) builds the actual App with production fonts and the controlled API fixture. Copy the helper/entry/fixture files into a detached delivered d192 worktree and the current worktree. Run it with `MC_QA_EVIDENCE_DIR`; only baseline uses `MC_OVERVIEW_CAPTURE_BASELINE=1`. Its baseline mode collects readiness and source/hash bindings without applying the current layout requirements. The [current curation helper](helpers/curate-ceba.mjs) consumes both private capture directories and the repository PNG codec.
 
-Source-bound checks are retained as staged receipts, not a single invented suite: final216affected units; final normal36 renders; final combined8cases/16frames; types/lint/build. Earlier131/158 and reader/state/keyboard checks keep their own phase. The stopped full-content stage and original failures remain historical failures. Shared-shell coverage is App route/landmark/tab units and render budgets with source-scoped non-Overview defaults; no nine-page browser matrix is claimed.
+Checks remain staged in [current-checks.json](records/current-checks.json): the pre-freeze correction worktree passed43tests across all five CI-failing files, including six Desktop browsercases and its nine-page shell check; frozen ceba passed normal36renders and combined8cases/16frames, plus root workspace types/lint/build. Earlier216/131/158 units and reader/state/keyboard executions retain their own phases. The stopped full-content stage and original failures remain historical failures. The43-case worktree run is not relabelled as a frozen-ceba execution.
 
 Text records declare their sole path-prefix normalization in [normalization.json](records/normalization.json); original and retained hashes are recorded. PNGs are unchanged screenshot bytes, direct viewport-intersection crops, or repository-codec diffs. [File ledger](files.json) covers every retained asset. CI and deployment belong to the controller and remain pending this artifact.

@@ -1,0 +1,9 @@
+{
+  "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+  "evidenceCommit": "08c6aa113366600c6009834e6847b90f335d0b85",
+  "status": "historical captured phase; first CI failed, not current source",
+  "galleryRecord": "records/f490-gallery.txt",
+  "matrixRecord": "records/f490-render-checks.json",
+  "fileLedger": "records/f490-files.json",
+  "assetInterpretation": "Old relative paths/hashes apply to the immutable08c6 Git tree, not the overwritten current/ and diff/ bytes in this successor. Private original capture directories remain unchanged."
+}

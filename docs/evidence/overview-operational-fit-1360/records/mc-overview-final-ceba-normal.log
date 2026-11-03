@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewOperational.browser.test.ts (1 test) 15816ms
+   ✓ Operational Overview composition > fits useful natural stacks at CSS viewport sizes and retains keyboard modal state  14434ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  20:29:32
+   Duration  16.58s (transform 217ms, setup 331ms, collect 255ms, tests 15.82s, environment 0ms, prepare 34ms)
+

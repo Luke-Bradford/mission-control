@@ -1,0 +1,218 @@
+[
+  {
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "capturedAt": "2026-11-03T17:56:14.998Z",
+    "fixtureClock": 1792238400000,
+    "apiSha256": "eb1037f401e0b90541f65b28a596d526aad695f0c8487308ae633fa808be65a7",
+    "helperSha256": "a27600da59ea92098bacd42189cd4b46863d07712b01a6895da4e7c38615e8fd",
+    "file": "constrained-stale-mixed-1920x1080-dark-folded.png",
+    "facts": {
+      "page": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 953,
+        "top": 73,
+        "right": 1824,
+        "bottom": 1026,
+        "left": 24
+      },
+      "grid": {
+        "client": 917,
+        "scroll": 917
+      },
+      "crew": {
+        "x": 24,
+        "y": 219,
+        "width": 1200,
+        "height": 399,
+        "top": 219,
+        "right": 1224,
+        "bottom": 618,
+        "left": 24
+      },
+      "provider": {
+        "x": 1236,
+        "y": 219,
+        "width": 588,
+        "height": 144,
+        "top": 219,
+        "right": 1824,
+        "bottom": 363,
+        "left": 1236
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 367,
+        "width": 588,
+        "height": 229,
+        "top": 367,
+        "right": 1824,
+        "bottom": 596,
+        "left": 1236
+      },
+      "history": {
+        "x": 1236,
+        "y": 600,
+        "width": 588,
+        "height": 179,
+        "top": 600,
+        "right": 1824,
+        "bottom": 779,
+        "left": 1236
+      },
+      "machine": {
+        "x": 1236,
+        "y": 783,
+        "width": 588,
+        "height": 240,
+        "top": 783,
+        "right": 1824,
+        "bottom": 1023,
+        "left": 1236
+      },
+      "constraint": "codex-main 7d full in ~8h00 at this rate (resets Sat 12:00)",
+      "status": "Stale snapshotLast read 11:55Refresh overview",
+      "next": "Next action · [operator-decision] Recorded fixture maintenance is paused until its next planned capacity window (Wednesday at02:00 UTC).Inspect evidence",
+      "zero": "Token throughput30m historyToken throughputCost per minuteIn-progress ticketsCI pass rate · rolling 24hNeeds you · global inboxInspectLatest 0 tokens/minPeak 0No activity in the measured minutes.10.5011:2511:4011:55Recorded values · 30 pointsComplete minutes · UTC · Scroll ↕ for every observation.Input + output per full minute. Rate is separate from context and account allowance. Missing intervals remain gaps.Minute startingDisplay · tokens/minRecorded · tokens/min11:250011:260011:270011:280011:290011:300011:310011:320011:330011:340011:350011:360011:370011:380011:390011:400011:410011:420011:430011:440011:450011:460011:470011:480011:490011:500011:510011:520011:530011:5400tokens/min · full-minute buckets · gaps = not collected",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "controls": [
+        {
+          "width": 121.65625,
+          "height": 30
+        },
+        {
+          "width": 82.3125,
+          "height": 30
+        },
+        {
+          "width": 417.28125,
+          "height": 32
+        },
+        {
+          "width": 60.109375,
+          "height": 30
+        }
+      ]
+    },
+    "errors": []
+  },
+  {
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "capturedAt": "2026-11-03T17:56:15.165Z",
+    "fixtureClock": 1792238400000,
+    "apiSha256": "eb1037f401e0b90541f65b28a596d526aad695f0c8487308ae633fa808be65a7",
+    "helperSha256": "a27600da59ea92098bacd42189cd4b46863d07712b01a6895da4e7c38615e8fd",
+    "file": "constrained-stale-mixed-1920x1080-dark-open.png",
+    "facts": {
+      "page": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 953,
+        "top": 73,
+        "right": 1824,
+        "bottom": 1026,
+        "left": 24
+      },
+      "grid": {
+        "client": 917,
+        "scroll": 917
+      },
+      "crew": {
+        "x": 24,
+        "y": 219,
+        "width": 1200,
+        "height": 399,
+        "top": 219,
+        "right": 1224,
+        "bottom": 618,
+        "left": 24
+      },
+      "provider": {
+        "x": 1236,
+        "y": 219,
+        "width": 588,
+        "height": 144,
+        "top": 219,
+        "right": 1824,
+        "bottom": 363,
+        "left": 1236
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 367,
+        "width": 588,
+        "height": 229,
+        "top": 367,
+        "right": 1824,
+        "bottom": 596,
+        "left": 1236
+      },
+      "history": {
+        "x": 1236,
+        "y": 600,
+        "width": 588,
+        "height": 179,
+        "top": 600,
+        "right": 1824,
+        "bottom": 779,
+        "left": 1236
+      },
+      "machine": {
+        "x": 1236,
+        "y": 783,
+        "width": 588,
+        "height": 240,
+        "top": 783,
+        "right": 1824,
+        "bottom": 1023,
+        "left": 1236
+      },
+      "constraint": "codex-main 7d full in ~8h00 at this rate (resets Sat 12:00)",
+      "status": "Stale snapshotLast read 11:55Refresh overview",
+      "next": "Next action · [operator-decision] Recorded fixture maintenance is paused until its next planned capacity window (Wednesday at02:00 UTC).Inspect evidence",
+      "zero": "Token throughput30m historyToken throughputCost per minuteIn-progress ticketsCI pass rate · rolling 24hNeeds you · global inboxInspectLatest 0 tokens/minPeak 0No activity in the measured minutes.10.5011:2511:4011:55Recorded values · 30 pointsComplete minutes · UTC · Scroll ↕ for every observation.Input + output per full minute. Rate is separate from context and account allowance. Missing intervals remain gaps.Minute startingDisplay · tokens/minRecorded · tokens/min11:250011:260011:270011:280011:290011:300011:310011:320011:330011:340011:350011:360011:370011:380011:390011:400011:410011:420011:430011:440011:450011:460011:470011:480011:490011:500011:510011:520011:530011:5400tokens/min · full-minute buckets · gaps = not collected",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "controls": [
+        {
+          "width": 121.65625,
+          "height": 30
+        },
+        {
+          "width": 82.3125,
+          "height": 30
+        },
+        {
+          "width": 417.28125,
+          "height": 32
+        },
+        {
+          "width": 60.109375,
+          "height": 30
+        }
+      ]
+    },
+    "errors": []
+  }
+]

@@ -1,0 +1,68 @@
+{
+  "head": "08c6aa113366600c6009834e6847b90f335d0b85",
+  "run": 41690356017,
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "validate",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T18:10:50Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001160"
+    },
+    {
+      "name": "web-core",
+      "conclusion": "failure",
+      "completedAt": "2026-11-03T18:17:53Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001504"
+    },
+    {
+      "name": "server (1)",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T18:13:12Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001514"
+    },
+    {
+      "name": "server-process (1)",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T18:09:02Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001550"
+    },
+    {
+      "name": "server-process (2)",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T18:17:36Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001623"
+    },
+    {
+      "name": "server (2)",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T18:12:10Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126107001847"
+    },
+    {
+      "name": "check",
+      "conclusion": "failure",
+      "completedAt": "2026-11-03T18:17:57Z",
+      "url": "https://github.com/Luke-Bradford/mission-control/actions/runs/41690356017/job/126114185900"
+    }
+  ],
+  "webCore": {
+    "passed": 5565,
+    "failed": 11,
+    "filesFailed": 5,
+    "failures": [
+      "web  test/AgentsPanelCss.test.ts > bounds the Overview rows and lets panel bodies scroll internally",
+      "web  test/DesktopLayout.browser.test.ts > Approved compact desktop shell > uses measured compact/wide geometry and a useful expandable rail at all approved viewports: light",
+      "web  test/DesktopLayout.browser.test.ts > Approved compact desktop shell > uses measured compact/wide geometry and a useful expandable rail at all approved viewports: dark",
+      "web  test/DesktopLayout.browser.test.ts > Approved compact desktop shell > retains actual mounted draft, focus and session choice through collapse, viewport changes and reload",
+      "web  test/KpiStrip.test.tsx > KpiStrip > shows neutral skeletons until the first response, then renders zeros and flat sparklines",
+      "web  test/KpiStrip.test.tsx > KpiStrip > labels eight linked metrics with their windows, registry hover and honest histories",
+      "web  test/KpiStrip.test.tsx > KpiStrip > labels a peak under 1 as itself, not as the scale's floor",
+      "web  test/KpiStrip.test.tsx > KpiStrip > keeps cached values marked stale after a failed refresh and clears the warning on recovery",
+      "web  test/KpiStrip.test.tsx > KpiStrip > under a session, Needs you stays the whole inbox and keeps its history",
+      "web  test/hudTokens.test.ts > the web source uses only the tokens > sets no raw font size, spacing or colour",
+      "web  test/needsYouCount.test.tsx > one Needs-you count > header, dock, Comms, Board and FLIGHT all count the same set, whatever the session filter"
+    ]
+  },
+  "disposition": "Held; no merge/deployment. Token compliance and accepted-layout/history compatibility were corrected in ceba037e; its exact-head CI remains required. Original failed CI/QA retained."
+}

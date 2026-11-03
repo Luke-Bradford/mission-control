@@ -1,0 +1,51 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/AgentsPanelCss.test.ts (10 tests) 8ms
+ ❯ |web| test/hudTokens.test.ts (15 tests | 1 failed) 101ms
+   ✓ hud.css tokens > defines exactly the type scale and its line heights 4ms
+   ✓ hud.css tokens > defines exactly the spacing scale 0ms
+   ✓ the web source uses only the tokens > scans the app's files 0ms
+   ✓ the web source uses only the tokens > flags a raw font size, spacing and colour 1ms
+   × the web source uses only the tokens > sets no raw font size, spacing or colour 94ms
+     → expected [ Array(1) ] to deeply equal []
+   ✓ readable content is at least 12px > hud/shared.css pre.diff 0ms
+   ✓ readable content is at least 12px > agent/agent.css .ev.tool .txt 0ms
+   ✓ readable content is at least 12px > agent/agent.css .ev details pre 0ms
+   ✓ readable content is at least 12px > flight/flight.css .wif-branch 0ms
+   ✓ readable content is at least 12px > flight/flight.css .wif-checkpoint 0ms
+   ✓ readable content is at least 12px > lenses/lenses.css .map-lens 0ms
+   ✓ readable content is at least 12px > lenses/lenses.css .map-conflict-detail 0ms
+   ✓ readable content is at least 12px > map/map.css .map-results 0ms
+   ✓ readable content is at least 12px > map/map.css .map-results button 0ms
+   ✓ readable content is at least 12px > components/config/Glossary.css .gloss code 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/hudTokens.test.ts > the web source uses only the tokens > sets no raw font size, spacing or colour
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "overview/overview.css:2269 colour #0008",
++ ]
+
+ ❯ test/hudTokens.test.ts:175:17
+    173|   it("sets no raw font size, spacing or colour", () => {
+    174|     const raw = FILES.flatMap((file) => offences(file, readFileSync(jo…
+    175|     expect(raw).toEqual([]);
+       |                 ^
+    176|   });
+    177| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 24 passed (25)
+   Start at  18:24:39
+   Duration  780ms (transform 188ms, setup 563ms, collect 16ms, tests 109ms, environment 472ms, prepare 62ms)
+

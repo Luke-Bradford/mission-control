@@ -1,6 +1,6 @@
 [
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -10,7 +10,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:54.981Z",
+    "capturedAt": "2026-11-03T20:29:36.040Z",
     "scheme": "light",
     "state": "folded",
     "png": {
@@ -266,7 +266,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -276,12 +276,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:55.184Z",
+    "capturedAt": "2026-11-03T20:29:36.225Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-1280x900-dpr1-light-open.png",
-      "sha256": "1d23caa806d61dfd014c448011ec181b55a76cf6ef93558c5e8aea277f1a3e9f"
+      "sha256": "be3375d475ee556f1adb300008759e69c9d7cec7d4fd51c33cd50177bab0e042"
     },
     "facts": {
       "viewport": {
@@ -459,7 +459,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -469,7 +469,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:55.664Z",
+    "capturedAt": "2026-11-03T20:29:36.743Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
@@ -725,7 +725,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -735,7 +735,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:55.832Z",
+    "capturedAt": "2026-11-03T20:29:36.906Z",
     "scheme": "dark",
     "state": "open",
     "png": {
@@ -918,7 +918,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -928,12 +928,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:56.302Z",
+    "capturedAt": "2026-11-03T20:29:37.394Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-1440x900-dpr1-light-folded.png",
-      "sha256": "ee67903efd4630cf373104753719e1c2b6e0fa066007ff86210f2cd3fdca6b3c"
+      "sha256": "22c4b20d9b2fa25033e01944e132d234a45825f5c4a8dfdc1257cc4c208f199d"
     },
     "facts": {
       "viewport": {
@@ -1184,7 +1184,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -1194,12 +1194,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:56.470Z",
+    "capturedAt": "2026-11-03T20:29:37.558Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-1440x900-dpr1-light-open.png",
-      "sha256": "69b6b75e030918c012e88a3a71c0c37bae033ee323e892c81782eb5e4ac6d908"
+      "sha256": "e58f05176f52d3e1be21ab08c27374a155ea2c3ecb35dcf182bafe7f56444f89"
     },
     "facts": {
       "viewport": {
@@ -1377,7 +1377,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -1387,7 +1387,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:56.951Z",
+    "capturedAt": "2026-11-03T20:29:38.026Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
@@ -1643,7 +1643,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -1653,12 +1653,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:57.120Z",
+    "capturedAt": "2026-11-03T20:29:38.193Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-1440x900-dpr1-dark-open.png",
-      "sha256": "0b12fc1437d0e1d4951b4437637462dfe1556788e1d1005e994d093be9d8c428"
+      "sha256": "38ba5241bc187db588312b7598c62147c9c42927d22b915c3c8a987bdba416bc"
     },
     "facts": {
       "viewport": {
@@ -1836,7 +1836,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -1846,7 +1846,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:57.591Z",
+    "capturedAt": "2026-11-03T20:29:38.697Z",
     "scheme": "light",
     "state": "folded",
     "png": {
@@ -2102,7 +2102,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -2112,7 +2112,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:57.757Z",
+    "capturedAt": "2026-11-03T20:29:38.865Z",
     "scheme": "light",
     "state": "open",
     "png": {
@@ -2295,7 +2295,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -2305,12 +2305,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:58.224Z",
+    "capturedAt": "2026-11-03T20:29:39.346Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-1600x1000-dpr1-dark-folded.png",
-      "sha256": "e574a98152dbc4ab2cf3e9e126733aa18d7cfd74356eeedcae50cfea9a31f1cf"
+      "sha256": "96ef371f0e28bb28e3e9cf56882d2fd04361727e78c7e3fa150849ba95dd093d"
     },
     "facts": {
       "viewport": {
@@ -2561,7 +2561,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -2571,12 +2571,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:58.392Z",
+    "capturedAt": "2026-11-03T20:29:39.515Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-1600x1000-dpr1-dark-open.png",
-      "sha256": "7c0fac675d0c3b498ceaf5f96d343a7acd654e255cadf1b945fec476ffe30b98"
+      "sha256": "3ed9f8b0c687a2e8468c65b7f0643ebcfe0ef587df0e2c5979e9ae2b2e401b95"
     },
     "facts": {
       "viewport": {
@@ -2754,7 +2754,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -2764,12 +2764,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:58.881Z",
+    "capturedAt": "2026-11-03T20:29:40.004Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-1920x1080-dpr1-light-folded.png",
-      "sha256": "49435e0cfecede2d5403d60c153bc105212ca5a8b7b2d67a2c15153113716a0a"
+      "sha256": "cfa1b308fb88850a928b81564752b2bd37198a3acc549873a61472cde91366ae"
     },
     "facts": {
       "viewport": {
@@ -3020,7 +3020,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -3030,7 +3030,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:59.064Z",
+    "capturedAt": "2026-11-03T20:29:40.187Z",
     "scheme": "light",
     "state": "open",
     "png": {
@@ -3213,7 +3213,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -3223,12 +3223,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:59.550Z",
+    "capturedAt": "2026-11-03T20:29:40.687Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-1920x1080-dpr1-dark-folded.png",
-      "sha256": "3c2c827577b192f19158aca3865a449f20340a130bfe0490bf21875488e12327"
+      "sha256": "4e9b84afe0d81a53e4451258beadea6e3ebef2c4135721c3a57c006c54925532"
     },
     "facts": {
       "viewport": {
@@ -3479,7 +3479,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -3489,12 +3489,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:55:59.735Z",
+    "capturedAt": "2026-11-03T20:29:40.871Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-1920x1080-dpr1-dark-open.png",
-      "sha256": "f84223142b9662810c67d3fff64f76e7f17b05f62e7a142b29093580c52f7e1f"
+      "sha256": "477bb66284b3012d400822eebd452d6a7863c0710b3f2b283b6ca453f3c46bf0"
     },
     "facts": {
       "viewport": {
@@ -3672,7 +3672,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -3682,12 +3682,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:00.265Z",
+    "capturedAt": "2026-11-03T20:29:41.384Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-2560x1440-dpr1-light-open.png",
-      "sha256": "5f68cde8a495ef3c71962db3ab1e5b38ed5b4060b6462f62fa55c246d3e087a2"
+      "sha256": "3360620c0ef8f2225e8678ee1f404c076ca3e02f30527e8b475df75aefeb7d7f"
     },
     "facts": {
       "viewport": {
@@ -3938,7 +3938,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -3948,12 +3948,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:00.477Z",
+    "capturedAt": "2026-11-03T20:29:41.580Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-2560x1440-dpr1-light-folded.png",
-      "sha256": "834d6915b5bed98788629093af16bf5bb5fb91559741b2712b93443439c0c000"
+      "sha256": "d7d6153b241842d660a7073f99b5d32830923bd5681c0ceee5b80a37fe2574f7"
     },
     "facts": {
       "viewport": {
@@ -4204,7 +4204,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -4214,12 +4214,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:00.984Z",
+    "capturedAt": "2026-11-03T20:29:42.102Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-2560x1440-dpr1-dark-open.png",
-      "sha256": "297734412cceddf6ad0c3cb2bcfffcc81fcb7ac808bf166dfb889686d236d7ba"
+      "sha256": "6ba6c7ca1b0d277d59e29bb604491aeed1361d6d62e6088153da1c233090022a"
     },
     "facts": {
       "viewport": {
@@ -4470,7 +4470,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -4480,12 +4480,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:01.194Z",
+    "capturedAt": "2026-11-03T20:29:42.300Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-2560x1440-dpr1-dark-folded.png",
-      "sha256": "49c06d54b65a0719e4e88e822a065140c885edbfc264e6b352f87088f5f82f7c"
+      "sha256": "3150d8ca6757a75372f75219b95b437bb7f3a23955c4c765c3606af925373276"
     },
     "facts": {
       "viewport": {
@@ -4736,7 +4736,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -4746,12 +4746,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:01.790Z",
+    "capturedAt": "2026-11-03T20:29:42.921Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-3840x2160-dpr1-light-open.png",
-      "sha256": "3033b56410916761d3af440c9ab8f04594221d0375cb47f22697ee893647c215"
+      "sha256": "3445b6b389a91aa59d336a469fefb9884dc583b9ee043ce104c67f3df97a496d"
     },
     "facts": {
       "viewport": {
@@ -5053,7 +5053,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -5063,12 +5063,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:02.063Z",
+    "capturedAt": "2026-11-03T20:29:43.198Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-3840x2160-dpr1-light-folded.png",
-      "sha256": "d22bfedf182f1424c7622a3d6124a16775e32ed6b325e2ffb0aa1df925af56d8"
+      "sha256": "7f31b00897bf1d1f18a682c69f506a1c35efdd4e81df878604f4e20d6156630a"
     },
     "facts": {
       "viewport": {
@@ -5370,7 +5370,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -5380,12 +5380,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:02.668Z",
+    "capturedAt": "2026-11-03T20:29:43.806Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-3840x2160-dpr1-dark-open.png",
-      "sha256": "1206ea26c3a22a6ca91f29ed73a66211c4b0d68ec12027e940ae1c5a2e254fd5"
+      "sha256": "b04598bf999895b051812ab7a87d96b89ca7a73b316b4a40120310b64a2701e5"
     },
     "facts": {
       "viewport": {
@@ -5687,7 +5687,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -5697,7 +5697,7 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:02.946Z",
+    "capturedAt": "2026-11-03T20:29:44.085Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
@@ -6004,7 +6004,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -6014,12 +6014,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:03.539Z",
+    "capturedAt": "2026-11-03T20:29:45.262Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-3840x1800-dpr1-light-open.png",
-      "sha256": "4030a7c98a0f4822751ef9122fb91b6f965364fb603d885ce2894b69f62e567a"
+      "sha256": "842e6c0a930c47169172660cadaf71ee8f5521afe96f84a3b15ddafa0982a0a4"
     },
     "facts": {
       "viewport": {
@@ -6269,7 +6269,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -6279,12 +6279,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:03.785Z",
+    "capturedAt": "2026-11-03T20:29:45.508Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-3840x1800-dpr1-light-folded.png",
-      "sha256": "e961daf7d81ca25bc382b8c5a2b195d2448fff2b73f307c5a6ee830769a308b4"
+      "sha256": "5676c3688f10be75a62ff9001d89e5bdb7ba95deb43ab74604535b0464f3d107"
     },
     "facts": {
       "viewport": {
@@ -6534,7 +6534,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -6544,12 +6544,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:04.360Z",
+    "capturedAt": "2026-11-03T20:29:46.049Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-3840x1800-dpr1-dark-open.png",
-      "sha256": "5a856f20193a5e8db339e7a34d3e5f6e2cb409a5917fc90eaa6bf6dfdb0c56fa"
+      "sha256": "775f61e6266c35c147e41dcf5263b7295c2c7cf3fa9b0f234596bca356ab4b0c"
     },
     "facts": {
       "viewport": {
@@ -6799,7 +6799,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -6809,12 +6809,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:04.604Z",
+    "capturedAt": "2026-11-03T20:29:46.258Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-3840x1800-dpr1-dark-folded.png",
-      "sha256": "23676f9beb103cd459a09b19dd1708ae86281fa834fd15e63ab230c720dfb00e"
+      "sha256": "a5f3f0c6ed02727dc112ee07db4c100a4210b61f4d059b4190f89f2239ffc9c4"
     },
     "facts": {
       "viewport": {
@@ -7064,7 +7064,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -7074,12 +7074,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:05.081Z",
+    "capturedAt": "2026-11-03T20:29:46.754Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-1600x700-dpr1-light-folded.png",
-      "sha256": "06acf5f1f7d621ea9c7b542dd19273b656859b2c5e618d977b016f6582b66da0"
+      "sha256": "daae98079a0ee62236f3a5f457ab9ce787075b6ef9a6dd000d82a01050817385"
     },
     "facts": {
       "viewport": {
@@ -7330,7 +7330,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -7340,12 +7340,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:05.269Z",
+    "capturedAt": "2026-11-03T20:29:46.922Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-1600x700-dpr1-light-open.png",
-      "sha256": "c784a49bad49e5f63bd09b7fa845dcc82734d76d2db51b157626e1640b16979c"
+      "sha256": "d52ddeba2f7ce84ea7c2dedf1a11b233818897e6fca159f0c10ccc1f0ba03c98"
     },
     "facts": {
       "viewport": {
@@ -7523,7 +7523,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -7533,12 +7533,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:05.765Z",
+    "capturedAt": "2026-11-03T20:29:47.387Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-1600x700-dpr1-dark-folded.png",
-      "sha256": "a7f2b0cb65747fb62b17e06c1f260e3200d9ac619ba43f409ce450636426b833"
+      "sha256": "e8e4f2cd66ffe13530505103ce93566beb40d1109adb0eeca765ce14f804fe34"
     },
     "facts": {
       "viewport": {
@@ -7789,7 +7789,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -7799,12 +7799,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:05.949Z",
+    "capturedAt": "2026-11-03T20:29:47.553Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-1600x700-dpr1-dark-open.png",
-      "sha256": "0a01024a105f02a8dd1f89ef803a7dfe395e73f4a68266f7b0ce8e8774213f8b"
+      "sha256": "6034e6eb20c95152213b9e6251caeabca0f4e112fa17d5863fd8653e17f91dc8"
     },
     "facts": {
       "viewport": {
@@ -7982,7 +7982,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -7992,12 +7992,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:06.577Z",
+    "capturedAt": "2026-11-03T20:29:48.166Z",
     "scheme": "light",
     "state": "folded",
     "png": {
       "file": "normal-loops-1920x1080-dpr2-light-folded.png",
-      "sha256": "03c5c4ecd7e53b248ce52e7236083c00b7aa6737db2302ae53327c6a30c682b2"
+      "sha256": "404e9b39a6ab17078737d46fa7197d9aebf9627dfed5ddc5453d5f23ef1cdfcb"
     },
     "facts": {
       "viewport": {
@@ -8248,7 +8248,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -8258,12 +8258,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:06.843Z",
+    "capturedAt": "2026-11-03T20:29:48.457Z",
     "scheme": "light",
     "state": "open",
     "png": {
       "file": "normal-loops-1920x1080-dpr2-light-open.png",
-      "sha256": "414c245e7818414b7ffd3774878d42b728721427e06e212451a8cfb02d1793a3"
+      "sha256": "a36f6a46fa20bce2c0820fcd733e36e40f406db406820f315825a34e2e8a6254"
     },
     "facts": {
       "viewport": {
@@ -8441,7 +8441,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -8451,12 +8451,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:07.490Z",
+    "capturedAt": "2026-11-03T20:29:49.083Z",
     "scheme": "dark",
     "state": "folded",
     "png": {
       "file": "normal-loops-1920x1080-dpr2-dark-folded.png",
-      "sha256": "fb3898f05da68c30950dc704c1a0ecd057b87381506dbfe0ad538664f8424d95"
+      "sha256": "b351757e2a76be1e8bb099ae502a280ae150a7c96545157a508a9f044cf36562"
     },
     "facts": {
       "viewport": {
@@ -8707,7 +8707,7 @@
     }
   },
   {
-    "runtimeSource": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "runtimeSource": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "mode": "current-acceptance",
     "fixtureClock": 1792238400000,
     "bindings": {
@@ -8717,12 +8717,12 @@
       "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
     },
     "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
-    "capturedAt": "2026-11-03T17:56:07.758Z",
+    "capturedAt": "2026-11-03T20:29:49.368Z",
     "scheme": "dark",
     "state": "open",
     "png": {
       "file": "normal-loops-1920x1080-dpr2-dark-open.png",
-      "sha256": "46c3b8f1daf3727c00ac86cde774a261d1bd48a53c9263148d5f2515630f42d9"
+      "sha256": "d5b12413c7404f8569abd87feab089416a1b47ad7b7d5e652a9abbe871b1242d"
     },
     "facts": {
       "viewport": {

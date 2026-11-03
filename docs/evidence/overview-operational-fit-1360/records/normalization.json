@@ -7,8 +7,8 @@
   },
   {
     "file": "records/current-render-checks.json",
-    "originalSha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
-    "sha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
+    "originalSha256": "b725fbe1013239a8bba7fc48480ae883f0d40d7fbf4182a016180bfd87fd05b2",
+    "sha256": "b725fbe1013239a8bba7fc48480ae883f0d40d7fbf4182a016180bfd87fd05b2",
     "normalization": "none"
   },
   {
@@ -153,6 +153,12 @@
     "file": "records/overview-runtime-f490-public-summary.json",
     "originalSha256": "a6edf62ccf366466593bafcd01dbdcbfb9a15c2af1711e8a97fc35d1b0de6dbd",
     "sha256": "a6edf62ccf366466593bafcd01dbdcbfb9a15c2af1711e8a97fc35d1b0de6dbd",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-ci-attempt1-public-summary.json",
+    "originalSha256": "9491710d635c01bf30828644c48be21816f3844b243fcce673a1ff00dfaac83d",
+    "sha256": "9491710d635c01bf30828644c48be21816f3844b243fcce673a1ff00dfaac83d",
     "normalization": "none"
   },
   {
@@ -336,6 +342,48 @@
     "normalization": "controller-directory prefix replaced by $CONTROLLER"
   },
   {
+    "file": "records/mc-1393-ci-migration-format.log",
+    "originalSha256": "b540323005ff5e608f6e803669f027919df57bb5e26d894a9be15cac3743258d",
+    "sha256": "b540323005ff5e608f6e803669f027919df57bb5e26d894a9be15cac3743258d",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-1393-ci-migration-five-files.log",
+    "originalSha256": "09e89e76ae05a169a38dfc7a66fc8983903f3e3fa53c2bbb635a8455ec002c99",
+    "sha256": "9c018939e62df29d3b0d76a7f62ca6f14c16f4e1b8d5d1ce111af19390cffbdb",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-ceba-types.log",
+    "originalSha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e",
+    "sha256": "89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-ceba-lint.log",
+    "originalSha256": "ad7a97faa938c74bdae9240e56ad26e55f971b23afd6509086586d2ea79f0ebf",
+    "sha256": "ad7a97faa938c74bdae9240e56ad26e55f971b23afd6509086586d2ea79f0ebf",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-ceba-build.log",
+    "originalSha256": "9fd91d9be23a3a16051cbd7ec0a4dda7322284e4c87aebddb0c04719c8aee78c",
+    "sha256": "9fd91d9be23a3a16051cbd7ec0a4dda7322284e4c87aebddb0c04719c8aee78c",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-final-ceba-normal.log",
+    "originalSha256": "2360c71dbce8f2489c6276b4e4b362c64fa733675d8ac2aca8cf649ad69f79ea",
+    "sha256": "eec64d5e4c7c7da1225f425d06dc5b95e36817cea9194bb41b2a161b5dfece88",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-ceba-combined.log",
+    "originalSha256": "924330958b560ea1ec42b7b2da5c5072514d7b12a90540df1c622431db95a792",
+    "sha256": "a30c7c0f2111d740ba51c18ba175eb5fa23c5e4a44cb71d1f520f603529d4917",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
     "file": "records/overview-operational-3a9-keyboard-paint-settled-context-scroll-trace-light.json",
     "originalSha256": "99d692e1fd824ea0324a1448bd5b764238c4ef29d9fd7daddbb98ab2472bb28f",
     "sha256": "99d692e1fd824ea0324a1448bd5b764238c4ef29d9fd7daddbb98ab2472bb28f",
@@ -423,6 +471,90 @@
     "file": "records/final-constrained-stale-normal-loops-light.json",
     "originalSha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
     "sha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-current-render-checks.json",
+    "originalSha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
+    "sha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-fresh-mixed-dark.json",
+    "originalSha256": "9984a69a6cc3fe0851ca0326d693cd742c75ba2761ee26e79120b804d37a19dc",
+    "sha256": "9984a69a6cc3fe0851ca0326d693cd742c75ba2761ee26e79120b804d37a19dc",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-fresh-mixed-light.json",
+    "originalSha256": "21b84738ff048775fe8cace1e46cf6c9ae1d802018b813f798543da038f878fa",
+    "sha256": "21b84738ff048775fe8cace1e46cf6c9ae1d802018b813f798543da038f878fa",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-fresh-normal-loops-dark.json",
+    "originalSha256": "b5eda1ab80a69056029044603ee8af036a080903b7dbdc29fe56e9770ec9559c",
+    "sha256": "b5eda1ab80a69056029044603ee8af036a080903b7dbdc29fe56e9770ec9559c",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-fresh-normal-loops-light.json",
+    "originalSha256": "471d4878bc3f78fed7bcb03846f0806657e37dfc0ba07fdf33ea5c265aa0e1be",
+    "sha256": "471d4878bc3f78fed7bcb03846f0806657e37dfc0ba07fdf33ea5c265aa0e1be",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-stale-mixed-dark.json",
+    "originalSha256": "88a8c352e76c9be9a928878067ed075a18fa2db2c633409f3fd83a5f3166b49f",
+    "sha256": "88a8c352e76c9be9a928878067ed075a18fa2db2c633409f3fd83a5f3166b49f",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-stale-mixed-light.json",
+    "originalSha256": "59424c673baf4beb4358c8cfec30dae295f9cd2d688fec80e6bc0dc3d49dc3b9",
+    "sha256": "59424c673baf4beb4358c8cfec30dae295f9cd2d688fec80e6bc0dc3d49dc3b9",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-stale-normal-loops-dark.json",
+    "originalSha256": "9b961389775dfcbfb0be07e6d3dc17126614941831d706b328c43b9756a46048",
+    "sha256": "9b961389775dfcbfb0be07e6d3dc17126614941831d706b328c43b9756a46048",
+    "normalization": "none"
+  },
+  {
+    "file": "records/f490-final-constrained-stale-normal-loops-light.json",
+    "originalSha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
+    "sha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-ceba037e.md",
+    "originalSha256": "cf9cf54bf9e9d8d1704bd9eaa6a64b0205f0246f76151517dfa9743b044ed058",
+    "sha256": "cf9cf54bf9e9d8d1704bd9eaa6a64b0205f0246f76151517dfa9743b044ed058",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-runtime-ceba-public-summary.json",
+    "originalSha256": "4cf89000eaedc18e1e40b28b95ad1fadaddca1625a9c28b664e34f6193a7539c",
+    "sha256": "4cf89000eaedc18e1e40b28b95ad1fadaddca1625a9c28b664e34f6193a7539c",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-1393-token-green.log",
+    "originalSha256": "1a07071a5b29289bf98bdc4010cc422132b7facc035ca8078a8ea45c4a7362b5",
+    "sha256": "b42e66a6ef20b42e4c522ecbbfc35699c29a50768b82d5899769b70822e34956",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-1393-token-green2.log",
+    "originalSha256": "43b680db561d79a90ea0258c7b2bbc92c2c69aba56c696c2660d7855bec1b1ce",
+    "sha256": "3de676fd40f7fb4f743e4c96c99849d92a14472c56aa70d7de46c41de411fb30",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-1393-ci-attempt1.json",
+    "originalSha256": "5c94b022fc4a76a382cdf64d11821f2d7784e51b46ec2f1cc0035909bceca4d4",
+    "sha256": "5c94b022fc4a76a382cdf64d11821f2d7784e51b46ec2f1cc0035909bceca4d4",
     "normalization": "none"
   }
 ]
