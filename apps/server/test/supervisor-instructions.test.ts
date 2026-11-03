@@ -327,3 +327,158 @@ it("refuses a seat removed while its delivery waits without reimporting captured
   expect(userLines()).toHaveLength(2);
   expect(store.instructions.seat("guido-1")).toEqual(before);
 });
+
+// Covers the independently confirmed 7b7bb20e pause bypass on each raw-supervisor notification path.
+it.each(["saved instruction", "initial legacy focus import"])(
+  "keeps %s durable and unread while paused, then delivers on an authorised ordinary turn",
+  async (source) => {
+    const { commsInboxContext } = await import("../src/comms.ts");
+    const { messageUnpausedSeat } = await import("../src/crew-pause.ts");
+    const { announceInstruction, flushInstructionNotices, importInstructionFocus } = await import(
+      "../src/instruction-notices.ts"
+    );
+    const { bus } = await import("./supervisor-harness.ts");
+    const { sup, cfg } = make({
+      inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const pause = JSON.stringify({
+      seats: ["guido-1"],
+      reason: "Operator token hold",
+      at: Date.now(),
+      by: "operator",
+    });
+    store.setSetting("crew.paused", pause);
+    const deps = { config: cfg, store, bus, supervisor: sup };
+    if (source === "saved instruction") {
+      const saved = store.instructions.create(
+        "guido-1",
+        { kind: "text", text: "Saved while paused" },
+        "operator",
+        Date.now(),
+      );
+      expect((await announceInstruction(deps, saved)).delivery).toBe("inbox");
+    } else {
+      const seat = cfg.crew!.sessions[0].seats.find((s) => s.id === "guido-1");
+      if (!seat) throw new Error("Fixture seat missing");
+      store.deleteSetting("instruction.config-focus:guido-1");
+      seat.focus = "label:legacy";
+      importInstructionFocus(deps);
+      await flushInstructionNotices(deps);
+    }
+    const notices = store.commsInbox("guido-1");
+    expect(notices).toHaveLength(1);
+    expect(userLines()).toHaveLength(1);
+    expect(store.commsInboxRead("guido-1", notices[0].id)).toBe(false);
+    expect(store.getSetting("crew.paused")).toBe(pause);
+    await flushInstructionNotices(deps);
+    expect(store.commsInbox("guido-1")).toHaveLength(1);
+    expect(userLines()).toHaveLength(1);
+    store.setSetting("crew.paused", "null"); // Explicit fixture operator unpause, never done by notification.
+    await messageUnpausedSeat(store, sup, "guido-1", "Next ordinary authorised turn", {
+      interrupt: false,
+      questions: "none",
+    });
+    await until(() => expect(userLines()).toHaveLength(2));
+    expect(userLines()[1]).toContain(notices[0].text);
+    expect(userLines()[1]).toContain(
+      source === "saved instruction" ? "Saved while paused" : '"focus":"label:legacy"',
+    );
+    expect(store.commsInboxRead("guido-1", notices[0].id)).toBe(true);
+    expect(store.commsInbox("guido-1")).toHaveLength(1);
+  },
+);
+
+it("rechecks a new operator pause inside the real delivery queue after notification was allowed", async () => {
+  const { commsInboxContext } = await import("../src/comms.ts");
+  const { announceInstruction } = await import("../src/instruction-notices.ts");
+  const { bus } = await import("./supervisor-harness.ts");
+  const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
+  sup.start();
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  let entered = () => {};
+  const admitted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const supervisor = {
+    seatFacts: sup.seatFacts,
+    message: async (...args: Parameters<typeof sup.message>) => {
+      expect(args[2].enforcePause).toBe(true);
+      entered();
+      await gate;
+      return sup.message(...args);
+    },
+  };
+  const saved = store.instructions.create(
+    "guido-1",
+    { kind: "text", text: "Race rule" },
+    "operator",
+    Date.now(),
+  );
+  const delivery = announceInstruction({ config: cfg, store, bus, supervisor }, saved);
+  await admitted;
+  const pause = JSON.stringify({
+    seats: ["guido-1"],
+    reason: "Pause before queued write",
+    at: Date.now(),
+    by: "operator",
+  });
+  store.setSetting("crew.paused", pause);
+  release();
+  expect((await delivery).delivery).toBe("inbox");
+  expect(userLines()).toHaveLength(1);
+  const notice = store.commsInbox("guido-1")[0];
+  expect(store.commsInboxRead("guido-1", notice.id)).toBe(false);
+  expect(store.getSetting("crew.paused")).toBe(pause);
+});
+
+it.each([true, false])(
+  "uses only the current run's recorded pause exception for immediate notification (%s)",
+  async (matching) => {
+    const { commsInboxContext } = await import("../src/comms.ts");
+    const { announceInstruction } = await import("../src/instruction-notices.ts");
+    const { bus } = await import("./supervisor-harness.ts");
+    const { sup, cfg } = make({
+      inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const pause = JSON.stringify({
+      seats: ["guido-1"],
+      reason: "Operator hold with scoped exception",
+      at: Date.now(),
+      by: "operator",
+      except: [
+        {
+          seat: "guido-1",
+          runId: matching ? runId : "another-run",
+          by: "controller",
+          at: Date.now(),
+          reason: "Only this recorded run may continue",
+        },
+      ],
+    });
+    store.setSetting("crew.paused", pause);
+    const saved = store.instructions.create(
+      "guido-1",
+      { kind: "text", text: "Scoped exception rule" },
+      "operator",
+      Date.now(),
+    );
+    const result = await announceInstruction({ config: cfg, store, bus, supervisor: sup }, saved);
+    expect(result.delivery).toBe(matching ? "notified" : "inbox");
+    if (matching) await until(() => expect(userLines()).toHaveLength(2));
+    else expect(userLines()).toHaveLength(1);
+    const notice = store.commsInbox("guido-1")[0];
+    expect(store.commsInboxRead("guido-1", notice.id)).toBe(matching);
+    expect(store.getSetting("crew.paused")).toBe(pause);
+  },
+);

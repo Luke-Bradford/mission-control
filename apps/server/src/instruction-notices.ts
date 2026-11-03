@@ -2,6 +2,7 @@ import { COMMS_CAPCOM, type InstructionMutation, seatDef } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
+import { messageUnpausedSeat } from "./crew-pause.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 
@@ -61,7 +62,10 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
           deliveries.set(key, "inbox");
           const facts = deps.supervisor?.seatFacts?.(seat);
           if (deps.supervisor && facts?.inTurn === false) {
-            await deps.supervisor.message(seat, "", { interrupt: false, questions: "none" });
+            await messageUnpausedSeat(deps.store, deps.supervisor, seat, "", {
+              interrupt: false,
+              questions: "none",
+            });
             deliveries.set(key, "notified");
           }
         } catch {
