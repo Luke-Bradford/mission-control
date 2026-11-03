@@ -1,13 +1,16 @@
 import { type ConfigView, type HealthRow, type LimitRow, usageCollector } from "@mc/core";
+import { useRef } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { percent } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { quotaWindows, resetWhen } from "../quota.ts";
+import { OverviewOverflowNote } from "./OverviewOverflowNote.tsx";
 
 /** The same cached allowance readings as the complete table; never a second poll. */
-export function QuotaSummaryPanel() {
+export function QuotaSummaryPanel({ onInspect }: { onInspect?: () => void } = {}) {
+  const region = useRef<HTMLElement>(null);
   const health = useResource<HealthRow[]>(RESOURCES.health).data ?? [];
   const source = useResource<LimitRow[]>(RESOURCES.limits);
   const config = useResource<ConfigView>(RESOURCES.config).data;
@@ -34,50 +37,89 @@ export function QuotaSummaryPanel() {
         {source.data && accounts.length === 0 && (
           <p className="s muted">No provider accounts configured.</p>
         )}
-        {accounts.flatMap((account) =>
-          (config?.accounts.find((a) => a.id === account)?.vendor
-            ? quotaWindows(config.accounts.find((a) => a.id === account)!.vendor)
-            : [
-                ...new Set(
-                  source.data
-                    ?.filter((row) => row.accountId === account)
-                    .map((row) => row.window) ?? [],
-                ),
-              ]
-          ).map((window) => {
-            const row = source.data?.find((r) => r.accountId === account && r.window === window);
-            return (
-              <div className="quota-summary-row" key={`${account}:${window}`}>
-                <span>
-                  {account} · {window}
-                </span>
-                <b className="num">
-                  {row ? `${percent(Math.max(0, 100 - row.used))} left` : "— remaining"}
-                </b>
-                <ResetSummary
-                  row={row ?? null}
-                  failed={!!health.find((h) => h.collector === usageCollector(account))?.error}
-                />
-              </div>
-            );
-          }),
-        )}
-        <GithubRateRow />
-        <button
-          type="button"
-          className="quota-details"
-          onClick={() => {
-            const panel = document.getElementById("quotaP");
-            panel?.scrollIntoView({ block: "start" });
-            const heading = panel?.querySelector<HTMLElement>("h2");
-            if (heading) {
-              heading.tabIndex = -1;
-              heading.focus();
-            }
-          }}
+        <section
+          ref={region}
+          className="quota-summary-accounts scroll"
+          aria-label="Provider account remaining allowance"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: named bounded account list supports native keyboard scrolling.
+          tabIndex={0}
         >
-          Used, forecasts and freshness →
-        </button>
+          <div>
+            {accounts.map((account) => {
+              const vendor = config?.accounts.find((entry) => entry.id === account)?.vendor;
+              const windows = vendor
+                ? quotaWindows(vendor)
+                : [
+                    ...new Set(
+                      source.data
+                        ?.filter((row) => row.accountId === account)
+                        .map((row) => row.window) ?? [],
+                    ),
+                  ];
+              const readings = windows.flatMap(
+                (window) =>
+                  source.data?.filter(
+                    (row) => row.accountId === account && row.window === window,
+                  ) ?? [],
+              );
+              const tightest = readings.reduce<LimitRow | null>(
+                (chosen, row) => (!chosen || row.used > chosen.used ? row : chosen),
+                null,
+              );
+              const missing = windows.filter(
+                (window) => !readings.some((row) => row.window === window),
+              ).length;
+              return (
+                <div className="quota-summary-row" key={account}>
+                  <span>
+                    {account} · {tightest?.window ?? "window unknown"}
+                    {missing > 0 && (
+                      <small className="muted">
+                        {" "}
+                        · {missing} window{missing === 1 ? "" : "s"} unknown
+                      </small>
+                    )}
+                  </span>
+                  <b className="num">
+                    {tightest ? `${percent(Math.max(0, 100 - tightest.used))} left` : "— remaining"}
+                  </b>
+                  <ResetSummary
+                    row={tightest}
+                    failed={
+                      !!health.find((row) => row.collector === usageCollector(account))?.error
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+        <OverviewOverflowNote region={region} label="every provider account" />
+        <p className="s muted quota-summary-definition">
+          Tightest recorded window per account · unknown windows are not spare allowance.
+        </p>
+        <div className="quota-summary-footer">
+          <GithubRateRow />
+          <button
+            type="button"
+            className="quota-details"
+            onClick={() => {
+              if (onInspect) {
+                onInspect();
+                return;
+              }
+              const panel = document.getElementById("quotaP");
+              panel?.scrollIntoView({ block: "start" });
+              const heading = panel?.querySelector<HTMLElement>("h2");
+              if (heading) {
+                heading.tabIndex = -1;
+                heading.focus();
+              }
+            }}
+          >
+            Used, forecasts and freshness →
+          </button>
+        </div>
       </div>
     </Panel>
   );
@@ -90,6 +132,11 @@ function ResetSummary({ row, failed }: { row: LimitRow | null; failed: boolean }
     <span className="muted">
       {row && tz ? `resets ${resetWhen(row, now, tz)}` : "Reset unknown"}
       {row && (row.stale || failed || now - row.sampledAt > 60 * 60_000) ? " · stale" : ""}
+      {row && row.used >= 100 ? (
+        <strong className="crit-t"> · at limit</strong>
+      ) : row?.fullAt !== null && row && row.fullAt < row.resetAt ? (
+        <strong className="warn-t"> · forecast full before reset</strong>
+      ) : null}
     </span>
   );
 }

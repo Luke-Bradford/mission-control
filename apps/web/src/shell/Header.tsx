@@ -37,10 +37,10 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
-export function Header({ page }: { page: Page }) {
+export function Header({ page, inert = false }: { page: Page; inert?: boolean }) {
   const attention = useNeedsYou();
   return (
-    <header className="top">
+    <header className="top" inert={inert}>
       <span className="brand">MISSION CONTROL</span>
       <nav className="tabs" aria-label="Pages">
         {TABS.map((t) => (

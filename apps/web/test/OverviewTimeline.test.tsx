@@ -172,3 +172,25 @@ it("uses live crew names and colours and resizes its lane grid after updates", a
   expect(grid()?.childElementCount).toBe(0);
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("0");
 });
+
+it("keeps short measured intervals distinct from zero and from durationless tool starts", async () => {
+  stub([
+    {
+      agentId: "dev-1",
+      spans: [{ kind: "checks", from: NOW - 20000, to: NOW - 5000 }],
+      ticks: [NOW - 10000],
+    },
+  ]);
+  const view = render(<TimelinePanel />);
+  await screen.findByTitle("dev-1");
+  expect(view.container.querySelector(".overview-span")?.textContent).toBe("checks · 15s");
+  expect(view.container.querySelector(".overview-span")?.getAttribute("title")).toContain(
+    "15s observed",
+  );
+  expect(view.container.querySelector(".overview-instant")?.getAttribute("title")).toContain(
+    "Tool start",
+  );
+  expect(view.container.querySelector(".overview-timeline-evidence")?.textContent).toContain(
+    "15s in this window",
+  );
+});

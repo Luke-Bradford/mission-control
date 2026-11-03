@@ -2,7 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { costRate } from "../src/fmt.ts";
-import { MeasuredHistory, OverviewHistoryPanel } from "../src/overview/OverviewHistoryPanel.tsx";
+import {
+  HistoryDataTable,
+  MeasuredHistory,
+  OverviewHistoryPanel,
+} from "../src/overview/OverviewHistoryPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, NOW, OVERVIEW } from "./fixtures.ts";
 
@@ -155,4 +159,17 @@ it("preserves percentage, sub-cent money, gaps and raw values while switching wi
   for (const value of ["tokens", "inflight", "needs"])
     await act(async () => fireEvent.change(select, { target: { value } }));
   expect(fetch.mock.calls.length).toBe(reads);
+});
+
+it("does not invent clock times or NaN keys when a partial payload omits its window end", () => {
+  source();
+  const view = render(
+    <HistoryDataTable values={[1, 2]} format={String} unit="tokens/min" at={Number.NaN} />,
+  );
+  expect(view.container.textContent).toContain("Window end not reported");
+  expect(view.container.textContent).not.toContain("NaN");
+  expect([...view.container.querySelectorAll("tbody th")].map((cell) => cell.textContent)).toEqual([
+    "−2m",
+    "−1m",
+  ]);
 });

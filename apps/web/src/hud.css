@@ -1089,3 +1089,26 @@ kbd {
     animation: none;
   }
 }
+
+/* Overview keeps its analytical canvas intact while the conversation temporarily covers it.
+   Other pages retain their existing dock geometry and session-only fold choice. */
+@media (min-width: 1200px) {
+  .app.overview-shell .shell {
+    position: relative;
+  }
+  .app.overview-shell:not(.dock-hidden):not(.dock-collapsed):not(.overview-flight-overlay) .shell {
+    grid-template-columns: minmax(0, 1fr) 400px;
+  }
+  .app.overview-flight-overlay .shell {
+    grid-template-columns: minmax(0, 1fr) var(--sp-7);
+  }
+  .app.overview-flight-overlay .dock {
+    position: absolute;
+    top: var(--shell-gutter);
+    right: var(--shell-gutter);
+    bottom: var(--shell-gutter);
+    width: 400px;
+    z-index: 30;
+    box-shadow: var(--shadow);
+  }
+}

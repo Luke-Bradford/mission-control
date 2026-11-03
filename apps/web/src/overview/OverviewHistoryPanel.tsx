@@ -7,7 +7,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { useSession } from "../shell/session.ts";
 import { machineAreaGeometry } from "./chartGeometry.ts";
 
-type History = "tokens" | "spend" | "inflight" | "ci" | "needs";
+export type History = "tokens" | "spend" | "inflight" | "ci" | "needs";
 const LABELS: Record<History, string> = {
   tokens: "Token throughput",
   spend: "Cost per minute",
@@ -25,6 +25,7 @@ export function MeasuredHistory({
   unit,
   label,
   at,
+  description,
 }: {
   values: (number | null)[];
   format: (n: number) => string;
@@ -33,6 +34,7 @@ export function MeasuredHistory({
   unit: string;
   label: string;
   at: number;
+  description?: string;
 }) {
   const tz = useTz();
   const readings = values.filter((v): v is number => v !== null);
@@ -45,7 +47,7 @@ export function MeasuredHistory({
       values.map((value) => (value === null ? null : value * scale)),
       top * scale,
     ),
-    end = Math.floor(at / 60_000) * 60_000;
+    end = Number.isFinite(at) ? Math.floor(at / 60_000) * 60_000 : null;
   return (
     <div className="measured-history">
       <div className="measured-reading s">
@@ -80,25 +82,44 @@ export function MeasuredHistory({
           )}
         </svg>
         <div className="measured-x num">
-          <span>{tz ? hhmm(end - values.length * 60_000, tz) : `−${values.length}m`}</span>
           <span>
-            {tz
-              ? hhmm(end - Math.ceil(values.length / 2) * 60_000, tz)
-              : `−${Math.ceil(values.length / 2)}m`}
+            {tz && end !== null ? hhmm(end - values.length * 60_000, tz) : `−${values.length}m`}
           </span>
-          <span>{tz ? hhmm(end, tz) : "Last minute"}</span>
+          <span>
+            {tz && end !== null
+              ? hhmm(end - (values.length / 2) * 60_000, tz)
+              : `−${values.length / 2}m`}
+          </span>
+          <span>{tz && end !== null ? hhmm(end, tz) : "Last minute"}</span>
         </div>
       </div>
       {peak === 0 && <p className="s muted">No activity in the measured minutes.</p>}
-      <HistoryDataTable values={values} format={format} unit={unit} at={at} />
+      <HistoryDataTable
+        values={values}
+        format={format}
+        unit={unit}
+        at={at}
+        description={description}
+      />
     </div>
   );
 }
 
 /** Existing page-shaped history only: selecting another measure does not fetch a new series. */
-export function OverviewHistoryPanel() {
+export function OverviewHistoryPanel({
+  measure,
+  compact = false,
+  onInspect,
+  id,
+}: {
+  id?: string;
+  measure?: History;
+  compact?: boolean;
+  onInspect?: (measure: History) => void;
+} = {}) {
   const [session] = useSession(),
-    [selected, setSelected] = useState<History>("tokens");
+    [choice, setSelected] = useState<History>("tokens");
+  const selected = measure ?? choice;
   const source = useResource<OverviewSummary>(RESOURCES.overview(session));
   const k = source.data?.kpis;
   const values =
@@ -136,23 +157,43 @@ export function OverviewHistoryPanel() {
           : selected === "inflight"
             ? "tickets"
             : "items";
+  const definition =
+    selected === "ci"
+      ? "Each point is passed / completed CI runs in its previous 24 hours."
+      : selected === "spend"
+        ? "Estimated spend in each minute; the daily total is a separate statistic."
+        : selected === "needs"
+          ? "Observed operator-inbox episodes; all sessions included."
+          : selected === "tokens"
+            ? "Input + output per full minute. Rate is separate from context and account allowance."
+            : "Recorded tickets started and not yet merged.";
+
   return (
     <Panel
-      id="overviewHistoryP"
+      id={id ?? (measure ? `overviewHistory-${measure}` : "overviewHistoryP")}
       title={LABELS[selected]}
       sub="30m history"
       actions={
-        <select
-          aria-label="Measured Overview history"
-          value={selected}
-          onChange={(e) => setSelected(e.target.value as History)}
-        >
-          {Object.entries(LABELS).map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
+        measure ? undefined : (
+          <>
+            <select
+              aria-label="Measured Overview history"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value as History)}
+            >
+              {Object.entries(LABELS).map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            {onInspect && (
+              <button type="button" className="sm" onClick={() => onInspect(selected)}>
+                Inspect
+              </button>
+            )}
+          </>
+        )
       }
     >
       <div className="pb overview-history">
@@ -174,22 +215,15 @@ export function OverviewHistoryPanel() {
             unit={unit}
             label={LABELS[selected]}
             at={source.data.at}
+            description={compact ? `${definition} Missing intervals remain gaps.` : undefined}
           />
         ) : (
           <p className="s muted">History not collected for this measure.</p>
         )}
         <p className="s muted history-window">
-          {unit} ·{" "}
-          {selected === "ci"
-            ? "Each point is passed / completed CI runs in its previous 24 hours."
-            : selected === "spend"
-              ? "Estimated spend in each minute; the daily total is a separate statistic."
-              : selected === "needs"
-                ? "Observed operator-inbox episodes; all sessions included."
-                : selected === "tokens"
-                  ? "Input + output per full minute. Rate is separate from context and account allowance."
-                  : "Recorded tickets started and not yet merged."}{" "}
-          Missing intervals remain gaps.
+          {compact
+            ? `${unit} · full-minute buckets · gaps = not collected`
+            : `${unit} · ${definition} Missing intervals remain gaps.`}
         </p>
       </div>
     </Panel>
@@ -202,14 +236,16 @@ export function HistoryDataTable({
   format,
   unit,
   at,
+  description,
 }: {
   values: (number | null)[];
   format: (value: number) => string;
   unit: string;
   at: number;
+  description?: string;
 }) {
   const tz = useTz(),
-    end = Math.floor(at / 60_000) * 60_000;
+    end = Number.isFinite(at) ? Math.floor(at / 60_000) * 60_000 : null;
   return (
     <details className="history-data">
       <summary>Recorded values · {values.length} points</summary>
@@ -220,8 +256,10 @@ export function HistoryDataTable({
         aria-label={`Recorded ${unit} observations`}
       >
         <p className="s muted">
-          {`Complete minutes${tz ? ` · ${tz}` : ""}`} · Scroll ↕ for every observation.
+          {`Complete minutes${tz ? ` · ${tz}` : ""}`} ·{" "}
+          {end === null ? "Window end not reported · " : ""}Scroll ↕ for every observation.
         </p>
+        {description && <p className="s muted">{description}</p>}
         <table>
           <thead>
             <tr>
@@ -232,11 +270,13 @@ export function HistoryDataTable({
           </thead>
           <tbody>
             {values.map((value, index) => {
-              const timestamp = end - (values.length - index) * 60_000;
-              const key = String(timestamp);
+              const timestamp = end === null ? null : end - (values.length - index) * 60_000;
+              const key = timestamp === null ? `point-${index}` : String(timestamp);
               return (
                 <tr key={key}>
-                  <th scope="row">{tz ? hhmm(timestamp, tz) : `−${values.length - index}m`}</th>
+                  <th scope="row">
+                    {tz && timestamp !== null ? hhmm(timestamp, tz) : `−${values.length - index}m`}
+                  </th>
                   <td className="num">{value === null ? "Not collected" : format(value)}</td>
                   <td className="num">{value === null ? "—" : String(value)}</td>
                 </tr>

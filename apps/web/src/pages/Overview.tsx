@@ -1,16 +1,23 @@
-import { useLayoutEffect, useRef } from "react";
+import { useRef } from "react";
 import { ActivityPanel } from "../overview/ActivityPanel.tsx";
 import { AgentsPanel } from "../overview/AgentsPanel.tsx";
 import { KpiStrip } from "../overview/KpiStrip.tsx";
 import { MachinePanel } from "../overview/MachinePanel.tsx";
 import { NeedsBanner } from "../overview/NeedsBanner.tsx";
-import { NextActionsPanel } from "../overview/NextActionsPanel.tsx";
+import {
+  OverviewMeasuredPanel,
+  OverviewTimelinePanel,
+} from "../overview/OverviewAnalyticalPanels.tsx";
+import { OverviewConstraints } from "../overview/OverviewConstraints.tsx";
+import { type EvidenceReader, OverviewEvidence } from "../overview/OverviewEvidence.tsx";
 import { OverviewHeader } from "../overview/OverviewHeader.tsx";
-import { OverviewHistoryPanel } from "../overview/OverviewHistoryPanel.tsx";
+import {
+  ContextSummaryPanel,
+  OverviewHistoryComparison,
+} from "../overview/OverviewInvestigation.tsx";
 import { PipelinePanel } from "../overview/PipelinePanel.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
 import { QuotaSummaryPanel } from "../overview/QuotaSummaryPanel.tsx";
-import { TimelinePanel } from "../overview/TimelinePanel.tsx";
 import "../overview/overview.css";
 
 /**
@@ -18,56 +25,47 @@ import "../overview/overview.css";
  * The Crew Activity Map is its own page (`/map`); the Timeline links to it.
  */
 export function Overview() {
-  const workspace = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const layout = workspace.current;
-    if (!layout || typeof ResizeObserver === "undefined") return;
-    // Keep the same mounted readers in every composition. Geometry variables position the
-    // independent columns without conditional remounts, extra fetches or clock subscriptions.
-    const targets = {
-      "--crew-height": "#agentsP",
-      "--primary-width": ".overview-primary",
-      "--quota-summary-height": "#quotaSummaryP",
-      "--timeline-height": "#timelineP",
-    };
-    const measure = () => {
-      for (const [name, selector] of Object.entries(targets)) {
-        const box = layout.querySelector(selector)?.getBoundingClientRect();
-        if (!box) continue;
-        const value = `${name === "--primary-width" ? box.width : box.height}px`;
-        if (layout.style.getPropertyValue(name) !== value) layout.style.setProperty(name, value);
-      }
-    };
-    const observer = new ResizeObserver(measure);
-    for (const selector of Object.values(targets)) {
-      const element = layout.querySelector(selector);
-      if (element) observer.observe(element);
-    }
-    measure();
-    return () => observer.disconnect();
-  }, []);
+  const allowance = useRef<EvidenceReader>(null),
+    machine = useRef<EvidenceReader>(null);
   return (
     <section id="page-overview">
       <OverviewHeader />
+      <OverviewConstraints />
       <NeedsBanner awayOnly />
       <div className="overview-grid">
         <div className="overview-metrics">
           <KpiStrip />
         </div>
-        <div className="overview-workspace" ref={workspace}>
+        <div className="overview-workspace">
           <div className="overview-primary">
             <AgentsPanel />
             <ActivityPanel />
-            <TimelinePanel footer={<NextActionsPanel compact />} />
-            <QuotaPanel />
+            <PipelinePanel />
+            <OverviewEvidence
+              ref={allowance}
+              title="Complete provider allowance"
+              inlineQuery="(min-width: 2200px) and (min-height: 1300px)"
+              className="overview-allowance-reader"
+            >
+              <QuotaPanel />
+            </OverviewEvidence>
           </div>
-          <div className="overview-secondary">
-            <QuotaSummaryPanel />
-            <OverviewHistoryPanel />
-            <MachinePanel />
+          <div className="overview-analytical">
+            <div className="overview-signals">
+              <QuotaSummaryPanel onInspect={() => allowance.current?.show()} />
+              <OverviewTimelinePanel />
+              <OverviewMeasuredPanel />
+            </div>
+            <div className="overview-resources">
+              <MachinePanel compact onInspect={() => machine.current?.show()} />
+              <ContextSummaryPanel />
+            </div>
           </div>
         </div>
-        <PipelinePanel />
+        <OverviewHistoryComparison />
+        <OverviewEvidence ref={machine} title="Complete machine, transcripts and test lock">
+          <MachinePanel />
+        </OverviewEvidence>
       </div>
     </section>
   );

@@ -1,9 +1,20 @@
 import { type ConfigView, type Crew, type OverviewTimeline, TIMELINE_WINDOW_MS } from "@mc/core";
-import { type CSSProperties, type ReactNode, useId } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type CSSProperties,
+  type Dispatch,
+  type ReactNode,
+  type RefObject,
+  type SetStateAction,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
-import { elapsed } from "../fmt.ts";
+import { dur, elapsed } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink, PAGE_PATHS } from "../router.ts";
@@ -11,6 +22,10 @@ import { useSessionScope } from "../shell/session.ts";
 import { useStore } from "../shell/store.ts";
 import { timelineGeometry } from "./chartGeometry.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
+import { OverviewOverflowNote } from "./OverviewOverflowNote.tsx";
+
+/** Preserve a measured sub-minute interval instead of labelling it as zero minutes. */
+const spanDuration = (ms: number) => (ms < 60_000 ? dur(ms) : elapsed(ms));
 
 const COLORS = {
   turn: "var(--accent)",
@@ -32,8 +47,19 @@ const AXIS: [string, number][] = [
  * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
  * activity stays visible, 5- and 15-minute gridlines and a "now" cursor.
  */
-export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
+export function TimelinePanel({
+  footer,
+  compact = false,
+  onInspect,
+  id: panelId = "timelineP",
+}: {
+  id?: string;
+  footer?: ReactNode;
+  compact?: boolean;
+  onInspect?: () => void;
+} = {}) {
   const id = useId();
+  const scroll = useRef<HTMLElement>(null);
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
@@ -78,12 +104,13 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
       active = true;
       const segment = geometry.segment(start, end);
       if (segment === null) return [];
-      const description = `${span.kind} · ${elapsed(end - start)} observed${span.to === null ? " · ongoing, end not recorded" : ""}`;
+      const description = `${span.kind} · ${spanDuration(end - start)} observed${span.to === null ? " · ongoing, end not recorded" : ""}`;
       return (
         <i
           key={`${span.kind}:${span.from}:${span.to}`}
           className={`overview-span k-${span.kind}`}
           title={description}
+          data-span-label={`${span.kind} · ${spanDuration(end - start)}`}
           style={{
             left: `${segment.left}%`,
             width: `${segment.width}%`,
@@ -92,7 +119,7 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
           }}
         >
           <span>
-            {span.kind} · {elapsed(end - start)}
+            {span.kind} · {spanDuration(end - start)}
           </span>
         </i>
       );
@@ -108,7 +135,7 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
             0,
             Math.min(now, span.to ?? openEnd) - Math.max(from, span.from),
           );
-          return `${span.kind}: ${new Date(span.from).toISOString()} to ${span.to === null ? "ongoing (end not recorded)" : new Date(span.to).toISOString()} · ${visibleMs > 0 ? `${elapsed(visibleMs)} in this window` : "outside this window"}`;
+          return `${span.kind}: ${new Date(span.from).toISOString()} to ${span.to === null ? "ongoing (end not recorded)" : new Date(span.to).toISOString()} · ${visibleMs > 0 ? `${spanDuration(visibleMs)} in this window` : "outside this window"}`;
         }),
         ...ticks.map(
           (at) => `Tool start: ${new Date(at).toISOString()} · instant, no duration recorded`,
@@ -120,7 +147,7 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
       text: evidence,
     });
     return (
-      <a
+      <TimelineLane
         key={lane.agentId}
         className="overview-lane"
         aria-label={agent ? callSign(agent) : (name ?? lane.agentId)}
@@ -159,28 +186,36 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
         <span id={`${id}-${lane.agentId}`} className="sr-only">
           {evidence}
         </span>
-      </a>
+      </TimelineLane>
     );
   });
   return (
     <Panel
-      id="timelineP"
+      id={panelId}
       title="Timeline"
       sub="last 60 minutes · observed spans and tool starts"
       actions={
-        <a
-          className="ph-link"
-          href={PAGE_PATHS.map}
-          title="Where in each repo the crew is working (g m)"
-          onClick={(e) => followLink(e, PAGE_PATHS.map)}
-        >
-          Activity map →
-        </a>
+        <>
+          {onInspect && (
+            <button type="button" className="sm" onClick={onInspect}>
+              {timeline.data ? `All ${lanes.length} lanes` : "All lanes"}
+            </button>
+          )}
+          <a
+            className="ph-link"
+            href={PAGE_PATHS.map}
+            title="Where in each repo the crew is working (g m)"
+            onClick={(e) => followLink(e, PAGE_PATHS.map)}
+          >
+            Activity map →
+          </a>
+        </>
       }
     >
       <div className="pb timeline-body">
         <section
           className="overview-lane-scroll scroll"
+          ref={scroll}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling keeps the shared axis visible.
           tabIndex={0}
           aria-label="Measured agent timeline"
@@ -200,6 +235,7 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
             {rows}
           </div>
         </section>
+        <OverviewOverflowNote region={scroll} label="every measured timeline lane" compact />
         {timeline.error && timeline.data && (
           <p className="crit-t">Could not refresh timeline. Showing stale data.</p>
         )}
@@ -209,34 +245,93 @@ export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
           </p>
         )}
         {timeline.data && !active && <p className="muted">No activity in the last hour.</p>}
-        <div className="overview-legend muted">
-          {Object.entries(COLORS).map(([kind, color]) => (
-            <span key={kind}>
-              <i style={{ background: color }} />
-              {kind}
+        <div className={compact ? "timeline-key" : undefined}>
+          <div className="overview-legend muted">
+            {Object.entries(COLORS).map(([kind, color]) => (
+              <span key={kind}>
+                <i style={{ background: color }} />
+                {kind}
+              </span>
+            ))}
+            <span>
+              {compact ? "◆ tool start (instant)" : "◆ tool start · no duration inferred"}
             </span>
-          ))}
-          <span>◆ tool start · no duration inferred</span>
+          </div>
+          {timeline.data && active && (
+            <details className="overview-timeline-evidence">
+              <summary>{compact ? "UTC intervals" : "Measured intervals · UTC"}</summary>
+              <section
+                className="scroll"
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: complete measured evidence supports bounded keyboard scrolling.
+                tabIndex={0}
+                aria-label="Complete measured timeline evidence"
+              >
+                {records.map((record) => (
+                  <p key={record.id}>
+                    <b>{record.name}</b> · {record.text}
+                  </p>
+                ))}
+              </section>
+            </details>
+          )}
         </div>
-        {timeline.data && active && (
-          <details className="overview-timeline-evidence">
-            <summary>Measured intervals · UTC</summary>
-            <section
-              className="scroll"
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: complete measured evidence supports bounded keyboard scrolling.
-              tabIndex={0}
-              aria-label="Complete measured timeline evidence"
-            >
-              {records.map((record) => (
-                <p key={record.id}>
-                  <b>{record.name}</b> · {record.text}
-                </p>
-              ))}
-            </section>
-          </details>
-        )}
       </div>
       {footer}
     </Panel>
   );
+}
+
+/** Labels that do not fit their measured interval move to a readable companion line.
+ * This reacts to track width, not guessed duration thresholds, and never invents a longer span.
+ */
+function TimelineLane(props: ComponentPropsWithoutRef<"a">) {
+  const row = useRef<HTMLAnchorElement>(null),
+    [outside, setOutside] = useState<string[]>([]);
+  useTimelineLabels(row, setOutside);
+  return (
+    <a {...props} ref={row}>
+      {props.children}
+      {outside.length > 0 && (
+        <span className="timeline-span-companions" aria-hidden="true">
+          {outside.join(" · ")}
+        </span>
+      )}
+    </a>
+  );
+}
+
+function useTimelineLabels(
+  row: RefObject<HTMLAnchorElement | null>,
+  setOutside: Dispatch<SetStateAction<string[]>>,
+) {
+  useLayoutEffect(() => {
+    const element = row.current;
+    if (!element) return;
+    const measure = () => {
+      const labels: string[] = [];
+      for (const interval of element.querySelectorAll<HTMLElement>("[data-span-label]")) {
+        const text = interval.querySelector<HTMLElement>("span");
+        const fits = !!text && text.scrollWidth + 8 <= interval.clientWidth;
+        interval.classList.toggle("span-label-outside", !fits);
+        if (!fits && interval.dataset.spanLabel) labels.push(interval.dataset.spanLabel);
+      }
+      setOutside((previous) => (previous.join("\n") === labels.join("\n") ? previous : labels));
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    const track = element.querySelector(".overview-track");
+    if (track) observer?.observe(track);
+    const changes = new MutationObserver(measure);
+    changes.observe(element, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-span-label"],
+    });
+    measure();
+    return () => {
+      observer?.disconnect();
+      changes.disconnect();
+    };
+  }, [row, setOutside]);
 }

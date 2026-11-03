@@ -1,6 +1,7 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { useNow, useTz } from "../clock.ts";
+import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { bytes, hhmm, percent, plural, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -52,6 +53,7 @@ function MachineAreaChart({
   color,
   live,
   at,
+  compact = false,
 }: {
   label: string;
   values: (number | null)[];
@@ -60,6 +62,7 @@ function MachineAreaChart({
   /** The history is loaded and its last read succeeded: the now-cursor pulses. */
   live: boolean;
   at: number;
+  compact?: boolean;
 }) {
   const gradient = `machine-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const geometry = machineAreaGeometry(
@@ -69,7 +72,8 @@ function MachineAreaChart({
   if (geometry.line === null) return null;
   // The scale's top: `max` (100 %), or the series' own peak.
   const { top } = geometry;
-  const tick = (value: number) => (max === 100 ? percent(value) : `${Math.round(value)} GiB`);
+  const tick = (value: number) =>
+    max === 100 ? percent(value) : `${Number(value.toFixed(2))} GiB`;
   const scale = max ?? Math.max(1, ...values.filter((value) => value !== null));
   return (
     <div className="machine-history">
@@ -78,6 +82,7 @@ function MachineAreaChart({
         <span>
           Peak {tick(Math.max(...values.filter((value): value is number => value !== null)))}
         </span>
+        {compact && <span>0–{tick(scale)}</span>}
       </div>
       <div className="machine-history-y num">
         <span>{tick(scale)}</span>
@@ -129,15 +134,17 @@ function MachineAreaChart({
       </svg>
       <div className="machine-history-x num">
         <span>−{values.length}m</span>
-        <span>−{Math.ceil(values.length / 2)}m</span>
+        <span>−{values.length / 2}m</span>
         <span>latest</span>
       </div>
-      <HistoryDataTable
-        values={values}
-        format={tick}
-        unit={max === 100 ? "%" : "GiB free"}
-        at={at}
-      />
+      {!compact && (
+        <HistoryDataTable
+          values={values}
+          format={tick}
+          unit={max === 100 ? "%" : "GiB free"}
+          at={at}
+        />
+      )}
     </div>
   );
 }
@@ -213,7 +220,13 @@ function AgentSlots({ view }: { view: MachineView }) {
 }
 
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
-export function MachinePanel() {
+export function MachinePanel({
+  compact = false,
+  onInspect,
+}: {
+  compact?: boolean;
+  onInspect?: () => void;
+} = {}) {
   const source = useResource<MachineView>(RESOURCES.machine);
   const view = source.data;
   const overview = useResource<OverviewSummary>(RESOURCES.overview());
@@ -235,6 +248,113 @@ export function MachinePanel() {
   const missingHistory = histories
     .filter(({ values }) => !values?.some((value) => value !== null))
     .map(({ name }) => name);
+
+  if (compact)
+    return (
+      <Panel
+        id="machineSummaryP"
+        title="Machine"
+        sub={`${m && tz ? `sample ${hhmm(m.at, tz)}` : "sample time unknown"} · 30m window`}
+        actions={
+          <button type="button" className="sm" onClick={onInspect}>
+            Full machine / lock
+          </button>
+        }
+      >
+        <div className="machine-summary pb">
+          {source.error && (
+            <p className="s warn-t" role="status">
+              {m ? "Refresh failed · last sample shown" : "Machine sample could not load"}
+            </p>
+          )}
+          {overview.error && (
+            <p className="s warn-t" role="status">
+              {summary
+                ? "History refresh failed · last received minutes shown"
+                : "Machine history could not load"}
+            </p>
+          )}
+          {!m && !source.error && (
+            <p className="s muted">{source.loading ? "Loading machine sample…" : NO_SAMPLE}</p>
+          )}
+          {[
+            {
+              label: "CPU %",
+              values: summary?.machine?.cpu,
+              max: 100,
+              color: "var(--accent)",
+              reading: u.cpu === null ? DASH : percent(u.cpu),
+              note: `${u.cores ?? DASH} logical threads`,
+            },
+            {
+              label: "RAM %",
+              values: summary?.machine?.mem,
+              max: 100,
+              color: "var(--think)",
+              reading: u.memUsed === null ? DASH : `${(u.memUsed / GIB).toFixed(1)} GiB`,
+              note: `of ${u.memTotal === null ? DASH : Math.round(u.memTotal / GIB)} GiB`,
+            },
+            {
+              label: "Disk free",
+              values: summary?.machine?.disk,
+              max: undefined,
+              color: "var(--fg-2)",
+              reading: u.diskFree === null ? DASH : `${Number((u.diskFree / GIB).toFixed(1))} GiB`,
+              note: "current free space",
+            },
+          ].map((metric) => (
+            <div className="machine-summary-row" key={metric.label}>
+              <b className="s">{metric.label}</b>
+              <div className="machine-summary-trace">
+                {summary && metric.values?.some((value) => value !== null) ? (
+                  <MachineAreaChart
+                    label={`${metric.label} history`}
+                    values={metric.values}
+                    max={metric.max}
+                    color={metric.color}
+                    live={live}
+                    at={summary.at}
+                    compact
+                  />
+                ) : (
+                  <p className="s muted">History not collected</p>
+                )}
+              </div>
+              <span className="num s">
+                {metric.reading}
+                <span className="muted">{metric.note}</span>
+              </span>
+            </div>
+          ))}
+          {m?.agents && (
+            <p className="machine-summary-processes s">
+              {m.agents.count} agent processes ·{" "}
+              {m.testRun ? `${m.testRun.count} test processes` : "test-process split not reported"}{" "}
+              · CPU/RAM breakdown in full details
+            </p>
+          )}
+          <div className="machine-summary-facts s">
+            <span>
+              Swap{" "}
+              {u.swapUsed === null ? "unknown" : `${Number((u.swapUsed / GIB).toFixed(1))} GiB`}
+            </span>
+            {typeof view?.seats === "number" && typeof view.maxSeats === "number" ? (
+              <span>
+                {view.seats} / {view.maxSeats} configured slots
+              </span>
+            ) : (
+              <span>Slot capacity unknown</span>
+            )}
+            <MachineLockSummary onInspect={onInspect} />
+          </div>
+          {view?.warning && (
+            <p role="status" className="s warn-t">
+              Holding new work · {view.warning}
+            </p>
+          )}
+        </div>
+      </Panel>
+    );
 
   return (
     <Panel
@@ -421,6 +541,30 @@ export function MachinePanel() {
               </span>
             </div>
           )}
+          {view?.transcripts && (
+            <section className="machine-transcript-detail">
+              <h3>Transcript footprint by seat</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Seat</th>
+                    <th>Footprint</th>
+                    <th>Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.transcripts.seats.map((seat) => (
+                    <tr key={seat.seatId}>
+                      <th scope="row">{seat.seatId}</th>
+                      <td className="num">{binaryBytes(seat.bytes)}</td>
+                      <td className="num">{seat.files}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {view.transcripts.seats.length === 0 && <p>No transcripts reported.</p>}
+            </section>
+          )}
           <LockBox />
         </div>
         <p className="machine-window s muted">
@@ -443,4 +587,26 @@ function TranscriptAge({ at }: { at: number }) {
   const now = useNow(),
     tz = useTz();
   return tz ? <span className="muted"> · oldest {rel(at, now, tz)}</span> : null;
+}
+
+/** Lock changes are independent of host history and do not rebuild charts on the second clock. */
+function MachineLockSummary({ onInspect }: { onInspect?: () => void }) {
+  const lock = useTestLock();
+  return (
+    <button
+      type="button"
+      className={lock?.holder || lock?.waiting.length ? "warn-t" : undefined}
+      onClick={onInspect}
+    >
+      Test lock:{" "}
+      {lock === undefined
+        ? "loading"
+        : lock.holder
+          ? `${lock.holder.seatId} holds it · ${lock.waiting.length} waiting`
+          : lock.waiting.length
+            ? `${lock.waiting.length} waiting`
+            : "free"}{" "}
+      · full details →
+    </button>
+  );
 }

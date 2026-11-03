@@ -34,10 +34,9 @@
 .overview-grid {
   flex: 1;
   min-height: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   /* Each group keeps its content height; the roster and evidence lists have bounded scrolling. */
-  grid-template-rows: max-content max-content max-content;
-  align-content: start;
   gap: var(--sp-3);
   overflow-y: auto;
 }
@@ -1266,7 +1265,7 @@
 /* Overview v2 metrics and stream freshness. */
 .overview-kpis {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -1699,34 +1698,32 @@
 }
 
 /* Content redesign: stable independent columns preserve panel readers across rail changes. */
+/* Natural stacks: no measured offsets or absolutely positioned panels. */
 .overview-workspace {
-  position: relative;
-  container: workspace / inline-size;
   display: grid;
-  grid-template-columns: minmax(1050px, 1200px) minmax(340px, 1fr);
+  grid-template-columns: minmax(1052px, 1200px) minmax(500px, 788px);
+  justify-content: center;
   align-items: start;
   gap: var(--sp-3);
 }
 .overview-primary,
-.overview-secondary {
+.overview-analytical,
+.overview-signals,
+.overview-resources {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
   min-width: 0;
 }
-.overview-primary > .panel,
-.overview-secondary > .panel {
-  flex: none;
+.overview-workspace .panel {
   min-width: 0;
-  overflow: hidden;
 }
 #page-overview .panel > .pb {
   padding: var(--sp-2) var(--sp-3);
 }
 .overview-primary > #actP {
-  height: 280px;
-  min-height: 280px;
-  contain: size;
+  height: 216px;
+  min-height: 216px;
 }
 .context-capacity {
   display: flex;
@@ -1845,63 +1842,6 @@
 .overview-history > .s {
   font-size: var(--fs-s);
 }
-@container overview (min-width: 1050px) and (max-width: 1449px) {
-  .overview-workspace {
-    grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr);
-  }
-  .overview-primary > #agentsP {
-    width: 100cqw;
-  }
-  .overview-secondary {
-    margin-top: calc(var(--crew-height, 0px) + var(--sp-3));
-  }
-  .overview-primary > #actP > .ph {
-    flex-wrap: wrap;
-  }
-}
-@container overview (max-width: 1049px) {
-  .overview-workspace {
-    display: flex;
-    flex-direction: column;
-  }
-  .overview-primary,
-  .overview-secondary {
-    display: contents;
-  }
-  .overview-workspace #agentsP {
-    order: 0;
-    width: 100%;
-  }
-  .overview-workspace #actP {
-    order: 1;
-    width: 100%;
-  }
-  .overview-workspace #quotaSummaryP {
-    order: 2;
-    width: 100%;
-  }
-  .overview-workspace #overviewHistoryP {
-    order: 3;
-    width: 100%;
-  }
-  .overview-workspace #timelineP {
-    order: 4;
-    width: 100%;
-  }
-  .overview-workspace #machP {
-    order: 5;
-    width: 100%;
-  }
-  .overview-workspace #quotaP {
-    order: 6;
-    width: 100%;
-  }
-}
-@media (max-height: 760px) {
-  #agentsList {
-    max-height: calc(7 * var(--table-row));
-  }
-}
 /* A measured plot owns its full row, so numeric values never squeeze its axes into a spark. */
 #machP .resrow:has(.machine-history) {
   grid-template-columns: 64px minmax(0, 1fr);
@@ -1945,17 +1885,6 @@
   display: none;
 }
 
-@container overview (min-width: 1450px) {
-  .overview-primary > #timelineP {
-    position: absolute;
-    right: 0;
-    top: calc(var(--quota-summary-height, 160px) + var(--sp-3));
-    width: calc(100cqw - var(--primary-width, 1050px) - var(--sp-3));
-  }
-  .overview-secondary > #overviewHistoryP {
-    margin-top: calc(var(--timeline-height, 0px) + var(--sp-3));
-  }
-}
 #overviewHistoryP > .ph {
   flex-wrap: wrap;
 }
@@ -2123,4 +2052,548 @@ button.quota-details {
   justify-content: space-between;
   gap: var(--sp-2);
   color: var(--fg-2);
+}
+
+/* Operational canvas: viewport width and height both buy useful information. */
+#page-overview {
+  max-width: 2880px;
+  margin-inline: auto;
+  width: 100%;
+}
+.overview-grid > * {
+  flex: none;
+  overflow: visible;
+}
+.overview-grid .ph {
+  min-height: 36px;
+  padding-block: 4px;
+}
+.overview-workspace #agentsList {
+  max-height: 390px;
+}
+.overview-primary > #actP {
+  display: flex;
+  flex-direction: column;
+}
+.overview-primary > #actP > .log {
+  min-height: 0;
+  flex: 1;
+}
+.overview-workspace #pipelineP {
+  min-height: 112px;
+}
+.overview-workspace .pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.overview-workspace .pipeline-stage {
+  min-width: 0;
+}
+.overview-workspace .pipeline-stage h3 {
+  min-height: 24px;
+  letter-spacing: 0;
+}
+.overview-workspace .pipeline-counts {
+  margin: 0;
+  min-height: 20px;
+}
+.overview-workspace .pipeline-chip {
+  min-height: 24px;
+}
+.overview-workspace #quotaSummaryP {
+  min-height: 144px;
+}
+.quota-summary-definition {
+  margin: 2px 0;
+}
+#quotaSummaryP .quota-summary {
+  padding-block: 2px;
+}
+#quotaSummaryP .quota-summary-row {
+  min-height: 24px;
+  margin: 0;
+}
+#quotaSummaryP .quota-summary-row small {
+  font-size: inherit;
+}
+.overview-signals > #timelineP {
+  min-height: 224px;
+}
+.overview-signals #timelineP .timeline-body {
+  padding-block: 4px;
+}
+.overview-signals .overview-lane-scroll {
+  max-height: 90px;
+}
+.overview-signals .overview-timeline-evidence {
+  margin-top: 0;
+}
+.overview-signals .overview-legend {
+  font-size: 11px;
+  line-height: 16px;
+}
+.overview-signals .overview-next-compact {
+  padding-block: 4px;
+}
+.overview-signals > #overviewHistoryP {
+  min-height: 184px;
+}
+.overview-signals #overviewHistoryP > .ph {
+  flex-wrap: nowrap;
+}
+.overview-signals #overviewHistoryP > .ph h2 {
+  display: none;
+}
+.overview-signals #overviewHistoryP > .ph .act {
+  margin-left: 0;
+  flex: 1;
+}
+.overview-signals #overviewHistoryP select {
+  width: 100%;
+}
+.overview-signals .measured-plot svg {
+  height: 60px;
+}
+.overview-signals .history-window {
+  margin: 4px 0 0;
+}
+/* Raw readings stay an explicit expansion: opening them grows the natural stack. */
+.measured-x {
+  position: relative;
+  height: 16px;
+}
+.measured-x > span {
+  position: absolute;
+  top: 0;
+}
+.measured-x > span:first-child {
+  left: 0;
+}
+.measured-x > span:nth-child(2) {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.measured-x > span:last-child {
+  right: 0;
+}
+.machine-summary-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 138px;
+  gap: 8px;
+  align-items: center;
+  min-height: 52px;
+}
+.machine-summary-row > .num {
+  text-align: right;
+}
+.machine-summary-row > .num > span {
+  display: block;
+}
+.machine-summary-trace {
+  min-width: 0;
+}
+.machine-summary .machine-history {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.machine-summary .machine-history-reading {
+  font: 11px / 14px var(--mono);
+}
+.machine-summary .machine-history-y {
+  display: none;
+}
+.machine-summary .machine-chart {
+  grid-column: 1;
+  width: 100%;
+  height: 24px;
+}
+.machine-summary .machine-history-x {
+  grid-column: 1;
+  font: 11px / 14px var(--mono);
+}
+.machine-summary-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.machine-summary-facts button {
+  padding: 0;
+  min-height: 24px;
+  font-size: 12px;
+}
+#contextSummaryP {
+  display: none;
+}
+#contextSummaryP p {
+  margin: 0 0 8px;
+}
+.machine-transcript-detail {
+  margin-block: 12px;
+}
+.machine-transcript-detail table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.machine-transcript-detail th,
+.machine-transcript-detail td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.overview-evidence {
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 0;
+  width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+}
+.overview-evidence::backdrop {
+  background: var(--scrim, #0008);
+}
+.evidence-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.evidence-heading h2 {
+  font-size: var(--fs-panel);
+  margin: 0;
+}
+.evidence-body {
+  max-height: calc(100dvh - 128px);
+  overflow: auto;
+}
+.overview-evidence .panel {
+  border: 0;
+}
+.overview-evidence.evidence-inline {
+  display: block;
+  position: static;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-height: none;
+}
+.evidence-inline > .evidence-heading {
+  display: none;
+}
+.evidence-inline > .evidence-body {
+  max-height: none;
+  overflow: visible;
+}
+.evidence-inline .panel {
+  border: 1px solid var(--line);
+}
+.overview-comparisons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 788px));
+  gap: 12px;
+  justify-content: center;
+}
+.overview-comparisons .panel {
+  min-width: 0;
+}
+.overview-comparisons .measured-plot svg {
+  height: 128px;
+}
+@container overview (min-width: 1280px) {
+  .overview-kpis {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    min-height: 96px;
+  }
+  .overview-kpi {
+    padding: 4px 12px;
+  }
+}
+@container overview (min-width: 2076px) {
+  .overview-workspace {
+    grid-template-columns: minmax(1052px, 1.7fr) minmax(500px, 1fr) minmax(500px, 1fr);
+  }
+  .overview-primary {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .overview-analytical {
+    display: contents;
+  }
+  .overview-signals {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .overview-resources {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  #contextSummaryP {
+    display: block;
+  }
+}
+@container overview (max-width: 1561px) {
+  .overview-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .overview-analytical {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  #contextSummaryP {
+    display: block;
+  }
+  .overview-primary > #actP > .ph {
+    flex-wrap: wrap;
+  }
+}
+@container overview (max-width: 1049px) {
+  .overview-analytical {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .quota-summary-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .quota-summary-row > :last-child {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+}
+@media (max-height: 800px) {
+  .overview-workspace #agentsList {
+    max-height: 262px;
+  }
+}
+@media (min-width: 2200px) and (min-height: 1300px) {
+  .overview-signals .overview-lane-scroll {
+    max-height: 208px;
+  }
+  .overview-signals .measured-plot svg {
+    height: 128px;
+  }
+  .machine-summary-row {
+    min-height: 96px;
+  }
+  .machine-summary .machine-chart {
+    height: 64px;
+  }
+}
+@media (min-width: 2800px) and (min-height: 1600px) {
+  .overview-primary > #actP {
+    height: 368px;
+  }
+  .overview-signals .overview-lane-scroll {
+    max-height: 340px;
+  }
+  .machine-summary-row {
+    min-height: 184px;
+  }
+  .machine-summary .machine-history {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 0 8px;
+  }
+  .machine-summary .machine-history-y {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .machine-summary .machine-chart {
+    height: 142px;
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .machine-summary .machine-history-x {
+    grid-column: 2;
+  }
+}
+
+.overview-span.span-label-outside > span {
+  visibility: hidden;
+}
+.timeline-span-companions {
+  grid-column: 2;
+  font: 11px / 16px var(--mono);
+  white-space: normal;
+  color: var(--fg-2);
+}
+.overview-signals .overview-legend {
+  font-size: 12px;
+}
+
+.overview-span > span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Shared roomy density must not silently change the accepted Overview seat geometry. */
+#page-overview {
+  --table-row: 32px;
+  --panel-head-y: 4px;
+}
+#page-overview .panel > div.ph {
+  padding: 2px 12px;
+  min-height: 36px;
+}
+.overview-signals > #timelineP {
+  align-self: stretch;
+}
+#quotaSummaryP .githubrate {
+  margin: 0;
+}
+#quotaSummaryP .quota-details {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+#quotaSummaryP .quota-summary-definition {
+  line-height: 16px;
+  margin: 0;
+}
+.overview-signals .overview-history {
+  padding-block: 4px;
+}
+.overview-signals .measured-plot svg {
+  height: 48px;
+}
+.overview-signals .history-window {
+  line-height: 16px;
+  margin-top: 0;
+}
+.timeline-key {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.timeline-key .overview-legend {
+  margin: 0;
+  gap: 8px;
+}
+.timeline-key .overview-timeline-evidence {
+  margin-left: auto;
+}
+.timeline-key .overview-timeline-evidence[open] {
+  width: 100%;
+}
+
+.overview-signals #overviewHistoryP select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.overview-evidence .measured-plot svg {
+  height: 240px;
+}
+.overview-evidence .overview-lane-scroll {
+  max-height: min(60dvh, 640px);
+}
+.overview-evidence .timeline-body {
+  overflow: visible;
+}
+
+/* Specific panel body budgets override the shared panel padding, without clipping content. */
+#page-overview #quotaSummaryP > .pb {
+  padding-block: 2px;
+}
+#page-overview #overviewHistoryP > .pb,
+#page-overview #machineSummaryP > .pb {
+  padding-block: 4px;
+}
+#machineSummaryP {
+  min-height: 240px;
+}
+.quota-summary-accounts {
+  max-height: 72px;
+}
+.overview-overflow-note {
+  margin: 0;
+  line-height: 16px;
+}
+.overview-overflow-note[hidden] {
+  display: none;
+}
+
+.overview-constraints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  flex: none;
+  font-size: 12px;
+  line-height: 18px;
+}
+.overview-constraints > span {
+  max-width: 1200px;
+  overflow-wrap: anywhere;
+}
+
+.quota-summary-footer {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.quota-summary-footer .githubrate {
+  flex: 1;
+  min-width: 180px;
+}
+.machine-summary-processes {
+  margin: 0;
+  line-height: 18px;
+}
+
+@media (max-height: 1299px), (max-width: 2199px) {
+  .machine-summary-row {
+    min-height: 52px;
+  }
+}
+
+/* The empty lane-label gutter can communicate genuine overflow without adding a panel row. */
+.timeline-body {
+  position: relative;
+}
+.timeline-body > .overview-overflow-note {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  max-width: var(--lane-label);
+  font: 11px / 16px var(--mono);
+}
+@media (min-width: 2200px) and (min-height: 1300px) {
+  .overview-signals .measured-plot svg {
+    height: 128px;
+  }
+}
+
+/* A 1050px comparison table needs its two panel borders too. Do not reserve an invisible
+   scrollbar gutter on the normal eleven-row roster; exceptional long lists scroll explicitly. */
+.overview-workspace #agentsList {
+  scrollbar-gutter: auto;
+}
+@container overview (min-width: 2800px) {
+  .overview-workspace {
+    grid-template-columns: 1280px minmax(500px, 1fr) minmax(500px, 1fr);
+  }
+}
+
+.machine-history-x {
+  position: relative;
+  display: block;
+  height: 14px;
+}
+.machine-history-x > span {
+  position: absolute;
+  top: 0;
+}
+.machine-history-x > span:first-child {
+  left: 0;
+}
+.machine-history-x > span:nth-child(2) {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.machine-history-x > span:last-child {
+  right: 0;
 }

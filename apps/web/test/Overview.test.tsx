@@ -50,6 +50,7 @@ import {
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
+import { mockNativeDialog } from "./nativeDialog.ts";
 
 const GIB = 2 ** 30;
 
@@ -129,15 +130,30 @@ function Probe() {
   return <span data-testid="item">{useItem() ?? "none"}</span>;
 }
 
+let restoreDialog = () => {};
 beforeEach(() => {
+  restoreDialog = mockNativeDialog();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   localStorage.clear();
 });
 afterEach(() => {
+  cleanup();
+  restoreDialog();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+async function inspectMachine(container: HTMLElement) {
+  fireEvent.click(within(container).getByRole("button", { name: "Full machine / lock" }));
+  await waitFor(() => expect(container.querySelector("#machP")).toBeTruthy());
+}
+async function inspectAllowance(container: HTMLElement) {
+  fireEvent.click(
+    within(container).getByRole("button", { name: "Used, forecasts and freshness →" }),
+  );
+  await waitFor(() => expect(container.querySelector("#quotaP")).toBeTruthy());
+}
 
 const agentRows = (c: HTMLElement) => [
   ...c.querySelectorAll<HTMLElement>(".trow:not(.head):not(.flight)"),
@@ -212,24 +228,27 @@ describe("Overview panels", () => {
     ).toBeTruthy();
   });
 
-  it("every panel carries its mockup id", async () => {
+  it("keeps monitoring panels in natural stacks and complete panels behind their reader routes", async () => {
     stub();
     const { container } = render(<Overview />);
-    expect(container.querySelector(".overview-primary > #agentsP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #timelineP")).toBeTruthy();
-    expect(container.querySelector(".overview-grid > #pipelineP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #actP")).toBeTruthy();
-    expect(container.querySelector(".overview-secondary > #machP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #quotaP")).toBeTruthy();
-    const grid = container.querySelector(".overview-grid")!;
-    expect([...grid.children].map((child) => child.id || child.className)).toEqual([
-      "overview-metrics",
-      "overview-workspace",
-      "pipelineP",
-    ]);
-    for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
+    for (const id of ["agentsP", "actP", "pipelineP"])
+      expect(container.querySelector(`.overview-primary > #${id}`), id).toBeTruthy();
+    for (const id of ["timelineP", "quotaSummaryP", "overviewHistoryP"])
+      expect(container.querySelector(`.overview-signals > #${id}`), id).toBeTruthy();
+    expect(container.querySelector(".overview-resources > #machineSummaryP")).toBeTruthy();
+    expect(container.querySelector("#quotaP")).toBeNull();
+    expect(container.querySelector("#machP")).toBeNull();
+    await inspectAllowance(container);
+    expect(container.querySelector(".overview-allowance-reader #quotaP")).toBeTruthy();
+    fireEvent.click(
+      within(container.querySelector(".overview-allowance-reader") as HTMLElement).getByText(
+        "Close",
+      ),
+    );
+    await inspectMachine(container);
+    for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"])
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
-    }
+    expect(container.querySelector(".overview-grid > #pipelineP")).toBeNull();
     await screen.findByText("No events yet.");
     expect(container.querySelector("#nbanner")).toBeNull();
   });
@@ -260,6 +279,8 @@ describe("Agents panel", () => {
     await waitFor(() => expect(agentRows(container).length).toBe(1));
     const text = agentRows(container)[0]?.textContent ?? "";
     expect(text).not.toContain("69%");
+    expect(container.querySelector("#quotaSummaryP")?.textContent).toContain("31% left");
+    await inspectAllowance(container);
     expect(container.querySelector("#quotaP")?.textContent).toContain("69%");
     expect(
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
@@ -1153,6 +1174,7 @@ describe("Agents panel", () => {
     expect(row.querySelector(".context-capacity")?.textContent).toBe(
       "483k / 1.00M · 517k left · 48%",
     );
+    await inspectAllowance(container);
     expect(container.querySelector("#quotaP")?.textContent).toContain("82%");
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(container.querySelector("#quotaP .meter.hi")).toBeTruthy(); // 82 % is amber
@@ -1395,6 +1417,7 @@ describe("Needs banner, acknowledged items", () => {
 describe("Machine panel: the test lock box", () => {
   const box = async () => {
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     return waitFor(() => {
       const box = container.querySelector("#machP .lock");
       expect(box).toBeTruthy();
@@ -1405,6 +1428,7 @@ describe("Machine panel: the test lock box", () => {
   it("hides the test lock box when free with nobody waiting", async () => {
     const fetch = stub();
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     await settled(fetch, "/api/test-lock");
     expect(container.querySelector("#machP .lock")).toBeNull();
   });
@@ -1481,6 +1505,7 @@ describe("Machine panel", () => {
       },
     });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await within(mach).findByText("Transcripts");
     expect(row.parentElement?.textContent).toContain("12.3 MiB");
@@ -1491,6 +1516,7 @@ describe("Machine panel", () => {
   it("leaves out the transcript footprint when the server has none", async () => {
     stub({ transcripts: null });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
     expect(within(mach).queryByText("Transcripts")).toBeNull();
@@ -1499,6 +1525,7 @@ describe("Machine panel", () => {
   it("labels CPU, memory and disk, keeping the legend on hover", async () => {
     stub();
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
     expect(mach.textContent).toContain("Host sample at");
@@ -1520,6 +1547,7 @@ describe("Machine panel", () => {
   it("the agents row: 6 of 8 seats, up to 3 per session, room for 2 more", async () => {
     stub({ seats: { maxSeats: 8, seats: 6, perSessionMax: 3 } });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await waitFor(() => {
       const r = mach.querySelector<HTMLElement>(".agentslots");
@@ -1537,6 +1565,7 @@ describe("Machine panel", () => {
   it("No room for another agent when every seat is used or 2 GB is free", async () => {
     stub({ seats: { maxSeats: 8, seats: 8, perSessionMax: 4 } });
     const first = render(<Overview />);
+    await inspectMachine(first.container);
     const mach = first.container.querySelector("#machP") as HTMLElement;
     const msg = await within(mach).findByTitle(/No room for another agent/);
     expect(msg.className).toContain("warn-t");
@@ -1549,6 +1578,7 @@ describe("Machine panel", () => {
       machine: sample({ memUsedBytes: 62 * GIB }),
     });
     const second = render(<Overview />);
+    await inspectMachine(second.container);
     const mach2 = second.container.querySelector("#machP") as HTMLElement;
     await within(mach2).findByTitle(/No room for another agent/);
     expect(mach2.textContent).not.toContain("Room for");
@@ -1557,6 +1587,7 @@ describe("Machine panel", () => {
   it("shows dashes and empty bars before the first sample", async () => {
     stub({ machine: null });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
@@ -1571,6 +1602,7 @@ describe("Machine panel", () => {
       machine: sample({ swapUsedBytes: 3.5 * GIB, swapTotalBytes: 8 * GIB }),
     });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
@@ -1584,6 +1616,7 @@ describe("Machine panel", () => {
   it("a swap that was not measured is a dash", async () => {
     stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
@@ -1593,6 +1626,7 @@ describe("Machine panel", () => {
   it("names the reason while the hub is holding new work", async () => {
     stub({ warning: "swap 21.5 of 22.5 GB used" });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     const warn = await waitFor(() => {
       const w = mach.querySelector<HTMLElement>(".capwarn");
@@ -1610,6 +1644,7 @@ describe("Machine panel", () => {
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
     stub({ machine: sample({ cpuPct: null, cores: 0, agents: null, memUsedBytes: null }) });
     const { container } = render(<Overview />);
+    await inspectMachine(container);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
@@ -1629,6 +1664,7 @@ describe("Account quota panel", () => {
       ],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByTitle(/read 4 min ago/);
     const rows = quota.querySelectorAll(".quotarow");
@@ -1655,6 +1691,7 @@ describe("Account quota panel", () => {
       ],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("7d 86%");
     const staleWindow = within(quota).getByRole("row", { name: /claude-main · 7d/ });
@@ -1675,6 +1712,7 @@ describe("Account quota panel", () => {
   it("one row per account, hover titles, warnings and the rewritten note", async () => {
     stub({ limits });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("claude-main 5h at its limit until 15:00");
     expect(within(quota).getByText("claude-main 5h at its limit until 15:00").className).toContain(
@@ -1707,6 +1745,7 @@ describe("Account quota panel", () => {
       ],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await waitFor(() => expect(quota.querySelectorAll(".quotarow").length).toBe(2));
     const rows = quota.querySelectorAll(".quotarow");
@@ -1741,6 +1780,7 @@ describe("Account quota panel", () => {
       ],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await waitFor(() =>
       expect(
@@ -1753,6 +1793,7 @@ describe("Account quota panel", () => {
   it("the GitHub row: what is left, the poll cost and the reset", async () => {
     stub({ limits, githubRate: GITHUB_RATE });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText(GITHUB_RATE_LINE)).toBeTruthy();
     expect(quota.textContent).not.toContain("slowed");
@@ -1761,6 +1802,7 @@ describe("Account quota panel", () => {
   it("the GitHub row is — before any reading", async () => {
     stub({ limits });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText("GitHub API · —")).toBeTruthy();
   });
@@ -1773,6 +1815,7 @@ describe("Account quota panel", () => {
       health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     const shown = await within(quota).findByText(note);
     expect(shown.getAttribute("role")).toBe("status");
@@ -1785,6 +1828,7 @@ describe("Account quota panel", () => {
       health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText(note)).toBeTruthy();
     expect(within(quota).getByText("GitHub API · —")).toBeTruthy();
@@ -1799,6 +1843,7 @@ describe("Account quota panel", () => {
     };
     stub({ limits, githubRate: expired });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(
       await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets —"),
@@ -1814,6 +1859,7 @@ describe("Account quota panel", () => {
       "/api/config": () => ({ status: 503, body: { error: "loading" } }),
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const { githubRate } = RESOURCES;
     await waitFor(() => expect(hub.snapshot(githubRate.path, githubRate.topic).data).toBeTruthy());
     // Re-query: the panel may have re-rendered since the reading landed.
@@ -1829,6 +1875,7 @@ describe("Account quota panel", () => {
       config: { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } },
     });
     const { container } = render(<Overview />);
+    await inspectAllowance(container);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(
       await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets 23:00"),
