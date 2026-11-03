@@ -440,3 +440,67 @@ The screenshots are local fixture test receipts, not new product-design acceptan
 Current handoff: integrated correction source 207cfc71 is clean and frozen for same-pass independent
 verification. Failed 893 history remains saved; the controller owns corrected publication, fresh exact-head
 CI, final QA, merge and Update. No final CI/review/merge/deployment or paid/live compliance claim is made.
+
+## Current-main integration after the f205 CI failure — 3 November 2026
+
+The paragraphs above retain their original stage identities. The next published source is merge
+`30dbac4bd8e798c0c5856cba8bd1b14730ff4049`, with parents:
+
+- Previous PR head `f205cab3e5b2bb8ab4c26f15ad6bf4ea7215a42f`.
+- Accepted main `5385b09a43adc07e276f065c686842cb83519aa8` (QA workflow PRs #1385, #1386 and #1387).
+
+The original f205 CI run [41631823605](https://github.com/Luke-Bradford/mission-control/actions/runs/41631823605)
+remains failed. Its server, process and validate jobs passed; web-core failed the short-height
+QA History keyboard round trip: expected `Ticket reference`, observed `Open image source`.
+Its immutable failed QA report is retained at
+`/qa?repo=mission-control&pr=1381&report=880172cd125fbbcb380c14a95272e81a3df1497b47c8484385100d4f5339cacf`.
+Local passing probes did not establish the exact Linux event sequence. Main now contains the
+separately reviewed deterministic image fixtures and actual image-error focus-preservation fix;
+this integration does not relabel the previous failure as a pass or a proven timing issue.
+
+The merge had no conflicts, manual resolutions or new product edits. Its entire web tree equals
+main5385. Instruction runtime, instruction-context, notice, store/API, queue/reorder, FLIGHT code,
+core production and roles/FLIGHT.md retain reviewed source `92ee33998d23db42c116cec9e8c3fe138b092366`.
+The server production differences from that old source are accepted main's qa-reports validation
+and the reviewBrief wording in runtime/brief.ts. The latter auto-composes with the existing
+rolePrompt seat-instruction hook without changing that hook. Instruction process fixtures and
+the original start/restart fail-closed assertions remain unchanged from f205.
+
+All commands below ran sequentially on merge30dbac4b, 3 November 2026, 14:39–14:42 UTC,
+using fictional API/store fixtures or the existing fake CLI. The shared lane was released
+immediately after the final build. No full local suite, provider, live hub write, crew,
+observed-loop, breaker or production database action occurred.
+
+```sh
+pnpm exec vitest run --project server apps/server/test/standing-instructions-api.test.ts apps/server/test/standing-instructions.test.ts apps/server/test/brief.test.ts apps/server/test/hud-memo.test.ts apps/server/test/routes.test.ts --maxWorkers=3 > /tmp/mc-1381-main5385-server.log 2>&1
+pnpm exec vitest run --project server-process apps/server/test/supervisor-instructions.test.ts --maxWorkers=1 > /tmp/mc-1381-main5385-process.log 2>&1
+pnpm exec vitest run --project server-process apps/server/test/supervisor-start.test.ts apps/server/test/supervisor-restart.test.ts --maxWorkers=1 -t 'does not spawn when recording the prompt version fails|a seat that never got its brief|rejects a known failed first write' > /tmp/mc-1381-main5385-failclosed.log 2>&1
+MC_QA_IMAGE_FOCUS_SHOTS=/tmp/mc-1381-main5385-image-focus pnpm exec vitest run --project web apps/web/test/QaReport.browser.test.ts apps/web/test/QaHistory.browser.test.ts --maxWorkers=1 -t 'keeps image-error|keeps Current and filled saved reports' > /tmp/mc-1381-main5385-browser.log 2>&1
+pnpm -s typecheck > /tmp/mc-1381-main5385-types.log 2>&1
+pnpm -s lint > /tmp/mc-1381-main5385-lint.log 2>&1
+pnpm -s build > /tmp/mc-1381-main5385-build.log 2>&1
+```
+
+| Check | Actual result |
+| --- | --- |
+| Server, five files | 114 passed, no filtered cases, 13.54s: 9 API, 8 store, 75 brief, 14 HUD memo, 8 routes. |
+| Instruction fake-provider process file | 22 passed, no filtered cases, 16.14s. Covers current/revoked guidance, reload/removal, pauses/run exceptions, final prompt identity/cost and fail-closed delivery. |
+| Unchanged initial-audit and restart guards | 3 passed, 288 filtered, 2.85s. |
+| QA image-error/retry and short-height Current/saved browser selection | 3 passed, 7 filtered, 8.38s; light/dark controlled assets. These are compatibility checks of accepted main, not a new #1377 visible feature. |
+| Workspace types | Exit 0, five projects checked sequentially. |
+| Workspace lint | Exit 0; 1,113 files, 76 warnings/seven infos, no fixes; 60 core modules, no cycles. |
+| Production build | Exit 0; Vite built in 962ms. |
+
+| Retained log | SHA-256 |
+| --- | --- |
+| `/tmp/mc-1381-main5385-server.log` | `33ab16fffcb9d61eecd46814979b6550e11113fd6ad89b30bef108a970f1af35` |
+| `/tmp/mc-1381-main5385-process.log` | `a887eb764612f0fa1cc49c6f434147fa78a89ebd8c9e9cb0c5ceefbef46d33dc` |
+| `/tmp/mc-1381-main5385-failclosed.log` | `1000af6f30cfc1c9da66ae6b900adc6495a9c72be2a09b81fab2c97b4475930d` |
+| `/tmp/mc-1381-main5385-browser.log` | `2d07e96f0a00c6277f8295056551207f6a55d88e07ab54ddcd421fde34ae7de8` |
+| `/tmp/mc-1381-main5385-types.log` | `89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e` |
+| `/tmp/mc-1381-main5385-lint.log` | `b033433aaadf70a4d26f0257ca81b9576c4052cec3fafa698b782be8e2fbd445` |
+| `/tmp/mc-1381-main5385-build.log` | `b10a168748c1416c2525a9de4f1401e5938e4bd4523c5381cd2e341a98d12c48` |
+
+Fresh CI and current-head controller QA remain outstanding at this integration checkpoint.
+Saved reports above are historical evidence, not current approval. Backend visuals remain N/A;
+#1378 supplies the management UI. No merge, deployment or actual-provider compliance is claimed here.
