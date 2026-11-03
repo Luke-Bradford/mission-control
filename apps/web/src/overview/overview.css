@@ -1509,6 +1509,20 @@
   flex-wrap: wrap;
   font-size: var(--fs-s);
 }
+.overview-notices {
+  display: contents;
+}
+.overview-notices:has(.overview-status, .overview-constraints) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+  gap: 4px 16px;
+}
+.overview-notices .overview-status button {
+  min-height: 24px;
+  padding-block: 0;
+}
 #agentsList .trow.head > :nth-child(n + 4),
 #agentsList .trow > .num {
   text-align: right;
@@ -2344,27 +2358,27 @@ button.quota-details {
  * only the two-column monitoring budget: retain Crew geometry, every warning,
  * full-size controls, chart scales and complete readers rather than clipping. */
 @container overview-canvas (min-width: 1562px) and (max-width: 2075px) {
-  #page-overview:has(> .overview-constraints) .overview-primary {
+  #page-overview:has(.overview-constraints) .overview-primary {
     gap: 8px;
   }
-  #page-overview:has(> .overview-constraints) .overview-primary > #actP {
+  #page-overview:has(.overview-constraints) .overview-primary > #actP {
     height: 188px;
     min-height: 188px;
   }
-  #page-overview:has(> .overview-constraints) .overview-analytical {
+  #page-overview:has(.overview-constraints) .overview-analytical {
     gap: 4px;
   }
-  #page-overview:has(> .overview-constraints)
+  #page-overview:has(.overview-constraints)
     .overview-analytical
     :is(#quotaSummaryP, #timelineP, #overviewHistoryP, #machineSummaryP)
     > .ph {
     min-height: 32px;
     padding-block: 0;
   }
-  #page-overview:has(> .overview-constraints) #overviewHistoryP {
+  #page-overview:has(.overview-constraints) #overviewHistoryP {
     min-height: 176px;
   }
-  #page-overview:has(> .overview-constraints) #overviewHistoryP .measured-reading {
+  #page-overview:has(.overview-constraints) #overviewHistoryP .measured-reading {
     margin-bottom: 0;
   }
 }

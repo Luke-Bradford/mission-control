@@ -24,8 +24,10 @@ export function Overview() {
     history = useRef<MeasuredHistoryReader>(null);
   return (
     <section id="page-overview">
-      <OverviewHeader />
-      <OverviewConstraints />
+      <div className="overview-notices">
+        <OverviewHeader />
+        <OverviewConstraints />
+      </div>
       <NeedsBanner awayOnly />
       <OverviewCanvas>
         <div className="overview-metrics">
