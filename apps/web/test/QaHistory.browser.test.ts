@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import { nativeQaFixture, qaHistoryApi, qaHistoryFixture } from "./qaHistoryFixture.ts";
-import { qaReportApi, qaReportFixture } from "./qaReportFixture.ts";
+import { qaReportApi, qaReportAssets, qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
 describeRendered("QA history in the application shell", () => {
@@ -293,10 +293,20 @@ describeRendered("QA history in the application shell", () => {
               colorScheme,
               search: `?path=${encodeURIComponent(archived ? report.permalink : "/qa")}`,
               api: { ...desktopFixture().api, ...qaReportApi(3) },
+              assets: qaReportAssets(),
             });
             try {
               await page.boxes("article.qa-report");
               if (expanded) await page.click("#dock .dockrail button");
+              const images = await page.evaluate(async () => {
+                const evidence = [
+                  ...document.querySelectorAll<HTMLImageElement>("article.qa-report img"),
+                ];
+                for (const image of evidence) image.loading = "eager";
+                await Promise.all(evidence.map((image) => image.decode()));
+                return evidence.length;
+              }, null);
+              expect(images).toBe(2);
               const before = await page.evaluate(() => {
                 const items = [
                   ...document.querySelectorAll<HTMLElement>(

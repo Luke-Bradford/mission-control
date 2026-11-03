@@ -698,7 +698,246 @@ describe("durable QA report archive", () => {
   });
 });
 
+describe("visual report completeness", () => {
+  const observed = [
+    { check: "browser", result: "pass" },
+    {
+      check: "design",
+      result: "pass",
+      note: "At 1920×1080 the normal crew and capacity fit together; columns align.",
+    },
+  ] satisfies NonNullable<QaReportImport["coverage"]>;
+  const visual: NonNullable<QaReportImport["visual"]> = {
+    applicability: "required",
+    pairs: [
+      {
+        label: "Controlled application viewport",
+        before: {
+          url: `https://raw.githubusercontent.com/example/sample/${BASE}/docs/before.png`,
+          source: "controlled-fixture",
+          provenance: "Fictional fixture at the named base.",
+        },
+        after: {
+          url: `https://raw.githubusercontent.com/example/sample/${SHA}/docs/after.png`,
+          source: "controlled-fixture",
+          provenance: "Matching fictional fixture at the reviewed head.",
+        },
+      },
+    ],
+  };
+  it.each<{ label: string; coverage: QaReportImport["coverage"]; missing: string }>([
+    {
+      label: "browser missing",
+      coverage: observed.filter((c) => c.check !== "browser"),
+      missing: "Browser coverage",
+    },
+    {
+      label: "design missing",
+      coverage: observed.filter((c) => c.check !== "design"),
+      missing: "Design coverage",
+    },
+    {
+      label: "design observations missing",
+      coverage: [
+        { check: "browser", result: "pass" },
+        { check: "design", result: "pass" },
+      ],
+      missing: "Design observations",
+    },
+    {
+      label: "browser unperformed",
+      coverage: [
+        { check: "browser", result: "n-a", note: "The browser was unavailable." },
+        observed[1],
+      ],
+      missing: "Browser rendering was not performed",
+    },
+    {
+      label: "design unperformed",
+      coverage: [
+        observed[0],
+        {
+          check: "design",
+          result: "n-a",
+          note: "Only supplied captures were available; no own render.",
+        },
+      ],
+      missing: "Design review was not performed",
+    },
+  ])(
+    "saves $label as incomplete without dropping images or rewriting prior reports",
+    async ({ coverage, missing }) => {
+      const reports = service();
+      const previous = (await reports.importController(input())).report;
+      const saved = (await reports.importController(input({ coverage, visual }))).report;
+      expect(saved.completeness.state).toBe("incomplete");
+      expect(saved.completeness.missing.join(" ")).toContain(missing);
+      expect(saved.visual.pairs).toHaveLength(1);
+      const hash = saved.visual.pairs[0]?.after.sha256;
+      if (!hash) throw new Error("Retained visual fixture missing");
+      expect(reports.asset(hash)).toEqual(PNG);
+      expect(reports.read(previous.id)).toEqual(previous);
+      expect(reports.list("sample", 7)).toHaveLength(2);
+    },
+  );
+  it("retains a complete honest failed visual report without inventing or weakening findings", async () => {
+    const findings: NonNullable<QaReportImport["findings"]> = [
+      {
+        severity: "Important",
+        file: "apps/web/src/App.tsx",
+        line: 1,
+        summary: "The normal roster is below the fold.",
+        scenario: "At the declared reference viewport, the primary answer is absent.",
+        fix: "Recompose the panels to retain the normal roster.",
+      },
+    ];
+    const saved = (
+      await service().importController(
+        input({
+          verdict: { spec: "fail", quality: "pass" },
+          findings,
+          coverage: [
+            observed[0],
+            {
+              check: "design",
+              result: "fail",
+              note: "The captured reference viewport puts the normal roster below the fold.",
+            },
+          ],
+          visual,
+        }),
+      )
+    ).report;
+    expect(saved.verdict).toEqual({ spec: "fail", quality: "pass" });
+    expect(saved.findings).toEqual(findings);
+    expect(saved.completeness).toEqual({ state: "complete", missing: [] });
+  });
+  it("keeps a visual report complete when rendering and design observations were recorded", async () => {
+    const saved = (await service().importController(input({ coverage: observed, visual }))).report;
+    expect(saved.completeness).toEqual({ state: "complete", missing: [] });
+  });
+  it("retains an incomplete native visual report atomically with its recorded findings", async () => {
+    prEvidenceStore(join(dir, "evidence")).save(
+      {
+        repoId: "sample",
+        pr: 7,
+        sha: SHA,
+        mainSha: BASE,
+        capturedAt: NOW - 100,
+        pairs: [
+          { page: "audit", scheme: "light", changedPixels: 1, changedPercent: 1, regions: [] },
+        ],
+      } as EvidenceManifest,
+      ["before", "after", "diff"].map((kind) => ({ name: `audit-light-${kind}.png`, png: PNG })),
+    );
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - 100,
+    });
+    if (!id) throw new Error("Review fixture missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - 50, runId: "retro:visual" });
+    const row = store.review(id);
+    if (!row) throw new Error("Review fixture missing");
+    const details = {
+      verdict: { spec: "pass", quality: "pass" } as const,
+      summary: "Rendered the visual fixture; design review was not recorded.",
+      findings: [],
+      checked: [{ check: "browser", result: "pass" }] as const,
+    };
+    const report = await service().prepareNative(
+      row,
+      { ...details, checked: [...details.checked] },
+      NOW,
+    );
+    expect(report.visual.applicability).toBe("required");
+    expect(report.completeness.missing.join(" ")).toContain("Design coverage");
+    expect(
+      store.recordFindings(id, "retro:visual", {
+        ...details,
+        checked: [...details.checked],
+        qaReport: report,
+        at: NOW,
+      }),
+    ).toBe(true);
+    expect(store.review(id)?.state).toBe("reported");
+    expect(store.qaReportForReview(id)).toEqual(report);
+    const hash = report.visual.pairs[0]?.after.sha256;
+    if (!hash) throw new Error("Retained native fixture missing");
+    expect(service().asset(hash)).toEqual(PNG);
+  });
+  it("keeps explicit nonvisual browser and design exclusions complete", async () => {
+    const saved = (
+      await service().importController(
+        input({
+          coverage: [
+            { check: "browser", result: "n-a", note: "Server-only boundary change." },
+            { check: "design", result: "n-a", note: "No visible change." },
+          ],
+        }),
+      )
+    ).report;
+    expect(saved.completeness).toEqual({ state: "complete", missing: [] });
+  });
+});
+
 describe("QA report API", () => {
+  it.each([
+    { verdict: { spec: "pass", quality: "pass" }, findings: [] },
+    { verdict: { spec: "fail", quality: "pass" }, findings: [] },
+    {
+      verdict: { spec: "fail", quality: "pass" },
+      findings: [
+        {
+          severity: "Minor",
+          file: "apps/web/src/App.tsx",
+          line: 1,
+          summary: "Spacing",
+          scenario: "Minor spacing issue",
+          fix: "Adjust spacing",
+        },
+      ],
+    },
+  ] as const)(
+    "refuses inconsistent failed design imports before any archive or GitHub side effect: %j",
+    async ({ verdict, findings }) => {
+      const app = buildApp({
+        config,
+        store,
+        bus: new ChangeBus(),
+        operatorToken: "fixture-key",
+        qaReports: service(),
+        now: () => NOW,
+      });
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/qa-reports/import",
+          headers: { "x-mc-operator": "fixture-key" },
+          payload: input({
+            verdict,
+            findings: [...findings],
+            coverage: [
+              { check: "design", result: "fail", note: "The normal roster is below the fold." },
+            ],
+          }),
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json().error).toMatch(/failed design check/i);
+        expect(store.qaReports("sample", 7)).toEqual([]);
+        expect(calls).toEqual([]);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   it("requires operator authority, refuses seat/FLIGHT provenance, and serves configured archive reads/Markdown", async () => {
     const tokens = new RunTokens();
     const seat = tokens.issue("retro", "retro:review");

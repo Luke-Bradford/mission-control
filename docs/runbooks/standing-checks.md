@@ -21,6 +21,14 @@ FLIGHT works through these checks each wake. Its role prompt (`roles/FLIGHT.md`)
 | FLIGHT notes for the controller | a FLIGHT "Missing power … For the controller" note | act on it, or log the power on #765 | controller (`flight-note`) | #1180 (FLIGHT gets the power) |
 | Work that builds on an open PR | a ticket whose base code is in an unmerged PR | hold it with `promote { to: "Backlog", waits_on: <PR> }`, and promote it when the PR merges | FLIGHT, by hand | #1195 |
 
+## Review and deployment handoffs
+
+Before calling a PR ready, name the reviewed source, current published head, exact CI result and
+immutable QA report permalink. Include unresolved findings and active holds. Reconcile later source
+changes with the review and evidence; a historical passing report is not current approval. For visible
+work, follow [visual QA](visual-qa.md), including the design contract and matched context/focused images.
+Keep that report link in the PR, relevant ticket and rework handoff. Missing required evidence stays explicit.
+
 ## Seats
 
 | Check | When | Action | Today | Moves to |

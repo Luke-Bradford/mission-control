@@ -1,6 +1,18 @@
 import { type QaReport, qaReportPermalink, REVIEW_CHECK_IDS } from "@mc/core";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 
+/** Browser-only raw image fixtures; report metadata stays unchanged and no DNS request escapes. */
+export function qaReportAssets() {
+  const image = {
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><rect width="200" height="80" fill="#607080"/></svg>',
+  };
+  return {
+    "https://evidence.example/before.png": image,
+    "https://evidence.example/after.png": image,
+  };
+}
+
 export function qaReportFixture(): QaReport {
   const headSha = "a".repeat(40),
     id = "c".repeat(64),
