@@ -124,3 +124,8 @@
 }
 
 .composition-v5 .allowance-scroll-note{padding:4px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+
+/* Complete account comparisons need their own meaningful column width, not height alone. */
+@container(min-width:2074px){.composition-v5 .operations{container-type:inline-size;container-name:provider-domain}}
+@media(min-height:1300px) and (min-width:2200px){.composition-v5 .allowance{display:block}.composition-v5 .allowance-full{display:none}}
+@container provider-domain (min-width:900px){.composition-v5 .allowance{display:none}.composition-v5 .allowance-full{display:block}}
