@@ -10,6 +10,7 @@ Use `docs/design/system.md` (sections cited below). A failed **[I]** item is Imp
 ## Plan
 
 - [ ] One question per page; one purpose per panel (§1).
+- [ ] Dashboards: apply [composition and responsive fit](references/dashboard-layout.md); record the reference CSS viewport/zoom/rail, essential fields and normal row count; declare the first-screen data and panel width/height budget before implementation.
 - [ ] Stats: label, value, definition, window, unit (§5–7).
 - [ ] Page-shaped APIs; tabs fetch on opening (§8–9).
 - [ ] Mockups precede new pages/big visual changes (direction principle 6).
@@ -36,7 +37,7 @@ Use `docs/design/system.md` (sections cited below). A failed **[I]** item is Imp
 ## Review
 
 - [ ] Build items hold in diff and rendered page.
-- [ ] First screenful answers the question, key item top left (§1).
+- [ ] **[I]** First screenful answers the page’s declared primary question at its normal reference viewport (§1). For dashboards, verify the operational content budget; eventual scroll reachability alone does not pass this check.
 - [ ] No empty panels/lone-number tiles (§5–7).
 - [ ] Record per-table observations, images, findings and limits; geometry alone is insufficient.
 
