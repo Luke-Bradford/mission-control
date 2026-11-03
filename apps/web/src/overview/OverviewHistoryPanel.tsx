@@ -20,6 +20,7 @@ const LABELS: Record<History, string> = {
 export function MeasuredHistory({
   values,
   format,
+  tickFormat = format,
   max,
   unit,
   label,
@@ -27,6 +28,7 @@ export function MeasuredHistory({
 }: {
   values: (number | null)[];
   format: (n: number) => string;
+  tickFormat?: (n: number) => string;
   max?: number;
   unit: string;
   label: string;
@@ -54,9 +56,9 @@ export function MeasuredHistory({
       </div>
       <div className="measured-plot">
         <div className="measured-y num">
-          <span>{format(top)}</span>
-          <span>{format(top / 2)}</span>
-          <span>{format(0)}</span>
+          <span>{tickFormat(top)}</span>
+          <span>{tickFormat(top / 2)}</span>
+          <span>{tickFormat(0)}</span>
         </div>
         <svg
           viewBox="0 0 100 24"
@@ -117,6 +119,13 @@ export function OverviewHistoryPanel() {
         : selected === "ci"
           ? (n: number) => percent(n)
           : (n: number) => String(Math.round(n));
+  // Readings are whole tokens/counts; an axis midpoint can be half a unit.
+  const tickFormat =
+    selected === "tokens"
+      ? (n: number) => (n < 1000 ? String(n) : kTokens(n))
+      : selected === "inflight" || selected === "needs"
+        ? String
+        : format;
   const unit =
     selected === "tokens"
       ? "tokens/min"
@@ -160,6 +169,7 @@ export function OverviewHistoryPanel() {
           <MeasuredHistory
             values={values}
             format={format}
+            tickFormat={tickFormat}
             max={selected === "ci" ? 100 : undefined}
             unit={unit}
             label={LABELS[selected]}

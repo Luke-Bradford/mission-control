@@ -1,0 +1,502 @@
+{
+  "renderedSource": "99e45192ca835348162ec6cebfdb51e7bb883023",
+  "baseline": "6f0df12e1112ace4bae4fa869117b3464e58f4a7",
+  "pairs": 28,
+  "sourcePairPngs": 84,
+  "independentPngs": 4,
+  "totalPngs": 88,
+  "readmeLocalLinks": 94,
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 12438,
+      "sha256": "f47c7533773a9e5cac46942f41149d0ab0ea137c2a3e137aa4a0013d9ecb57e0"
+    },
+    {
+      "file": "capture.ts",
+      "bytes": 9078,
+      "sha256": "17c5a50b8f350fb2339d12086f718af565d2544c7bb00bf8703d4ead9c1f5dd6"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-context-after.png",
+      "bytes": 345756,
+      "sha256": "99f19247cf68f9227ddaf278cff4df1b1d73c7b3530c9ec8fefd28366db22d3f"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-context-before.png",
+      "bytes": 345615,
+      "sha256": "8dfea3676476520f1889b9ead685892078f37be3f43237ca15ca4612483c0676"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-context-diff.png",
+      "bytes": 228532,
+      "sha256": "6bf097736355ae74ec17b5a71db6fdb28a7773bfd1026e666a5e484b43f8d86c"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-panel-after.png",
+      "bytes": 20834,
+      "sha256": "6803c417015303b88b597f0849f13a62595dff23b4d0f911280a74c446d7ab33"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-panel-before.png",
+      "bytes": 20691,
+      "sha256": "c767d0018abba81a25137a74dc9a632dffe29a8e766cefed1fa88190902c87f0"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 13652,
+      "sha256": "6b6218aad692832ab80447c188d34d38f9686ab1f8eef179f2638c770793349d"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-context-after.png",
+      "bytes": 343719,
+      "sha256": "29eb6410ad8ca9a0b18d5f180a9b4001a569c3586c4804a4388e7f8c3067ef87"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-context-before.png",
+      "bytes": 343614,
+      "sha256": "0f9d7ad31d660682d8c06f817e6ab4e505416d08cd5bbc0d16b29a78ee735f05"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-context-diff.png",
+      "bytes": 232588,
+      "sha256": "9ec4c84a5198a8140cdc37209b11accdb826d7762ee1f88c57ec8e4c221bd737"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-panel-after.png",
+      "bytes": 20661,
+      "sha256": "6a7f1a68317d46bfa0edaf0caef5ec2c1457ce61f63f7c62192c27fc8d729e42"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-panel-before.png",
+      "bytes": 20518,
+      "sha256": "69c3a64f45acbbb8e5d223f3650c31ac15d8a7fe3e194e41bfdfc7438a680ba5"
+    },
+    {
+      "file": "images/history-inflight-three-1920x1080-light-folded-panel-diff.png",
+      "bytes": 13842,
+      "sha256": "4b2e28fd4888110aa0e12671b85bef57852f381be6bc07c6d1970910401e71a6"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-context-after.png",
+      "bytes": 345851,
+      "sha256": "1b03e7aa8cafe24937d1cc81a8c6170fd0d884dcb0a1e1a96a77b7b6affbd3ae"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-context-before.png",
+      "bytes": 345546,
+      "sha256": "f30fabf8ef8365882435767953c255f9e2de38b0026634b5a6ba0c6f8a1e1852"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-context-diff.png",
+      "bytes": 228333,
+      "sha256": "e3c263c0e5a89ccd7e05523455143de151298f238b65a4fb312039a9e3b5023d"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-panel-after.png",
+      "bytes": 21741,
+      "sha256": "04a15cbc2c71e28a673ff533f04e536baae6b1e8da3d45945dd103cc754ac6b7"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-panel-before.png",
+      "bytes": 21440,
+      "sha256": "583fa58ed352702b8e1a57d6f5ddae05a4a35d2cd6dbc3e49c740f6827936612"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 14266,
+      "sha256": "5f0f1907bbb5a8b94775c0299e049c690569d924032fe63278a74ef937d491ef"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-context-after.png",
+      "bytes": 343621,
+      "sha256": "c2e8d4fc3001e0685e26708fe7c4d705cc6d6757698646eb6e91e75dfc1a0df7"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-context-before.png",
+      "bytes": 343341,
+      "sha256": "046293fd6dba28bd683d75294166542efb2141c2b022855b1fb172f2a97f07f3"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-context-diff.png",
+      "bytes": 232311,
+      "sha256": "861e87ee22547fb01d9c87116af18d490adb4a597f0349b00e7c477b212b7215"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-panel-after.png",
+      "bytes": 21424,
+      "sha256": "e0971d291e1d7d1571babe67b7e1df95a05007a459510270af00f8f90ac5befa"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-panel-before.png",
+      "bytes": 21135,
+      "sha256": "1ef63400f414fdbe52960ab15e069e21ad0b94b62e0e13fac5efd58e099b4a7a"
+    },
+    {
+      "file": "images/history-needs-one-1920x1080-light-folded-panel-diff.png",
+      "bytes": 14460,
+      "sha256": "3f6a3a9afd86bfded759e458c97a5126c94a3fe0e05a682c9d5eedbb4a1fbaba"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-context-after.png",
+      "bytes": 365343,
+      "sha256": "56603196bfc38a8e27a0b7938ebfcb7eda03566c7861cc14c99d639c12a61dc7"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-context-before.png",
+      "bytes": 365338,
+      "sha256": "c53a8ce3354055c2e09388055249793a1fe451b7515841d67f57d825c437f7ae"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-context-diff.png",
+      "bytes": 240557,
+      "sha256": "b549409c1cc9e4e82f9f8fee69562f8ca3576c3ee11caf9d16a26ce6e8c143ce"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-panel-after.png",
+      "bytes": 36385,
+      "sha256": "0d0c3ad0cceb545bb2ec317dc59347bc8aa4770c7bb24175f2eacce0ceb96dc8"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-panel-before.png",
+      "bytes": 36385,
+      "sha256": "0d0c3ad0cceb545bb2ec317dc59347bc8aa4770c7bb24175f2eacce0ceb96dc8"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 23426,
+      "sha256": "3215764ca03f77231363e3d74f1fc4f591af62de8bc759efba7d192f3f10b047"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-context-after.png",
+      "bytes": 362836,
+      "sha256": "f003e2943b48a4e675cd69c86f23cbebdbfab36af4d416ef96632c9d73f2445c"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-context-before.png",
+      "bytes": 362869,
+      "sha256": "a888f6962ab9d9eb50022e188eca87f4774840662c4b2646590ac818578dc1f4"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-context-diff.png",
+      "bytes": 244194,
+      "sha256": "a8555cec623c32dedeb3df2f3c3b014921e78ad80d38b7f991a397a6b34d5c2b"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-panel-after.png",
+      "bytes": 35749,
+      "sha256": "c695b327c42a069355efcbcfd3fba7eacb72f1d27d7085cb22236ee93b4a6a4a"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-panel-before.png",
+      "bytes": 35749,
+      "sha256": "c695b327c42a069355efcbcfd3fba7eacb72f1d27d7085cb22236ee93b4a6a4a"
+    },
+    {
+      "file": "images/history-percentage-gap-1920x1080-light-folded-panel-diff.png",
+      "bytes": 23277,
+      "sha256": "09dc32cc50ec8f66bda575b330e6a5b4e633e9123e8047bb2b180a42197b8397"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-context-after.png",
+      "bytes": 360055,
+      "sha256": "a820bfc2006d50ebd2df441400461b35d9914618034169dc2717a73ff66e895a"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-context-before.png",
+      "bytes": 360065,
+      "sha256": "034552b338b69c5eb65704ddf8d5f750cb7f66925fc5ed10b242fcefb23ef6b9"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-context-diff.png",
+      "bytes": 236358,
+      "sha256": "6a4882e56807ee5511200810fb9605a8fb4fe37c2f12acf3fc774ca91f30599c"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-panel-after.png",
+      "bytes": 32842,
+      "sha256": "a2c68eff1ba5d129470920e8419f96bd9ea56a1577bcac11d8a3cc60b74f9700"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-panel-before.png",
+      "bytes": 32842,
+      "sha256": "a2c68eff1ba5d129470920e8419f96bd9ea56a1577bcac11d8a3cc60b74f9700"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 20588,
+      "sha256": "a8b4433de6cd24f48aa372b3a17021a942c54f0bff2f34762f3e33347b6e735a"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-context-after.png",
+      "bytes": 357592,
+      "sha256": "a8ef4f85de81e249008b20aae89b5ce934559661aaf8ffeb53826d99ca63833d"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-context-before.png",
+      "bytes": 357595,
+      "sha256": "d59ccbb0888d357c79af728cebd11b5656f24da9445b5666a5e60774a4e5ba3a"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-context-diff.png",
+      "bytes": 240118,
+      "sha256": "f8bebc5632c3cbb1dfb42affbbe04017bdd45deca047f1820dc1620205d2c882"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-panel-after.png",
+      "bytes": 32397,
+      "sha256": "ef49d89e8deb73397b973485317f5be4484fa3ed922e661c5e589cf8e1139597"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-panel-before.png",
+      "bytes": 32397,
+      "sha256": "ef49d89e8deb73397b973485317f5be4484fa3ed922e661c5e589cf8e1139597"
+    },
+    {
+      "file": "images/history-subcent-cost-1920x1080-light-folded-panel-diff.png",
+      "bytes": 20598,
+      "sha256": "df9dd6aad7c578bc9b9e200d2d215695c5437efc67d30a61987962bda0f9ff08"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-context-after.png",
+      "bytes": 337333,
+      "sha256": "f7825ff078e5c4a5b8e6e288e1cb335c6243412345ecee43dd31a2df14e56a5a"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-context-before.png",
+      "bytes": 337017,
+      "sha256": "3d2cb51d6a8fc8b72435b021d19ea3602f95bc1132394ea9fd9ed20f6831235d"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-context-diff.png",
+      "bytes": 222924,
+      "sha256": "374b4c8181811a4f2e79ceece1b0c46402034ef6ac2e79275d4fa2621f985274"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-panel-after.png",
+      "bytes": 23408,
+      "sha256": "8df69d0b318f18caea917232ba937711509ba2abb75bb36a2c75ea05995c8dca"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-panel-before.png",
+      "bytes": 23108,
+      "sha256": "d4f8e11c6c10079339993235f87e790cadeb10b0771f3fa7142bf70ebea4e371"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 15303,
+      "sha256": "b46aa251785190073c5c13e64512df2648de95efed1360bf5b92c62fbbcd113e"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-context-after.png",
+      "bytes": 335394,
+      "sha256": "a2f4e6d8c521c872feb01d0d1520861cc6a99b11261034afb98fb32a26b19d65"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-context-before.png",
+      "bytes": 335123,
+      "sha256": "2d28441f4df732c70b09ff01df050664208f76418cd7567556634fab8cd210a2"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-context-diff.png",
+      "bytes": 226821,
+      "sha256": "990744799ea289dc4238dca76665ba76111364dca08f1c38979519d7146cea5a"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-panel-after.png",
+      "bytes": 23043,
+      "sha256": "c470a508ffe0153075aa0879e2dcb514da5071b368c46c0f814f3c800ff50e5b"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-panel-before.png",
+      "bytes": 22757,
+      "sha256": "ae74f7f063eeee7112b1cb32ee1d346e6168bfb1e3468d858b0d59e21bd893a4"
+    },
+    {
+      "file": "images/history-tokens-one-1920x1080-light-folded-panel-diff.png",
+      "bytes": 15549,
+      "sha256": "a539c2fc537e2114172967d4a155702ee23ba2ff53d0feace66065b6e9b5089c"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-context-after.png",
+      "bytes": 338200,
+      "sha256": "3535b7604205a9ddd79cbdd8fb3eadee6b1c9051308223490246cd6563a9b268"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-context-before.png",
+      "bytes": 338059,
+      "sha256": "2809fa247f91894fecf542b6faa8060aa6a3d97085f60056e77b06190af56e32"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-context-diff.png",
+      "bytes": 223536,
+      "sha256": "67f195db76b3b942e81796349592f96796d17c422cf90eb5c275a8c7dc15ad79"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-panel-after.png",
+      "bytes": 23816,
+      "sha256": "bf06a672dc0e902b251d6e7790bc3128459fd2e8a92d73e8542dcc5b7dc3bd04"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-panel-before.png",
+      "bytes": 23678,
+      "sha256": "2995dbe9689ff90534a9f6b1a5c88e1217b1ec4c531935ea6f977e17858da5c2"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 15536,
+      "sha256": "a2f92d954d2ede38a4fdea4976c9351bf4a74b581d191c3ea59dfcfe544ed033"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-context-after.png",
+      "bytes": 336316,
+      "sha256": "9cdd6d7de8b84862b64a8db054fb0df0edfb467bd0e1c6c239078372acf9c5e5"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-context-before.png",
+      "bytes": 336175,
+      "sha256": "1d70b154bfae44e987e84e6bb89a3447aa5fa472c5d40ca1531483f48c964239"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-context-diff.png",
+      "bytes": 227390,
+      "sha256": "e1e34956917ca8b8df02fc77ac0768f9bae37a54b17ad59de00fe3447da72a75"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-panel-after.png",
+      "bytes": 23558,
+      "sha256": "105814dcb76ed18e04340709cd27f61766f1911457ca71e313d49f5f353e89a7"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-panel-before.png",
+      "bytes": 23426,
+      "sha256": "b7a845d2b7b608fd6627f6624712c75213e7f1f87425d5068618a50fcc3eff68"
+    },
+    {
+      "file": "images/history-tokens-three-1920x1080-light-folded-panel-diff.png",
+      "bytes": 15736,
+      "sha256": "da67d0242a49ecec63a76621c06dbfcf3d0b1f9268cc9c8690a433289b2a1a44"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-context-after.png",
+      "bytes": 338171,
+      "sha256": "c0edbebe19e89705fa0eee5e26923f458afec3d50e31e2f3d7ac02d6203ba0d8"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-context-before.png",
+      "bytes": 337861,
+      "sha256": "f335fdc681ced74fc8b0e96db97a0746b64a7a325e1f23fa27d297a1b48965b3"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-context-diff.png",
+      "bytes": 223450,
+      "sha256": "08019e05363ab97593f46238c454e593f5fb850912421e502c14ea48f2b49dd8"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-panel-after.png",
+      "bytes": 25617,
+      "sha256": "605bb24f1adff7deb36dbe90f0bd25255700b5cf7c46b2845b984dfe56bdd7f1"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-panel-before.png",
+      "bytes": 25321,
+      "sha256": "a4a6474a9f8abdea77e5a2e82be3d6d3ae9525471d729c6c092bec2cd836d43d"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-dark-folded-panel-diff.png",
+      "bytes": 16469,
+      "sha256": "1a87809d4d44eb45f1c109947122de533305e4a37fc066e0c27889b4728dcdb8"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-context-after.png",
+      "bytes": 336265,
+      "sha256": "e3d1650cd3ff5bed1d38ff359b2d830b3c908eed9046e9c5e85a73b89808b66e"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-context-before.png",
+      "bytes": 335956,
+      "sha256": "b7caad6e03a8f2d2f8d7d4fdbb77080e4c1c738c2c6bada7c7f94bc2bea041ff"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-context-diff.png",
+      "bytes": 227202,
+      "sha256": "6bac05bc5e1d0d945daa9a8c4d5e720025514a59a5329ad248a2ffe857bb8f9e"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-panel-after.png",
+      "bytes": 25341,
+      "sha256": "21c3150ca86b275295a12fe4055f632edc11157a2f2ae96020bb08277b2004ca"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-panel-before.png",
+      "bytes": 25045,
+      "sha256": "3b565bab05078e28d0fdb95516b261741f392c4d2a41a0869c0de131fd15bdf5"
+    },
+    {
+      "file": "images/history-tokens-zero-1920x1080-light-folded-panel-diff.png",
+      "bytes": 16752,
+      "sha256": "e2791e687a9fd400a033c4ce7f8b5f7b4e763718d717762842ea91a61e9df49f"
+    },
+    {
+      "file": "images/independent-after-tokens-context.png",
+      "bytes": 325017,
+      "sha256": "c8d68086fb4bab6c964979b1081230bff413a6cda9edaeccf2399a5452dd1c4b"
+    },
+    {
+      "file": "images/independent-after-tokens-panel.png",
+      "bytes": 23630,
+      "sha256": "3479c2e1b89c99e98c12e1ca5a930c75f19f1ae0cef8b918304d7da84a9c1465"
+    },
+    {
+      "file": "images/independent-before-tokens-context.png",
+      "bytes": 324914,
+      "sha256": "55299d8ef2e2b7178444ee559c04e5ed3f66ca350320e4466fd501339a764ace"
+    },
+    {
+      "file": "images/independent-before-tokens-panel.png",
+      "bytes": 23507,
+      "sha256": "9142e0ef7e449f8d9ceb3dc712b8e7e76c1134217c971febfbb5a4a8cceaf912"
+    },
+    {
+      "file": "independent-checks.json",
+      "bytes": 34656,
+      "sha256": "ad387ddc8efaccdd905642d221302d95396aae79376e43e8a16e74b9e19a74d5"
+    },
+    {
+      "file": "local-checks.json",
+      "bytes": 3810,
+      "sha256": "ca33a1258512ad944609630a4af9b8436f11a267261d57b3e547f4aeb13a5c6f"
+    },
+    {
+      "file": "logs/mc-1379-build.log",
+      "bytes": 6123,
+      "sha256": "14765eae17d86049cb24fe400a2d904bce52c38c2dd238bf67868c9d9313c261"
+    },
+    {
+      "file": "logs/mc-1379-green.log",
+      "bytes": 531,
+      "sha256": "74458088c49b58621aa684ae5181ac546598f2416a98550157a9c1fa1d5062b0"
+    },
+    {
+      "file": "logs/mc-1379-lint.log",
+      "bytes": 18067,
+      "sha256": "d3674db11651f8125ad1642b5bb95ac99a470089ec1bc0190d8e34b49b256c1e"
+    },
+    {
+      "file": "logs/mc-1379-red.log",
+      "bytes": 122768,
+      "sha256": "1e437c0949fa6dc141d4767535a6748021eb32d1a9796b8104c0c9ec655e7e3a"
+    },
+    {
+      "file": "logs/mc-1379-types.log",
+      "bytes": 15,
+      "sha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92"
+    },
+    {
+      "file": "render-checks.json",
+      "bytes": 122441,
+      "sha256": "60285cea7c89e6b9fbae1522c151c4ba41e799d6297e29e9c55da98a5db7ac1e"
+    }
+  ],
+  "scope": "Evidence-only retained files; manifest excludes itself to avoid recursive hash. Final Git artifact head is verified separately."
+}
