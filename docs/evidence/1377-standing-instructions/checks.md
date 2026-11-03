@@ -368,3 +368,75 @@ Heavy slots were released immediately, including after the retained red command,
 Handoff: test correction 1e73f2bf is clean and frozen for same-pass independent verification. The controller
 retains failed 9a QA and owns the next remote push, exact-head CI, final QA, merge and Update. No new production
 source, screenshot acceptance, paid-provider compliance or live-crew claim is part of this correction.
+
+
+## Integrated-main CI finding and bounded settling hardening — 3 November 2026
+
+Run 41627861687 at PR head 893ba4e2 is a failed attempt with two distinct outcomes:
+
+- server (2): all 90 files/3,698 tests passed, 16 skipped, but the job exited 1 on one unhandled Vitest
+  worker RPC timeout calling onTaskUpdate (327.83s). The previous 9a run passed the same server shard/counts
+  in 249.66s. This supports an isolated runner/reporting timing inference, not a proven platform cause or a green job.
+- web-core: 1 failed/5,512 passed, 252 files, 768.50s. AgentDensity.browser.test.ts:396 found the 50th
+  picker seat not painted after End, although remaining ≤2px and guido-50 text assertions had passed.
+- Both process shards, server (1) and validate succeeded; the aggregate check failed. No rerun was
+  performed by the implementation agent, and these failures were not relabeled as passing.
+
+Saved failed 893 QA: `db0af331dc3737d2e4eb5ddd1c2af7f05d9edd0b881a08a2ce558ee7560881de`.
+Reader: `/qa?repo=mission-control&pr=1381&report=db0af331dc3737d2e4eb5ddd1c2af7f05d9edd0b881a08a2ce558ee7560881de`.
+
+The actual tested checkout was merge e81b4f7 (893 into main 74f1869a), whose apps/web tree is
+2112b67b180eade038db40bab5fe2e3e04a9ef4f, exactly main 74f1869a's web tree. Local 893 lacked the newly
+merged Agent browser test. Prior 9a green used merge a75f4d6 against older main 99e8404e, with 250 files/
+5,483 tests and no AgentDensity browser case; it is not a same-input web comparator. The proper Agent
+baseline is PR 1382 CI 41618649791/job 125858382228: that exact many-seat case passed in 5.919s, with
+16 Agent browser cases and 252 files/5,513 total tests passing. Original Linux red, comparison logs and
+independent unmodified-main/exact-merge local passes/frame receipts remain retained by the controller/reviewer.
+The actual Linux frame and root cause are unknown; local green does not explain away its failure.
+
+Reviewer 1188 found a concrete test mismatch, with no clipping reproduced on the unchanged exact merge:
+the old wait stopped at remaining ≤2px while the unchanged painted predicate requires the row inside a
+1px bound plus an elementFromPoint hit. Root authorized a minimal test-only settling correction, folded
+into existing #656/#1361 history; no new ticket or product change is introduced.
+
+Main cb133e64 (Agent #1382 and HUD guidance #1383) was merged cleanly into the implementation branch as
+816a3afeb964bbde11bf6c8e4da625ab3b0862d8. Source/test correction 207cfc717751b8ae9de0bd179ed2a9493a7b455a
+then changes only apps/web/test/AgentDensity.browser.test.ts relative to that integrated merge. Both the
+50th deliverable and the 50th picker seat now reread the unchanged combined remaining+painted predicate
+until it passes or the existing 1,000ms budget expires, matching the existing full-text pattern. Every
+remaining/text/rectangle/hit assertion and numeric tolerance is preserved. This is settling hardening,
+not a proven platform or product fix; no production code, timeout, browser setting or assertion is relaxed.
+Server production, core production and roles remain byte-identical to validated source 92ee3399.
+The late PR path expansion is the one Agent browser test; web production changes in the merge are current main.
+
+Final bounded commands, all exit 0 on content frozen as 207cfc71:
+
+```sh
+MC_AGENT_DENSITY_SHOTS=/tmp/mc-1377-agent-settling-shots pnpm exec vitest run --project web apps/web/test/AgentDensity.browser.test.ts --maxWorkers=1 -t 'keeps honest (many|long) content|offers full text when' > /tmp/mc-1377-agent-settling-browser.log 2>&1
+pnpm -s lint > /tmp/mc-1377-integrated-settling-lint.log 2>&1
+pnpm -s typecheck > /tmp/mc-1377-integrated-settling-types.log 2>&1
+pnpm -s build > /tmp/mc-1377-integrated-settling-build.log 2>&1
+```
+
+Results: 3 passed/13 filtered, 6.83s (both themes for many, long and full-text cases); lint passed on
+1,113 files with 76 warnings/7 infos/no errors, 60 core modules/no cycles; all workspace types passed;
+integrated production compatibility build passed (959ms). One worker/browser was used, and the lane was
+released immediately after commands. No full local suite, live read/write or paid-provider action occurred.
+The screenshots are local fixture test receipts, not new product-design acceptance or actual Linux proof.
+
+| Retained `/tmp` artifact basename | SHA-256 |
+| --- | --- |
+| mc-1381-893-ci-server2-failed.log | fa70ce25ed778ed29ce1a05012c05f148bca67d7e45c054e18c3d037b8f082ae |
+| mc-1381-893-ci-webcore-failed.log | 706d725f3960dd5e243f68e1021de8ff85f52b59e6768a7819d2c327fde2a138 |
+| mc-1381-893-ci-webcore-normalized.log | 7ecb29d64251244bcfaa0f3d4aa3ddc671b1f1b0d222cd063c30d280eae02952 |
+| mc-1381-9a-ci-webcore-green.log | 0769b60553f45c96ddacb213ae0efc6ba11fd14fe485b69decfedc406de5414b |
+| mc-1382-ci-webcore-green.log | ea6338d772619bf1be7cade7e689554d26ad69516c00d75c52b40d45b8b40966 |
+| mc-1377-agent-settling-browser.log | fd5b531b74f84a661880227e9e0de63ed1c704af5dc9ee3084e3ce4cf28b3213 |
+| mc-1377-integrated-settling-lint.log | 90a3404f1c78839efc650e4313ee90ce2ba8b5b9a31e0adad56a65b7118acc78 |
+| mc-1377-integrated-settling-types.log | 89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e |
+| mc-1377-integrated-settling-build.log | 15b2b1c40d9c5f07885a9530b6bf68d09eac5cc091fd00d3be3cf81058a80c28 |
+| mc-1377-agent-settling-shots/manifest.json (18 fixture frame/metrics files) | 891369046cf41ad86fa771c032c781ea73d9087671b1bc6402b57d363ee67aeb |
+
+Current handoff: integrated correction source 207cfc71 is clean and frozen for same-pass independent
+verification. Failed 893 history remains saved; the controller owns corrected publication, fresh exact-head
+CI, final QA, merge and Update. No final CI/review/merge/deployment or paid/live compliance claim is made.
