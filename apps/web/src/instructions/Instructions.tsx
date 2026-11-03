@@ -1,4 +1,5 @@
 import {
+  type ConfigView,
   INSTRUCTION_TEXT_MAX,
   type InstructionMutation,
   type SeatInstructionIndex,
@@ -121,15 +122,18 @@ function Entry({
   onRevoke,
   anchored = false,
   disabled = false,
+  canEditFocus = false,
 }: {
   entry: StandingInstruction;
   onEdit?: (entry: StandingInstruction, button: HTMLButtonElement) => void;
   onRevoke?: (entry: StandingInstruction, button: HTMLButtonElement) => void;
   anchored?: boolean;
   disabled?: boolean;
+  canEditFocus?: boolean;
 }) {
   const tz = useTz();
-  const queueHref = entry.seatId === null ? null : `${agentPath(entry.seatId)}?side=queue`;
+  const queueHref =
+    canEditFocus && entry.seatId !== null ? `${agentPath(entry.seatId)}?side=queue` : null;
   const box = useRef<HTMLElement>(null);
   useEffect(() => {
     if (anchored) {
@@ -258,6 +262,11 @@ function History({
 
 /** The operator edits text here. Selectors keep their existing single Queue editor. */
 export function InstructionManager({ seatId }: { seatId: string | null }) {
+  const config = useResource<ConfigView>(seatId === null ? null : RESOURCES.config);
+  const canEditFocus =
+    config.data?.crew?.sessions.some((session) =>
+      session.seats.some((seat) => seat.id === seatId && seat.mode === "writer"),
+    ) ?? false;
   const reference = seatId === null ? RESOURCES.flightOrders : RESOURCES.seatInstructions(seatId);
   const resource = useResource<SeatInstructionList | StandingInstructionList>(reference);
   const hash = useHash();
@@ -401,9 +410,11 @@ export function InstructionManager({ seatId }: { seatId: string | null }) {
           <Expandable lines={3} of="effective focus">
             <span className="instruction-text">{focus.effectiveFocus ?? "Unrestricted"}</span>
           </Expandable>
-          <p className="note">
-            Clear in Queue saves an operator instruction. Revoking it can reveal FLIGHT’s focus.
-          </p>
+          {canEditFocus && (
+            <p className="note">
+              Clear in Queue saves an operator instruction. Revoking it can reveal FLIGHT’s focus.
+            </p>
+          )}
         </>
       )}
       {notice && (
@@ -420,7 +431,7 @@ export function InstructionManager({ seatId }: { seatId: string | null }) {
       >
         {seatId === null ? "Add order" : "Add seat instruction"}
       </button>
-      {seatId !== null && (
+      {seatId !== null && canEditFocus && (
         <a
           className="instruction-link"
           href={`${agentPath(seatId)}?side=queue`}
@@ -506,7 +517,7 @@ export function InstructionManager({ seatId }: { seatId: string | null }) {
                 {afterRevoke
                   ? `${instructionValue(afterRevoke)} · ${instructionSource(afterRevoke)} #${afterRevoke.id}`
                   : "Unrestricted · no remaining focus instruction"}
-                . This revocation is different from Clear.
+                .{canEditFocus && " This revocation is different from Clear."}
               </p>
             </Expandable>
           )}
@@ -540,6 +551,7 @@ export function InstructionManager({ seatId }: { seatId: string | null }) {
             onEdit={edit}
             onRevoke={revoke}
             disabled={busy || editing !== null || revoking !== null}
+            canEditFocus={canEditFocus}
           />
         ))}
       </section>

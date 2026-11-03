@@ -18,7 +18,7 @@ import { Flight, tabForHash } from "../src/pages/Flight.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { agentDensityFixture } from "./agentDensityFixture.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, NOW } from "./fixtures.ts";
+import { CONFIG, CREW_CONFIG, NOW } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
 
 const order = (id: number, text: string, revokedAt: number | null = null): StandingInstruction => ({
@@ -613,6 +613,79 @@ it("keeps Queue Clear authoritative until an explicit revoke reveals FLIGHT focu
     fn.mock.calls.filter(
       ([path, init]) =>
         path === "/api/seats/guido-1/focus" &&
+        init?.method === "POST" &&
+        new Headers(init.headers).get(OPERATOR_HEADER) === "fixture-operator",
+    ),
+  ).toHaveLength(1);
+});
+
+it("uses configured writer capability for Queue links while watch seats keep text actions", async () => {
+  let watching = false;
+  let active = [
+    { ...order(8, "Original seat guidance"), seatId: "guido-1" },
+    focus(9, "label:cache", "flight"),
+  ];
+  const fn = stubFetch({
+    ...base,
+    "/api/config": () => ({
+      status: 200,
+      body: {
+        ...CREW_CONFIG,
+        crew: {
+          ...CREW_CONFIG.crew,
+          sessions: CREW_CONFIG.crew?.sessions.map((session) => ({
+            ...session,
+            seats: session.seats.map((seat) =>
+              seat.id === "guido-1"
+                ? {
+                    ...seat,
+                    mode: watching ? "read-only" : "writer",
+                    loop: watching ? "watch" : "build",
+                  }
+                : seat,
+            ),
+          })),
+        },
+      },
+    }),
+    "/api/seats/guido-1/instructions?limit=1": () => ({
+      status: 200,
+      body: { ...EMPTY, active, effectiveFocus: "label:cache", focusInstructionId: 9 },
+    }),
+    "POST /api/seats/guido-1/instructions": (init: RequestInit) => {
+      if (new Headers(init.headers).get(OPERATOR_HEADER) !== "fixture-operator")
+        return { status: 401, body: { error: OPERATOR_TOKEN_REQUIRED } };
+      expect(JSON.parse(init.body as string)).toEqual({
+        kind: "text",
+        text: "Watch guidance",
+        replacesId: 8,
+      });
+      const entry = { ...order(10, "Watch guidance"), seatId: "guido-1" };
+      active = [entry, active[1]];
+      return { status: 200, body: { entry, changed: true } };
+    },
+  });
+  render(<InstructionManager seatId="guido-1" />);
+  const queue = await screen.findByRole("link", { name: "Edit focus or Clear in Queue" });
+  expect(queue.getAttribute("href")).toBe("/agent/guido-1?side=queue");
+  expect(screen.getByRole("link", { name: "Change focus in Queue" })).toBeTruthy();
+  expect(screen.getByText(/Clear in Queue saves an operator instruction/)).toBeTruthy();
+  watching = true;
+  act(() => hub.refetch(RESOURCES.config.path));
+  await waitFor(() => expect(screen.queryByRole("link", { name: /Queue/ })).toBeNull());
+  expect(screen.queryByText(/Clear in Queue saves an operator instruction/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Replace #8" }));
+  fireEvent.change(screen.getByLabelText("Instruction text"), {
+    target: { value: "Watch guidance" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save instruction" }));
+  await screen.findByRole("button", { name: "Replace #10" });
+  expect(screen.getByRole("button", { name: "Add seat instruction" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Revoke #10" })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: /Queue/ })).toBeNull();
+  expect(
+    fn.mock.calls.filter(
+      ([, init]) =>
         init?.method === "POST" &&
         new Headers(init.headers).get(OPERATOR_HEADER) === "fixture-operator",
     ),
