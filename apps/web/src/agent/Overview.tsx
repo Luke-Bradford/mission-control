@@ -16,6 +16,17 @@ import "./Overview.css";
 const DASH = "—";
 const localLink = (event: MouseEvent<HTMLAnchorElement>) =>
   followLink(event, event.currentTarget.getAttribute("href") ?? "/agent");
+function BriefReason({ text, limit, label }: { text: string; limit: number; label: string }) {
+  const line = firstLine(text).slice(0, limit);
+  const abbreviated = line !== text;
+  return (
+    <Reason
+      line={abbreviated ? `${line.trimEnd()}…` : line}
+      full={abbreviated ? text : null}
+      label={label}
+    />
+  );
+}
 function Age({ at }: { at: number }) {
   const now = useNow();
   return <span className="mono muted">State changed {dur(Math.max(0, now - at))} ago</span>;
@@ -93,7 +104,7 @@ export function AgentNextMove({ view }: { view: AgentDetailView }) {
     <section className="panel agent-v2-next" aria-label="Next move">
       <b>{title}</b>
       <div>
-        <Reason line={firstLine(move.text).slice(0, 160)} full={move.text} />
+        <BriefReason text={move.text} limit={160} label="next decision" />
         {move.recommendation && <p className="s fg2">FLIGHT recommends: {move.recommendation}</p>}
       </div>
       <a className="btn" href={move.href} onClick={localLink}>
@@ -110,10 +121,12 @@ export function AgentAvailability({ view }: { view: AgentDetailView }) {
   return (
     <Panel title="What is happening now?">
       <div className="pb agent-v2-availability">
-        <p>
+        <div className="agent-v2-awaiting">
           <b>{awaiting.label}</b>
-          {awaiting.reason ? ` · ${awaiting.reason}` : ""}
-        </p>
+          {awaiting.reason && (
+            <BriefReason text={awaiting.reason} limit={200} label="current state reason" />
+          )}
+        </div>
         {row.sourceError && <p className="crit-t">Source could not refresh: {row.sourceError}</p>}
         {row.mode === "writer" && row.review && (
           <p className="s muted">PR #{row.review.prNumber} · head SHA not supplied in this view</p>
@@ -283,7 +296,7 @@ export function AgentLoop({ view }: { view: AgentDetailView }) {
                   )}
                 </span>
                 {step.reason && (
-                  <Reason line={firstLine(step.reason).slice(0, 100)} full={step.reason} />
+                  <BriefReason text={step.reason} limit={100} label={`${step.label} reason`} />
                 )}
               </li>
             ))}
@@ -311,7 +324,11 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
       <div className="pb agent-v2-story">
         <div>
           <h3>Original ask</h3>
-          <p>{view.story.title ?? "No ticket title recorded."}</p>
+          {view.story.title ? (
+            <BriefReason text={view.story.title} limit={160} label="original ask" />
+          ) : (
+            <p>No ticket title recorded.</p>
+          )}
           {view.story.original.length > 0 ? (
             <details>
               <summary>{view.story.original.length} acceptance checks</summary>
@@ -329,7 +346,7 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
         <div>
           <h3>Reported result</h3>
           {view.story.report ? (
-            <Reason line={firstLine(view.story.report).slice(0, 200)} full={view.story.report} />
+            <BriefReason text={view.story.report} limit={200} label="reported result" />
           ) : (
             <p className="muted">No result reported yet.</p>
           )}

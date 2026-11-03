@@ -106,7 +106,13 @@ describeRendered("Agent density in the production App", () => {
                   ? "No run yet."
                   : "Ask → result → next";
         await page.box("#page-agent");
-        expect(await page.evaluate(waitForText, expected)).toBe(true);
+        const settled = await page.evaluate(waitForText, expected);
+        const shots = process.env.MC_AGENT_DENSITY_SHOTS;
+        if (shots) {
+          mkdirSync(shots, { recursive: true });
+          await page.screenshot(join(shots, `agent-state-${scenario}-${theme}-initial.png`));
+        }
+        expect(settled).toBe(true);
         if (scenario === "stale") {
           await page.evaluate(() => window.dispatchEvent(new Event("fixture-stale-agent")), null);
           expect(await page.evaluate(waitForText, "Showing the last saved agent view.")).toBe(true);
@@ -115,7 +121,7 @@ describeRendered("Agent density in the production App", () => {
           ).toContain(fixture.view.story.title);
         }
         if (scenario === "long") {
-          await page.click(".agent-v2-story .vnow button");
+          await page.click('[aria-label="Read full reported result"]');
           expect(
             await page.evaluate(
               () => document.querySelector(".agent-v2-story .vdetail")?.textContent,
@@ -123,6 +129,46 @@ describeRendered("Agent density in the production App", () => {
             ),
           ).toBe(fixture.view.story.report);
           expect(await page.reachable(".agent-v2-story .vdetail")).not.toContain(false);
+          await page.evaluate(
+            () =>
+              (
+                document.querySelector('[aria-label="Full reported result"]') as HTMLElement
+              ).focus(),
+            null,
+          );
+          await page.press("End");
+          const fullText = await page.evaluate(async () => {
+            const region = document.querySelector(
+              '[aria-label="Full reported result"]',
+            ) as HTMLElement;
+            const start = performance.now();
+            while (
+              region.scrollHeight - region.clientHeight - region.scrollTop > 2 &&
+              performance.now() - start < 1000
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const range = document.createRange();
+            range.selectNodeContents(region);
+            const last = [...range.getClientRects()].at(-1),
+              box = region.getBoundingClientRect();
+            return {
+              remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
+              painted:
+                !!last &&
+                last.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
+                last.top >= Math.max(box.top, 0) - 1 &&
+                region.contains(
+                  document.elementFromPoint(
+                    last.x + Math.min(last.width / 2, 20),
+                    last.y + last.height / 2,
+                  ),
+                ),
+            };
+          }, null);
+          if (shots)
+            await page.screenshot(join(shots, `agent-state-long-${theme}-full-text-end.png`));
+          expect(fullText.remaining).toBeLessThanOrEqual(2);
+          expect(fullText.painted).toBe(true);
         }
         if (scenario === "many") {
           expect((await page.boxes(".agent-v2-deliverables a")).length).toBe(50);
@@ -156,11 +202,50 @@ describeRendered("Agent density in the production App", () => {
                 ),
             };
           }, null);
+          if (shots) await page.screenshot(join(shots, `agent-state-many-${theme}-50th-link.png`));
           expect(bottom.remaining).toBeLessThanOrEqual(2);
           expect(bottom.last).toContain("evidence-50.tsx");
           expect(bottom.painted).toBe(true);
+          expect((await page.boxes("#picker button")).length).toBe(50);
+          await page.evaluate(
+            () => (document.querySelector("#picker") as HTMLElement).focus(),
+            null,
+          );
+          await page.press("End");
+          const lastSeat = await page.evaluate(async () => {
+            const region = document.querySelector("#picker") as HTMLElement,
+              start = performance.now();
+            while (
+              region.scrollHeight - region.clientHeight - region.scrollTop > 2 &&
+              performance.now() - start < 1000
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const button = region.querySelector("button:last-child") as HTMLElement,
+              rect = button.getBoundingClientRect(),
+              box = region.getBoundingClientRect();
+            return {
+              text: button.textContent,
+              remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
+              painted:
+                rect.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
+                rect.top >= Math.max(box.top, 0) - 1 &&
+                button.contains(
+                  document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+                ),
+            };
+          }, null);
+          if (shots) await page.screenshot(join(shots, `agent-state-many-${theme}-50th-seat.png`));
+          expect(lastSeat.remaining).toBeLessThanOrEqual(2);
+          expect(lastSeat.text).toContain("guido-50");
+          expect(lastSeat.painted).toBe(true);
         }
-        const shots = process.env.MC_AGENT_DENSITY_SHOTS;
+        if (scenario === "disconnected")
+          expect(
+            await page.evaluate(
+              () => document.querySelector(".dock-summary-state")?.textContent,
+              null,
+            ),
+          ).toContain("Disconnected");
         if (shots) {
           mkdirSync(shots, { recursive: true });
           await page.screenshot(join(shots, `agent-state-${scenario}-${theme}.png`));

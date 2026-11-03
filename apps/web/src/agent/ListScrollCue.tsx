@@ -5,10 +5,12 @@ export function ListScrollCue({
   region,
   label,
   count,
+  text,
 }: {
   region: RefObject<HTMLElement | null>;
   label: string;
   count: number;
+  text?: string;
 }) {
   const [overflow, setOverflow] = useState(false);
   useEffect(() => {
@@ -23,7 +25,7 @@ export function ListScrollCue({
   }, [region, count]);
   return (
     <p className="agent-list-scroll-cue s muted" hidden={!overflow}>
-      Scroll ↕ for all {count} {label}
+      {text ?? `Scroll ↕ for all ${count} ${label}`}
     </p>
   );
 }

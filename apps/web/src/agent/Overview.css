@@ -145,7 +145,7 @@
 }
 .agent-v2-steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(148px, calc(100% / 3))), 1fr));
   list-style: none;
   padding: 0;
   margin: 0;
@@ -312,6 +312,16 @@
   gap: var(--sp-2);
   overflow-wrap: anywhere;
 }
+.agent-v2-awaiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+.agent-v2-awaiting > .vnow {
+  flex: 1;
+  min-width: 160px;
+}
 .agent-v2-availability p {
   margin: 0;
 }
@@ -325,10 +335,14 @@
   padding: var(--sp-1) var(--sp-4);
   margin: 0;
 }
+.agent-v2-awaiting > .vdetail,
+.agent-v2-awaiting > .agent-list-scroll-cue {
+  flex-basis: 100%;
+}
 .agent-v2-story .vnow {
   align-items: start;
 }
-.agent-v2-story .vnow .ellip {
+:is(.agent-v2-story, .agent-v2-availability, .agent-v2-next, .agent-v2-steps) .vnow .ellip {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;

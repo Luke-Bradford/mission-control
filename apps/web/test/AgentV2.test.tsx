@@ -247,3 +247,23 @@ it.each(["stopped", "idle"] as const)(
     expect(screen.queryByText(/Checking PR #90/)).toBeNull();
   },
 );
+
+it.each(["original ask", "reported result", "current state reason"] as const)(
+  "keeps every character of a long %s behind its named keyboard disclosure",
+  async (label) => {
+    const view = populatedAgentView();
+    const full =
+      "A recorded operator requirement with its complete reason and recovery evidence. ".repeat(30);
+    if (label === "original ask") view.story.title = full;
+    else if (label === "reported result") view.story.report = full;
+    else view.awaiting.reason = full;
+    setup(view);
+    const read = await screen.findByRole("button", { name: `Read full ${label}` });
+    expect(read.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(read);
+    const region = screen.getByRole("region", { name: `Full ${label}` });
+    expect(region.textContent).toBe(full);
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(read.getAttribute("aria-controls")).toBe(region.id);
+  },
+);

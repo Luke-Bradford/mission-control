@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
+import { ListScrollCue } from "./ListScrollCue.tsx";
 
 /**
  * A one-line reason with its whole text behind a "details" control: long text (a park reason,
@@ -9,12 +10,16 @@ export function Reason({
   line,
   full,
   className = "vnow",
+  label,
 }: {
   line: string;
   full: string | null;
   className?: string;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const region = useRef<HTMLElement>(null);
+  const detailId = useId();
   return (
     <>
       <div className={className}>
@@ -26,17 +31,33 @@ export function Reason({
             type="button"
             className="sm ghost"
             aria-expanded={open}
+            aria-controls={detailId}
+            aria-label={label ? `Read full ${label}` : undefined}
             onClick={() => setOpen(!open)}
           >
-            details
+            {label ? "Read full" : "details"}
           </button>
         )}
       </div>
       {open && full !== null && (
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: full text can exceed the bounded disclosure.
-        <section className="vdetail" tabIndex={0} aria-label="Full reason text">
-          {full}
-        </section>
+        <>
+          <ListScrollCue
+            region={region}
+            count={full.length}
+            label="characters"
+            text="Scroll ↕ for the full text"
+          />
+          <section
+            className="vdetail"
+            ref={region}
+            id={detailId}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: full text can exceed the bounded disclosure.
+            tabIndex={0}
+            aria-label={label ? `Full ${label}` : "Full reason text"}
+          >
+            {full}
+          </section>
+        </>
       )}
     </>
   );
