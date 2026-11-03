@@ -38,10 +38,15 @@ Board, Agent review status and the actual shared PrChip use the same current-hea
 Held reasons have a keyboard control, not just a hover title. Only the checking-age child reads the
 five-second clock; unchanged cards and PR chips without an elapsed check do not subscribe to it.
 
-## Verification still required
+## Author verification and remaining review
 
-This inventory is not a render verdict. Verify the actual production App at the required widths,
-both rail states/themes, short height and empty/one/50/long/state cases. Record real column allocation,
-text wrapping, scrolling, focus, complete actionable controls and retained drafts. Capture matched
-baseline/final context and focused views with source, fixture, clock, UTC and file hashes. Preserve
-any failed checks and corrections. Fresh independent whole-branch review remains required.
+The [source-bound gallery](../evidence/agent-density-1361/README.md) retains all64 matched pairs
+and eight after-only keyboard/full-content proofs at source `746430541045d52a41cf350e50544615254293bc`.
+It covers the required widths, both rail states/themes, short height and empty/one/50/long/state
+cases, with real production fonts and settled controlled API values. Its per-surface observations
+record column allocation, text wrapping, scrolling, actions and retained drafts. Earlier genuine
+reader/title defects, failed experiments and fixture mistakes are retained separately.
+
+Selected units passed in two stages (488 +240 distinct cases); exact final source passed20 browser
+cases plus web types, lint and build. This is author verification. Fresh independent whole-branch
+review and exact-head CI remain required before delivery; no independent approval is claimed here.

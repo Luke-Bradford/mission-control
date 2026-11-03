@@ -1,0 +1,30 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentV2.browser.test.ts (5 tests) 4695ms
+   ✓ Agent page v2 > fits 1280 × 1000 in both themes  1014ms
+   ✓ Agent page v2 > fits 1600 × 1000 in both themes  719ms
+   ✓ Agent page v2 > fits 1920 × 1000 in both themes  677ms
+   ✓ Agent page v2 > fits 1600 × 700 in both themes  665ms
+   ✓ Agent page v2 > keeps 50 long deliverables in a visible scroller  354ms
+ ✓ |web| test/AgentDensity.browser.test.ts (14 tests) 19524ms
+   ✓ Agent density in the production App > keeps the answer first at 1280 × 1000, both rail states and schemes  2051ms
+   ✓ Agent density in the production App > keeps the answer first at 1440 × 1000, both rail states and schemes  1616ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 1000, both rail states and schemes  1717ms
+   ✓ Agent density in the production App > keeps the answer first at 1920 × 1080, both rail states and schemes  1769ms
+   ✓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes  1816ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 700, both rail states and schemes  1704ms
+   ✓ Agent density in the production App > keeps honest empty content and full access in both schemes  698ms
+   ✓ Agent density in the production App > keeps honest one content and full access in both schemes  822ms
+   ✓ Agent density in the production App > keeps honest long content and full access in both schemes  1330ms
+   ✓ Agent density in the production App > keeps honest many content and full access in both schemes  1697ms
+   ✓ Agent density in the production App > keeps honest loading content and full access in both schemes  705ms
+   ✓ Agent density in the production App > keeps honest error content and full access in both schemes  733ms
+   ✓ Agent density in the production App > keeps honest stale content and full access in both schemes  773ms
+   ✓ Agent density in the production App > keeps honest disconnected content and full access in both schemes  799ms
+
+ Test Files  2 passed (2)
+      Tests  19 passed (19)
+   Start at  01:16:12
+   Duration  25.45s (transform 280ms, setup 495ms, collect 370ms, tests 24.22s, environment 0ms, prepare 76ms)
+

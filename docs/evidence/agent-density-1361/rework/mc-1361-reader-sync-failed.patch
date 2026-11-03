@@ -1,0 +1,26 @@
+diff --git a/apps/web/src/agent/Reason.tsx b/apps/web/src/agent/Reason.tsx
+index 4c508063..2a1b2534 100644
+--- a/apps/web/src/agent/Reason.tsx
++++ b/apps/web/src/agent/Reason.tsx
+@@ -54,6 +54,9 @@ export function Reason({
+             // biome-ignore lint/a11y/noNoninteractiveTabindex: full text can exceed the bounded disclosure.
+             tabIndex={0}
+             aria-label={label ? `Full ${label}` : "Full reason text"}
++            onFocus={(event) =>
++              event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })
++            }
+           >
+             {full}
+           </section>
+diff --git a/apps/web/src/agent/agent.css b/apps/web/src/agent/agent.css
+index 55fd9c2e..c6ca63f4 100644
+--- a/apps/web/src/agent/agent.css
++++ b/apps/web/src/agent/agent.css
+@@ -256,6 +256,7 @@
+ }
+ 
+ .vdetail {
++  scroll-margin-block: var(--sp-2);
+   margin: var(--sp-1) 0;
+   padding: var(--sp-2);
+   max-height: 40vh;

@@ -1,0 +1,59 @@
+diff --git a/apps/web/src/agent/Overview.css b/apps/web/src/agent/Overview.css
+index 863ced13..8b510fb6 100644
+--- a/apps/web/src/agent/Overview.css
++++ b/apps/web/src/agent/Overview.css
+@@ -1,5 +1,6 @@
+ .agent-v2-identity {
+   padding: var(--sp-2) var(--sp-4);
++  overflow-wrap: anywhere;
+ }
+ .agent-v2 .picker {
+   max-height: calc(3 * var(--table-row) + 2 * var(--sp-1));
+diff --git a/apps/web/test/AgentDensity.browser.test.ts b/apps/web/test/AgentDensity.browser.test.ts
+index 30cc3dc5..9e208887 100644
+--- a/apps/web/test/AgentDensity.browser.test.ts
++++ b/apps/web/test/AgentDensity.browser.test.ts
+@@ -122,6 +122,7 @@ describeRendered("Agent density in the production App", () => {
+           ).toContain(fixture.view.story.title);
+         }
+         if (scenario === "long") {
++          expect(await page.unclipped(".agent-v2-identity")).not.toContain(false);
+           await page.click('[aria-label="Read full reported result"]');
+           expect(
+             await page.evaluate(
+diff --git a/apps/web/test/agentDensityFixture.ts b/apps/web/test/agentDensityFixture.ts
+index 2e888688..ee449ca8 100644
+--- a/apps/web/test/agentDensityFixture.ts
++++ b/apps/web/test/agentDensityFixture.ts
+@@ -1,4 +1,5 @@
+ import {
++  BUILTIN_ROLES,
+   type ConfigView,
+   type CrewChanges,
+   GUARD_RULES,
+@@ -38,9 +39,11 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
+     };
+   if (scenario === "long") {
+     view.story.title =
+-      "Preserve all operator routes and the current-head review evidence while making the Agent page answer visible. ".repeat(
+-        6,
++      `Preserve current-head evidence for ${"RollbackPolicy".repeat(12)} while keeping the next decision accessible.`.slice(
++        0,
++        220,
+       );
++    view.row.ticketTitle = view.story.title;
+     view.story.report =
+       "The implementation preserves the message draft, account permissions and original evidence links. A concrete keyboard check remains before the next decision. ".repeat(
+         20,
+@@ -91,6 +94,11 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
+     operator: { id: "operator", timezone: "UTC" },
+     crew: {
+       ...crewConfig,
++      roles: Object.entries(BUILTIN_ROLES).map(([name, role]) => ({
++        name,
++        ...role,
++        tools: [...role.tools],
++      })),
+       sessions: [{ id: "s1", repoId: "shop-app", checkout: "/mc/clone", seats }],
+     },
+   };

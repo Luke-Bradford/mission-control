@@ -1,0 +1,64 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/Agent.test.tsx (148 tests) 3807ms
+stderr | test/BoardPage.test.tsx > cards > every link in a card other than the title sits in a .rref, which the CSS lifts above the cover
+Not implemented: navigation to another Document
+
+stderr | test/BoardPage.test.tsx > cards > every link in a card other than the title sits in a .rref, which the CSS lifts above the cover
+Not implemented: navigation to another Document
+
+stderr | test/BoardPage.test.tsx > cards > every link in a card other than the title sits in a .rref, which the CSS lifts above the cover
+Not implemented: navigation to another Document
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session keeps unassigned cards in All repos and offers each repo lane
+The current testing environment is not configured to support act(...)
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session preserves a route naming another repo's lane
+The current testing environment is not configured to support act(...)
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session preserves the stored lane and its unassigned cards
+The current testing environment is not configured to support act(...)
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session with a ticket deep link keeps the ticket and unassigned cards in view
+The current testing environment is not configured to support act(...)
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session with a stored lane for a repo no longer configured shows no note
+The current testing environment is not configured to support act(...)
+
+stderr | test/BoardPage.test.tsx > ticket route, lane and session > a session with a stored All repos lane shows no note
+The current testing environment is not configured to support act(...)
+
+ ✓ |web| test/BoardPage.test.tsx (93 tests) 1569ms
+(node:91147) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ |web| test/Header.test.tsx (28 tests) 657ms
+stderr | test/App.test.tsx > App > / renders its page and marks its tab
+Not implemented: navigation to another Document
+
+(node:91181) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ |web| test/App.test.tsx (42 tests) 3601ms
+   ✓ App > / has one page heading and the shell landmarks  391ms
+   ✓ App > /flight has one page heading and the shell landmarks  320ms
+   ✓ App > /board has one page heading and the shell landmarks  315ms
+   ✓ App > /agent has one page heading and the shell landmarks  313ms
+   ✓ App > /map/sample has one page heading and the shell landmarks  309ms
+   ✓ App > /comms has one page heading and the shell landmarks  317ms
+   ✓ App > /telemetry has one page heading and the shell landmarks  320ms
+   ✓ App > /audit has one page heading and the shell landmarks  311ms
+   ✓ App > /setup/loops has one page heading and the shell landmarks  312ms
+ ✓ |web| test/AgentV2.test.tsx (20 tests) 539ms
+ ✓ |web| test/PrChip.test.tsx (13 tests) 188ms
+ ✓ |web| test/pageRenderCounts.test.tsx (18 tests) 1809ms
+ ✓ |web| test/ReviewClockIsolation.test.tsx (7 tests) 125ms
+ ✓ |web| test/ReviewDisplay.test.tsx (7 tests) 86ms
+ ✓ |web| test/Card.test.tsx (6 tests) 33ms
+ ✓ |web| test/crew.test.ts (105 tests) 26ms
+ ✓ |web| test/formatContract.test.ts (1 test) 19ms
+
+ Test Files  12 passed (12)
+      Tests  488 passed (488)
+   Start at  00:57:36
+   Duration  20.60s (transform 1.14s, setup 1.51s, collect 912ms, tests 12.46s, environment 3.55s, prepare 420ms)
+

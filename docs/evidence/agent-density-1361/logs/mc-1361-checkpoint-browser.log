@@ -1,0 +1,24 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentDensity.browser.test.ts (14 tests) 17908ms
+   ✓ Agent density in the production App > keeps the answer first at 1280 × 1000, both rail states and schemes  2068ms
+   ✓ Agent density in the production App > keeps the answer first at 1440 × 1000, both rail states and schemes  1601ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 1000, both rail states and schemes  1704ms
+   ✓ Agent density in the production App > keeps the answer first at 1920 × 1080, both rail states and schemes  1584ms
+   ✓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes  1715ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 700, both rail states and schemes  1610ms
+   ✓ Agent density in the production App > keeps honest empty content and full access in both schemes  577ms
+   ✓ Agent density in the production App > keeps honest one content and full access in both schemes  690ms
+   ✓ Agent density in the production App > keeps honest long content and full access in both schemes  827ms
+   ✓ Agent density in the production App > keeps honest many content and full access in both schemes  1144ms
+   ✓ Agent density in the production App > keeps honest loading content and full access in both schemes  642ms
+   ✓ Agent density in the production App > keeps honest error content and full access in both schemes  617ms
+   ✓ Agent density in the production App > keeps honest stale content and full access in both schemes  1122ms
+   ✓ Agent density in the production App > keeps honest disconnected content and full access in both schemes  684ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  00:48:33
+   Duration  18.68s (transform 224ms, setup 353ms, collect 238ms, tests 17.91s, environment 0ms, prepare 36ms)
+
