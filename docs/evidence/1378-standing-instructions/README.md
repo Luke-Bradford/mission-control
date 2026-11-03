@@ -74,11 +74,38 @@ history pagination; revoked orders remain explicitly revoked.
   checkpoint pack passed all 361 affected tests across six files (including 15 instruction cases),
   4.64s; core/web types and changed-file formatting passed without diagnostics.
 
-## Checks still required before completion
+## Final author validation
 
-This is an implementation-progress record, not QA approval. Remaining work: capture and inspect the final changed panels across 1280/1600/1920 and 1600x700, light/dark,
-empty/one/50/long/4,000-unit data; retain matched before/after actual-App evidence; complete affected
-regressions and integrated lint/types/build; then a fresh whole-branch review and normal CI.
-No full local suite is authorized. Heavy jobs run one at a time, at most three unit workers or one
-browser worker, with immediate lane release after commands. All API fixtures are fictional and
-intercepted on the browser runner's made-up origin. No live/provider/crew/observed-loop writes occur.
+Product source `261171462c78640bc339e46d9645a4a90490b678` passed 361 affected tests, core/web
+then full workspace types, lint and production build. Lint retains 76 warnings and seven infos,
+matching the dependency's integrated-lint counts; the 18 changed source/test files passed their
+separate formatter/lint check without diagnostics. No full local suite or test:related expansion
+ran: the controller explicitly authorized bounded affected checks and normal CI instead.
+
+The final matched actual-App run covers 120 context scenes per side: orders, Crew and Agent at
+1280x1000, 1600x1000, 1920x1080 and 1600x700; light/dark; empty, one, 50, long and boundary-sized
+instructions. The baseline is exact f205 production plus identical untracked capture instrumentation.
+All 24 selected browser cases passed (12 per side), with nine filtered per bounded viewport command.
+There are 576 PNGs and 336 JSON receipts. Their SHA-256 index is [artifacts.json](artifacts.json);
+exact commands and bounded pass/filter counts are in [checks.md](checks.md).
+
+Author inspection of real context/interaction frames found readable ID/target/date/source groups,
+distinct Active/Revoked words, useful text wrapping and standard HUD actions. At 1280, Knows keeps
+two useful columns; at 1920 the rows retain their own actions and metadata rather than stretching
+isolated numbers. Memory and working context remain separate. Global readers cap at 320px; Crew
+uses its existing independently scrolling Seats panel and caps its active reader to the viewport.
+Opening or focusing a long Crew target can scroll that containing pane; no claim is made that all
+50 entries fit in the first screen. The default Seats table and Agent's delivered layout are preserved.
+Agent instructions are a closed-by-default disclosure in the existing context hierarchy; opening
+large content can scroll the existing Agent page. Full-content readers have a visible focus outline.
+
+Final native keyboard receipts show all 24 last-row checks painted at remaining=0, all 48 long or
+4,000-UTF-16-unit readers painted at remaining<=2, and all 24 editor Save controls painted. Text is
+not silently capped; the active set is complete and history alone paginates. Repeated errors, stale
+reads, disconnection, target/draft retention, pending dedupe, authenticated refusal/retry, stable
+revoked links beyond page one and Clear versus revoke have production-component action coverage.
+The browser captures are fictional intercepted fixtures, not actual-provider or live-crew proof.
+
+Fresh whole-branch review, controller QA registration and exact-head normal CI remain outstanding.
+The dependency stays stacked until the controller composes/merges it. No push, PR publication,
+live/provider/crew/observed-loop writes, shared shell redesign or Overview change occurred here.
