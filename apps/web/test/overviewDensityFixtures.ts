@@ -25,6 +25,7 @@ import {
 export type OverviewScenario =
   | "default"
   | "mixed"
+  | "normal-loops"
   | "empty"
   | "one"
   | "many"
@@ -227,13 +228,13 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
         reason: "Account paused; this current-head review is queued.",
       },
     });
-  if (scenario === "mixed")
+  if (scenario === "mixed" || scenario === "normal-loops")
     rows.push(
       ...["loop-alpha", "loop-beta"].map((id, index) =>
         crewRow({
           id,
           repoId: "site-builder",
-          index: 9 + index,
+          index: count + index,
           hudState: index ? "blocked" : "parked",
           run: null,
           note: index
@@ -249,7 +250,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
     ...CREW_CONFIG,
     operator: { id: "operator", timezone: "UTC" },
     loops:
-      scenario === "mixed"
+      scenario === "mixed" || scenario === "normal-loops"
         ? rows
             .filter((row) => row.kind === "loop")
             .map((row) => ({
