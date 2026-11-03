@@ -63,7 +63,7 @@
  .composition-v5 .operations{grid-column:2;grid-row:1}
  .composition-v5 .observations{grid-column:3;grid-row:1}
  .composition-v5 .capacity{display:block}
- .composition-v5 .allowance,.composition-v5 .timeline,.composition-v5 .history-hub,.composition-v5 .machine,.composition-v5 .capacity{order:initial}
+ .composition-v5 .allowance,.composition-v5 .allowance-full,.composition-v5 .timeline,.composition-v5 .history-hub,.composition-v5 .machine,.composition-v5 .capacity{order:initial}
 }
 @media(min-height:1300px) and (min-width:2200px){
  .composition-v5 .allowance{display:none}
