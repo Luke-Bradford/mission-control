@@ -300,7 +300,71 @@ The lane was released immediately after each bounded pack, before inspecting/rep
 | mc-1377-prompt-audit-final-lint.log | acdc54472b3ce5e4ec8d3312609f49fe6cd7e318cf38c61ed81560c035cf9d94 |
 | mc-1377-prompt-audit-final-build.log | f8b542cf86ed714ace3330348ae52f2a517e96b2d81d9bc29796e09f0a38c687 |
 
-Source 92ee3399 is frozen for the same reviewer's narrow correction verification. That review and fresh
-corrected-head CI remain pending; the controller owns remote publication, final QA, merge and Update.
+At the 9a72bd6c handoff, source 92ee3399 was frozen for the same reviewer's narrow correction verification. That review and fresh
+corrected-head CI were pending; the controller owns remote publication, final QA, merge and Update.
 No screenshot acceptance applies to this server/core/runtime correction, no web controls are delivered,
 and no actual paid-provider or live-crew compliance is claimed.
+
+
+## Fourth CI attempt: interrupted-start fixture correction — 3 November 2026
+
+Same-reviewer prompt-audit correction verification completed clean on source 92ee3399 at 11:11:18 UTC:
+8 passed/293 filtered, exit 0, 6.48s. The original no-spawn test file was byte-unchanged, and no assertion
+weakening was found. Final 9a72bd6c changed only this evidence file. Raw independent receipt:
+`/tmp/mc-1377-independent-prompt-audit-92ee3399.log`, SHA-256
+`3f5c9b8db56874365c6c8e6182bfb9ddbc3576236a651e587dd0fd7c0b26c37d`.
+
+[Fresh exact-head CI 41625564196](https://github.com/Luke-Bradford/mission-control/actions/runs/41625564196)
+failed on 9a72bd6c: server-process (1) reported 1 failed/266 passed (171.98s). server-process (2) was canceled
+by fail-fast; server (1), server (2), web-core and validate succeeded. The aggregate check failed. No canceled
+shard is counted as a pass. All 22 instruction process tests passed in the failed shard; its one failure was
+an older restart fixture expecting startRun success despite a known failed first write. The corrected production
+code intentionally rejects that condition immediately. The controller classified this stale fixture as Minor,
+retaining the clean independent prompt-audit correction and actual failed CI outcome.
+
+Saved failed 9a QA: `4b8f599dd608ef3bc87dc04a7af42d5820d48d5aa620a8725c3383b742239dff`.
+Reader: `/qa?repo=mission-control&pr=1381&report=4b8f599dd608ef3bc87dc04a7af42d5820d48d5aa620a8725c3383b742239dff`.
+The terminal job log was retrieved through GitHub's jobs/logs endpoint while the workflow was still running;
+`gh run view --job ... --log` correctly refused until workflow completion. Both raw and normalized receipts
+are retained, and final workflow status was separately verified.
+
+Test correction: `1e73f2bf9564297c75217dba4392413aaa8c8449`. Only supervisor-harness.ts and
+supervisor-restart.test.ts change. Production sources/packages/roles remain byte-identical to 92ee3399/9a.
+The existing attach guard still exercises a persisted starting seat with a live keeper and no input, modeling
+a historical hub interruption before first delivery. An explicit test-only dropped-input transport creates
+that state; it is false by default and reset between cases. Every existing close-gate, concurrent-resume,
+error-reason, failed-run and one-CLI assertion remains. The fixture no longer relies on a known send failure
+being silently treated as success.
+
+A separate new test exercises that known failure: start rejects with 500; no user turn is delivered; the run
+ends failed; neither a delivered receipt nor prompt cost is recorded. A subsequent hub fixture start and explicit
+resumeRun on the ended run cause no attach and no second CLI. Ended-run resume is the existing intentional
+no-op. The initial author run incorrectly expected it to throw: 1 failed/3 passed/90 filtered (4.10s), retained
+in the red receipt below. Correcting that new fixture expectation changed no production behavior and kept all
+no-resume outcome checks. The original historical attach case already passed in that red run.
+
+Final bounded commands, all exit 0 on the test content committed as 1e73f2bf:
+
+```sh
+pnpm exec vitest run --project server-process apps/server/test/supervisor-restart.test.ts --maxWorkers=1 -t 'a seat that never got its brief|rejects a known failed first write|no keeper falls back|an old keeper.s open turn: a line|an ended watch run is left alone|a killed CLI under an attached hub' > /tmp/mc-1377-restart-crash-final.log 2>&1
+pnpm -s typecheck > /tmp/mc-1377-restart-crash-types.log 2>&1
+pnpm -s lint > /tmp/mc-1377-restart-crash-lint.log 2>&1
+```
+
+Results: 6 passed/88 filtered (5.63s); all workspace types passed; lint passed with 51 warnings, 7 infos,
+no errors, 60 core modules/no cycles. No build rerun was needed for this test-only correction: production
+source and the previously successful compatibility build remain unchanged. No full local suite was run.
+Heavy slots were released immediately, including after the retained red command, before analysis.
+
+| Retained `/tmp` artifact basename | SHA-256 |
+| --- | --- |
+| mc-1381-9a-ci-process1-failed.log | 12a2d6fd17d1bc0a3f967f903b9343f6e419ba2d75e5d84f9d7e74eca8aa67f6 |
+| mc-1381-9a-ci-process1-normalized.log | 199f5bc24e7319e8c146aa3a57859ff64a6cf8c058f60ef1fe1d092c61c69a7f |
+| mc-1377-restart-crash-focused.log | 434ba3a8cee997960207a56fd713141ac3816956223105e683455875b0a5b9b8 |
+| mc-1377-restart-crash-final.log | 5969e8ee46e9d6d382033e409c8a01e0d2e62ecabf0a92340e3047de305c6efd |
+| mc-1377-restart-crash-types.log | 89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e |
+| mc-1377-restart-crash-lint.log | ca460b59f2e7fcdd57e8a2cac373f90721bc66205629f5b664c9fd55ada7d8f5 |
+
+Handoff: test correction 1e73f2bf is clean and frozen for same-pass independent verification. The controller
+retains failed 9a QA and owns the next remote push, exact-head CI, final QA, merge and Update. No new production
+source, screenshot acceptance, paid-provider compliance or live-crew claim is part of this correction.
