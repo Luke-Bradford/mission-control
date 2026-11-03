@@ -1,4 +1,4 @@
-import { checkBriefDispatch } from "../brief-dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -1208,6 +1208,7 @@ export function createEngine(deps: EngineDeps): Engine {
     key: string,
     mirror: string,
   ): Promise<boolean> {
+    checkBriefDispatch();
     const row = {
       at: now(),
       from: COMMS_CAPCOM,
@@ -1229,6 +1230,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return true;
     }
     const sent = await supervisor.send(run.id, key, text);
+    checkBriefDispatch();
     // a paused seat reads it when it resumes: the verdict is recorded all the same
     if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
@@ -3026,12 +3028,13 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
+        checkBriefDispatch();
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3111,6 +3114,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
@@ -3123,7 +3127,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3194,6 +3198,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
@@ -3206,7 +3211,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3275,7 +3280,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         lastTransient.delete(runId);
         bus.emit("agents");
-        await pass(runId);
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },

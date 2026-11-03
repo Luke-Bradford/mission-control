@@ -1149,6 +1149,19 @@ const toCiRun = (r: Row): CiRunView => ({
   at: r.at as number,
 });
 
+const toEscalation = (r: Row): Escalation => ({
+  id: r.id as string,
+  repoId: r.repo_id as string,
+  issueNumber: r.issue_number as number,
+  title: r.title as string,
+  kind: r.kind as Escalation["kind"],
+  source: r.source === "title" ? "title" : "label",
+  openedAt: r.opened_at as number,
+  url: r.url as string,
+  question:
+    r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
+});
+
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as number,
   authorRunId: r.author_run_id as string,
@@ -3153,18 +3166,15 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM escalations ORDER BY opened_at ASC, id ASC")
       .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as string,
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      title: r.title as string,
-      kind: r.kind as Escalation["kind"],
-      source: r.source === "title" ? "title" : "label",
-      openedAt: r.opened_at as number,
-      url: r.url as string,
-      question:
-        r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
-    }));
+    return rows.map(toEscalation);
+  }
+
+  /** Indexed canonical source lookup; freshness reads never mutate the escalation set. */
+  escalation(id: string): Escalation | null {
+    const row = this.db.prepare("SELECT * FROM escalations WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? toEscalation(row) : null;
   }
 
   /** True when any stored row changed. */

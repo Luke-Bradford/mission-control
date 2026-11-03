@@ -48,6 +48,9 @@ export function briefSourceRevision(
   const prs = new Set<string>();
   const queueKeys = new Set<string>();
   if (item.agentId) seatIds.add(item.agentId);
+  const escalationId =
+    item.escalationId ?? (item.key.startsWith("esc:") ? item.key.slice(4) : null);
+  const escalation = escalationId ? store.escalation(escalationId) : null;
   const questionId = /^ask:(\d+)$/.exec(item.key)?.[1];
   const question = questionId ? store.question(Number(questionId)) : null;
   if (question) {
@@ -194,6 +197,7 @@ export function briefSourceRevision(
       ticket: item.ticket,
       escalationId: item.escalationId,
     },
+    escalation,
     question: question
       ? {
           id: question.id,

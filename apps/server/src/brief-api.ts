@@ -71,17 +71,22 @@ export function registerBriefChoiceRoutes(
         // Forward immutable declared provenance, not a post-await re-resolution that could turn an
         // ended FLIGHT actor into an anonymous operator. All original route auth still executes.
         const token = request.headers[OPERATOR_HEADER];
-        const response = await withinBriefDispatch(context.beforeWrite, () =>
-          app.inject({
-            method: "POST",
-            url: route.path,
-            payload: route.body,
-            headers: {
-              "content-type": "application/json",
-              ...(typeof token === "string" ? { [OPERATOR_HEADER]: token } : {}),
-              ...(typeof declared === "string" ? { [FLIGHT_OPERATOR_ACTOR_HEADER]: declared } : {}),
-            },
-          }),
+        const response = await withinBriefDispatch(
+          context.beforeWrite,
+          () =>
+            app.inject({
+              method: "POST",
+              url: route.path,
+              payload: route.body,
+              headers: {
+                "content-type": "application/json",
+                ...(typeof token === "string" ? { [OPERATOR_HEADER]: token } : {}),
+                ...(typeof declared === "string"
+                  ? { [FLIGHT_OPERATOR_ACTOR_HEADER]: declared }
+                  : {}),
+              },
+            }),
+          context.brief.binding?.epoch,
         );
         let body: { error?: string; text?: string } = {};
         try {

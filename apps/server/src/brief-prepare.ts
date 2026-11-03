@@ -394,6 +394,11 @@ export async function prepareBriefActions(
           throw new BriefError(409, "This is not the runaway recovery source.");
         break;
       case "record-decision":
+        if (item.key.startsWith("ask:"))
+          throw new BriefError(
+            400,
+            "A seat question needs its typed answer action; recording a decision alone does not answer it.",
+          );
         proof = briefHash({ answer: option.answer });
         if (
           item.kind === "approval" ||

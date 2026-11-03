@@ -1,6 +1,7 @@
 // Actual keeper/fake CLI boundary only; never a paid provider or live workspace.
 import "./supervisor-harness.ts";
 import { expect, it } from "vitest";
+import { checkBriefDispatch, withinBriefDispatch } from "../src/brief-dispatch-context.ts";
 import { make, seatState, store, until, userLines } from "./supervisor-harness.ts";
 
 it("1389 refuses an expected-run change in the actual queued provider message", async () => {
@@ -80,4 +81,63 @@ it("1389 preserves the existing pause check inside the queued message path", asy
   });
   await expect(delivered).rejects.toThrow(/Paused/);
   expect(userLines()).toHaveLength(1);
+});
+
+it("1389 preserves the bound send-back guard in the final real provider queue", async () => {
+  const { sup } = make();
+  sup.start();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  let current = true,
+    checks = 0;
+  const delivery = withinBriefDispatch(
+    () => {
+      checks++;
+      if (!current) throw new Error("Bound source changed");
+    },
+    () => {
+      checkBriefDispatch();
+      const sent = sup.send(
+        runId,
+        "controller-fail-bound",
+        "Stale verdict must never reach provider",
+      );
+      current = false;
+      return sent;
+    },
+  );
+  await expect(delivery).rejects.toThrow("Bound source changed");
+  expect(checks).toBe(2);
+  expect(userLines()).toHaveLength(1);
+});
+it("1389 keeps keyed delivery deduplication scoped to the exact bound decision epoch", async () => {
+  const { sup } = make();
+  sup.start();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  expect(
+    await withinBriefDispatch(
+      () => {},
+      () => sup.send(runId, "same-controller-line", "First exact intent"),
+      "fixture-epoch-one",
+    ),
+  ).toBe("sent");
+  await until(() => expect(userLines()).toHaveLength(2));
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  expect(
+    await withinBriefDispatch(
+      () => {},
+      () => sup.send(runId, "same-controller-line", "First exact intent"),
+      "fixture-epoch-one",
+    ),
+  ).toBe("dup");
+  expect(
+    await withinBriefDispatch(
+      () => {},
+      () => sup.send(runId, "same-controller-line", "A newly inspected different intent"),
+      "fixture-epoch-two",
+    ),
+  ).toBe("sent");
+  await until(() => expect(userLines()).toHaveLength(3));
+  expect(userLines()[2]).toContain("A newly inspected different intent");
 });

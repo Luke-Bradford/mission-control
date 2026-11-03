@@ -1,10 +1,43 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-/** Internal in-process dispatch context. No client header or payload can install a callback. */
-const dispatchGuard = new AsyncLocalStorage<() => void>();
-export const withinBriefDispatch = <T>(guard: () => void, run: () => T): T =>
-  dispatchGuard.run(guard, run);
-/** Shared handlers retain their existing auth and add this final precondition for a brief call. */
-export const checkBriefDispatch = (): void => dispatchGuard.getStore()?.();
-
-export const boundBriefGuard = (): (() => void) | undefined => dispatchGuard.getStore();
+/** Private in-process context. No header or producer input can install a callback or identity. */
+const dispatchGuard = new AsyncLocalStorage<{
+  guard: () => void;
+  identity?: string;
+  active: boolean;
+}>();
+export async function withinBriefDispatch<T>(
+  guard: () => void,
+  run: () => Promise<T>,
+  identity?: string,
+): Promise<T> {
+  const context = { guard, identity, active: true };
+  try {
+    return await dispatchGuard.run(context, run);
+  } finally {
+    context.active = false;
+  }
+}
+export const checkBriefDispatch = (): void => {
+  const context = dispatchGuard.getStore();
+  if (context?.active) context.guard();
+};
+export const boundBriefGuard = (): (() => void) | undefined => {
+  const context = dispatchGuard.getStore();
+  return context?.active
+    ? () => {
+        if (context.active) context.guard();
+      }
+    : undefined;
+};
+export const boundBriefIdentity = (): string | undefined => {
+  const context = dispatchGuard.getStore();
+  return context?.active ? context.identity : undefined;
+};
+/** After the explicit effect commits, subsequent engine work uses its normal current guards. */
+export const withoutBriefDispatch = <T>(run: () => T): T => {
+  const context = dispatchGuard.getStore();
+  if (!context) return run();
+  context.active = false;
+  return dispatchGuard.exit(run);
+};

@@ -537,3 +537,66 @@ it("1389 refuses a newly held question source before sending an unrelated answer
   expect(store.question(first)?.answeredAt).toBeNull();
   expect(store.question(second)?.answeredAt).toBeNull();
 });
+
+it("1389 invalidates changed canonical escalation question facts before any choice", async () => {
+  const initial = {
+    id: "repo#99",
+    repoId: "repo",
+    issueNumber: 99,
+    title: "[operator-decision] Choose a budget",
+    kind: "operator-decision" as const,
+    source: "title" as const,
+    openedAt: AT,
+    url: "https://example.test/99",
+    question: {
+      question: "Spend 10 dollars?",
+      recommendation: "Cap at 10",
+      reasoning_quote: "Known bound",
+      effort_sunk: "None",
+      default_if_ignored: "Wait",
+      answers: ["10", "wait"],
+    },
+  };
+  store.replaceEscalations("repo", [initial]);
+  const key = "esc:repo#99";
+  const request = await brief({ kind: "record-decision" }, key);
+  const oldEpoch = required(required(store.briefs().get(key)).binding).epoch;
+  store.replaceEscalations("repo", [
+    {
+      ...initial,
+      question: {
+        ...initial.question,
+        question: "Spend 10000 dollars?",
+        recommendation: "Cap at 10000",
+        answers: ["10000", "wait"],
+      },
+    },
+  ]);
+  expect(
+    attentionItems(config, store, AT).find((item) => item.key === key)?.brief?.state?.freshness,
+  ).toBe("stale");
+  const response = await post(app(), request, key);
+  expect(response.statusCode).toBe(409);
+  expect(store.acks().has(key)).toBe(false);
+  expect(store.flightDecisions(0, 10)).toEqual([]);
+  const refreshed = await brief({ kind: "record-decision" }, key);
+  expect(refreshed.sourceRevision).not.toBe(request.sourceRevision);
+  expect(required(required(store.briefs().get(key)).binding).epoch).not.toBe(oldEpoch);
+  expect(store.briefs().get(key)?.defaultAt).toBeUndefined();
+});
+it("1389 refuses a recording-only seat-question brief and leaves the passed question visible", async () => {
+  const id = store.addQuestion({
+    agentId: "GUIDO-1",
+    runId: "target",
+    text: "Choose the required authority",
+    at: AT,
+  });
+  store.passQuestion(id, AT);
+  const key = `ask:${id}`;
+  await expect(brief({ kind: "record-decision" }, key)).rejects.toThrow(/typed answer action/);
+  expect(store.question(id)?.answeredAt).toBeNull();
+  expect(store.briefs().has(key)).toBe(false);
+  expect(attentionItems(config, store, AT).find((item) => item.key === key)?.acked).toBe(false);
+  expect(store.acks().has(key)).toBe(false);
+  expect(store.flightDecisions(0, 10)).toEqual([]);
+});
