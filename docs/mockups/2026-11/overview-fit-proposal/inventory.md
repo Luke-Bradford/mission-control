@@ -39,16 +39,16 @@ physical3840×2160 output does not automatically mean a3840-CSS-pixel dashboard.
 | Activity | 640 / 1050–1200 / 1280px | 192 / 216 / 280px | Six useful recent rows and all filters/routes. No shared Machine height can displace it. |
 | Pipeline | 900 / crew width / 1280px | 104 / 112 / 144px | Five aligned lanes; total includes the visible example. Explicit unshown count opens the full Board lane. |
 | Provider summary | 500 / 588–700 / 788px | 128 / 144 / 176px | Remaining/reset/freshness for each configured account, explicit unknowns, GitHub points and an obvious complete-table route. Warnings do not depend on opening detail. More accounts require a visible bounded list, not deleting rows. |
-| Timeline | 500 / 588–700 / 788px | 216 / 232 / 300px | Four current/selected measured lanes, labelled60-minute time axis, spans versus isolated starts, one next decision. Full13-lane intervals/Map remain explicit. |
-| Throughput/history | 500 / 588–700 / 788px | 176 / 192 / 260px | All five existing measures selectable, labels/units/peak and gaps visible. A larger plot and raw30-minute samples are available on request. |
-| Machine | 500 / 588–700 / 788px | 224 / 236 / 300px | Three meaningful bounded traces with current values, units, swap, process split, slots and lock status. Raw minute tables are not automatically expanded. |
-| Full evidence dialog | 640 / 1040 / 1120px | natural, bounded by viewport | Large plots, raw tables, full reasons and exact identifiers are investigation, not permanently expanded dashboard tiles. Keyboard focus, Escape and native scroll are retained. |
+| Timeline | 500 / 588–700 / 788px | 216 / 224 / 424px | Four current/selected measured lanes, labelled60-minute time axis, spans versus isolated starts, one next decision. Full13-lane intervals/Map remain explicit. |
+| Throughput/history | 500 / 588–700 / 788px | 176 / 184 / 328px | All five existing measures selectable, labels/units/peak and gaps visible. A larger plot and raw30-minute samples are available on request. |
+| Machine | 500 / 588–700 / 788px | 240 / 252 / 660px | Three meaningful bounded traces with current values, units, swap, process split, slots and lock status. Raw minute tables are not automatically expanded. |
+| Full evidence dialog | 640 / 1040 / 1120px | natural, bounded by viewport | Large plots, raw tables, full reasons and exact identifiers are investigation, not permanently expanded dashboard tiles. Keyboard focus, Escape and native scroll are retained. At smaller CSS widths, the conversation is a keyboard modal: background canvas/header/footer become inert while remaining visible, and Tab stays in FLIGHT. A complete reader dialog can open above it and return focus to its initiating control. |
 
 At1920 folded, the primary target is Crew≈460 + Activity216 + Pipeline112 +24px gaps ≈812px.
-The independent analytical stack is Provider144 + Timeline232 + Throughput192 + Machine236 +36px
+The independent analytical stack is Provider144 + Timeline224 + Throughput184 + Machine252 +36px
 gaps =840px. These are hypotheses to check in actual renders, not reasons to hide overflow.
 
-When content width reaches2100px, a third useful column separates Machine/context/evidence access
+When content width reaches2074px, a third useful column separates Machine/context/evidence access
 from Timeline/history. Widths remain purposeful rather than stretching a single chart across spare
 space. Canvas maximum2880px centers the operational grouping on a4K CSS viewport; the surrounding
 space frames it rather than becoming empty card interiors. No important panel is pushed down by
@@ -59,10 +59,10 @@ This is an explicit temporary conversation mode; the underlying analytical stack
 obscured until dismissed, so this is not claimed as simultaneous full visibility. Crew and Live log
 remain uncovered, and the global constraint status stays visible in the top bar. Close/Escape restores
 the monitoring canvas, focus and retained draft. At2560/3840, FLIGHT can sit alongside adequate
-columns. An implementation must preserve the existing mounted conversation/draft and its focus
+columns. At1920 the visible crew/log are monitoring context while the conversation is modal; they are temporarily noninteractive until Close/Escape. This is an explicit interaction tradeoff, not simultaneous active use. An implementation must preserve the existing mounted conversation/draft and its focus
 semantics; this prototype demonstrates the composition, not server action permissions.
 
-Below1700px, Crew remains full width; analytical panels recompose below rather than compressing
+At content widths of at least1280px, the eight-cell96px KPI strip remains; only smaller actual content widths use two rows. Below1700px viewport width, Crew remains full width; analytical panels recompose below rather than compressing
 the accepted columns. At1600×700 the crew region visibly scrolls, with its actual total stated.
 The full normal dashboard cannot fit in a700px height; that limitation is explicit, not a no-overflow pass.
 
@@ -94,3 +94,31 @@ Record actual full views first, then crew/analytical crops:1920×1080,2560×1440
 and1920×1080 atDPR2, both themes, folded/open FLIGHT. Also inspect smaller/short views without
 claiming the complete dashboard is initially visible there. Keep source/hash, UTC, actual pixel
 size and panel bounds, plus visual observations. Geometry alone is not a design verdict.
+
+
+## Deliberate use of taller CSS viewports
+
+At2560×1440, the third column remains available even with the400px inline conversation:
+2074px is the actual minimum (1050px crew +500px +500px +24px gaps), not a viewport guess.
+Eight Timeline lanes become visible; larger Machine traces retain time endpoints/range/current/peak.
+The complete six-window allowance comparison appears below Pipeline, with source/freshness/backoff
+and full forecast/reset columns. These are existing fields, not additional collection.
+
+At3840×2160, all13 Timeline lanes appear, with explicit no-observed-interval rows rather than invented
+spans. The live log exposes twelve actual example events, not six rows plus empty padding. Machine
+shows three larger labelled plots, per-metric current/peak/range/time endpoints. Full allowance data
+remains inline, and a lower comparison row exposes all five existing measured histories with distinct
+units and raw-sample access. This consumes useful vertical capacity; extra space does not merely
+enlarge the same sparklines. Compact crew rows and accepted fixed column allocations stay unchanged.
+
+The v1 render and its review findings remain historical. V2 corrects minimum chart type, the Timeline
+axis (0/50/100% anchors share exactly the80px lane-label offset and track width), modal focus under the
+FLIGHT overlay, the retained Activity filter set, and complete Machine/lock/provider detail.
+Transcript total/per-seat bytes/files/oldest age, agent/test/other process split, allocation warning,
+full lock holder/command/elapsed/usual-duration availability and named waiters/seat/ticket/stop actions
+are explicitly available in named complete detail. The prototype never executes those actions.
+
+History sample points use bucket centres within the labelled30-minute window. Raw tables identify
+bucket starts; missing intervals are actual gaps. The table/plot units remain the same. V2 must still
+be checked in actual full renders and keyboard interaction; these statements are not a self-awarded
+production design pass.
