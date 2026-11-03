@@ -1,0 +1,4636 @@
+
+ RUN  v3.2.7 [controller]/codex-overview-ticks-1379
+
+ ❯ |web| test/OverviewMeasuredHistory.test.tsx (13 tests | 9 failed) 9303ms
+   ✓ keeps missing minutes as gaps and distinguishes unknown history from observed zero 61ms
+   ✓ uses the displayed fractional dollar scale instead of flattening spend below one dollar 2ms
+   ✓ retains a nonzero sub-cent USD/minute rate in latest, peak and axis labels 2ms
+   × keeps tokens axis positions accurate for a peak of 0 1027ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_0_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_0_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps tokens axis positions accurate for a peak of 1 1021ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_1_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_1_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps tokens axis positions accurate for a peak of 3 1023ms
+     → expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_2_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_2_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps inflight axis positions accurate for a peak of 0 1025ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_3_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_3_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps inflight axis positions accurate for a peak of 1 1029ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_4_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_4_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps inflight axis positions accurate for a peak of 3 1024ms
+     → expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_5_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_5_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps needs axis positions accurate for a peak of 0 1020ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_6_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_6_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps needs axis positions accurate for a peak of 1 1014ms
+     → expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_7_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_7_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   × keeps needs axis positions accurate for a peak of 3 1025ms
+     → expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_8_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_8_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+   ✓ preserves percentage, sub-cent money, gaps and raw values while switching without more reads 27ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps tokens axis positions accurate for a peak of 0
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_0_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_0_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps tokens axis positions accurate for a peak of 1
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_1_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_1_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps tokens axis positions accurate for a peak of 3
+AssertionError: expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_2_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_2_"
+          >
+            Token throughput
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                tokens/min
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Token throughput · tokens/min · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tokens/min observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tokens/min
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tokens/min
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tokens/min
+             ·
+
+            Input + output per full minute. Rate is separate from context and account allowance.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "3",
+-   "1.5",
++   "2",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps inflight axis positions accurate for a peak of 0
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_3_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_3_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps inflight axis positions accurate for a peak of 1
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_4_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_4_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps inflight axis positions accurate for a peak of 3
+AssertionError: expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_5_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_5_"
+          >
+            In-progress tickets
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                tickets
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="In-progress tickets · tickets · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded tickets observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        tickets
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        tickets
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            tickets
+             ·
+
+            Recorded tickets started and not yet merged.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "3",
+-   "1.5",
++   "2",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps needs axis positions accurate for a peak of 0
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_6_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_6_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                0
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                0
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,22.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <p
+              class="s muted"
+            >
+              No activity in the measured minutes.
+            </p>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps needs axis positions accurate for a peak of 1
+AssertionError: expected [ '1', '1', '0' ] to deeply equal [ '1', '0.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_7_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_7_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                1
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                1
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  1
+                </span>
+                <span>
+                  1
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        1
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "1",
+-   "0.5",
++   "1",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  |web| test/OverviewMeasuredHistory.test.tsx > keeps needs axis positions accurate for a peak of 3
+AssertionError: expected [ '3', '2', '0' ] to deeply equal [ '3', '1.5', '0' ]
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <section
+        aria-labelledby="_r_8_"
+        class="panel"
+        id="overviewHistoryP"
+      >
+        <div
+          class="ph"
+        >
+          <h2
+            id="_r_8_"
+          >
+            Needs you · global inbox
+          </h2>
+          <span
+            class="sub"
+          >
+            30m history
+          </span>
+          <span
+            class="act"
+          >
+            <select
+              aria-label="Measured Overview history"
+            >
+              <option
+                value="tokens"
+              >
+                Token throughput
+              </option>
+              <option
+                value="spend"
+              >
+                Cost per minute
+              </option>
+              <option
+                value="inflight"
+              >
+                In-progress tickets
+              </option>
+              <option
+                value="ci"
+              >
+                CI pass rate · rolling 24h
+              </option>
+              <option
+                value="needs"
+              >
+                Needs you · global inbox
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          class="pb overview-history"
+        >
+          <div
+            class="measured-history"
+          >
+            <div
+              class="measured-reading s"
+            >
+              <span
+                class="num"
+              >
+                Latest
+                3
+
+                items
+              </span>
+              <span
+                class="num"
+              >
+                Peak
+                3
+              </span>
+            </div>
+            <div
+              class="measured-plot"
+            >
+              <div
+                class="measured-y num"
+              >
+                <span>
+                  3
+                </span>
+                <span>
+                  2
+                </span>
+                <span>
+                  0
+                </span>
+              </div>
+              <svg
+                aria-label="Needs you · global inbox · items · last 2 complete minutes · missing samples remain gaps"
+                preserveAspectRatio="none"
+                role="img"
+                viewBox="0 0 100 24"
+              >
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="3"
+                  y2="3"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="12.5"
+                  y2="12.5"
+                />
+                <line
+                  class="measured-grid"
+                  x1="0"
+                  x2="100"
+                  y1="22"
+                  y2="22"
+                />
+                <path
+                  d="M0.0,22.0L100.0,3.0"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                class="measured-x num"
+              >
+                <span>
+                  11:58
+                </span>
+                <span>
+                  11:59
+                </span>
+                <span>
+                  12:00
+                </span>
+              </div>
+            </div>
+            <details
+              class="history-data"
+            >
+              <summary>
+                Recorded values ·
+                2
+                 points
+              </summary>
+              <section
+                aria-label="Recorded items observations"
+                class="history-data-scroll scroll"
+                tabindex="0"
+              >
+                <p
+                  class="s muted"
+                >
+                  Complete minutes · UTC
+                   · Scroll ↕ for every observation.
+                </p>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        Minute starting
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Display ·
+                        items
+                      </th>
+                      <th
+                        class="num"
+                      >
+                        Recorded ·
+                        items
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:58
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        0
+                      </td>
+                    </tr>
+                    <tr>
+                      <th
+                        scope="row"
+                      >
+                        11:59
+                      </th>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                      <td
+                        class="num"
+                      >
+                        3
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </details>
+          </div>
+          <p
+            class="s muted history-window"
+          >
+            items
+             ·
+
+            Observed operator-inbox episodes; all sessions included.
+
+            Missing intervals remain gaps.
+          </p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
+
+- Expected
++ Received
+
+  [
+    "3",
+-   "1.5",
++   "2",
+    "0",
+  ]
+
+ ❯ test/OverviewMeasuredHistory.test.tsx:118:60
+    116|       target: { value: measure },
+    117|     });
+    118|     await waitFor(() => expect(tickLabels(view.container)).toEqual([..…
+       |                                                            ^
+    119|     expect(new Set(tickLabels(view.container)).size).toBe(3);
+    120|     const readings = view.container.querySelector(".measured-reading")…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 4 passed (13)
+   Start at  23:54:21
+   Duration  10.13s (transform 197ms, setup 297ms, collect 22ms, tests 9.30s, environment 324ms, prepare 35ms)
