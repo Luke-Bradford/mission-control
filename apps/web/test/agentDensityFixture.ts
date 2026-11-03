@@ -9,7 +9,7 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
   const fixture = desktopFixture(scenario);
   const view =
     scenario === "one"
-      ? agentView(seatRow({ run: null, ticket: null, ticketTitle: null }))
+      ? agentView(seatRow({ hudState: "idle", run: null, ticket: null, ticketTitle: null }))
       : populatedAgentView();
   if (view.row.run) {
     view.row.ticket = "shop-app#77";
@@ -19,16 +19,17 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
     view.story.ticketHref = "/tickets/shop-app/77";
   }
   view.row.cli = { effort: "high", budgetUsd: 12.5, version: "2.1.302" };
-  view.row.review = {
-    prNumber: 77,
-    state: "changes",
-    check: {
-      kind: "held",
-      by: "CAPCOM",
-      reason:
-        "One keyboard check is still open. Retain the current head and inspect the saved evidence before continuing.",
-    },
-  };
+  if (view.row.run)
+    view.row.review = {
+      prNumber: 77,
+      state: "changes",
+      check: {
+        kind: "held",
+        by: "CAPCOM",
+        reason:
+          "One keyboard check is still open. Retain the current head and inspect the saved evidence before continuing.",
+      },
+    };
   if (scenario === "long") {
     view.story.title =
       "Preserve all operator routes and the current-head review evidence while making the Agent page answer visible. ".repeat(
@@ -74,20 +75,22 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
     [RESOURCES.agentDetail(view.row.id).path]: view,
     [RESOURCES.stream(view.row.id).path]: {
       runId: view.row.run?.id,
-      events: [
-        {
-          id: "agent:1",
-          at: NOW - 60_000,
-          kind: "op",
-          text: "Keep the answer visible and preserve every existing action.",
-        },
-        {
-          id: "agent:2",
-          at: NOW,
-          kind: "msg",
-          text: "The change is ready for the remaining keyboard check. The current review is held until that evidence is recorded.",
-        },
-      ],
+      events: view.row.run
+        ? [
+            {
+              id: "agent:1",
+              at: NOW - 60_000,
+              kind: "op",
+              text: "Keep the answer visible and preserve every existing action.",
+            },
+            {
+              id: "agent:2",
+              at: NOW,
+              kind: "msg",
+              text: "The change is ready for the remaining keyboard check. The current review is held until that evidence is recorded.",
+            },
+          ]
+        : [],
       tasks: [],
       truncated: false,
       more: false,
