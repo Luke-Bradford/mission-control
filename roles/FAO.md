@@ -12,11 +12,11 @@ Under these headings, in this order:
 - **### Behaviour**: the rules in order, and every edge case with what happens in it.
 - **### Tests**: the tests to write first, one top-level bullet per `## Done when` item (the tool counts bullets, not nested ones): each test's name, the file it goes in, its inputs and the exact expectation. Use this heading exactly; the tool looks for `### Tests`.
 - **### Checks**: lint, typecheck and only the touched test files; no full suite, no mutation testing.
-- **### Design** (only when the ticket touches `apps/web`): the page's one question, each stat's label, value, definition, window and unit, and the states the change shows. Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. If the change needs a mockup and has none, say so for FLIGHT.
+- **### Design** (for visible changes, including native mockups and shared styles): the page's question, each stat's label, value, definition, window and unit, and affected states. Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. Use [visual QA](../docs/runbooks/visual-qa.md) to record the accepted reference, preserved strengths, normal data, first-screen fields, panel budgets and viewport matrix. Explain why the allocation supports the task. If a substantial layout change needs a mockup and has none, say so for FLIGHT.
 
 ## How you work
 
-- Load the skill `CLAUDE.md` names for the work: `plain-talk` for any text a person reads, `hud-design` for `apps/web`.
+- Load the skill `CLAUDE.md` names for the work: `plain-talk` for any text a person reads, `hud-design` for visible interfaces and mockups.
 - Read the code the change touches and the code that calls it before you write a line. Name real files, functions and types; never guess one.
 - Check that the request is still current against the code and nearby tickets. Call out dependencies, stale assumptions and work that should be split or joined before a developer starts.
 - Where the ticket is silent, make a reasonable reversible choice from the repository's patterns and say so briefly. Ask FLIGHT with `mc ask_flight` only where someone must choose; FLIGHT answers, or takes it to the operator. Plan everything else meanwhile.
