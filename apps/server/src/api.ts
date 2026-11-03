@@ -175,6 +175,9 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
+import { registerBriefChoiceRoutes } from "./brief-api.ts";
+import { checkBriefDispatch } from "./brief-dispatch.ts";
+import { boundBriefGuard } from "./brief-dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
 import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
@@ -3919,10 +3922,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!deps.queueReorder || deps.noLoopWrites)
           return reply.code(409).send({ error: "Queue Priority writes unavailable." });
         try {
+          checkBriefDispatch();
           const result = await resolveQueueReorder(
             deps.queueReorder,
             req.params.key,
             body.data.action,
+            boundBriefGuard(),
           );
           bus.emit("attention");
           bus.emit("boards");
@@ -4564,6 +4569,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.post("/flight/runaway/lift", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        checkBriefDispatch();
         if (!liftRunaway(store, bus, now()))
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
@@ -4586,6 +4592,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const until = Date.parse(body.data.until);
         if (until <= at || until - at > FLIGHT_APPROVAL_MAX_MS)
           return reply.code(400).send({ error: "until must be in the future and within 7 days" });
+        checkBriefDispatch();
         const approval = grantApproval(
           store,
           { rule: body.data.rule, scope: body.data.scope, until, reason: body.data.reason },
@@ -4811,9 +4818,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             allowOwnRepoRefs: true,
           });
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
+          checkBriefDispatch();
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
           wroteBody = true;
           store.setSetting(attemptKey, body);
+          checkBriefDispatch();
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
@@ -4912,8 +4921,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
         const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
+        checkBriefDispatch();
+        const guard = boundBriefGuard();
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, by, { action: "accept" })
+          ? await deps.engine.onOperatorMessage(run.id, by, {
+              action: "accept",
+              ...(guard
+                ? {
+                    beforeLift: async () => {
+                      guard();
+                      return true;
+                    },
+                  }
+                : {}),
+            })
           : await deps.engine.onOperatorMessage(run.id, by);
         if (!lifted.lifted) {
           return reply
@@ -4959,6 +4980,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               );
             }
           }
+          checkBriefDispatch();
           const result = await deps.engine.controllerCheck(
             run.id,
             body.data.verdict,
@@ -5054,6 +5076,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 "An independent controller must check changes to FLIGHT's runtime or approval rules.",
             });
           if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+          checkBriefDispatch();
           setExternalPrControl(store, target.repo.id, number, target.sha, {
             ...control,
             controllerPassed: body.data.verdict === "pass",
@@ -5095,6 +5118,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .code(403)
               .send({ error: "Only the controller may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
+          checkBriefDispatch();
           setExternalMergeHold(
             store,
             target.repo.id,
@@ -5139,6 +5163,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!control?.uatRequired)
               return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
             if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+            checkBriefDispatch();
             setExternalPrControl(store, repo.id, n, target.sha, {
               ...control,
               uatAccepted: body.data.action === "accept",
@@ -5170,6 +5195,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               );
             }
           }
+          checkBriefDispatch();
           const result = await deps.engine.uat(
             run.id,
             body.data.action,
@@ -5199,6 +5225,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
+        checkBriefDispatch();
         const result =
           body.data.action === "hold"
             ? await engine.holdMerge(
@@ -5240,16 +5267,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           let commsError: unknown = null;
+          checkBriefDispatch();
           const result = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
             kinds: [kind],
             beforeLift: async () => {
               try {
-                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
-                  to: run.agentId,
-                  text: body.data.text,
-                  ref: run.ticket ?? undefined,
-                  targetRunId: run.id,
-                });
+                checkBriefDispatch();
+                await sendComms(
+                  { store, crew: commsCrew, knownSecrets, now, beforeWrite: checkBriefDispatch },
+                  COMMS_CAPCOM,
+                  {
+                    to: run.agentId,
+                    text: body.data.text,
+                    ref: run.ticket ?? undefined,
+                    targetRunId: run.id,
+                  },
+                );
                 return true;
               } catch (e) {
                 commsError = e;
@@ -5498,6 +5531,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               : item,
           ),
       );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
+      registerBriefChoiceRoutes(api, app, deps, flightActor);
       // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
@@ -5521,6 +5556,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
         if (!sharedAttention().some((i) => i.key === req.params.key))
           return reply.code(404).send({ error: "Item is no longer waiting." });
+        checkBriefDispatch();
         if (
           !holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now())
         )
@@ -5650,6 +5686,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        checkBriefDispatch();
         // This note is another breaker-recovery route. Preserve the same independent operator
         // authority as /flight/runaway/lift, including decoded attention keys. The header was
         // validated before body parsing: keep that provenance if the watch run has since ended.
@@ -5743,6 +5780,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
+        checkBriefDispatch();
         const how = body.data.how ?? "marked";
         const person = store.briefs().get(key)?.person;
         if (

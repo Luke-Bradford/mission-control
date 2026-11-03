@@ -31,6 +31,7 @@ import {
 import { codexProfile } from "./account-bindings.ts";
 import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import type { BriefChoiceDeps } from "./brief-choices.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   CLI_COLLECTOR,
@@ -287,6 +288,7 @@ export interface SchedulerDeps {
   cliHold?: CliHold;
   /** Hands an applied default to the seat that asked it. */
   deliverDefault?: (seatId: string, text: string) => Promise<void>;
+  defaultChoices?: () => BriefChoiceDeps;
   /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
   waitedPrs?: (repoId: RepoId) => number[];
 }
@@ -535,7 +537,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         store,
         now: now(),
         lock: deps.lockState?.(),
-        deliver: deps.deliverDefault,
+        choices: deps.defaultChoices?.(),
       });
       if (n > 0) bus.emit("attention");
     } catch (e) {

@@ -86,6 +86,7 @@ import {
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention, protectedDecisionItem } from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief-source.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
@@ -1346,7 +1347,16 @@ function buildAttentionItems(
   const route = (i: OwnedItem): AttentionItem => {
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-    const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    const retained = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    const brief = retained
+      ? {
+          ...retained,
+          state: briefReadState(config, store, { ...i, acked: false }, retained),
+          ...(retained.binding
+            ? { choice: store.briefChoice(retained.binding.epoch) ?? undefined }
+            : {}),
+        }
+      : undefined;
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
@@ -1354,7 +1364,20 @@ function buildAttentionItems(
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
-      acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
+      acked:
+        ackAt !== undefined &&
+        ackAt >= Math.max(i.at, askAt) &&
+        (!brief?.binding ||
+          (store.getSetting(`brief-ack:${i.key}`) === brief.binding.epoch &&
+            ((brief.choice === undefined && brief.state?.freshness === "current") ||
+              (brief.choice?.state === "applied" &&
+                brief.choice.settledSourceRevision ===
+                  briefSourceRevision(
+                    config,
+                    store,
+                    { ...i, acked: false },
+                    brief.binding.actions.map((entry) => entry.action),
+                  ))))),
     };
     if (
       brief?.for === "operator" &&

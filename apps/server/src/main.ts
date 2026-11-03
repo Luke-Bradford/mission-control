@@ -36,6 +36,7 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
+import { routineBriefChoices } from "./brief-routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
@@ -108,7 +109,11 @@ import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa-reports.ts";
-import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import {
+  prepareQueueReorderSnapshot,
+  type QueueReorderDeps,
+  reorderQueue,
+} from "./queue-reorder.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
@@ -319,9 +324,20 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
-    deliverDefault: async (seatId, text) => {
-      await supervisor.message(seatId, text, { interrupt: false });
-    },
+    // Lazy: supervisor, shared queue services and mcDeps are initialized before scheduler.start.
+    defaultChoices: () =>
+      routineBriefChoices(
+        {
+          config,
+          store,
+          now: Date.now,
+          supervisor,
+          queue: queueReorder,
+          knownSecrets: mcDeps.knownSecrets,
+          bus,
+        },
+        () => lock.state(),
+      ),
   });
   const previewActivity = (() => {
     const url = process.env.MC_PREVIEW_ACTIVITY_URL;
@@ -774,6 +790,8 @@ export async function main(): Promise<void> {
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
+    prepareQueueReorder: (seatId, move, above) =>
+      prepareQueueReorderSnapshot(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
     config,

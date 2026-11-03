@@ -1,3 +1,4 @@
+import { checkBriefDispatch } from "../brief-dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -2832,6 +2833,7 @@ export function createEngine(deps: EngineDeps): Engine {
         result = { lifted: false, reason };
       };
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return refuse("not-parked");
@@ -2919,6 +2921,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (opts?.beforeLift !== undefined && !(await opts.beforeLift()))
           return refuse("before-lift");
+        checkBriefDispatch();
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -3039,6 +3042,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3130,6 +3134,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3209,6 +3214,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop || run.endedAt !== null)
@@ -3244,6 +3250,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         const hold = loop?.mergeHold;

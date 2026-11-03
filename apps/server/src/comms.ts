@@ -34,6 +34,8 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** Internal final dispatch precondition; never accepted from message input. */
+  beforeWrite?: () => void;
 }
 
 const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
@@ -107,6 +109,7 @@ export async function sendComms(
         ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
         : undefined,
     );
+  deps.beforeWrite?.();
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
   if (deps.seatSender && stored === null)

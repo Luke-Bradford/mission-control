@@ -7,12 +7,11 @@ import {
   COMMS_OPEN_PREFIX,
 } from "@mc/core";
 import { protectedDecisionItem } from "./attention-holds.ts";
+import { bindPreparedBrief, ORDINARY_GUIDANCE, prepareOrdinaryGuidance } from "./brief-prepare.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/state.ts";
 import { attentionItems, NO_LOCK } from "./hud.ts";
 import type { Store } from "./store.ts";
-
-const ASK_MAX = 300;
 
 /**
  * Raises one CAPCOM decision for each labelled question or blocker that has waited 15 minutes for
@@ -46,17 +45,45 @@ export function raiseStalledCommsDecisions(d: {
     if (item === undefined || protectedDecisionItem(store, item, config, now)) continue;
     const blocker = message.label === "blocker";
     const flight = briefs.get(key);
+    const targetRun = item.agentId ? store.seatRun(item.agentId) : undefined;
+    if (!item.agentId || !targetRun) continue;
+    const action = {
+      kind: "ordinary-run-guidance" as const,
+      seatId: item.agentId,
+      runId: targetRun.id,
+    };
+    let prepared: ReturnType<typeof prepareOrdinaryGuidance>;
+    try {
+      prepared = prepareOrdinaryGuidance({ config, store, now: () => now }, item, action);
+    } catch {
+      continue;
+    } // Unknown authority remains unbriefed; no invented operator-only reason.
     const brief: AttentionBrief = {
       for: "operator",
       original: message.text,
       context: `${message.from} sent ${message.to} a ${message.label}${message.ticket === null ? "" : ` on ${message.ticket}`} and nobody has settled it: ${message.text}`,
-      ask: message.text.slice(0, ASK_MAX),
+      assessment:
+        flight?.assessment ??
+        flight?.context ??
+        `This ${message.label} is still open; the sender's current run can receive ordinary guidance within its existing authority.`,
+      did: [],
+      checked: [
+        {
+          source: `Comms ${message.id}`,
+          finding: "The source, current run and existing FLIGHT delivery authority were checked.",
+        },
+      ],
+      ask: message.text,
       recommendation:
-        flight?.for === "flight" && flight.recommendation.trim() !== ""
-          ? flight.recommendation
-          : blocker
-            ? "Let the seat work around the blocker where it safely can."
-            : "Let the seat proceed on its best judgment with the most reversible choice.",
+        flight?.recommendation ??
+        (blocker
+          ? "Let the seat work around the blocker where it safely can."
+          : "Let the seat proceed on its best judgment with the most reversible choice."),
+      decision: {
+        consulted: [],
+        costOfDelay:
+          "The sender continues waiting. There is no measured completion-time or money estimate for this delay.",
+      },
       basis: `Comms ${message.id}, unsettled since ${new Date(message.at).toISOString()}.`,
       at: now,
       recommendedOptionId: "proceed",
@@ -65,18 +92,49 @@ export function raiseStalledCommsDecisions(d: {
           id: "proceed",
           label: "Proceed",
           description: "Applies on its own if you do not answer in time.",
-          answer: blocker
-            ? "No one cleared this blocker in time. Work around it where you safely can, keep any change reversible, and say what you assumed. If you cannot, stay parked and say what you need."
-            : "No one answered in time. Proceed on your best judgment with the most reversible choice, and say what you assumed.",
+          answer: ORDINARY_GUIDANCE,
+          consequence:
+            "Deliver bounded guidance to this exact existing run. It grants no approval or hold release.",
+          reversibility: {
+            kind: "reversible",
+            detail:
+              "The guidance can be superseded. This message performs no irreversible action or approval.",
+          },
+          action,
         },
         {
           id: "hold",
           label: "Hold",
           answer: "Do not act on this until CAPCOM answers.",
+          consequence: "Hold this item for an explicit answer; do not apply its default.",
+          reversibility: {
+            kind: "reversible",
+            detail: "The operator can release the explicit hold and refresh the brief.",
+          },
+          action: {
+            kind: "attention-hold",
+            reason: "Wait for CAPCOM's explicit answer.",
+            condition: { kind: "manual" },
+          },
         },
       ],
     };
-    store.addBrief({ key, ...brief });
+    const bound = bindPreparedBrief(
+      { config, store, now: () => now },
+      item,
+      brief,
+      { service: "stalled-comms" },
+      [
+        prepared,
+        {
+          optionId: "hold",
+          action: brief.options[1]?.action ?? { kind: "record-decision" },
+          defaultable: false,
+          effect: "Hold this item until an explicit answer",
+        },
+      ],
+    );
+    store.addBrief({ key, ...bound });
     raised++;
   }
   return raised;

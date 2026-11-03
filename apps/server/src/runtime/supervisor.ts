@@ -668,7 +668,13 @@ export interface Supervisor {
   message(
     seatId: string,
     text: string,
-    opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none"; enforcePause?: boolean },
+    opts: {
+      interrupt: boolean;
+      questions?: "all" | "unpassed" | "none";
+      enforcePause?: boolean;
+      expectedRunId?: string;
+      beforeWrite?: () => void;
+    },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
@@ -4862,6 +4868,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const moving = transfers.get(seatId);
       if (moving) await moving;
       const l = liveOrRefuse(need(seatId));
+      const checkBinding = () => {
+        if (
+          opts.expectedRunId !== undefined &&
+          (l.run.id !== opts.expectedRunId ||
+            store.seatSession(seatId)?.runId !== opts.expectedRunId ||
+            store.run(opts.expectedRunId)?.endedAt !== null)
+        )
+          throw new SupervisorError(
+            409,
+            "The intended run changed or ended before message delivery.",
+          );
+        opts.beforeWrite?.();
+      };
+      checkBinding();
       return enqueue(l, async () => {
         const inbox = l.inTurn ? { text, messageIds: [] } : withInbox(seatId, l.run.id, text);
         if (opts.interrupt && l.inTurn) {
@@ -4872,6 +4892,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           const pause = pausedSeat(store, seatId);
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
+        checkBinding();
         writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's

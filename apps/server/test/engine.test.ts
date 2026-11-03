@@ -7428,3 +7428,40 @@ describe("the engine runs reviews", () => {
     });
   });
 });
+
+it("1389 checks a bound choice again after waiting on the real engine run chain", async () => {
+  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () => h.engine.onOperatorMessage(RUN),
+  );
+  sourceChanged = true;
+  expect((await result).lifted).toBe(false);
+  expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "ci" } });
+  expect(loopTexts()).not.toContain("resumed by CAPCOM");
+});
+it("1389 rechecks a bound source after asynchronous beforeLift without weakening ordinary resume", async () => {
+  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = await withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () =>
+      h.engine.onOperatorMessage(RUN, "CAPCOM", {
+        beforeLift: async () => {
+          await Promise.resolve();
+          sourceChanged = true;
+          return true;
+        },
+      }),
+  );
+  expect(result.lifted).toBe(false);
+  expect(loopOf().phase).toBe("parked");
+  expect((await h.engine.onOperatorMessage(RUN)).lifted).toBe(true);
+});

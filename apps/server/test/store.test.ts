@@ -3522,14 +3522,14 @@ it("retains complete and legacy briefs across restart without inventing checked 
     ],
     recommendedOptionId: "scope",
   };
-  store.addBrief(legacy);
-  store.addBrief(complete);
+  const legacyId = store.addBrief(legacy);
+  const completeId = store.addBrief(complete);
   store.close();
   store = new Store(join(dir, "mc.sqlite"));
   const { key: _legacyKey, ...legacyBrief } = legacy;
   const { key: _completeKey, ...completeBrief } = complete;
-  expect(store.briefs().get(legacy.key)).toEqual(legacyBrief);
-  expect(store.briefs().get(complete.key)).toEqual(completeBrief);
+  expect(store.briefs().get(legacy.key)).toEqual({ ...legacyBrief, id: legacyId });
+  expect(store.briefs().get(complete.key)).toEqual({ ...completeBrief, id: completeId });
   expect(store.briefs().get(legacy.key)?.checked).toBeUndefined();
 });
 

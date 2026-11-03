@@ -79,6 +79,10 @@ afterEach(() => {
 });
 
 describe("decision defaults", () => {
+  it("1389 never derives default authority from an unbound legacy recommendation", () => {
+    expect(decisionDefault(store, item("note:legacy", "ready"), config(), NOW)).toBeNull();
+  });
+
   async function expectProtectedSweep(key: string): Promise<void> {
     store.addBrief({ key, ...brief() });
     const deliver = vi.fn(async () => {});
@@ -178,7 +182,7 @@ describe("decision defaults", () => {
     expect(decisionDefault(store, legacy)).toBeNull();
   });
 
-  it("starts the wait when a default is first stamped, not at an older ask's time", () => {
+  it("does not stamp a deadline onto an unbound legacy rebrief", () => {
     const key = "ask:old";
     const asked = NOW - 5 * 86_400_000;
     // briefed before defaults existed: the same ask, stored with no defaultAt
@@ -186,7 +190,7 @@ describe("decision defaults", () => {
     store.addBrief({ key, ...brief(), at: NOW });
     const stored = store.briefs().get(key);
     expect(stored?.askAt).toBe(asked);
-    expect(stored?.defaultAt).toBe(NOW + DECISION_DEFAULT_WAIT_MS);
+    expect(stored?.defaultAt).toBeUndefined();
   });
 
   it("stores a recommendation on a protected brief without a deadline", () => {
@@ -201,7 +205,7 @@ describe("decision defaults", () => {
     expect(store.briefs().get(`${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)).not.toHaveProperty("defaultAt");
   });
 
-  it("applies an ordinary reversible decision once at its deadline", async () => {
+  it("does not execute an old unbound ordinary answer against today's seat", async () => {
     const id = store.addQuestion({ agentId: "GUIDO-1", runId: "run", text: "Proceed?", at: ASKED });
     store.setSeatSession({
       seatId: "GUIDO-1",
@@ -214,11 +218,11 @@ describe("decision defaults", () => {
     });
     store.addBrief({ key: `ask:${id}`, ...brief() });
     const deliver = vi.fn(async () => {});
-    expect(await applyDecisionDefaults({ config: config(), store, now: NOW, deliver })).toBe(1);
+    expect(await applyDecisionDefaults({ config: config(), store, now: NOW, deliver })).toBe(0);
     expect(attentionItems(config(), store, NOW).find((x) => x.key === `ask:${id}`)?.acked).toBe(
-      true,
+      false,
     );
-    expect(deliver).toHaveBeenCalledOnce();
+    expect(deliver).not.toHaveBeenCalled();
     expect(await applyDecisionDefaults({ config: config(), store, now: NOW + 1, deliver })).toBe(0);
   });
 });

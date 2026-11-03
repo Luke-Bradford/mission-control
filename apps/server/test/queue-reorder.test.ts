@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AttentionBrief,
   type BoardItem,
+  DECISION_DEFAULT_WAIT_MS,
   DEFAULT_PROFILES,
   freezeRules,
   OPERATOR_HEADER,
@@ -10,16 +12,22 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { bindCompleteBrief } from "../src/brief-prepare.ts";
+import { routineBriefChoices } from "../src/brief-routine.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { refillQueues } from "../src/engine/queue.ts";
+import { attentionItems } from "../src/hud.ts";
 import {
+  prepareQueueReorderSnapshot,
   proposeQueueReorder,
   type QueueReorderDeps,
   reorderQueue,
   resolveQueueReorder,
 } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
+import { liveBriefSeat } from "./brief-fixture.ts";
 
 let dir: string;
 let store: Store;
@@ -452,4 +460,142 @@ it("rechecks allocation at approval if another seat joins after the proposal", a
   await expect(resolveQueueReorder(deps, item.key, "approve")).rejects.toThrow(/allocation/i);
   expect(deps.edit).not.toHaveBeenCalled();
   expect(store.notes().some((n) => n.key.endsWith(":recovery"))).toBe(false);
+});
+
+it("1389 defaults only FLIGHT's own validated direct queue judgment through real allocation and writes", async () => {
+  required(config.crew?.sessions[0]).seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "account",
+    model: "fixture",
+    area: [],
+  });
+  liveBriefSeat(store, "flight-1", "flight-run", 100, "demo");
+  const flight = required(store.run("flight-run"));
+  store.upsertRun({ ...flight, ticket: null });
+  await refill();
+  store.raiseNote({
+    key: "ready:queue-judgment",
+    kind: "ready",
+    runId: null,
+    seatId: "guido-1",
+    repoId: "demo",
+    text: "A within-authority Priority judgment.",
+    at: 100,
+  });
+  const key = "note:ready:queue-judgment",
+    source = required(attentionItems(config, store, 100).find((item) => item.key === key));
+  const brief: AttentionBrief = {
+    for: "operator",
+    at: 100,
+    context: "Swap these two adjacent eligible cards.",
+    ask: "Use this reversible order?",
+    did: [],
+    checked: [],
+    decision: { consulted: [], costOfDelay: "The current order continues." },
+    basis: "Actual queue/allocation fixture",
+    recommendation: "Swap the displayed priorities.",
+    recommendedOptionId: "swap",
+    options: [
+      {
+        id: "swap",
+        label: "Swap",
+        answer: "Swap these displayed priorities.",
+        consequence: "Write both Priority values and verify their new order.",
+        reversibility: { kind: "reversible", detail: "The prior Priority pair is retained." },
+        action: {
+          kind: "direct-queue-priority-swap",
+          seatId: "guido-1",
+          move: "demo#2",
+          above: "demo#1",
+        },
+      },
+      {
+        id: "wait",
+        label: "Wait",
+        answer: "Keep waiting.",
+        consequence: "Hold the source.",
+        reversibility: { kind: "reversible", detail: "Refresh after release." },
+        action: { kind: "attention-hold", reason: "Wait.", condition: { kind: "manual" } },
+      },
+    ],
+  };
+  const bound = await bindCompleteBrief(
+    {
+      config,
+      store,
+      now: () => 100,
+      prepareQueue: (seat, move, above) => prepareQueueReorderSnapshot(deps, seat, move, above),
+    },
+    source,
+    brief,
+    { seatId: "flight-1", runId: "flight-run" },
+  );
+  store.addBrief({ key, ...bound });
+  const now = 100 + DECISION_DEFAULT_WAIT_MS;
+  deps.now = () => now;
+  const choices = routineBriefChoices({
+    config,
+    store,
+    now: () => now,
+    knownSecrets: async () => [],
+    queue: deps,
+  });
+  expect(await applyDecisionDefaults({ config, store, now, choices })).toBe(1);
+  expect(deps.edit).toHaveBeenCalledTimes(2);
+  expect(store.queue("guido-1").map((entry) => entry.issue)).toEqual([2, 1]);
+  expect(await applyDecisionDefaults({ config, store, now, choices })).toBe(0);
+  expect(deps.edit).toHaveBeenCalledTimes(2);
+});
+it("1389 executes a bound explicit queue proposal through the actual serialized resolver", async () => {
+  const { item } = await propose();
+  const app = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    queueReorder: deps,
+    now: deps.now,
+    operatorToken: "fixture-operator",
+  });
+  try {
+    const request = {
+      briefId: item.brief?.id,
+      sourceRevision: item.brief?.binding?.sourceRevision,
+      optionId: "approve",
+      requestId: "explicit-queue",
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${encodeURIComponent(item.key)}/choice`,
+      headers: { [OPERATOR_HEADER]: "fixture-operator" },
+      payload: request,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ state: "applied" });
+    expect(deps.edit).toHaveBeenCalledTimes(2);
+    expect(store.queue("guido-1").map((entry) => entry.issue)).toEqual([2, 1]);
+  } finally {
+    await app.close();
+  }
+});
+it("1389 projects prepared queue freshness on GET without preparing remote actions or writing state", async () => {
+  const { item } = await propose();
+  const boardRead = vi.spyOn(deps, "readBoard"),
+    rulesRead = vi.spyOn(deps, "rules"),
+    setSetting = vi.spyOn(store, "setSetting");
+  const app = buildApp({ config, store, bus: new ChangeBus(), queueReorder: deps, now: deps.now });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const response = await app.inject("/api/attention");
+      expect(
+        response.json().find((entry: { key: string }) => entry.key === item.key)?.brief.state,
+      ).toMatchObject({ completeness: "complete", freshness: "current" });
+    }
+    expect(boardRead).not.toHaveBeenCalled();
+    expect(rulesRead).not.toHaveBeenCalled();
+    expect(setSetting).not.toHaveBeenCalled();
+    expect(deps.edit).not.toHaveBeenCalled();
+  } finally {
+    await app.close();
+  }
 });
