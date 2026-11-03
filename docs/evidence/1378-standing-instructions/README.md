@@ -1,5 +1,9 @@
 # Standing instructions web: implementation and QA record
 
+Current integration: backend #1381 is merged at `b94125aa`; UI source `cdd8930b` merges that actual
+main without conflicts. See [integration.md](integration.md) for current checks, new matched images
+and limits. The following 261/76 records remain explicitly historical.
+
 Current correction: source `76a00706`, documented in [watch-correction.md](watch-correction.md).
 The full matrix below remains historical source261/docs959 evidence. Its whole-branch review
 completed with one Minor and no Important/Critical finding; the narrow correction awaits same-pass verification.
