@@ -1,0 +1,68 @@
+{
+  "receipts": [
+    {
+      "key": "agent-default-1440x900-light-folded",
+      "version": "before",
+      "source": "6f0df12e1112ace4bae4fa869117b3464e58f4a7",
+      "scheme": "light",
+      "dock": "folded",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "file": "agent-default-1440x900-light-folded-context-before.png",
+      "sha256": "0fc723f71469b145f2c9849613f5f239c007fe47b3ff46468a82f729eb0a71c5",
+      "bytes": 18049,
+      "capturedAt": "2026-11-03T10:10:31.690Z",
+      "apiSha256": "b63553a285def673a9bec8e49826a937cf50004d7605d244705ebd6b17453897",
+      "facts": {
+        "width": 1440,
+        "height": 900,
+        "scale": 1,
+        "bodyWidth": 1440,
+        "figures": 0,
+        "steps": 0,
+        "picker": 0,
+        "fonts": [
+          "Barlow Semi Condensed",
+          "Barlow Semi Condensed",
+          "Barlow Semi Condensed",
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "IBM Plex Mono",
+          "IBM Plex Mono"
+        ]
+      },
+      "errors": [
+        "Cannot read properties of undefined (reading 'toUpperCase')"
+      ],
+      "writes": [],
+      "requests": [
+        "/api/config",
+        "/api/limits",
+        "/api/crew?shape=summary",
+        "/api/machine",
+        "/api/test-lock",
+        "/api/settings/away",
+        "/api/attention",
+        "/api/away/digest",
+        "/api/flight/summary",
+        "/api/flight",
+        "/api/escalations",
+        "/api/notifications",
+        "/api/agents/guido-1",
+        "/api/agents/flight-1/stream?limit=20",
+        "/api/runs/r-12/handoff",
+        "/api/runs/r-12/loop",
+        "/api/agents/guido-1/stream?limit=20",
+        "/api/activity",
+        "/api/guard/hits?days=7"
+      ],
+      "readsBefore": 19,
+      "readsAfter": 19,
+      "scope": "Actual production App initial viewport at1x; identical controlled fictional API payload/frozen clock and real production fonts. Not full scroll height; no live network or CSS injection."
+    }
+  ]
+}

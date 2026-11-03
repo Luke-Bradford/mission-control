@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentV2.test.tsx (17 tests) 376ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  00:29:11
+   Duration  1.91s (transform 416ms, setup 514ms, collect 181ms, tests 376ms, environment 556ms, prepare 53ms)
+

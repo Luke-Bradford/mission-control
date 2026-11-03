@@ -44,7 +44,8 @@ it.each(REVIEW_STATES)(
             queued={null}
             reviewer={null}
             pr={pr}
-            checkPill={{ label, tone: "plain" }}
+            checkLabel={label}
+            checkTone="plain"
             mine={false}
             unacked={false}
             outcome="Closed"

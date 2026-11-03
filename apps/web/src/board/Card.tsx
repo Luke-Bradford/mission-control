@@ -3,7 +3,7 @@ import {
   CI_PILL,
   type CrewRow,
   type HudColumn,
-  type PillSpec,
+  type PillTone,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
@@ -16,6 +16,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
 import { PrChip, type PreviewPr } from "../hud/PrChip.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { ReviewState } from "../hud/ReviewState.tsx";
 import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
 import {
@@ -39,9 +40,20 @@ const MILESTONE_SPLIT = " — ";
 const PR_EXPECTED: readonly HudColumn[] = ["In progress", "In review", "Ready for QA"];
 
 /** The card's PR; the card's own header names the repo, so the PR does not. */
-function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec | null }) {
+function PrLine({
+  pr,
+  checkLabel,
+  checkTone,
+  checkingSeat,
+  checkingSince,
+  checkReason,
+}: Pick<
+  CardProps,
+  "pr" | "checkLabel" | "checkTone" | "checkingSeat" | "checkingSince" | "checkReason"
+> & { pr: PullRequestView }) {
   // a crew PR stays a draft until the engine merges it: the review state is the open PR's pill
-  const review = pr.state === "open" ? (checkPill ?? null) : null;
+  const review =
+    pr.state === "open" && checkLabel && checkTone ? { label: checkLabel, tone: checkTone } : null;
   const showState = review !== null || pr.state !== "open" || pr.isDraft || pr.review !== null;
   const ci = pr.ci === null ? null : CI_PILL[pr.ci];
   const state =
@@ -61,7 +73,13 @@ function PrLine({ pr, checkPill }: { pr: PullRequestView; checkPill?: PillSpec |
       {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
       {checks && <span className="xs muted">{checks}</span>}
       {(showState || (pr.state === "open" && pr.uat)) && (
-        <Pill tone={state.tone}>{state.label}</Pill>
+        <ReviewState
+          label={state.label}
+          tone={state.tone}
+          checkingSeat={pr.state === "open" && !pr.uat ? checkingSeat : undefined}
+          checkingSince={pr.state === "open" && !pr.uat ? checkingSince : undefined}
+          reason={pr.state === "open" && !pr.uat ? checkReason : undefined}
+        />
       )}
     </>
   );
@@ -81,8 +99,12 @@ export interface CardProps {
   reviewer: CardSeat | null;
   /** The PR the card shows. */
   pr: PullRequestView | null;
-  /** The PR's review state as a pill (`reviewCheckPill`), set by `Kanban`; null or absent without one. */
-  checkPill?: PillSpec | null;
+  /** Stable current-head review fields; only the elapsed child reads the clock. */
+  checkLabel?: string | null;
+  checkTone?: PillTone | null;
+  checkingSeat?: string;
+  checkingSince?: number;
+  checkReason?: string | null;
   /** Something on this card waits on you. */
   mine: boolean;
   unacked: boolean;
@@ -118,7 +140,11 @@ export const Card = memo(function Card({
   queued,
   reviewer,
   pr,
-  checkPill,
+  checkLabel,
+  checkTone,
+  checkingSeat,
+  checkingSince,
+  checkReason,
   mine,
   unacked,
   outcome,
@@ -137,7 +163,7 @@ export const Card = memo(function Card({
   // of the card is a mouse shortcut to it. A link inside the card goes elsewhere (GitHub), and
   // must not also open the card.
   const click = (e: MouseEvent) => {
-    if (!(e.target as Element).closest("a")) go();
+    if (!(e.target as Element).closest("a, button, .review-state-reason")) go();
   };
   const overlay = [
     agent && (
@@ -183,7 +209,7 @@ export const Card = memo(function Card({
       ) : (
         // the review-state pill says who is checking or what the PR waits on; without one, the line does
         col === "In review" &&
-        !checkPill && (
+        !checkLabel && (
           <span key="rev" className="xs muted">
             {NO_REVIEWER}
           </span>
@@ -191,7 +217,15 @@ export const Card = memo(function Card({
       )),
     col !== "Done" &&
       (pr ? (
-        <PrLine key="pr" pr={pr} checkPill={checkPill} />
+        <PrLine
+          key="pr"
+          pr={pr}
+          checkLabel={checkLabel}
+          checkTone={checkTone}
+          checkingSeat={checkingSeat}
+          checkingSince={checkingSince}
+          checkReason={checkReason}
+        />
       ) : (
         PR_EXPECTED.includes(col) && (
           <span key="nopr" className="xs muted">

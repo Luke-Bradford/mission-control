@@ -1,0 +1,66 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ❯ |web| test/AgentDensity.browser.test.ts (14 tests | 1 failed) 20287ms
+   ✓ Agent density in the production App > keeps the answer first at 1280 × 1000, both rail states and schemes  2178ms
+   ✓ Agent density in the production App > keeps the answer first at 1440 × 1000, both rail states and schemes  1702ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 1000, both rail states and schemes  1765ms
+   ✓ Agent density in the production App > keeps the answer first at 1920 × 1080, both rail states and schemes  1758ms
+   ✓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes  1760ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 700, both rail states and schemes  1657ms
+   ✓ Agent density in the production App > keeps honest empty content and full access in both schemes  682ms
+   ✓ Agent density in the production App > keeps honest one content and full access in both schemes  891ms
+   × Agent density in the production App > keeps honest long content and full access in both schemes 1363ms
+     → expected false to be true // Object.is equality
+   ✓ Agent density in the production App > keeps honest many content and full access in both schemes  1874ms
+   ✓ Agent density in the production App > keeps honest loading content and full access in both schemes  761ms
+   ✓ Agent density in the production App > keeps honest error content and full access in both schemes  745ms
+   ✓ Agent density in the production App > keeps honest stale content and full access in both schemes  875ms
+   ✓ Agent density in the production App > keeps honest disconnected content and full access in both schemes  883ms
+ ❯ |web| test/AgentV2.browser.test.ts (5 tests | 1 failed) 4092ms
+   ✓ Agent page v2 > fits 1280 × 1000 in both themes  869ms
+   ✓ Agent page v2 > fits 1600 × 1000 in both themes  650ms
+   ✓ Agent page v2 > fits 1920 × 1000 in both themes  681ms
+   × Agent page v2 > fits 1600 × 700 in both themes 317ms
+     → expected 719.5 to be less than 700
+   ✓ Agent page v2 > keeps 50 long deliverables in a visible scroller  343ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/AgentDensity.browser.test.ts > Agent density in the production App > keeps honest long content and full access in both schemes
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/AgentDensity.browser.test.ts:171:36
+    169|             await page.screenshot(join(shots, `agent-state-long-${them…
+    170|           expect(fullText.remaining).toBeLessThanOrEqual(2);
+    171|           expect(fullText.painted).toBe(true);
+       |                                    ^
+    172|         }
+    173|         if (scenario === "many") {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| test/AgentV2.browser.test.ts > Agent page v2 > fits 1600 × 700 in both themes
+AssertionError: expected 719.5 to be less than 700
+ ❯ test/AgentV2.browser.test.ts:78:29
+     76|         expect(summary.steps).toBe(6);
+     77|         expect(summary.next).toContain("For the controller");
+     78|         expect(summary.top).toBeLessThan(height);
+       |                             ^
+     79|         const shots = process.env.MC_AGENT_V2_SHOTS;
+     80|         if (shots) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 17 passed (19)
+   Start at  00:57:36
+   Duration  27.78s (transform 258ms, setup 474ms, collect 474ms, tests 24.38s, environment 0ms, prepare 78ms)
+

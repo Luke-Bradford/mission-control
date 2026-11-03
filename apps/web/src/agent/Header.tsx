@@ -8,16 +8,16 @@ import type {
   ReviewCheckState,
   RunLoopView,
 } from "@mc/core";
-import { reviewCheckPill } from "@mc/core";
 import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
-import { useNow, useSecond, useTz } from "../clock.ts";
+import { useSecond, useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { agentColor, useRoleLabel } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { ReviewCheck } from "../hud/ReviewState.tsx";
 import { agentPath } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { useIsPopout } from "../shell/popout.ts";
@@ -599,11 +599,9 @@ function TickingDoingLine({ row, tz, repoPrs }: Parameters<typeof CurrentDoingLi
 
 /** Review ages tick independently, keeping the header's controls stable. */
 export function HeaderReviewState({ check }: { check: ReviewCheckState }) {
-  const now = useNow();
-  const pill = reviewCheckPill(check, now);
   return (
-    <span className="header-review-state" title={pill.label}>
-      <Pill tone={pill.tone}>{pill.label}</Pill>
+    <span className="header-review-state">
+      <ReviewCheck check={check} />
     </span>
   );
 }

@@ -773,10 +773,10 @@ describe("Agents panel", () => {
     expect(flight.querySelector(".ag")?.textContent).toBe("FLIGHT");
   });
 
-  it("an agent's row shows model, effort and CLI version with the full id on hover", async () => {
+  it("an agent's row keeps recorded model, effort, budget and CLI version in its identity", async () => {
     stub({
       rows: [
-        seatRow({ cli: { version: "2.1.302", effort: "high" } }),
+        seatRow({ cli: { version: "2.1.302", effort: "high", budgetUsd: 12.5 } }),
         crewRow({ id: "studio", index: 1, cli: { version: null, effort: null } }),
       ],
     });
@@ -784,11 +784,9 @@ describe("Agents panel", () => {
     await screen.findByText("guido-1");
     const [seat, loop] = agentRows(container);
     expect(seat?.querySelector<HTMLElement>(".agent-identity")?.title).toBe(
-      "claude-opus-4-1 · high · CLI 2.1.302",
+      "claude-opus-4-1 · high · Budget $12.50 · CLI 2.1.302",
     );
-    expect(loop?.querySelector<HTMLElement>(".agent-identity")?.title).toBe(
-      "claude-opus-4-1 · default",
-    );
+    expect(loop?.querySelector<HTMLElement>(".agent-identity")?.title).toBe("claude-opus-4-1");
   });
 
   it.each([

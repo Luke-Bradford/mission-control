@@ -1,0 +1,26 @@
+{
+  "remaining": 0,
+  "region": {
+    "x": 272.5625,
+    "y": 402,
+    "width": 223.578125,
+    "height": 280,
+    "top": 402,
+    "right": 496.140625,
+    "bottom": 682,
+    "left": 272.5625
+  },
+  "last": {
+    "x": 280.5625,
+    "y": 656,
+    "width": 182.078125,
+    "height": 15,
+    "top": 656,
+    "right": 462.640625,
+    "bottom": 671,
+    "left": 280.5625
+  },
+  "active": "Full reported result",
+  "hit": "DIV",
+  "painted": false
+}

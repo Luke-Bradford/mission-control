@@ -620,16 +620,28 @@ describe("modelLine", () => {
   });
 
   it("a seat falls back to its config alias, then to a dash", () => {
-    expect(modelLine(seat({ run: ran(null) }))).toBe("sonnet · default");
-    expect(modelLine(seat({ run: null, model: null }))).toBe("— · default");
+    expect(modelLine(seat({ run: ran(null) }))).toBe("sonnet");
+    expect(modelLine(seat({ run: null, model: null }))).toBe("—");
   });
 
-  it("a seat with no effort says default; with no version leaves it out", () => {
+  it("a seat omits unset effort and version", () => {
     const row = seat({ run: ran("claude-sonnet-5-5"), cli: { version: "2.1.302", effort: null } });
-    expect(modelLine(row)).toBe("claude-sonnet-5-5 · default · CLI 2.1.302");
+    expect(modelLine(row)).toBe("claude-sonnet-5-5 · CLI 2.1.302");
     expect(modelLine(seat({ run: ran("m"), cli: { version: null, effort: "high" } }))).toBe(
       "m · high",
     );
+  });
+
+  it("shows only recorded effort and budget, preserving a real zero budget", () => {
+    expect(
+      modelLine(seat({ run: ran("m"), cli: { version: null, effort: "xhigh", budgetUsd: 12.5 } })),
+    ).toBe("m · xhigh · Budget $12.50");
+    expect(
+      modelLine(seat({ run: ran("m"), cli: { version: null, effort: null, budgetUsd: 0 } })),
+    ).toBe("m · Budget $0.00");
+    expect(
+      modelLine(seat({ run: ran("m"), cli: { version: null, effort: null, budgetUsd: null } })),
+    ).toBe("m");
   });
 
   it("a loop is the model only (effort is never shown), or a dash", () => {

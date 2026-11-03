@@ -1,0 +1,18 @@
+.review-state-reason {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.review-state-detail {
+  flex-basis: 100%;
+  margin: var(--sp-1) 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: var(--fs-s);
+}

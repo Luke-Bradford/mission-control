@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentDensity.browser.test.ts (15 tests | 14 skipped) 2721ms
+   ✓ Agent density in the production App > keeps honest long content and full access in both schemes  1537ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 14 skipped (15)
+   Start at  02:16:21
+   Duration  3.31s (transform 185ms, setup 266ms, collect 173ms, tests 2.72s, environment 0ms, prepare 27ms)
+

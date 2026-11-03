@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentDensity.browser.test.ts (16 tests | 14 skipped) 4317ms
+   ✓ Agent density in the production App > offers full text when a short character-count summary wraps beyond four lines  1557ms
+   ✓ Agent density in the production App > keeps honest long content and full access in both schemes  1476ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 14 skipped (16)
+   Start at  10:05:00
+   Duration  4.99s (transform 196ms, setup 282ms, collect 221ms, tests 4.32s, environment 0ms, prepare 34ms)
+

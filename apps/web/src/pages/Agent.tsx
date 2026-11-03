@@ -2,6 +2,7 @@ import type { AgentDetailView, AttentionItem, Crew } from "@mc/core";
 import { useEffect, useState } from "react";
 import { HandoffPanel } from "../agent/HandoffPanel.tsx";
 import {
+  AgentAvailability,
   AgentContext,
   AgentDeliverables,
   AgentIdentity,
@@ -27,8 +28,9 @@ import { toast } from "../shell/Toast.tsx";
 import "../agent/agent.css";
 
 /**
- * One agent in detail (catalogue §2.4): picker, need banner, header and tiles, then Activity beside
- * Runs and the side tabs. `/agent` with no id shows the selected agent, else the first running crew seat,
+ * One agent in detail (catalogue §2.4): identity, ask/result and next decision before the
+ * conversation, alongside current review and run context. History stays lazy. `/agent` with no id
+ * shows the selected agent, else the first running crew seat,
  * else the first crew seat, else the first in view.
  */
 export function Agent({ id }: { id: string | null }) {
@@ -111,18 +113,21 @@ export function Agent({ id }: { id: string | null }) {
                 </div>
               )}
               <AgentIdentity view={detail.data as AgentDetailView} />
-              <AgentNextMove view={detail.data as AgentDetailView} />
-              <AgentStats view={detail.data as AgentDetailView} />
-              <AgentLoop view={detail.data as AgentDetailView} />
-              {!handoffRun && row.kind === "crew" && row.run && <HandoffPanel runId={row.run.id} />}
               {row && (
                 <div className="agent-v2-columns">
                   <div className="agent-v2-left">
                     <AgentStory view={detail.data as AgentDetailView} />
+                    <AgentNextMove view={detail.data as AgentDetailView} />
+                    <AgentDeliverables view={detail.data as AgentDetailView} />
                     <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
                   </div>
                   <div className="agent-v2-right">
-                    <AgentDeliverables view={detail.data as AgentDetailView} />
+                    <AgentAvailability view={detail.data as AgentDetailView} />
+                    <AgentStats view={detail.data as AgentDetailView} />
+                    <AgentLoop view={detail.data as AgentDetailView} />
+                    {!handoffRun && row.kind === "crew" && row.run && (
+                      <HandoffPanel runId={row.run.id} />
+                    )}
                     <AgentRelated view={detail.data as AgentDetailView} />
                     <AgentContext view={detail.data as AgentDetailView} />
                     <SideTabs key={`t:${row.id}`} row={row} />
