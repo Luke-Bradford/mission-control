@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { agentDensityFixture } from "./agentDensityFixture.ts";
@@ -129,44 +129,83 @@ describeRendered("Agent density in the production App", () => {
             ),
           ).toBe(fixture.view.story.report);
           expect(await page.reachable(".agent-v2-story .vdetail")).not.toContain(false);
-          await page.evaluate(
-            () =>
-              (
-                document.querySelector('[aria-label="Full reported result"]') as HTMLElement
-              ).focus(),
-            null,
-          );
+          await page.press("Tab");
+          const focusReady = await page.evaluate(async () => {
+            const reader = document.querySelector(
+              '[aria-label="Full reported result"]',
+            ) as HTMLElement;
+            const clip = document.querySelector("#page-agent") as HTMLElement,
+              start = performance.now();
+            const visible = () => {
+              const box = reader.getBoundingClientRect(),
+                outer = clip.getBoundingClientRect();
+              return (
+                document.activeElement === reader &&
+                box.top >= outer.top &&
+                box.bottom <= outer.bottom
+              );
+            };
+            while (!visible() && performance.now() - start < 1000)
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            return {
+              visible: visible(),
+              box: reader.getBoundingClientRect().toJSON(),
+              outer: clip.getBoundingClientRect().toJSON(),
+            };
+          }, null);
+          if (shots)
+            writeFileSync(
+              join(shots, `agent-state-long-${theme}-focus.json`),
+              JSON.stringify(focusReady, null, 2),
+            );
+          expect(focusReady.visible).toBe(true);
           await page.press("End");
           const fullText = await page.evaluate(async () => {
             const region = document.querySelector(
               '[aria-label="Full reported result"]',
             ) as HTMLElement;
             const start = performance.now();
-            while (
-              region.scrollHeight - region.clientHeight - region.scrollTop > 2 &&
-              performance.now() - start < 1000
-            )
-              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            const range = document.createRange();
-            range.selectNodeContents(region);
-            const last = [...range.getClientRects()].at(-1),
-              box = region.getBoundingClientRect();
-            return {
-              remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
-              painted:
-                !!last &&
-                last.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
-                last.top >= Math.max(box.top, 0) - 1 &&
-                region.contains(
-                  document.elementFromPoint(
+            const read = () => {
+              const range = document.createRange();
+              range.selectNodeContents(region);
+              const last = [...range.getClientRects()].at(-1),
+                box = region.getBoundingClientRect();
+              const hit = last
+                ? document.elementFromPoint(
                     last.x + Math.min(last.width / 2, 20),
                     last.y + last.height / 2,
-                  ),
-                ),
+                  )
+                : null;
+              return {
+                remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
+                region: box.toJSON(),
+                last: last?.toJSON(),
+                active: document.activeElement?.getAttribute("aria-label"),
+                hit: hit?.tagName,
+                painted:
+                  !!last &&
+                  last.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
+                  last.top >= Math.max(box.top, 0) - 1 &&
+                  region.contains(hit),
+              };
             };
+            let measured = read();
+            while (
+              (!measured.painted || measured.remaining > 2) &&
+              performance.now() - start < 1000
+            ) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              measured = read();
+            }
+            return measured;
           }, null);
           if (shots)
             await page.screenshot(join(shots, `agent-state-long-${theme}-full-text-end.png`));
+          if (shots)
+            writeFileSync(
+              join(shots, `agent-state-long-${theme}-full-text-metrics.json`),
+              JSON.stringify(fullText, null, 2),
+            );
           expect(fullText.remaining).toBeLessThanOrEqual(2);
           expect(fullText.painted).toBe(true);
         }

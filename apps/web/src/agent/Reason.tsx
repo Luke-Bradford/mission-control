@@ -19,7 +19,19 @@ export function Reason({
 }) {
   const [open, setOpen] = useState(false);
   const region = useRef<HTMLElement>(null);
+  const revealPending = useRef(false);
   const detailId = useId();
+  // Keep the focused box within its ancestors while native scrolling preserves the reading position.
+  const reveal = (reader: HTMLElement) => {
+    if (revealPending.current) return;
+    revealPending.current = true;
+    requestAnimationFrame(() => {
+      revealPending.current = false;
+      if (document.activeElement === reader) {
+        reader.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      }
+    });
+  };
   return (
     <>
       <div className={className}>
@@ -54,6 +66,8 @@ export function Reason({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: full text can exceed the bounded disclosure.
             tabIndex={0}
             aria-label={label ? `Full ${label}` : "Full reason text"}
+            onFocus={(event) => reveal(event.currentTarget)}
+            onScroll={(event) => reveal(event.currentTarget)}
           >
             {full}
           </section>

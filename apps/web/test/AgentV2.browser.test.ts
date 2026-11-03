@@ -68,14 +68,18 @@ describeRendered("Agent page v2", () => {
             stats: document.querySelectorAll(".agent-v2-stat").length,
             steps: document.querySelectorAll(".agent-v2-steps li").length,
             next: document.querySelector(".agent-v2-next")?.textContent,
-            top: document.querySelector(".agent-v2-steps")?.getBoundingClientRect().top ?? 1000,
+            answerBottom:
+              document.querySelector(".agent-v2-story")?.getBoundingClientRect().bottom ?? 1000,
           }),
           null,
         );
         expect(summary.stats).toBe(5);
         expect(summary.steps).toBe(6);
         expect(summary.next).toContain("For the controller");
-        expect(summary.top).toBeLessThan(height);
+        // #1361 moves full loop context after the answer. Keep the answer on screen, and every
+        // original step accessible through the named scroller rather than promoting it above the result.
+        expect(summary.answerBottom).toBeLessThan(height);
+        expect(await page.reachable(".agent-v2-steps li")).not.toContain(false);
         const shots = process.env.MC_AGENT_V2_SHOTS;
         if (shots) {
           mkdirSync(shots, { recursive: true });
