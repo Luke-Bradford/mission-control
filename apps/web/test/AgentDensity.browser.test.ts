@@ -6,7 +6,7 @@ import { agentDensityFixture } from "./agentDensityFixture.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 
 const { renderAt } = browserSession();
-type ReadWindow = Window & { __agentReads: string[] };
+type ReadWindow = { __agentReads: string[] };
 const waitForText = async (expected: string) => {
   const start = performance.now();
   while (
@@ -314,7 +314,7 @@ describeRendered("Agent density in the production App", () => {
         await page.box(".agent-v2-story");
         await page.evaluate(async () => {
           await document.fonts.ready;
-          const logged = window as ReadWindow;
+          const logged = window as unknown as ReadWindow;
           logged.__agentReads = [];
           const original = window.fetch.bind(window);
           window.fetch = (input, init) => {
@@ -341,7 +341,10 @@ describeRendered("Agent density in the production App", () => {
             null,
           ),
         ).toBe("ab");
-        const before = await page.evaluate(() => (window as ReadWindow).__agentReads, null);
+        const before = await page.evaluate(
+          () => (window as unknown as ReadWindow).__agentReads,
+          null,
+        );
         expect(before.some((path) => /\/runs(?:\?|$)|\/prs\?|\/files(?:\?|$)/.test(path))).toBe(
           false,
         );
@@ -349,7 +352,10 @@ describeRendered("Agent density in the production App", () => {
         await page.box("#loopP .vsteps");
         expect(
           await page.evaluate(
-            () => (window as ReadWindow).__agentReads.some((path) => /\/runs(?:\?|$)/.test(path)),
+            () =>
+              (window as unknown as ReadWindow).__agentReads.some((path) =>
+                /\/runs(?:\?|$)/.test(path),
+              ),
             null,
           ),
         ).toBe(true);
@@ -358,11 +364,15 @@ describeRendered("Agent density in the production App", () => {
           await page.evaluate(async () => {
             const start = performance.now();
             while (
-              !(window as ReadWindow).__agentReads.some((path) => /\/files(?:\?|$)/.test(path)) &&
+              !(window as unknown as ReadWindow).__agentReads.some((path) =>
+                /\/files(?:\?|$)/.test(path),
+              ) &&
               performance.now() - start < 1000
             )
               await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            return (window as ReadWindow).__agentReads.some((path) => /\/files(?:\?|$)/.test(path));
+            return (window as unknown as ReadWindow).__agentReads.some((path) =>
+              /\/files(?:\?|$)/.test(path),
+            );
           }, null),
         ).toBe(true);
         expect(page.errors()).toEqual([]);
