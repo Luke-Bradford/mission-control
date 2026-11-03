@@ -336,27 +336,33 @@ describeRendered("Agent density in the production App", () => {
           const bottom = await page.evaluate(async () => {
             const list = document.querySelector(".agent-v2-deliverables") as HTMLElement;
             const start = performance.now();
-            while (
-              list.scrollHeight - list.clientHeight - list.scrollTop > 2 &&
-              performance.now() - start < 1000
-            )
-              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            const last = list.querySelector("li:last-child a") as HTMLElement,
-              box = last.getBoundingClientRect(),
-              region = list.getBoundingClientRect();
-            return {
-              remaining: list.scrollHeight - list.clientHeight - list.scrollTop,
-              last: last.textContent,
-              painted:
-                box.bottom <= Math.min(region.bottom, innerHeight) + 1 &&
-                box.top >= Math.max(region.top, 0) - 1 &&
-                last.contains(
-                  document.elementFromPoint(
-                    box.x + Math.min(box.width / 2, 30),
-                    box.y + box.height / 2,
+            const read = () => {
+              const last = list.querySelector("li:last-child a") as HTMLElement,
+                box = last.getBoundingClientRect(),
+                region = list.getBoundingClientRect();
+              return {
+                remaining: list.scrollHeight - list.clientHeight - list.scrollTop,
+                last: last.textContent,
+                painted:
+                  box.bottom <= Math.min(region.bottom, innerHeight) + 1 &&
+                  box.top >= Math.max(region.top, 0) - 1 &&
+                  last.contains(
+                    document.elementFromPoint(
+                      box.x + Math.min(box.width / 2, 30),
+                      box.y + box.height / 2,
+                    ),
                   ),
-                ),
+              };
             };
+            let measured = read();
+            while (
+              (!measured.painted || measured.remaining > 2) &&
+              performance.now() - start < 1000
+            ) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              measured = read();
+            }
+            return measured;
           }, null);
           if (shots) await page.screenshot(join(shots, `agent-state-many-${theme}-50th-link.png`));
           expect(bottom.remaining).toBeLessThanOrEqual(2);
@@ -371,24 +377,30 @@ describeRendered("Agent density in the production App", () => {
           const lastSeat = await page.evaluate(async () => {
             const region = document.querySelector("#picker") as HTMLElement,
               start = performance.now();
-            while (
-              region.scrollHeight - region.clientHeight - region.scrollTop > 2 &&
-              performance.now() - start < 1000
-            )
-              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            const button = region.querySelector("button:last-child") as HTMLElement,
-              rect = button.getBoundingClientRect(),
-              box = region.getBoundingClientRect();
-            return {
-              text: button.textContent,
-              remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
-              painted:
-                rect.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
-                rect.top >= Math.max(box.top, 0) - 1 &&
-                button.contains(
-                  document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
-                ),
+            const read = () => {
+              const button = region.querySelector("button:last-child") as HTMLElement,
+                rect = button.getBoundingClientRect(),
+                box = region.getBoundingClientRect();
+              return {
+                text: button.textContent,
+                remaining: region.scrollHeight - region.clientHeight - region.scrollTop,
+                painted:
+                  rect.bottom <= Math.min(box.bottom, innerHeight) + 1 &&
+                  rect.top >= Math.max(box.top, 0) - 1 &&
+                  button.contains(
+                    document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+                  ),
+              };
             };
+            let measured = read();
+            while (
+              (!measured.painted || measured.remaining > 2) &&
+              performance.now() - start < 1000
+            ) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              measured = read();
+            }
+            return measured;
           }, null);
           if (shots) await page.screenshot(join(shots, `agent-state-many-${theme}-50th-seat.png`));
           expect(lastSeat.remaining).toBeLessThanOrEqual(2);
