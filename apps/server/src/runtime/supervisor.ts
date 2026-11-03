@@ -241,8 +241,10 @@ import { assertSeatGitConfig, assertSeatGitVersion, crewGit, SeatGitError } from
 import { runSeatGrants } from "./grants.ts";
 import {
   type DeliveryEnvelope,
+  DirectionContextError,
   directionKey,
   instructionEnvelope,
+  needsDirectionContext,
   readDirectionContext,
 } from "./instruction-context.ts";
 import {
@@ -1656,7 +1658,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? await deps.flightEnvironment?.()
         : undefined;
     if (stopping) throw new Error(SHUTTING_DOWN);
-    if (seatDef(info.seat).loop === "watch" && store.getSetting(directionKey(run.id)) === null) {
+    if (seatDef(info.seat).loop === "watch" && needsDirectionContext(store, run.id)) {
       const sha = (
         await crewGit(
           checkout.path,
@@ -2674,6 +2676,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const dir = crewKeeperDir(deps.dbPath, runId);
     const cursor = store.keeperCursor(runId);
     let checkoutMissing = false;
+    let checkoutProblem = "could not resume: checkout missing";
     const info = findSeat(row.seatId);
     const run = store.run(runId);
     if (info && run?.endedAt === null && run.reviewId == null) {
@@ -2681,7 +2684,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (def.mode === "read-only" && def.loop !== "plan") {
         try {
           const checkout = await readOnlyCheckout(info, row, run);
-          if (def.loop === "watch" && store.getSetting(directionKey(run.id)) === null) {
+          if (def.loop === "watch" && needsDirectionContext(store, run.id)) {
             const sha = (
               await crewGit(
                 checkout.path,
@@ -2695,7 +2698,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               JSON.stringify(await readDirectionContext(info.session.checkout, sha, true)),
             );
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof DirectionContextError) checkoutProblem = error.message;
           if (runGone(runId, row.seatId)) return;
           // Discover the keeper first: an exit keeps its reason; a missing keeper goes through resume.
           checkoutMissing = true;
@@ -2742,7 +2746,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dropGrant(row.seatId, runId);
         await found.session.close();
         if (runGone(runId, row.seatId)) return;
-        return failResume(row, "could not resume: checkout missing");
+        return failResume(row, checkoutProblem);
       }
       // no await before the seat is tracked: the replay's first line must find its listeners
       return attachOne(row, runId, found.session, found.hello, cursor);
@@ -2912,6 +2916,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  function errorDirectionMessage(error: unknown): string {
+    return error instanceof DirectionContextError
+      ? `${RESUME_FAILED}: ${error.message}`
+      : `${RESUME_FAILED}: ${CANNOT_START}`;
+  }
+
   async function resumeOne(row: SeatSessionRow): Promise<void> {
     const info = findSeat(row.seatId);
     if (!info) return failResume(row, "could not resume: seat removed");
@@ -2969,7 +2979,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         deferredRecoveries.add(run.id);
         return;
       }
-      return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
+      return failResume(row, errorDirectionMessage(e));
     }
     // Keep the error that the successful resume is about to replace in Activity.
     if (row.state === "error") {
@@ -3696,7 +3706,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -3712,7 +3725,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }
@@ -3852,7 +3867,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -3868,7 +3886,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }
@@ -4162,7 +4182,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: scratch.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -4179,7 +4202,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }

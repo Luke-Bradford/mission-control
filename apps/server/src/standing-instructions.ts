@@ -316,6 +316,14 @@ export class StandingInstructions {
       entry: this.get(Number(n.instruction_id)) as StandingInstruction,
     }));
   }
+  noticeDelivery(id: number, action: string): "pending" | "inbox" {
+    const notice = this.db
+      .prepare(
+        "SELECT comms_id FROM standing_instruction_notices WHERE instruction_id = ? AND action = ?",
+      )
+      .get(id, action);
+    return notice?.comms_id == null ? "pending" : "inbox";
+  }
   noticeStored(id: number, action: string, commsId: string): void {
     this.db
       .prepare(

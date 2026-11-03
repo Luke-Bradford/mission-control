@@ -6,6 +6,7 @@ import type { Store } from "../store.ts";
 import { readBaseEntry } from "./checkouts.ts";
 
 export const DIRECTION_MAX_BYTES = 64 * 1024;
+export class DirectionContextError extends Error {}
 export interface DirectionContext {
   sha: string;
   text: string | null;
@@ -17,7 +18,15 @@ export async function readDirectionContext(
   sha: string,
   restored = false,
 ): Promise<DirectionContext> {
-  const entry = await readBaseEntry(checkout, sha, "docs/direction.md");
+  let entry: Awaited<ReturnType<typeof readBaseEntry>>;
+  try {
+    entry = await readBaseEntry(checkout, sha, "docs/direction.md");
+  } catch (cause) {
+    throw new DirectionContextError(
+      "Could not verify FLIGHT direction. Repair the selected base Git objects before resuming.",
+      { cause },
+    );
+  }
   if (!entry) return { sha, text: null, restored };
   if (
     !entry.body ||
@@ -25,7 +34,7 @@ export async function readDirectionContext(
     entry.body.byteLength > DIRECTION_MAX_BYTES ||
     !isUtf8(entry.body)
   )
-    throw new Error(
+    throw new DirectionContextError(
       "FLIGHT direction is unsafe, invalid UTF-8 or above 64 KiB. Fix docs/direction.md on the selected base before resuming.",
     );
   return { sha, text: entry.body.toString("utf8"), restored };
@@ -33,17 +42,39 @@ export async function readDirectionContext(
 export function directionContext(store: Store, runId: string): DirectionContext {
   const raw = store.getSetting(directionKey(runId));
   if (!raw)
-    throw new Error(
+    throw new DirectionContextError(
       "FLIGHT's verified direction context is missing. Resume the run to rebuild it from verified Git objects.",
     );
-  const parsed = JSON.parse(raw) as DirectionContext;
+  let parsed: DirectionContext;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new DirectionContextError(
+      "FLIGHT's retained direction context is invalid. Resume from a verified base.",
+      { cause },
+    );
+  }
   if (
+    !parsed ||
     !/^[0-9a-f]{40}$/.test(parsed.sha) ||
-    (parsed.text !== null && typeof parsed.text !== "string")
+    (parsed.text !== null && typeof parsed.text !== "string") ||
+    (typeof parsed.text === "string" && Buffer.byteLength(parsed.text) > DIRECTION_MAX_BYTES)
   )
-    throw new Error("FLIGHT's retained direction context is invalid. Resume from a verified base.");
+    throw new DirectionContextError(
+      "FLIGHT's retained direction context is invalid. Resume from a verified base.",
+    );
   return parsed;
 }
+export function needsDirectionContext(store: Store, runId: string): boolean {
+  try {
+    directionContext(store, runId);
+    return false;
+  } catch (error) {
+    if (error instanceof DirectionContextError) return true;
+    throw error;
+  }
+}
+
 export interface DeliveryEnvelope {
   text: string;
   pieces: PromptPiece[];

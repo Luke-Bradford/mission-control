@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DEFAULT_SEAT_COMMANDS, type NewRepo, type SeatInput } from "@mc/core";
+import { DEFAULT_SEAT_COMMANDS, type NewRepo, OPERATOR_HEADER, type SeatInput } from "@mc/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -499,7 +499,7 @@ describe("setSessionSeats", () => {
     expect(read().find((s) => s.id === "guido-1")?.focus).toBeNull();
   });
 
-  it("focus API saves through the session editor and reloads the readable focus", async () => {
+  it("focus API persists durable instructions while retaining the raw config import source", async () => {
     const config = loadConfig(path);
     const store = new Store(":memory:");
     const changes = {
@@ -517,6 +517,7 @@ describe("setSessionSeats", () => {
     const app = buildApp({
       config,
       store,
+      operatorToken: "fictional-focus-key",
       bus: new ChangeBus(),
       configPath: path,
       seatWrites: true,
@@ -532,24 +533,27 @@ describe("setSessionSeats", () => {
       const response = await app.inject({
         method: "POST",
         url: "/api/seats/guido-1/focus",
+        headers: { [OPERATOR_HEADER]: "fictional-focus-key" },
         payload: { focus: "label:catalog" },
       });
       expect(response.statusCode).toBe(200);
-      expect(reload).toHaveBeenCalledTimes(1);
-      expect((await app.inject({ method: "GET", url: "/api/seats/guido-1/focus" })).json()).toEqual(
-        { focus: "label:catalog" },
-      );
-      expect(read().find((s) => s.id === "guido-1")?.focus).toBe("label:catalog");
+      expect(reload).not.toHaveBeenCalled();
+      expect(
+        (await app.inject({ method: "GET", url: "/api/seats/guido-1/focus" })).json(),
+      ).toMatchObject({ focus: "label:catalog" });
+      expect(store.instructions.focus("guido-1").effectiveFocus).toBe("label:catalog");
+      expect(read().find((s) => s.id === "guido-1")?.focus).toBeUndefined();
       expect(
         (
           await app.inject({
             method: "POST",
             url: "/api/seats/guido-1/focus",
+            headers: { [OPERATOR_HEADER]: "fictional-focus-key" },
             payload: { focus: "unrecognised prose" },
           })
         ).statusCode,
       ).toBe(400);
-      expect(reload).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
     } finally {
       await app.close();
       store.close();

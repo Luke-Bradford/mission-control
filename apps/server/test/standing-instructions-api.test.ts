@@ -246,7 +246,7 @@ it("stores a short durable notice before a live notification failure, without du
     NOW,
   );
   const announced = await announceInstruction({ config, store, bus, supervisor }, result);
-  expect(announced.delivery).toBe("pending");
+  expect(announced.delivery).toBe("inbox");
   expect(messages).toBe(1);
   expect(store.instructions.active("builder")).toHaveLength(1);
   expect(store.instructions.notices()).toEqual([]);
@@ -255,4 +255,59 @@ it("stores a short durable notice before a live notification failure, without du
   const inbox = store.commsInbox("builder");
   expect(inbox).toHaveLength(1);
   expect(inbox[0].text.length).toBeLessThan(1200);
+});
+
+it("reports each concurrent mutation's own recipient delivery while draining a shared flush", async () => {
+  const extra = {
+    id: "other-builder",
+    role: "GUIDO",
+    accountId: "claude",
+    model: "haiku",
+    area: [],
+  };
+  const cfg = structuredClone(config);
+  cfg.crew!.sessions[0].seats.push(extra);
+  let release = () => {};
+  let entered = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const firstNotification = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const notified: string[] = [];
+  const supervisor = {
+    seatFacts: (seatId: string) => ({
+      inTurn: seatId === extra.id,
+      resumedAt: null,
+      rateLimitedUntil: null,
+    }),
+    message: async (seatId: string) => {
+      notified.push(seatId);
+      entered();
+      await gate;
+    },
+  };
+  const first = store.instructions.create(
+    "builder",
+    { kind: "text", text: "First mutation" },
+    "operator",
+    NOW,
+  );
+  const firstReply = announceInstruction({ config: cfg, store, bus, supervisor }, first);
+  await firstNotification;
+  const later = store.instructions.create(
+    extra.id,
+    { kind: "text", text: "Concurrent mutation" },
+    "operator",
+    NOW + 1,
+  );
+  const laterReply = announceInstruction({ config: cfg, store, bus, supervisor }, later);
+  release();
+  expect((await firstReply).delivery).toBe("notified");
+  expect((await laterReply).delivery).toBe("inbox");
+  expect(notified).toEqual(["builder"]);
+  expect(store.commsInbox("builder")).toHaveLength(1);
+  expect(store.commsInbox(extra.id)).toHaveLength(1);
+  expect(store.instructions.notices()).toEqual([]);
 });

@@ -1594,7 +1594,8 @@ const wordsOf = (text: string): Set<string> =>
 
 /** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
 const accountable = (category: string, item: unknown): boolean => {
-  if (category === "t") return false;
+  // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
+  if (category === "t" || category === "instructions") return false;
   if (category === "prs") {
     const [, , ready, state, awaiting, away] = String(item).split(":");
     return (ready === "true" && state === "open") || !!awaiting || !!away;

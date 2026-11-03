@@ -12,54 +12,65 @@ interface NoticeDeps {
   supervisor?: Pick<Supervisor, "message"> & Partial<Pick<Supervisor, "seatFacts">>;
   now?: () => number;
 }
-const flushing = new WeakMap<Store, Promise<"inbox" | "notified" | "pending">>();
-/** Mutation receipts survive notification errors. Comms is stored before any provider notification. */
-export function flushInstructionNotices(
-  deps: NoticeDeps,
-): Promise<"inbox" | "notified" | "pending"> {
+type Delivery = NonNullable<InstructionMutation["delivery"]>;
+const keyOf = (id: number, action: string) => `${id}:${action}`;
+const flushing = new WeakMap<Store, Promise<Map<string, Delivery>>>();
+/** A stored unread inbox notice survives failed immediate notification. No duplicate Comms retry is needed. */
+export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, Delivery>> {
   const previous = flushing.get(deps.store);
   if (previous) return previous;
   const work = (async () => {
-    let delivery: "inbox" | "notified" | "pending" = "inbox";
+    const deliveries = new Map<string, Delivery>();
+    const attempted = new Set<string>();
     const crew = () =>
       deps.config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
-    for (const notice of deps.store.instructions.notices()) {
-      const seat = notice.entry.seatId;
-      if (seat === null || !crew().includes(seat)) {
-        delivery = "pending";
-        continue;
-      }
-      const flight = deps.config.crew?.sessions
-        .flatMap((s) => s.seats)
-        .find((s) => seatDef(s).loop === "watch");
-      const from = notice.by === "flight" ? (flight?.id ?? COMMS_CAPCOM) : COMMS_CAPCOM;
-      try {
-        const message = await sendComms(
-          {
-            store: deps.store,
-            crew,
-            knownSecrets: async () => [],
-            now: deps.now,
-            seatSender: false,
-          },
-          from,
-          {
-            to: seat,
-            text: `Instruction ${notice.id} ${notice.action}. The next turn carries the complete current instruction snapshot.`,
-            label: "handoff",
-          },
-        );
-        deps.store.instructions.noticeStored(notice.id, notice.action, message.id);
-        const facts = deps.supervisor?.seatFacts?.(seat);
-        if (deps.supervisor && facts?.inTurn === false) {
-          await deps.supervisor.message(seat, "", { interrupt: false, questions: "none" });
-          delivery = "notified";
+    // A later mutation can arrive while an earlier notification awaits its provider. Drain it too.
+    for (;;) {
+      const pending = deps.store.instructions
+        .notices()
+        .filter((n) => !attempted.has(keyOf(n.id, n.action)));
+      if (pending.length === 0) break;
+      for (const notice of pending) {
+        const key = keyOf(notice.id, notice.action);
+        attempted.add(key);
+        deliveries.set(key, "pending");
+        const seat = notice.entry.seatId;
+        if (seat === null || !crew().includes(seat)) continue;
+        const flight = deps.config.crew?.sessions
+          .flatMap((s) => s.seats)
+          .find((s) => seatDef(s).loop === "watch");
+        if (notice.by === "flight" && !flight) continue;
+        const from = notice.by === "flight" ? flight!.id : COMMS_CAPCOM;
+        try {
+          const message = await sendComms(
+            {
+              store: deps.store,
+              crew,
+              knownSecrets: async () => [],
+              now: deps.now,
+              seatSender: false,
+            },
+            from,
+            {
+              to: seat,
+              text: `Instruction ${notice.id} ${notice.action}. The next turn carries the complete current instruction snapshot.`,
+              label: "handoff",
+            },
+          );
+          deps.store.instructions.noticeStored(notice.id, notice.action, message.id);
+          deliveries.set(key, "inbox");
+          const facts = deps.supervisor?.seatFacts?.(seat);
+          if (deps.supervisor && facts?.inTurn === false) {
+            await deps.supervisor.message(seat, "", { interrupt: false, questions: "none" });
+            deliveries.set(key, "notified");
+          }
+        } catch {
+          // Keep pending only if Comms storage failed. A notification error leaves a durable inbox.
+          deliveries.set(key, deps.store.instructions.noticeDelivery(notice.id, notice.action));
         }
-      } catch {
-        delivery = "pending";
       }
     }
-    return delivery;
+    return deliveries;
   })();
   flushing.set(deps.store, work);
   void work.finally(() => flushing.delete(deps.store));
@@ -73,6 +84,11 @@ export async function announceInstruction(
   deps.bus.emit("flight");
   deps.bus.emit("agents");
   deps.bus.emit("config");
-  const delivery = await flushInstructionNotices(deps);
-  return result.entry.seatId === null ? result : { ...result, delivery };
+  const deliveries = await flushInstructionNotices(deps);
+  if (result.entry.seatId === null) return result;
+  const action = result.entry.revokedAt === null ? "saved" : "revoked";
+  const delivery =
+    deliveries.get(keyOf(result.entry.id, action)) ??
+    deps.store.instructions.noticeDelivery(result.entry.id, action);
+  return { ...result, delivery };
 }

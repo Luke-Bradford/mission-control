@@ -80,6 +80,7 @@ import {
   ownReply,
   pending,
   wakeFacts,
+  wakeReasons,
 } from "../src/flight/state.ts";
 import {
   createFlightWatch,
@@ -5082,6 +5083,10 @@ it("wakes once for a new or revoked order and retries a failed delivery without 
     "operator",
     nowMs,
   ).entry;
+  const changed = flightState({ config, store, busy: [], now: nowMs });
+  expect(
+    wakeReasons("{}", wakeFacts(changed)).some((reason) => reason.id.startsWith("instructions:")),
+  ).toBe(false);
   sendFails = true;
   await watch.check();
   expect(sendCalls).toHaveLength(1);

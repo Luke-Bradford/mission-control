@@ -151,3 +151,107 @@ it("rejects symlink and oversized direction instead of silently omitting or trim
     /unsafe/,
   );
 });
+
+it("resolves an order revoked while the actual delivery queue waits on an interrupt", async () => {
+  const old = store.instructions.create(
+    null,
+    { kind: "text", text: "Queued old order" },
+    "operator",
+    1,
+  ).entry;
+  const { sup } = make({ extraSeat: flight });
+  sup.start();
+  await sup.startWatch(flight.id, { first: "SLOW working context" });
+  await until(() => expect(userLines()).toHaveLength(1));
+  const session = prep.sessions.at(-1);
+  if (!session) throw new Error("Fake provider session missing");
+  const originalControl = session.control.bind(session);
+  let entered = () => {};
+  const interruptStarted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  session.control = async (...args) => {
+    entered();
+    await gate;
+    return originalControl(...args);
+  };
+  const pending = sup.message(flight.id, "Queued replacement context", {
+    interrupt: true,
+    questions: "none",
+  });
+  await interruptStarted;
+  store.instructions.revoke(old.id, null, "operator", 2);
+  store.instructions.create(null, { kind: "text", text: "Queued current order" }, "operator", 3);
+  release();
+  await pending;
+  session.control = originalControl;
+  await until(() => expect(userLines()).toHaveLength(2));
+  const delivered = userLines()[1] as string;
+  expect(delivered).toContain('"text":"Queued current order"');
+  expect(delivered).not.toContain('"text":"Queued old order"');
+  expect(delivered).toContain("Queued replacement context");
+});
+
+it("rebuilds a missing direction snapshot before delivering to a reattached keeper", async () => {
+  direction("Verified keeper direction");
+  const first = make({ extraSeat: flight });
+  first.sup.start();
+  const { runId } = await first.sup.startWatch(flight.id);
+  await until(() => expect(seatState(flight.id)).toBe("idle"));
+  store.deleteSetting(directionKey(runId));
+  await first.sup.stopAll();
+  const second = make({ extraSeat: flight });
+  second.sup.start();
+  await until(() => expect(second.sup.seatFacts(flight.id)).toMatchObject({ inTurn: false }));
+  await second.sup.message(flight.id, "Post-reattachment context", {
+    interrupt: false,
+    questions: "none",
+  });
+  await until(() => expect(userLines()).toHaveLength(2));
+  expect(userLines()[1]).toContain("Verified keeper direction");
+  expect(userLines()[1]).toContain("rebuilt on resume");
+  expect(userLines()[1]).toContain("Post-reattachment context");
+});
+
+it("retains a notice after failed immediate notification and delivers it once on the next real fixture turn", async () => {
+  const { commsInboxContext } = await import("../src/comms.ts");
+  const { announceInstruction } = await import("../src/instruction-notices.ts");
+  const { bus } = await import("./supervisor-harness.ts");
+  const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
+  sup.start();
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  prep.failWrite = true;
+  const change = store.instructions.create(
+    "guido-1",
+    { kind: "text", text: "Complete live rule" },
+    "operator",
+    Date.now(),
+  );
+  const reply = await announceInstruction({ config: cfg, store, bus, supervisor: sup }, change);
+  expect(reply.delivery).toBe("inbox");
+  const notices = store.commsInbox("guido-1");
+  expect(notices).toHaveLength(1);
+  expect(store.commsInboxRead("guido-1", notices[0].id)).toBe(false);
+  prep.failWrite = false;
+  await sup.message("guido-1", "Next ordinary turn", { interrupt: false, questions: "none" });
+  await until(() => expect(userLines()).toHaveLength(2));
+  expect(userLines()[1]).toContain("Complete live rule");
+  expect(userLines()[1]).toContain(`Instruction ${change.entry.id} saved`);
+  expect(store.commsInboxRead("guido-1", notices[0].id)).toBe(true);
+  expect(store.commsInbox("guido-1")).toHaveLength(1);
+});
+
+it("reports an actionable direction failure before launching a fake provider", async () => {
+  direction("x".repeat(64 * 1024 + 1));
+  const { sup } = make({ extraSeat: flight });
+  sup.start();
+  await expect(sup.startWatch(flight.id)).rejects.toThrow(/Fix docs\/direction.md/);
+  expect(store.seatSession(flight.id)?.reason).toContain("64 KiB");
+  expect(userLines()).toEqual([]);
+  expect(prep.sessions).toEqual([]);
+});
