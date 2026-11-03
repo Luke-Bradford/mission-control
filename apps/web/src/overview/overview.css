@@ -2589,8 +2589,8 @@ button.quota-details {
   padding: 4px 8px;
 }
 .kpi-destination {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(16px, auto) 28px minmax(16px, auto);
   gap: 4px;
   min-width: 0;
   color: inherit;
@@ -2598,6 +2598,7 @@ button.quota-details {
 }
 .overview-kpi {
   position: relative;
+  display: block;
 }
 .kpi-history-link {
   position: absolute;
