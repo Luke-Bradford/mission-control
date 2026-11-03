@@ -1,5 +1,9 @@
 # Standing instructions web: implementation and QA record
 
+Current correction: source `76a00706`, documented in [watch-correction.md](watch-correction.md).
+The full matrix below remains historical source261/docs959 evidence. Its whole-branch review
+completed with one Minor and no Important/Critical finding; the narrow correction awaits same-pass verification.
+
 Issue #1378, child of #993. Dependency #1377 is the reviewed server contract carried by base
 `f205cab3e5b2bb8ab4c26f15ad6bf4ea7215a42f`. This record does not claim that dependency merged.
 No new operator approval gate, policy tier or actual-provider proof is part of the web outcome.
