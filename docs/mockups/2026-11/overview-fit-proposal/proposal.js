@@ -61,7 +61,7 @@ const historyHeader=document.createElement('header');historyHeader.innerHTML='<h
 historyHeader.append($('#measure'));historyHub.append(historyHeader,comparisons);observations.append(historyHub);
 analytical.replaceChildren(operations,observations);comparisonTitle.remove();obsoleteHistory.remove();
 comparisons.className='canonical-histories';comparisons.removeAttribute('aria-label');
-[...comparisons.children].forEach((panel,index)=>{const [id,h]=Object.entries(histories)[index];panel.dataset.history=id;panel.id='history-'+id;panel.querySelector('.history-reading>b').textContent='Latest '+h.format(h.values.at(-1))+' '+h.unit;const content=document.createElement('div');content.className='history-evidence';const plot=panel.querySelector('.plot');plot.replaceWith(content);content.append(plot);const exact=document.createElement('div');exact.className='recent-readings';exact.innerHTML='<h3>Latest complete minutes</h3>'+table(['UTC',h.unit],h.values.slice(-5).map((v,i)=>['11:'+String(55+i),v===null?'— missing':h.format(v)]));content.append(exact);});
+[...comparisons.children].forEach((panel,index)=>{const [id,h]=Object.entries(histories)[index];panel.dataset.history=id;panel.id='history-'+id;panel.querySelector('.history-reading>b').textContent='Latest '+h.format(h.values.at(-1))+' '+(id==='ci'?'of completed runs':h.unit);const content=document.createElement('div');content.className='history-evidence';const plot=panel.querySelector('.plot');plot.replaceWith(content);content.append(plot);const exact=document.createElement('div');exact.className='recent-readings';exact.innerHTML='<h3>Latest complete minutes</h3>'+table(['UTC',h.unit],h.values.slice(-5).map((v,i)=>['11:'+String(55+i),v===null?'— missing':h.format(v)]));content.append(exact);});
 // The selector reveals a single canonical panel at compact sizes, all five at wide/tall sizes.
 drawHistory=function(){const selected=$('#measure').value;$$('[data-history]').forEach(panel=>{panel.classList.toggle('selected-history',panel.dataset.history===selected);});};drawHistory();
 $('#measure').onchange=drawHistory;
@@ -79,3 +79,11 @@ detailText.layout=['Composition and access','<p>The primary operations, provider
 // Caption names actual exposed lanes/events instead of implying removed seats.
 laneCaption=function(){timelineSub.textContent='60m · '+(matchMedia('(min-width:2800px) and (min-height:1600px)').matches?13:4)+' of 13 lanes';};laneCaption();
 eventCaption=function(){$('#activity>footer').firstChild.textContent='Latest '+(matchMedia('(min-width:2800px) and (min-height:1600px)').matches?12:6)+' of 120 events ';};eventCaption();
+
+// Name actual complete-table overflow; a hidden native scrollbar is not a disclosure cue.
+const allowanceRegion=$('#full-allowance>.scroll'), allowanceCue=document.createElement('p');
+allowanceCue.className='allowance-scroll-note';allowanceCue.id='allowance-scroll-note';
+allowanceCue.textContent='Scroll ↔ for all allowance fields';allowanceRegion.before(allowanceCue);
+allowanceRegion.setAttribute('aria-describedby','allowance-scroll-note');
+function updateAllowanceCue(){allowanceCue.hidden=allowanceRegion.scrollWidth<=allowanceRegion.clientWidth+1;}
+const allowanceObserver=new ResizeObserver(updateAllowanceCue);allowanceObserver.observe(allowanceRegion);allowanceObserver.observe(allowanceRegion.querySelector('table'));updateAllowanceCue();

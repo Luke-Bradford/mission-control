@@ -122,3 +122,5 @@
  .composition-v5 .allowance{grid-column:1/-1}
  .composition-v5 .capacity{display:block}
 }
+
+.composition-v5 .allowance-scroll-note{padding:4px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
