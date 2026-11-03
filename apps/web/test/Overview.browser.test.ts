@@ -10,6 +10,7 @@ const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR ?? join(process.env.TMPDIR ?? "/tmp", "overview-shots");
 
 const api = {
+  "/api/settings/crew-pause": null,
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
@@ -57,7 +58,7 @@ describeRendered("Overview transcript footprint in a browser", () => {
           () => document.querySelector<HTMLElement>("#machP .transcript-footprint")?.title,
           undefined,
         ),
-      ).toBe("fao-1 8.0 MB · 3 files");
+      ).toBe("fao-1 8.0 MiB · 3 files");
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

@@ -20,6 +20,7 @@ export function QuotaMeter({
   now,
   showAge = false,
   compact = false,
+  hideDetail = false,
 }: {
   row: LimitRow | null;
   accountId?: string;
@@ -27,6 +28,8 @@ export function QuotaMeter({
   now: number;
   showAge?: boolean;
   compact?: boolean;
+  /** The complete table supplies visible forecast and age columns. */
+  hideDetail?: boolean;
 }) {
   const health = useResource<HealthRow[]>(RESOURCES.health).data;
   const note = health?.find(
@@ -63,7 +66,7 @@ export function QuotaMeter({
             : null)
         }
         detail={
-          row && !compact
+          row && !compact && !hideDetail
             ? `${forecast(row, now)}${
                 showAge || row.stale || note ? ` · ${age} ago${nextTry ? ` · ${nextTry}` : ""}` : ""
               }`

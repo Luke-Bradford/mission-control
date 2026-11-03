@@ -1,0 +1,22 @@
+{
+  "horizontalBefore": {
+    "focus": true,
+    "left": 0,
+    "width": 835,
+    "scrollWidth": 1050
+  },
+  "horizontalAfterRight": {
+    "focus": true,
+    "left": 198,
+    "width": 835,
+    "scrollWidth": 1050
+  },
+  "afterPan": {
+    "reads": 22,
+    "sameRow": true,
+    "history": "ci",
+    "scroll": 200,
+    "finalColumnVisible": true,
+    "sticky": "sticky"
+  }
+}

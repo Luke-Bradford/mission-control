@@ -1,0 +1,48 @@
+
+ RUN  v3.2.7 [controller]/codex-overview-density
+
+ ✓ |web| test/AgentsPanel.test.tsx (85 tests) 871ms
+ ✓ |web| test/pageRenderCounts.test.tsx (18 tests) 848ms
+ ✓ |web| test/Overview.test.tsx (129 tests) 2831ms
+stderr | test/App.test.tsx > App > / renders its page and marks its tab
+Not implemented: navigation to another Document
+
+(node:38505) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ |web| test/KpiStrip.test.tsx (11 tests) 331ms
+ ✓ |web| test/App.test.tsx (42 tests) 3470ms
+   ✓ App > / has one page heading and the shell landmarks  360ms
+   ✓ App > /flight has one page heading and the shell landmarks  315ms
+   ✓ App > /board has one page heading and the shell landmarks  315ms
+   ✓ App > /agent has one page heading and the shell landmarks  307ms
+   ✓ App > /map/sample has one page heading and the shell landmarks  310ms
+   ✓ App > /comms has one page heading and the shell landmarks  317ms
+   ✓ App > /telemetry has one page heading and the shell landmarks  318ms
+   ✓ App > /audit has one page heading and the shell landmarks  310ms
+   ✓ App > /setup/loops has one page heading and the shell landmarks  312ms
+ ✓ |web| test/loadFetches.test.tsx (2 tests) 294ms
+stderr | test/OverviewV2.test.tsx > renders overview panels safely with missing or partial sections: {"machine":{"cpu":[10,20]},"kpis":{"working":{},"spendToday":{}}}
+Encountered two children with the same key, `NaN`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+stderr | test/OverviewV2.test.tsx > renders overview panels safely with missing or partial sections: {"machine":{"cpu":[10,20]},"kpis":{"working":{},"spendToday":{}}}
+Encountered two children with the same key, `NaN`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ |web| test/OverviewV2.test.tsx (14 tests) 271ms
+ ✓ |web| test/OverviewTimeline.test.tsx (8 tests) 170ms
+ ✓ |web| test/MapPerformance.test.tsx (8 tests) 168ms
+ ✓ |web| test/OverviewHistory.test.tsx (5 tests) 135ms
+ ✓ |web| test/OverviewBudget.test.tsx (2 tests) 159ms
+ ✓ |web| test/Review1360LockClock.test.tsx (2 tests) 84ms
+ ✓ |web| test/PipelinePanel.test.tsx (3 tests) 85ms
+ ✓ |web| test/OverviewMeasuredHistory.test.tsx (3 tests) 72ms
+ ✓ |web| test/formatContract.test.ts (1 test) 17ms
+ ✓ |web| test/ContextCapacity.test.tsx (3 tests) 17ms
+ ✓ |web| test/doingCss.test.ts (16 tests) 14ms
+ ✓ |web| test/clock.test.tsx (1 test) 11ms
+ ✓ |web| test/AgentsPanelCss.test.ts (10 tests) 8ms
+ ✓ |web| test/OverviewLayoutCss.test.ts (14 tests) 10ms
+
+ Test Files  20 passed (20)
+      Tests  377 passed (377)
+   Start at  22:27:30
+   Duration  7.60s (transform 1.06s, setup 2.59s, collect 1.28s, tests 9.87s, environment 5.39s, prepare 642ms)

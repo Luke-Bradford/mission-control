@@ -31,7 +31,7 @@ import {
 } from "@mc/core";
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
-import { cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
+import { cost, cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -531,11 +531,13 @@ export function seatRoleTitle(
 
 /**
  * `model · effort · CLI version`: the run's model id (else the config alias), a seat's effort
- * (`default` when unset; a loop has none), and the CLI version when it is known.
+ * when recorded, its configured budget when present, and the CLI version when known.
  */
 export function modelLine(row: CrewRow): string {
   const parts = [row.run?.model ?? row.model ?? "—"];
-  if (row.kind === "crew") parts.push(row.cli.effort ?? "default");
+  if (row.kind === "crew" && row.cli.effort) parts.push(row.cli.effort);
+  if (row.kind === "crew" && row.cli.budgetUsd != null)
+    parts.push(`Budget ${cost(row.cli.budgetUsd, false)}`);
   if (row.cli.version) parts.push(`CLI ${row.cli.version}`);
   return parts.join(DOING_SEP);
 }

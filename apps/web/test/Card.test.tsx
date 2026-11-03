@@ -1,10 +1,11 @@
+import type { PillSpec } from "@mc/core";
 import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { Card } from "../src/board/Card.tsx";
 import { PrChip } from "../src/hud/PrChip.tsx";
 import { boardItem, prView } from "./fixtures.ts";
 
-const card = (pr: ReturnType<typeof prView>, checkPill: Parameters<typeof Card>[0]["checkPill"]) =>
+const card = (pr: ReturnType<typeof prView>, checkPill: PillSpec | null) =>
   render(
     <Card
       item={boardItem({ status: "In review" })}
@@ -14,7 +15,8 @@ const card = (pr: ReturnType<typeof prView>, checkPill: Parameters<typeof Card>[
       queued={null}
       reviewer={null}
       pr={pr}
-      checkPill={checkPill}
+      checkLabel={checkPill?.label}
+      checkTone={checkPill?.tone}
       mine={false}
       unacked={false}
       outcome="Closed"

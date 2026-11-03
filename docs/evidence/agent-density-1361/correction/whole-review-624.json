@@ -1,0 +1,26 @@
+{
+  "reviewedAt": "2026-11-03T10:01:10.803482+00:00",
+  "headSha": "624a7d4e2ea1420ec695ec1938caeddc51b70ff9",
+  "runtimeSource": "746430541045d52a41cf350e50544615254293bc",
+  "scope": "Fresh independent whole-branch source and rendered design review against integrated main99e8404e, with actual approved1353Agent mockup and source-bound production App fixtures. No prior Agent approval reused.",
+  "findings": [
+    {
+      "severity": "Minor",
+      "category": "design",
+      "path": "apps/web/src/agent/Overview.tsx",
+      "line": 349,
+      "relatedPath": "apps/web/src/agent/Overview.css",
+      "relatedLine": 201,
+      "title": "Long summaries exceed four lines in the narrow open-rail Agent view",
+      "reproduction": "At1280x700 with FLIGHT open and the long controlled fixture, the reported-result200-character preview wraps to nine lines before its named full reader. The original-ask preview wraps to roughly eight.",
+      "impact": "Exceeds the HUD four-line running-summary rule and increases the distance to the next decision. Complete content remains keyboard accessible, so this is Minor.",
+      "fix": "Bound the preview to four lines or allocate its story cell enough width; keep an indicated full-text route whenever visual clamping occurs, including strings shorter than the character limit.",
+      "image": "1361-independent-review/long-dark-final.png",
+      "initialContext": "1361-independent-review/long-dark-initial.png"
+    }
+  ],
+  "importantOrCritical": 0,
+  "independentBrowser": "Three1280x700open production-App cases: longdark full-reader Enter/Tab/nativeEnd and held reason; manylight End to50th deliverable/seat/relation; stopped reviewer exactqueuedhead and zero-budget/unseteffort. All19to19reads,zeroerrors/writes.",
+  "artifactAttestation": "1361-independent-artifact-attestation.json",
+  "limits": "No test-suite or build rerun. Reused frozen source-bound author production build. Controlled fictional APIs/frozen clock; no live/provider/crew/loop actions or publication."
+}

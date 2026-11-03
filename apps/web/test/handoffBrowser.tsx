@@ -26,7 +26,7 @@ createRoot(root).render(
             queued={null}
             reviewer={null}
             pr={null}
-            checkPill={null}
+            checkLabel={null}
             mine={false}
             unacked={false}
             outcome="Closed"

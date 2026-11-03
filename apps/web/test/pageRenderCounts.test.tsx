@@ -26,6 +26,8 @@ class Stream {
 
   addEventListener(type: string, listener: (event: MessageEvent) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+    // This fixture is an idle connected stream, not a connection that silently times out.
+    if (type === "open") queueMicrotask(() => listener(new MessageEvent("open")));
   }
 
   close() {}
@@ -84,9 +86,11 @@ async function commitsOverMinute(
       if (live && (second + 1) % 5 === 0) Stream.current?.emit("agents");
     });
   }
+  // Ending the stream is a new connection-state event, outside the idle observation window.
+  const observed = { commits, requests: fetchMock.mock.calls.length };
   stop();
   view.unmount();
-  return { commits, requests: fetchMock.mock.calls.length };
+  return observed;
 }
 
 describe("page-root render counts", () => {

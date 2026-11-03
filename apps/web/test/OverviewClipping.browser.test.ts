@@ -75,6 +75,7 @@ const comms = (i: number) => ({
 });
 
 const api = {
+  "/api/settings/crew-pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [
@@ -118,7 +119,7 @@ const api = {
 };
 
 /** Panels whose body is a list that scrolls with a visible scrollbar. Every other panel shows all of its content. */
-const SCROLLING_PANELS = ["agentsP", "timelineP", "actP"];
+const SCROLLING_PANELS = ["agentsP", "timelineP", "actP", "overviewNextP"];
 
 /** Geometry and screenshots must describe the populated fixture, never its loading skeleton. */
 async function settled(page: RenderedPage) {
@@ -142,7 +143,7 @@ interface Problems {
   problems: string[];
 }
 
-describeRendered("Overview panels never clip or wrap their header", () => {
+describeRendered("Overview panels keep headers readable and content reachable", () => {
   for (const [width, height] of [
     [1280, 1000],
     [1600, 1000],
@@ -166,16 +167,23 @@ describeRendered("Overview panels never clip or wrap their header", () => {
             const box = (el: Element) => el.getBoundingClientRect();
             for (const panel of document.querySelectorAll<HTMLElement>("#page-overview .panel")) {
               const id = panel.id;
-              // the header stays on one line
+              // Deliberate wrapping is readable; every title and control stays inside its header.
               const ph = panel.querySelector<HTMLElement>(":scope > .ph");
               if (ph) {
-                const parts = [
-                  ...ph.children,
-                  ...(ph.querySelector(".act")?.children ?? []),
-                ].filter((el) => box(el).width > 0);
-                const tops = parts.map((el) => box(el).top);
-                const spread = Math.max(...tops) - Math.min(...tops);
-                if (spread > 8) out.push(`${id}: header wraps (${spread}px)`);
+                const bounds = box(ph);
+                for (const el of ph.querySelectorAll<HTMLElement>("h2,button,a,select")) {
+                  const rect = box(el);
+                  if (!rect.width || !rect.height) continue;
+                  if (
+                    rect.left < bounds.left - 1 ||
+                    rect.right > bounds.right + 1 ||
+                    rect.top < bounds.top - 1 ||
+                    rect.bottom > bounds.bottom + 1
+                  )
+                    out.push(`${id}: header control outside its bounds: ${el.textContent}`);
+                  if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+                    out.push(`${id}: header text clipped: ${el.textContent}`);
+                }
               }
               // nothing is cut off by the panel itself
               if (panel.scrollHeight > panel.clientHeight + 1) {
@@ -189,7 +197,11 @@ describeRendered("Overview panels never clip or wrap their header", () => {
                 if (over <= 1 || el.clientHeight === 0 || el.closest(".sr-only")) continue;
                 // line clamps and ellipsis are meant; real blocks are not
                 if (style.webkitLineClamp !== "none" && style.webkitLineClamp !== "") continue;
-                if (scrollsY && !scrolling.includes(id)) {
+                if (
+                  scrollsY &&
+                  !scrolling.includes(id) &&
+                  !el.matches(".allowance-scroll,.history-data-scroll")
+                ) {
                   out.push(`${id}: ${el.className || el.tagName} scrolls instead of showing`);
                 } else if (clipsY && style.display !== "-webkit-box") {
                   out.push(`${id}: ${el.className || el.tagName} clips ${over}px`);
@@ -207,7 +219,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
             if (lanes.length === 0) out.push("pipeline: no lanes");
             return { problems: out };
           }, SCROLLING_PANELS);
-          expect(problems).toEqual([]);
+          expect(problems, JSON.stringify(problems)).toEqual([]);
           await page.close();
         },
         BROWSER_TEST_TIMEOUT_MS,
@@ -235,7 +247,7 @@ describeRendered("Overview panels never clip or wrap their header", () => {
         expect(activity.height).toBeGreaterThanOrEqual(280);
         expect(activity.height).toBeLessThan(600);
         expect(await page.reachable("#actList .arow", "#actList")).not.toContain(false);
-        expect(await page.reachable("#pipelineP .pipeline-more")).not.toContain(false);
+        expect(await page.reachable("#pipelineP .pipeline-stage h3 a")).not.toContain(false);
         expect(await page.reachable(".overview-metrics")).toEqual([true]);
         expect(await page.reachable("#pipelineP .pipeline-chip")).not.toContain(false);
         await page.screenshot(join(SHOTS, `overview-populated-1600x700-${colorScheme}.png`));

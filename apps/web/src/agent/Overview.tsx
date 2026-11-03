@@ -1,19 +1,28 @@
 import type { AgentDetailView } from "@mc/core";
-import type { MouseEvent } from "react";
+import { type MouseEvent, useRef } from "react";
 import { useNow } from "../clock.ts";
 import { callSign, modelLine, seatAreaText } from "../crew.ts";
 import { cost, dur, firstLine, kTokens, percent } from "../fmt.ts";
 import { useRoleLabel } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { PromptCostBar } from "../hud/PromptCost.tsx";
+import { ReviewCheck } from "../hud/ReviewState.tsx";
 import { followLink, tracePath } from "../router.ts";
 import { AgentHeaderActions, HeaderReviewState } from "./Header.tsx";
+import { ListScrollCue } from "./ListScrollCue.tsx";
 import { Reason } from "./Reason.tsx";
 import "./Overview.css";
 
 const DASH = "—";
 const localLink = (event: MouseEvent<HTMLAnchorElement>) =>
   followLink(event, event.currentTarget.getAttribute("href") ?? "/agent");
+function BriefReason({ text, limit, label }: { text: string; limit: number; label: string }) {
+  const line = firstLine(text).slice(0, limit);
+  const abbreviated = line !== text;
+  return (
+    <Reason line={abbreviated ? `${line.trimEnd()}…` : line} full={text} label={label} brief />
+  );
+}
 function Age({ at }: { at: number }) {
   const now = useNow();
   return <span className="mono muted">State changed {dur(Math.max(0, now - at))} ago</span>;
@@ -91,13 +100,63 @@ export function AgentNextMove({ view }: { view: AgentDetailView }) {
     <section className="panel agent-v2-next" aria-label="Next move">
       <b>{title}</b>
       <div>
-        <Reason line={firstLine(move.text).slice(0, 160)} full={move.text} />
+        <BriefReason text={move.text} limit={160} label="next decision" />
         {move.recommendation && <p className="s fg2">FLIGHT recommends: {move.recommendation}</p>}
       </div>
       <a className="btn" href={move.href} onClick={localLink}>
         {move.label}
       </a>
     </section>
+  );
+}
+/** Seat availability and queued work are separate: stopped seats can still have a review waiting. */
+export function AgentAvailability({ view }: { view: AgentDetailView }) {
+  const { row, awaiting } = view;
+  const queued = row.queuedReview;
+  const checking = row.reviewing;
+  return (
+    <Panel title="What is happening now?">
+      <div className="pb agent-v2-availability">
+        <div className="agent-v2-awaiting">
+          <b>{awaiting.label}</b>
+          {awaiting.reason && (
+            <BriefReason text={awaiting.reason} limit={200} label="current state reason" />
+          )}
+        </div>
+        {row.sourceError && <p className="crit-t">Source could not refresh: {row.sourceError}</p>}
+        {row.mode === "writer" && row.review && (
+          <p className="s muted">PR #{row.review.prNumber} · head SHA not supplied in this view</p>
+        )}
+        {checking && (
+          <p>
+            {row.crewPause || row.paused || row.hudState === "stopped" || row.hudState === "error"
+              ? "Assigned review"
+              : "Checking"}{" "}
+            PR #{checking.prNumber} · <code>{checking.sha}</code>
+            {checking.ref ? ` · ${checking.ref}` : ""}
+          </p>
+        )}
+        {queued && (
+          <div className="agent-v2-queued-review">
+            <b>
+              Review waiting · PR #{queued.prNumber} · #{queued.position} in queue
+            </b>
+            <p>{queued.reason}</p>
+            <p>
+              Queued head <code>{queued.sha}</code>
+              {queued.ref ? ` · ${queued.ref}` : ""}
+            </p>
+            <a
+              href={`/qa?repo=${encodeURIComponent(queued.repoId)}&pr=${queued.prNumber}&head=${encodeURIComponent(queued.sha)}`}
+              onClick={localLink}
+            >
+              Review evidence for this head
+            </a>
+          </div>
+        )}
+        {row.review?.check && <ReviewCheck check={row.review.check} />}
+      </div>
+    </Panel>
   );
 }
 export function AgentStats({ view }: { view: AgentDetailView }) {
@@ -150,7 +209,12 @@ export function AgentStats({ view }: { view: AgentDetailView }) {
         <span>
           {context.window === null ? "Window not recorded" : `of ${kTokens(context.window)} tokens`}
         </span>
-        <span>Latest saved reading</span>
+        <span>
+          {context.tokens === null
+            ? "Used tokens not recorded"
+            : `${kTokens(context.tokens)} tokens used`}{" "}
+          · latest saved reading
+        </span>
       </Stat>
     </section>
   );
@@ -173,6 +237,7 @@ function Stat({
   );
 }
 export function AgentLoop({ view }: { view: AgentDetailView }) {
+  const steps = useRef<HTMLOListElement>(null);
   if (!view.row.run) return null;
   return (
     <Panel
@@ -185,50 +250,54 @@ export function AgentLoop({ view }: { view: AgentDetailView }) {
       }
     >
       {view.steps.length ? (
-        <ol className="agent-v2-steps">
-          {view.steps.map((step) => (
-            <li key={step.id} className={step.state}>
-              <b>
-                {step.state === "done"
-                  ? "✓"
-                  : step.state === "held"
-                    ? "Ⅱ"
-                    : step.state === "current"
-                      ? "●"
-                      : "○"}{" "}
-                {step.label}
-              </b>
-              <span>
-                {step.state === "unknown"
-                  ? "Not recorded"
-                  : step.state === "todo"
-                    ? "Not started"
-                    : step.state === "done"
-                      ? "Completed"
-                      : step.state === "held"
-                        ? "Held"
-                        : "Running"}
-                {step.tries !== null
-                  ? ` · ${step.tries} ${step.failures !== null ? "executions" : step.limit !== null ? "rounds" : step.tries === 1 ? "try" : "tries"}${step.failures === null && step.limit !== null ? ` of ${step.limit}` : ""}`
-                  : " · tries not recorded"}
-                {step.failures !== null &&
-                  ` · ${step.failures} ${step.failures === 1 ? "failure" : "failures"}${step.limit !== null ? ` of ${step.limit} allowed` : ""}`}
-              </span>
-              <span className="agent-v2-step-time">
-                {step.since !== null ? (
-                  <StepAge since={step.since} />
-                ) : step.durationMs !== null ? (
-                  dur(step.durationMs)
-                ) : (
-                  DASH
+        <>
+          <ListScrollCue region={steps} label="loop steps" count={view.steps.length} />
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded steps scroll with the keyboard. */}
+          <ol className="agent-v2-steps" ref={steps} tabIndex={0} aria-label="Build loop steps">
+            {view.steps.map((step) => (
+              <li key={step.id} className={step.state}>
+                <b>
+                  {step.state === "done"
+                    ? "✓"
+                    : step.state === "held"
+                      ? "Ⅱ"
+                      : step.state === "current"
+                        ? "●"
+                        : "○"}{" "}
+                  {step.label}
+                </b>
+                <span>
+                  {step.state === "unknown"
+                    ? "Not recorded"
+                    : step.state === "todo"
+                      ? "Not started"
+                      : step.state === "done"
+                        ? "Completed"
+                        : step.state === "held"
+                          ? "Held"
+                          : "Running"}
+                  {step.tries !== null
+                    ? ` · ${step.tries} ${step.failures !== null ? "executions" : step.limit !== null ? "rounds" : step.tries === 1 ? "try" : "tries"}${step.failures === null && step.limit !== null ? ` of ${step.limit}` : ""}`
+                    : " · tries not recorded"}
+                  {step.failures !== null &&
+                    ` · ${step.failures} ${step.failures === 1 ? "failure" : "failures"}${step.limit !== null ? ` of ${step.limit} allowed` : ""}`}
+                </span>
+                <span className="agent-v2-step-time">
+                  {step.since !== null ? (
+                    <StepAge since={step.since} />
+                  ) : step.durationMs !== null ? (
+                    dur(step.durationMs)
+                  ) : (
+                    DASH
+                  )}
+                </span>
+                {step.reason && (
+                  <BriefReason text={step.reason} limit={100} label={`${step.label} reason`} />
                 )}
-              </span>
-              {step.reason && (
-                <Reason line={firstLine(step.reason).slice(0, 100)} full={step.reason} />
-              )}
-            </li>
-          ))}
-        </ol>
+              </li>
+            ))}
+          </ol>
+        </>
       ) : (
         <p className="pb s muted">No build loop is recorded for this run.</p>
       )}
@@ -251,11 +320,16 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
       <div className="pb agent-v2-story">
         <div>
           <h3>Original ask</h3>
-          <p>{view.story.title ?? "No ticket title recorded."}</p>
+          {view.story.title ? (
+            <BriefReason text={view.story.title} limit={160} label="original ask" />
+          ) : (
+            <p>No ticket title recorded.</p>
+          )}
           {view.story.original.length > 0 ? (
             <details>
               <summary>{view.story.original.length} acceptance checks</summary>
-              <ol>
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: acceptance text has a bounded scroller. */}
+              <ol tabIndex={0} aria-label="Original acceptance checks">
                 {view.story.original.map((check) => (
                   <li key={check.line}>{check.text}</li>
                 ))}
@@ -268,7 +342,7 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
         <div>
           <h3>Reported result</h3>
           {view.story.report ? (
-            <Reason line={firstLine(view.story.report).slice(0, 200)} full={view.story.report} />
+            <BriefReason text={view.story.report} limit={200} label="reported result" />
           ) : (
             <p className="muted">No result reported yet.</p>
           )}
@@ -278,7 +352,8 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
                 {view.story.doneWhen.filter((item) => item.status === "met").length} of{" "}
                 {view.story.original.length || view.story.doneWhen.length} checks reported met
               </summary>
-              <ul>
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: reported evidence has a bounded scroller. */}
+              <ul tabIndex={0} aria-label="Reported acceptance evidence">
                 {view.story.doneWhen.map((item) => (
                   <li key={item.line}>
                     <b>{item.status === "met" ? "✓ Reported met" : "○ Reported not met"}:</b>{" "}
@@ -298,10 +373,18 @@ export function AgentStory({ view }: { view: AgentDetailView }) {
   );
 }
 export function AgentDeliverables({ view }: { view: AgentDetailView }) {
+  const links = useRef<HTMLUListElement>(null);
   if (!view.row.run) return null;
   return (
     <Panel title="Deliverables" sub={`${view.deliverables.length} saved links`}>
-      <ul className="agent-v2-deliverables">
+      <ListScrollCue region={links} label="saved links" count={view.deliverables.length} />
+      <ul
+        className="agent-v2-deliverables"
+        ref={links}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded list scrolls with the keyboard.
+        tabIndex={0}
+        aria-label="Saved deliverable links"
+      >
         {view.deliverables.map((item) => (
           <li key={item.id}>
             <span>
@@ -320,10 +403,18 @@ export function AgentDeliverables({ view }: { view: AgentDetailView }) {
   );
 }
 export function AgentRelated({ view }: { view: AgentDetailView }) {
+  const related = useRef<HTMLUListElement>(null);
   if (view.related.length === 0) return null;
   return (
     <Panel title="Related work" sub="Reviews, subagents and set-aside runs">
-      <ul className="agent-v2-related">
+      <ListScrollCue region={related} label="related items" count={view.related.length} />
+      <ul
+        className="agent-v2-related"
+        ref={related}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded list scrolls with the keyboard.
+        tabIndex={0}
+        aria-label="Related reviews and runs"
+      >
         <li>
           <b>{callSign(view.row)} · this run</b>
         </li>

@@ -48,7 +48,7 @@ function KpiTrace({
   const quiet = quietSeries(values);
   const readings = values.filter((v): v is number => v !== null);
   // zeros are no activity; no readings at all (e.g. no completed cycles) is no data
-  const empty = readings.length === 0 ? "no data" : "no activity";
+  const empty = readings.length === 0 ? "history not collected" : "no activity";
   const peak = Math.max(0, ...readings);
   const latest = values.at(-1);
   const aria = quiet
@@ -56,20 +56,16 @@ function KpiTrace({
     : `${label} · peak ${format(peak)}${latest == null ? "" : ` · latest ${format(latest)}`}`;
   return (
     <span className="kpi-trace">
-      <Sparkline values={values} color={color} label={aria} live={live} top={9} />
+      {readings.length > 0 && <Sparkline values={values} color={color} label={aria} live={live} />}
       {quiet ? (
         <span className="kpi-quiet" aria-hidden="true">
           {empty}
         </span>
       ) : (
-        <span className="kpi-peak num" aria-hidden="true" title="Peak in the last 30 minutes">
+        <span className="kpi-peak sr-only" aria-hidden="true" title="Peak in the last 30 minutes">
           {format(peak)}
         </span>
       )}
-      <span className="kpi-axis num" aria-hidden="true">
-        <span>-30m</span>
-        <span>now</span>
-      </span>
     </span>
   );
 }
@@ -123,8 +119,9 @@ export function KpiStrip() {
       fmt: String,
     }),
     {
-      label: "Tokens/min",
-      title: "Input and output tokens in the last full minute, crew-wide in the repos in view.",
+      label: "Tokens/min · 1m",
+      title:
+        "Input and output tokens in the last full minute, crew-wide in the repos in view. Unit: tokens per minute. History: last 30 complete minutes.",
       page: "telemetry",
       value: k?.tokensPerMin?.now != null ? kTokens(k.tokensPerMin.now) : "—",
       pending,
@@ -155,8 +152,9 @@ export function KpiStrip() {
       fmt: String,
     }),
     {
-      label: "CI pass rate",
-      title: "CI runs that passed in the last 24 hours, of those that finished.",
+      label: "CI pass rate · 24h",
+      title:
+        "CI runs that passed in the last 24 hours, of those that finished. Unit: percent of completed runs; this is not first-push PR success.",
       page: "board",
       value: percent(k?.ciPassRate24h?.pct),
       pending,
@@ -208,6 +206,8 @@ export function KpiStrip() {
         {tiles.map((tile) => {
           const path = tile.to ?? PAGE_PATHS[tile.page];
           const series = tile.series;
+          const measuredHistory =
+            !!series && series.length >= 2 && series.some((value) => value !== null);
           // A figure with no history shows its context where the trace would be.
           const contextOnly = series === undefined;
           return (
@@ -216,36 +216,45 @@ export function KpiStrip() {
               key={tile.label}
               href={path}
               onClick={(e) => followLink(e, path)}
+              title={tile.title}
             >
               <span className="lbl" title={tile.title}>
                 {tile.metric ? <MetricName id={tile.metric} /> : tile.label}
               </span>
-              <span
-                className="v num"
-                data-metric={tile.metric}
-                title={tile.metric ? tile.title : undefined}
-              >
-                {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
+              <span className="kpi-reading">
+                <span
+                  className="v num"
+                  data-metric={tile.metric}
+                  title={tile.metric ? tile.title : undefined}
+                >
+                  {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
+                </span>
+                {series && measuredHistory ? (
+                  <KpiTrace
+                    values={series}
+                    color={tile.color}
+                    label={`${tile.label} · ${tile.history}`}
+                    format={tile.fmt}
+                    live={summary !== undefined && error === null}
+                  />
+                ) : null}
               </span>
-              {!contextOnly && (
+              {!contextOnly && measuredHistory ? (
                 <span className="d num" title={tile.pending ? undefined : tile.delta}>
                   {tile.pending ? null : tile.delta}
                 </span>
-              )}
-              {series && series.length >= 2 ? (
-                <KpiTrace
-                  values={series}
-                  color={tile.color}
-                  label={`${tile.label} · ${tile.history}`}
-                  format={tile.fmt}
-                  live={summary !== undefined && error === null}
-                />
               ) : (
                 <span
                   className="kpi-secondary num"
                   title={contextOnly ? tile.delta : "History unavailable"}
                 >
-                  {tile.pending ? null : contextOnly ? tile.delta : "—"}
+                  {tile.pending
+                    ? "Loading measure…"
+                    : contextOnly
+                      ? tile.delta === "—"
+                        ? "History not collected"
+                        : tile.delta
+                      : "History not collected"}
                 </span>
               )}
             </a>

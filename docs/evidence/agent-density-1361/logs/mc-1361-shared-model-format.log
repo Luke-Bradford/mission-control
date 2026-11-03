@@ -1,0 +1,14 @@
+apps/web/test/Overview.test.tsx:224:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    222 │     expect(container.querySelector(".overview-secondary > #machP")).toBeTruthy();
+    223 │     expect(container.querySelector(".overview-primary > #quotaP")).toBeTruthy();
+  > 224 │     const grid = container.querySelector(".overview-grid")!;
+        │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    225 │     expect([...grid.children].map((child) => child.id || child.className)).toEqual([
+    226 │       "overview-metrics",
+  
+
+Checked 2 files in 56ms. Fixed 1 file.
+Found 1 warning.

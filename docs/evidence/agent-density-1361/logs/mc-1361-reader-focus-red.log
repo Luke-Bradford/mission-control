@@ -1,0 +1,47 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ❯ |web| test/AgentDensity.browser.test.ts (14 tests | 1 failed | 13 skipped) 3001ms
+   ↓ Agent density in the production App > keeps the answer first at 1280 × 1000, both rail states and schemes
+   ↓ Agent density in the production App > keeps the answer first at 1440 × 1000, both rail states and schemes
+   ↓ Agent density in the production App > keeps the answer first at 1600 × 1000, both rail states and schemes
+   ↓ Agent density in the production App > keeps the answer first at 1920 × 1080, both rail states and schemes
+   ↓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes
+   ↓ Agent density in the production App > keeps the answer first at 1600 × 700, both rail states and schemes
+   ↓ Agent density in the production App > keeps honest empty content and full access in both schemes
+   ↓ Agent density in the production App > keeps honest one content and full access in both schemes
+   × Agent density in the production App > keeps honest long content and full access in both schemes 1814ms
+     → expected false to be true // Object.is equality
+   ↓ Agent density in the production App > keeps honest many content and full access in both schemes
+   ↓ Agent density in the production App > keeps honest loading content and full access in both schemes
+   ↓ Agent density in the production App > keeps honest error content and full access in both schemes
+   ↓ Agent density in the production App > keeps honest stale content and full access in both schemes
+   ↓ Agent density in the production App > keeps honest disconnected content and full access in both schemes
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/AgentDensity.browser.test.ts > Agent density in the production App > keeps honest long content and full access in both schemes
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/AgentDensity.browser.test.ts:187:36
+    185|             );
+    186|           expect(fullText.remaining).toBeLessThanOrEqual(2);
+    187|           expect(fullText.painted).toBe(true);
+       |                                    ^
+    188|         }
+    189|         if (scenario === "many") {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  01:02:54
+   Duration  4.61s (transform 184ms, setup 268ms, collect 168ms, tests 3.00s, environment 0ms, prepare 27ms)
+

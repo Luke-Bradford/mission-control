@@ -1,0 +1,247 @@
+[
+  {
+    "state": "failed-ed31",
+    "receipt": "failed-ed31-review-receipt.json",
+    "originalReceiptSha256": "a31069b576c375bce0dd206e177a6861f2da3a1752db76e676a4d672ee22cfa7",
+    "retainedReceiptSha256": "9a0739e117a3362228e2a0e9793be32dfc6ef9f9f6b3b6cb873bf20b162e8678",
+    "files": [
+      {
+        "file": "failed-ed31-1280x900-dark-default-work-focus-after-pan.png",
+        "sha256": "59e34123e31c514b385e062b48ee07f399105fc877e05c76c12c2794235318d9"
+      },
+      {
+        "file": "failed-ed31-1600x700-light-many-work-focus-after-pan.png",
+        "sha256": "423f1379d70b5591a39c1f558ec96d760d0e3553a4a3e520b07d786ef0260b2f"
+      },
+      {
+        "file": "failed-ed31-1920x1080-light-mixed-work-focus-after-pan.png",
+        "sha256": "e976e05980be946c2161bec3542d662622a50b65a231e63c3dc26d7d6eb2b832"
+      }
+    ],
+    "scope": "Independent real-browser probe. Source/viewport/theme/read counts are in its receipt. Controller build paths are replaced by a logical marker in the retained receipt; original bytes hash is preserved."
+  },
+  {
+    "state": "failed-allowance-ed31",
+    "receipt": "failed-allowance-ed31-review-receipt.json",
+    "originalReceiptSha256": "6bc0fb6b594e58b4e692a7fbca26f2bfd68c5a9df503f6fdd38bafb78e24623d",
+    "retainedReceiptSha256": "e789e5d9e01b7de9b281e364ebfea3f36ffcaa2797f5f35624920da12312dd1a",
+    "files": [
+      {
+        "file": "failed-allowance-ed31-1600x1000-light-default-missing-overflow-cue.png",
+        "sha256": "775aa7fff63ce663481b4f866fae65cd6a646e89bbd216a157fb5952733e84d9"
+      }
+    ],
+    "scope": "Independent real-browser probe. Source/viewport/theme/read counts are in its receipt. Controller build paths are replaced by a logical marker in the retained receipt; original bytes hash is preserved."
+  },
+  {
+    "state": "corrected-025",
+    "receipt": "corrected-025-review-receipt.json",
+    "originalReceiptSha256": "8bae1bd0918386987868b1cdc4b74ed4a597e1bbe4b9b78d269435b3d76e304c",
+    "retainedReceiptSha256": "448897c59d5480170a1bbf752324e351f2da6a0cb8ba5b91e504b59717579f4b",
+    "files": [
+      {
+        "file": "corrected-025-1280x900-dark-default-focus-0.png",
+        "sha256": "709fb2ac2cb3af69d531e25f926645bf2d9be6d516a7d64f92c787fa9f7dd580"
+      },
+      {
+        "file": "corrected-025-1280x900-dark-default-focus-1.png",
+        "sha256": "aa0db7e5a098f99097e3f257185ccff00e4ead4b8ab6eccbcde108fdc25161e0"
+      },
+      {
+        "file": "corrected-025-1280x900-dark-default-focus-2.png",
+        "sha256": "fe6545b972444f7134948eb81be32eea67f0872797a6d09d15b4b1fe778fde52"
+      },
+      {
+        "file": "corrected-025-1280x900-dark-default-focus-3.png",
+        "sha256": "2c33b3f98f7fce75ce21b71ac9922d92a09d5416f79667bde1f5b0b3d9abbc0a"
+      },
+      {
+        "file": "corrected-025-1280x900-dark-default-focus-4.png",
+        "sha256": "950d31545631698f1ddcdbbbf40af8b40be0289767ddce6ae71b49b4e45c928b"
+      },
+      {
+        "file": "corrected-025-1280x900-dark-default-settled.png",
+        "sha256": "49fcb11da6be2a38adfe1873936b712ed3edc75aeb3e2a4f8094ff715ad59dfe"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-focus-0.png",
+        "sha256": "154098a6296ee1202fd430e39a917f60ebb3d65a0eb2d0da0b4df628de09d23b"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-focus-1.png",
+        "sha256": "1dd2d3b13d8962f8841cc9c79e2211802ee360a0be1b19a80d2d81e93c3480c9"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-focus-2.png",
+        "sha256": "8724cd54797fab887807bc7be4d170872af050493ea82d9bfdaa160c8197b71f"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-focus-3.png",
+        "sha256": "b156e5bf57f309fb0c78f8122870abb0a8dddd687d5320dddd3438d6dcbb43c0"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-focus-4.png",
+        "sha256": "43b3696ddd7c4fdaf140096b5e694697701851c2749cb4f3e5e110a7fd586c57"
+      },
+      {
+        "file": "corrected-025-1280x900-light-default-settled.png",
+        "sha256": "40a8ed43113da50d1e60300b99cec8426e15e5baf9b3aa0f3fbb359486912ebb"
+      },
+      {
+        "file": "corrected-025-1600x1000-light-default-settled.png",
+        "sha256": "0fdf2e9206e1c944643bc9129c1483d9c5f74876cb15eff814c05c245af5bb56"
+      },
+      {
+        "file": "corrected-025-1600x1000-light-default-visible-overflow-cue.png",
+        "sha256": "24c754fb961d6a9cc73f802f6e6e48eafa3a09f5b0e31107f704c410398a2da3"
+      }
+    ],
+    "scope": "Independent real-browser probe. Source/viewport/theme/read counts are in its receipt. Controller build paths are replaced by a logical marker in the retained receipt; original bytes hash is preserved."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-allowance-evidence-dark.png",
+    "sha256": "ec0e19bdf6286c3cc7474b0ae53e5a1d873503f3b0515a4bc44f30021f0131d2",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-allowance-evidence-light.png",
+    "sha256": "5d1fea113a1cbf4db31c3f822385c05db100fb078d64fa69c1e6bb0946adf17a",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-context-keyboard-narrow-dark.png",
+    "sha256": "4a5bede5e3c2420bba42e31797134be0e1d7e5bafc467a99fde33157eba4d562",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-context-keyboard-narrow-light.png",
+    "sha256": "802404dd3d0a48be660fb8025dcfe4347b0be92468854b95bdc61805a82069c8",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-context-scroll-trace-dark.json",
+    "sha256": "82d12c7ea0ebb3a27c67ea4d8aa7077269a032a352559e682390bc5450844e7e",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-context-scroll-trace-light.json",
+    "sha256": "82d12c7ea0ebb3a27c67ea4d8aa7077269a032a352559e682390bc5450844e7e",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-history-end-trace-dark.json",
+    "sha256": "39bfddf6d34313c97d416236213f7de8508b5b40bce8c5324cf9515116c606ce",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-history-end-trace-light.json",
+    "sha256": "37e1ead52337a2ff3e44b64246a7c3b48e0eb436126c0e97cc1916425f8f5b5f",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-history-subcent-before-end-dark.png",
+    "sha256": "62da3b663f801bc8c7b02dfeacb7cb2184d3e3bf109d6375cc7fbb7befcb3071",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-history-subcent-before-end-light.png",
+    "sha256": "48e7e1eae7dd9b5dbcae94aa84dda314acb7682cc174b688925692b2538b46c6",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-history-subcent-dark.png",
+    "sha256": "556fb28c063f37a1507e13720b254aa9972eb7153f60d81c8778837852bdb453",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-history-subcent-light.png",
+    "sha256": "02a5fe3bf7b7bcf7d955187a952e94050beee9b943350b4804f97c57cf474a2a",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-work-focus-after-pan-dark.json",
+    "sha256": "be71c095b8aaafd6a79313025423970becbb160d5640f64b244b4a75414adac3",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-work-focus-after-pan-dark.png",
+    "sha256": "5d8578fab3ca39f5ca5875cea3e95305a569dbb1fcf8df9b9df882dec002da59",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "keyboard-work-focus-after-pan-light.json",
+    "sha256": "be71c095b8aaafd6a79313025423970becbb160d5640f64b244b4a75414adac3",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "author-keyboard-journey",
+    "file": "images/keyboard-work-focus-after-pan-light.png",
+    "sha256": "3af4da705ca9b0f36b11b0ac729e33b5958d3c933ff619829812972da02781a6",
+    "scope": "Controlled cost/CI-history selector journey, exact production bytes committed unchanged in02585976. Performed immediately before source freeze. Additional after-only browser evidence; not a baseline pair or independent review."
+  },
+  {
+    "state": "final-source-keyboard-supplement",
+    "receipt": "supplement-checks.json",
+    "receiptSha256": "af060cf97fb0f64cd098181143d0e156a87d392437cae4a7378a6eb66629e53f",
+    "helper": "access-supplement.ts",
+    "helperSha256": "4947f5e0dfcc07fc1d31b13158e191d22b2814f4b4e32c79e133f737af0e2abe",
+    "files": [
+      {
+        "file": "images/supplement-allowance-dark-panel.png",
+        "sha256": "4274649c53ef27b5679f651bd67984699accac6e16938399d4d6f7e90aa58e0c"
+      },
+      {
+        "file": "images/supplement-allowance-dark-viewport.png",
+        "sha256": "f9d4852d2d54f53dc59afd7ff3f691e576cf9c803e526a58cd2b8dbba8da44c3"
+      },
+      {
+        "file": "images/supplement-allowance-light-panel.png",
+        "sha256": "5d64792521dc0b26a82f35f93cf78744132506a00fb493c1176d659bd5d07b66"
+      },
+      {
+        "file": "images/supplement-allowance-light-viewport.png",
+        "sha256": "979b291b1886cef40b47c3f797ff0991ea7dd9ef32b478c5842742df4547e9fb"
+      },
+      {
+        "file": "images/supplement-many-dark-panel.png",
+        "sha256": "2bc5535e612d2f794bc0f60e0241d07890359ba0cd9d5833adb64e0530c9a079"
+      },
+      {
+        "file": "images/supplement-many-dark-viewport.png",
+        "sha256": "6820b1b6271c742bf6be2c0aea083d2b08566c30576daac17b90c8a5d64564ae"
+      },
+      {
+        "file": "images/supplement-many-light-panel.png",
+        "sha256": "ba8e9ac967d5fe70860cafd32e5558b66767b387e73a254b273ec4e12a633b37"
+      },
+      {
+        "file": "images/supplement-many-light-viewport.png",
+        "sha256": "c958115794c03d22fe89f31e4d4cce4effd6ea9632b195ebccb08619f2f3ab60"
+      }
+    ],
+    "scope": "Four source-bound025 production-browser cases: actual allowance header/forecast text-node bounds and native50th-row End/focus, both schemes, reads unchanged and writes refused. Eight after-only PNGs, not baseline pairs."
+  },
+  {
+    "state": "rejected-padding-edge-probe",
+    "receipt": "aux-pan-diagnostic.json",
+    "receiptSha256": "60dfad04bf744cb6c0d30aa52d31be83e37f6165b33d67e939ad3a443573de83",
+    "file": "images/aux-pan-diagnostic.png",
+    "sha256": "7266eb33b04db542707953bbf0491050d211db59f392b03e2118aff0360d12a6",
+    "scope": "Probe rejected cellright619 vs region618.625 despite real pan178 and painted header. Not a product defect or an accepted full-content proof. Final supplement checks actual text-node bounds instead."
+  }
+]

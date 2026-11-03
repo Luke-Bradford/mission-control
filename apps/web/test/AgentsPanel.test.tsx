@@ -1,12 +1,13 @@
 import type { AttentionItem, CrewRow, LimitRow, RunDigest } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import * as crewModule from "../src/crew.ts";
 import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
 import { nextAgent, setSelectedAgent } from "../src/shell/selection.ts";
-import { stubFetch } from "./fetchStub.ts";
+import { settled, stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, item, limit5h, MIN, NOW, seatRow } from "./fixtures.ts";
 
 const digest = (minuteTokens: [number, number][]): RunDigest => ({
@@ -72,6 +73,75 @@ const rowsIn = (container: HTMLElement) => [
   ...container.querySelectorAll<HTMLElement>(".trow:not(.head)"),
 ];
 
+it("shows the server's queued current-head review and reason without inferring a queue from pause", async () => {
+  stub(
+    [
+      seatRow({
+        id: "review-queued",
+        hudState: "stopped",
+        paused: true,
+        run: null,
+        queuedReview: {
+          repoId: "shop-app",
+          prNumber: 208,
+          sha: "a".repeat(40),
+          ref: null,
+          position: 1,
+          reason: "Account paused; current-head review is queued.",
+        },
+      }),
+      seatRow({ id: "review-paused", hudState: "stopped", paused: true, run: null }),
+    ],
+    true,
+    [],
+  );
+  const view = render(<AgentsPanel />);
+  await screen.findByText("Queued");
+  const queued = rowsIn(view.container).find((row) => row.textContent?.includes("review-queued"));
+  expect(queued?.textContent).toContain("Account paused; current-head review is queued.");
+  expect(queued?.querySelector('a[href*="/pull/208"]')).toBeTruthy();
+  const paused = rowsIn(view.container).find((row) => row.textContent?.includes("review-paused"));
+  expect(paused?.textContent).not.toContain("Queued");
+});
+
+it("does not reorder or rebuild the roster on clock ticks", async () => {
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.setSystemTime(NOW);
+  const fetch = stub(
+    [
+      seatRow({
+        id: "clock-row",
+        hudState: "running",
+        digest: {
+          ...digest([]),
+          liveTool: { name: "Bash", detail: "fixture check", since: NOW - 5000 },
+        },
+      }),
+    ],
+    true,
+    [],
+  );
+  const order = vi.spyOn(crewModule, "crewOrder");
+  try {
+    render(<AgentsPanel />);
+    await screen.findByText("clock-row");
+    await settled(fetch, "/api/crew?shape=summary");
+    const row = screen.getByText("clock-row").closest(".trow") as HTMLElement;
+    expect(row.title).toBe("Bash 0:05 · fixture check");
+    order.mockClear();
+    fetch.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(row.title).toBe("Bash 0:25 · fixture check");
+    expect(order).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    order.mockRestore();
+  }
+});
+
 it("shows FLIGHT and the crew in seven columns with a live Work line, and observed loops in the Loops strip", async () => {
   const loop = {
     phase: "working" as const,
@@ -98,7 +168,15 @@ it("shows FLIGHT and the crew in seven columns with a live Work line, and observ
     within(table)
       .getAllByRole("columnheader")
       .map((h) => h.textContent),
-  ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+  ).toEqual([
+    "Agent",
+    "State",
+    "Work",
+    "Tokens/min · 30m avg",
+    "Cost",
+    "Context · used / limit · left · used%",
+    "In state",
+  ]);
   expect(within(table).getAllByRole("row")).toHaveLength(6);
   const rendered = rowsIn(container);
   expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
@@ -129,7 +207,8 @@ it("shows FLIGHT and the crew in seven columns with a live Work line, and observ
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(row.querySelector(".tok")?.textContent).toContain("40/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.querySelectorAll(".meter")).toHaveLength(1);
+    expect(row.querySelectorAll(".context-capacity")).toHaveLength(1);
+    expect(row.querySelector(".context-capacity")?.textContent).toBe("400 / 1.0k · 600 left · 40%");
   }
   expect(container.querySelector("details, summary, .agent-group, .scroll")).toBeNull();
   expect(screen.queryByText("Run details")).toBeNull();
@@ -143,12 +222,13 @@ it("keeps a long latest message clipped inside its Crew Work cell", async () => 
   const { container } = render(<AgentsPanel />);
 
   await screen.findByText("guido-1");
-  const work = [...container.querySelectorAll<HTMLElement>(".ticket-cell")].find(
-    (cell) => cell.querySelector<HTMLElement>("[title]")?.title === latestMessage,
+  const fullMessage = [...container.querySelectorAll<HTMLElement>(".work-cell [title]")].find(
+    (element) => element.title === latestMessage,
   );
-  expect(work?.classList.contains("ticket-cell")).toBe(true);
+  expect(fullMessage).toBeDefined();
+  const work = fullMessage?.closest(".ticket-cell");
   expect(work?.classList.contains("work-cell")).toBe(true);
-  expect(work?.querySelector("[title]")?.classList.contains("ellip")).toBe(true);
+  expect(fullMessage?.classList.contains("ellip")).toBe(true);
   expect(
     screen.getByRole("table", { name: "Crew" }).querySelectorAll("[role=columnheader]"),
   ).toHaveLength(7);
@@ -295,7 +375,7 @@ it("labels Context, leaves quota in Systems and preserves paused state", async (
     false,
   );
   const { container } = render(<AgentsPanel />);
-  await screen.findByText("ctx 40%");
+  await screen.findByText("400 / 1.0k · 600 left · 40%");
   expect(screen.queryByText("14%")).toBeNull();
   const paused = await screen.findByText("Idle");
   expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Crew is paused");
@@ -468,8 +548,8 @@ it.each([
     [limit5h({ used: pct })],
   );
   const { container } = render(<AgentsPanel />);
-  await screen.findByText(`ctx ${pct}%`);
-  const meters = rowsIn(container)[1]?.querySelectorAll(".meter");
+  await screen.findByText(new RegExp(` · ${pct}%$`));
+  const meters = rowsIn(container)[1]?.querySelectorAll(".context-capacity");
   expect(meters).toHaveLength(1);
   for (const meter of meters ?? []) expect(meter.classList.contains(level)).toBe(true);
 });
@@ -520,7 +600,9 @@ it("uses the live FLIGHT seat while config is unavailable, without a duplicate o
   expect(flight.querySelector(".agent-identity")?.getAttribute("title")).toContain("opus");
   expect(flight.lastElementChild?.getAttribute("title")).toContain("Turns this session: 23");
   expect(flight.textContent).toContain("~$2.47");
-  expect(flight.textContent).toContain("ctx 40%");
+  expect(flight.querySelector(".context-capacity")?.textContent).toBe(
+    "400 / 1.0k · 600 left · 40%",
+  );
   expect(container.textContent).not.toContain("Loading…");
   expect(screen.queryByText("flight-1")).toBeNull();
 });
@@ -593,6 +675,9 @@ it("retains a stale quota reading with its age and the collector note", async ()
 });
 
 it("advances the 30 minute window and live indicator with the panel clock", async () => {
+  vi.useRealTimers();
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.setSystemTime(NOW);
   const end = Math.floor(NOW / MIN) * MIN;
   expect(
     activityValues(
@@ -620,17 +705,10 @@ it("advances the 30 minute window and live indicator with the panel clock", asyn
   const { container } = render(<AgentsPanel />);
   await screen.findByText("live");
   expect(screen.getByRole("img", { name: "Live token activity" })).toBeTruthy();
-  vi.useFakeTimers();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(61_000);
   });
-  // The shared clock was subscribed before timers were faked; allow its next real tick.
-  vi.useRealTimers();
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(NOW + 61_000);
-  await waitFor(() => expect(container.querySelector(".activity-live")).toBeNull(), {
-    timeout: 2000,
-  });
+  expect(container.querySelector(".activity-live")).toBeNull();
 });
 
 it("sorts working crew and observed loops by the last ten minutes and shares j/k order", async () => {

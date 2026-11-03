@@ -1,0 +1,265 @@
+{
+  "runtimeSource": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+  "testOnlySuccessor": "f79d6b2ad59eaae929a32f9c2118f8f731416b86",
+  "earlierGalleryRuntime": "746430541045d52a41cf350e50544615254293bc",
+  "earlierGalleryArtifact": "624a7d4e2ea1420ec695ec1938caeddc51b70ff9",
+  "scope": "Narrow correction of one independent Minor, plus missing required1440x900 coverage. Original64 pairs remain earlier phase, never relabelled new source.",
+  "finding": "At1280x700/open, character-limited long ask/result previews wrapped beyond four lines. Full content already existed.",
+  "fix": "Four-line visual preview with actual overflow measurement. Full named reader appears even for below-character-limit text that visually wraps. Its own button row avoids width/measurement feedback. No collection, reads, clocks or page hierarchy changed.",
+  "matchedCorrectionPairs": [
+    {
+      "key": "four-line-long-1280x700-light-open",
+      "before": {
+        "file": "../images/agent-long-1280x700-light-open-context-after.png",
+        "source": "746430541045d52a41cf350e50544615254293bc",
+        "capturedAt": "2026-11-03T02:38:44.194Z",
+        "sha256": "85f5d1548edfd4103f806221ea056e69bcec7404239a139cfab65e9adf0aec73",
+        "apiSha256": "6a4e8a2ab0d622917df55211f36d206e929e55f3d5c21c0e72f86bf6df9e9fa1"
+      },
+      "after": {
+        "file": "images/independent-long-light-initial.png",
+        "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+        "capturedAtEpochMs": 1793700514760,
+        "sha256": "a98cbda9a6d0e87b67630f4d96d4e0f349b098aa4fb1530ebb0a23e319176da2",
+        "apiSha256": "6a4e8a2ab0d622917df55211f36d206e929e55f3d5c21c0e72f86bf6df9e9fa1"
+      },
+      "diff": "images/four-line-long-1280x700-light-open-diff.png",
+      "scope": "Actual earlier746 initial viewport vs independently rendered correctedbeb6 initial viewport. Same API/harness/frozen clock/1280x700/open/theme. Wall-clock capture times differ and remain explicit.",
+      "diffSha256": "d7eb2dae253e7091811e00da1894150ba4a5d4ebb4a01c05ec9466b22678e6a5",
+      "diffComputedAt": "2026-11-03T10:15:31.859Z",
+      "changedPixels": 17931,
+      "changedPercent": 2
+    },
+    {
+      "key": "four-line-long-1280x700-dark-open",
+      "before": {
+        "file": "../images/agent-long-1280x700-dark-open-context-after.png",
+        "source": "746430541045d52a41cf350e50544615254293bc",
+        "capturedAt": "2026-11-03T02:38:44.677Z",
+        "sha256": "d621bac829851c5eeea92be95ddd47e31c966fb59ae3af2050eb244acf63bf30",
+        "apiSha256": "6a4e8a2ab0d622917df55211f36d206e929e55f3d5c21c0e72f86bf6df9e9fa1"
+      },
+      "after": {
+        "file": "images/independent-long-dark-initial.png",
+        "source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+        "capturedAtEpochMs": 1793700514095,
+        "sha256": "9e9f6bf0ef3e04db7fc6e9b50766783f0839b181ff9d4bab7e9df752f14777c3",
+        "apiSha256": "6a4e8a2ab0d622917df55211f36d206e929e55f3d5c21c0e72f86bf6df9e9fa1"
+      },
+      "diff": "images/four-line-long-1280x700-dark-open-diff.png",
+      "scope": "Actual earlier746 initial viewport vs independently rendered correctedbeb6 initial viewport. Same API/harness/frozen clock/1280x700/open/theme. Wall-clock capture times differ and remain explicit.",
+      "diffSha256": "aacd3d93a65b591090e6740a27eb93fcc0283ffd7dc9e165638930eab63c5fb6",
+      "diffComputedAt": "2026-11-03T10:15:31.912Z",
+      "changedPixels": 18487,
+      "changedPercent": 2.06
+    }
+  ],
+  "currentIndependentImages": [
+    {
+      "file": "images/independent-short-dark-initial.png",
+      "originalName": "short-dark-initial.png",
+      "sha256": "ce68608dd88af78465c40011013d9ee3f3485eddf1194d39f58a5cfb2b7e7856",
+      "bytes": 180138,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515409
+    },
+    {
+      "file": "images/independent-long-light-initial.png",
+      "originalName": "long-light-initial.png",
+      "sha256": "a98cbda9a6d0e87b67630f4d96d4e0f349b098aa4fb1530ebb0a23e319176da2",
+      "bytes": 191004,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514760
+    },
+    {
+      "file": "images/independent-long-dark-original-ask-end.png",
+      "originalName": "long-dark-original-ask-end.png",
+      "sha256": "79188fac3a78694c759a42a5a4cc6c70ef2e3434e0f3329230445f3351c7d9eb",
+      "bytes": 212776,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514213
+    },
+    {
+      "file": "images/independent-long-light-final.png",
+      "originalName": "long-light-final.png",
+      "sha256": "63bbf93461adee7fbe3765e1702a72af54ce1cb62320a68fa3f9d14cc6d484a3",
+      "bytes": 202213,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515196
+    },
+    {
+      "file": "images/independent-long-dark-final.png",
+      "originalName": "long-dark-final.png",
+      "sha256": "78f3b4cba6549dd20a7529e53235b42610f2a8a1f8f8a1e7b578fbb702673a7f",
+      "bytes": 206722,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514546
+    },
+    {
+      "file": "images/independent-long-light-original-ask-end.png",
+      "originalName": "long-light-original-ask-end.png",
+      "sha256": "88eb8643a1c234680173c8e1cf34d3112ef9a210869b88170bf23fbc1d9637f4",
+      "bytes": 208522,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514864
+    },
+    {
+      "file": "images/independent-short-dark-reported-result-end.png",
+      "originalName": "short-dark-reported-result-end.png",
+      "sha256": "a2bfb2d2faa1dc86f6c2633ecffdedbbe636ed5e2184c80e8dac579acc835800",
+      "bytes": 173225,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515612
+    },
+    {
+      "file": "images/independent-long-dark-initial.png",
+      "originalName": "long-dark-initial.png",
+      "sha256": "9e9f6bf0ef3e04db7fc6e9b50766783f0839b181ff9d4bab7e9df752f14777c3",
+      "bytes": 193773,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514095
+    },
+    {
+      "file": "images/independent-short-light-reported-result-end.png",
+      "originalName": "short-light-reported-result-end.png",
+      "sha256": "d2efa7e902bf1b50d2d15f5b1b09f6e1f4e4d415fe6080f24445d734224128bd",
+      "bytes": 170706,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700516080
+    },
+    {
+      "file": "images/independent-long-light-reported-result-end.png",
+      "originalName": "long-light-reported-result-end.png",
+      "sha256": "54811a63921d238068d92233656aede2bb98a40a49f1e811ed7f09401a092729",
+      "bytes": 212286,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515159
+    },
+    {
+      "file": "images/independent-short-light-final.png",
+      "originalName": "short-light-final.png",
+      "sha256": "c88f6938fe3d41eccd6c8c7f6fd39dddcffcf3b2e9b4123e22da11c27152b644",
+      "bytes": 179721,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700516109
+    },
+    {
+      "file": "images/independent-short-light-initial.png",
+      "originalName": "short-light-initial.png",
+      "sha256": "99de92c215793fb4c93358b4694c7c90478783935fbb6d1326eff527fba63c2a",
+      "bytes": 177496,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515859
+    },
+    {
+      "file": "images/independent-short-dark-original-ask-end.png",
+      "originalName": "short-dark-original-ask-end.png",
+      "sha256": "73ae11c320834f897d3e72bb0d9c77a81bfda1f1e14e4b57062a63d39ccdfc8e",
+      "bytes": 174079,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515508
+    },
+    {
+      "file": "images/independent-long-dark-reported-result-end.png",
+      "originalName": "long-dark-reported-result-end.png",
+      "sha256": "5c551d30ddbd5ff3c109710594cb74779ee8e9c773b1a593f1283af9ca980a34",
+      "bytes": 219042,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700514509
+    },
+    {
+      "file": "images/independent-short-light-original-ask-end.png",
+      "originalName": "short-light-original-ask-end.png",
+      "sha256": "7a6f6e28fec55d3f04a9961d9e251262f57a5679a813c235cb752a49b47e5410",
+      "bytes": 171660,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515974
+    },
+    {
+      "file": "images/independent-short-dark-final.png",
+      "originalName": "short-dark-final.png",
+      "sha256": "822fc8a9db6fe7951575617af864d538d12ad9ab44ed45b646bca46c328119ce",
+      "bytes": 182372,
+      "scope": "Independent correctedbeb6 full-App original-size image; exact capture UTC is original file mtime, no relabelled prior image.",
+      "capturedAtEpochMs": 1793700515642
+    },
+    {
+      "file": "images/review-624-long-dark-initial.png",
+      "sha256": "9a6b8b3bace5f03a0bd304e0618eb8d43d3a8edf461d9c858822dcd3b22b77da",
+      "bytes": 194196,
+      "scope": "Original independent624 Minor finding image, not corrected acceptance.",
+      "capturedAtEpochMs": 1793699866692
+    },
+    {
+      "file": "images/review-624-long-dark-final.png",
+      "sha256": "af552744fc69bee455b60da3e11de62593e427edc68d83496aa5f2b50518041c",
+      "bytes": 220782,
+      "scope": "Original independent624 Minor finding image, not corrected acceptance.",
+      "capturedAtEpochMs": 1793699867004
+    }
+  ],
+  "normalizedRecords": [
+    {
+      "file": "whole-review-624.json",
+      "originalSha256": "298941b806b436ee346510860ae131d0ec24442c79815889ac4022cd622edcd1",
+      "retainedSha256": "298941b806b436ee346510860ae131d0ec24442c79815889ac4022cd622edcd1",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    },
+    {
+      "file": "independent-624-checks.json",
+      "originalSha256": "5afb95e8af562d4a452367432de290237aa66ee15695aea5a9ad8a57388aa8ec",
+      "retainedSha256": "5afb95e8af562d4a452367432de290237aa66ee15695aea5a9ad8a57388aa8ec",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    },
+    {
+      "file": "independent-correction-checks.json",
+      "originalSha256": "7dcdd3a6c7cf0c66c72b2ab70b75a28948f9e764ac0c2dce1c912c9b959d26b4",
+      "retainedSha256": "7dcdd3a6c7cf0c66c72b2ab70b75a28948f9e764ac0c2dce1c912c9b959d26b4",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    },
+    {
+      "file": "independent-correction-attestation.json",
+      "originalSha256": "dc086b071e917ce8eda25446f4830a09aedc9a74dcffa4c73c3b3cb9680522dc",
+      "retainedSha256": "6ef88cae500e620ee4f25180b357b2d1f17c09b646487ce18b5337699256ea94",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    },
+    {
+      "file": "rejected-1440-null-progress.json",
+      "originalSha256": "42e96ce33011885bd6b47158ae76de3bd7019789dd0dc478bec23eee827e7e1f",
+      "retainedSha256": "42e96ce33011885bd6b47158ae76de3bd7019789dd0dc478bec23eee827e7e1f",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    },
+    {
+      "file": "rejected-1440-null-stack.json",
+      "originalSha256": "b4f37927b01a31e22d4c67d032723d21e83dc54c49afc9e17ec60a642b35c3c1",
+      "retainedSha256": "b4f37927b01a31e22d4c67d032723d21e83dc54c49afc9e17ec60a642b35c3c1",
+      "normalization": "Only local absolute paths replaced with declared placeholders."
+    }
+  ],
+  "required1440Pairs": 4,
+  "required1440Source": "beb6e04421bc44502b9966d380dc15c9a14edd6a",
+  "originalReview": {
+    "file": "whole-review-624.json",
+    "importantOrCritical": 0,
+    "minorCount": 1
+  },
+  "narrowReview": {
+    "file": "independent-correction-attestation.json",
+    "checkedAt": "2026-11-03T10:09:07.755609+00:00",
+    "verdict": "clean",
+    "design": "pass",
+    "minorResolved": true
+  },
+  "required1440HarnessFailure": {
+    "failure": "Known null handoff serialized as{} by new helper; baseline fromSeat was undefined.",
+    "fix": "Serialize known API responses verbatim, including null. Keep valid404error response for unknowns. No product/settlement/geometry guard weakened.",
+    "red": "rejected-1440-null-progress.json",
+    "stack": "rejected-1440-null-stack.json",
+    "accepted": "required-1440-checks.json"
+  },
+  "normalization": {
+    "[agent-worktree]": "isolated author worktree",
+    "[controller]": "private local evidence area",
+    "[home]": "local home"
+  }
+}

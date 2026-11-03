@@ -53,6 +53,7 @@ const accounts = [
 ];
 
 const api = {
+  "/api/settings/crew-pause": null,
   "/api/overview": {
     ...OVERVIEW,
     pipeline: [stage("ready", 5), stage("building", 7), stage("review", 0), stage("merged", 4)],
@@ -103,17 +104,22 @@ describeRendered("Overview v2 layout in a browser", () => {
         // Nothing spills sideways.
         expect(await page.unclipped("#page-overview")).toEqual([true]);
 
-        // Crew beside Timeline: the Timeline takes the mockup's share of the row.
+        // Crew and activity own the primary column; measured panels remain independent.
         const crew = await page.box("#agentsP");
         const timeline = await page.box("#timelineP");
-        expect(Math.abs(crew.y - timeline.y)).toBeLessThan(2);
-        const share = timeline.width / (crew.width + timeline.width + 12);
-        const target = width <= 1280 ? 0.34 : width >= 1920 ? 0.27 : 0.31;
-        expect(Math.abs(share - target)).toBeLessThan(0.02);
+        const machine = await page.box("#machP");
+        const log = await page.box("#actP");
+        const summary = await page.box("#quotaSummaryP");
+        expect(log.y).toBeGreaterThanOrEqual(crew.y + crew.height - 1);
+        expect(machine.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
+        if (width === 1920) {
+          expect(summary.x).toBeGreaterThanOrEqual(crew.x + crew.width);
+          expect(timeline.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
+        }
 
         // The Work column gets the room the others leave.
         const work = await page.boxes("#agentsList .trow:not(.head) .work-cell");
-        for (const cell of work) expect(cell.width).toBeGreaterThanOrEqual(140);
+        for (const cell of work) expect(cell.width).toBeGreaterThanOrEqual(260);
 
         // Loops sit in a strip under the roster, not in it.
         const strip = await page.box("#agentsP .loops-strip");
@@ -126,16 +132,15 @@ describeRendered("Overview v2 layout in a browser", () => {
         expect(lanes).toHaveLength(5);
         const empty = await page.box("#pipelineP .pipeline-stage.empty");
         const full = await page.box("#pipelineP .pipeline-stage.progress");
-        expect(empty.width).toBeLessThan(full.width / 2);
+        expect(empty.width).toBeLessThan(full.width);
 
-        // Live log, Machine and Quota share one row.
-        const log = await page.box("#actP");
-        const machine = await page.box("#machP");
+        // Pipeline is secondary; all full evidence panels precede it without clipping.
         const quota = await page.box("#quotaP");
-        expect(Math.abs(log.y - machine.y)).toBeLessThan(2);
-        expect(Math.abs(log.y - quota.y)).toBeLessThan(2);
-        expect(log.x).toBeLessThan(machine.x);
-        expect(machine.x).toBeLessThan(quota.x);
+        const pipeline = await page.box("#pipelineP");
+        expect(quota.y).toBeGreaterThanOrEqual(log.y + log.height - 1);
+        for (const panel of [crew, log, timeline, quota, machine]) {
+          expect(pipeline.y).toBeGreaterThanOrEqual(panel.y + panel.height - 1);
+        }
 
         // A long Comms message is one line and its "read" link stays visible and reachable.
         await page.evaluate(() => {
@@ -166,19 +171,18 @@ describeRendered("Overview v2 layout in a browser", () => {
               ),
             undefined,
           ),
-        ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
+        ).toEqual([
+          "Agent",
+          "State",
+          "Work",
+          "Tokens/min · 30m avg",
+          "Cost",
+          "Context · used / limit · left · used%",
+          "In state",
+        ]);
 
-        // The page stays on one screen.
-        const bottom = await page.evaluate(
-          () =>
-            Math.max(
-              ...[...document.querySelectorAll(".panel")].map(
-                (p) => p.getBoundingClientRect().bottom,
-              ),
-            ),
-          undefined,
-        );
-        expect(bottom).toBeLessThanOrEqual(1000);
+        // Lower panels remain reachable in the Overview scroll region.
+        expect(await page.reachable("#quotaP", ".overview-grid")).not.toContain(false);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,

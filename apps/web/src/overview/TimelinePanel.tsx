@@ -1,11 +1,14 @@
 import { type ConfigView, type Crew, type OverviewTimeline, TIMELINE_WINDOW_MS } from "@mc/core";
-import type { CSSProperties } from "react";
+import { type CSSProperties, type ReactNode, useId } from "react";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, streamStatus, useResource } from "../data.ts";
+import { elapsed } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink, PAGE_PATHS } from "../router.ts";
+import { useSessionScope } from "../shell/session.ts";
+import { useStore } from "../shell/store.ts";
 import { timelineGeometry } from "./chartGeometry.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
@@ -29,13 +32,19 @@ const AXIS: [string, number][] = [
  * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
  * activity stays visible, 5- and 15-minute gridlines and a "now" cursor.
  */
-export function TimelinePanel() {
+export function TimelinePanel({ footer }: { footer?: ReactNode } = {}) {
+  const id = useId();
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roster = configuredAgents(config);
+  const { inView, session } = useSessionScope();
+  const connection = useStore(streamStatus);
   const now = useNow();
-  const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
+  const openEnd =
+    (timeline.error || (!connection.connected && connection.reconnecting)) && timeline.data
+      ? Math.min(now, timeline.data.to)
+      : now;
   const from = now - TIMELINE_WINDOW_MS;
   const geometry = timelineGeometry({ from, to: now });
   const pending = !timeline.data && !timeline.error;
@@ -44,13 +53,21 @@ export function TimelinePanel() {
     (config
       ? roster
       : Array.from({ length: OVERVIEW_LOADING_ROWS }, (_, i) => ({ id: `loading-${i}` })));
-  const lanes =
+  const supplied =
     timeline.data?.lanes ??
     (pending ? fallback.map((agent) => ({ agentId: agent.id, spans: [], ticks: [] })) : []);
+  const lanes = supplied.filter((lane) => {
+    const row =
+      crew?.rows.find((row) => row.id === lane.agentId) ??
+      roster.find((row) => row.id === lane.agentId);
+    return row ? inView(row) : session === "all";
+  });
   let active = false;
+  const records: { id: string; name: string; text: string }[] = [];
   const rows = lanes.map((lane) => {
     const name = roster.find((row) => row.id === lane.agentId)?.name;
     const agent = crew?.rows.find((row) => row.id === lane.agentId);
+    const kinds = [...new Set(lane.spans.map((span) => span.kind))];
     const spans = lane.spans.flatMap((span) => {
       // An open turn says its end is unknown. A parked seat must not be painted as turning for the
       // whole view, but independent open activity (locks, checks and reviews) remains observable.
@@ -61,23 +78,54 @@ export function TimelinePanel() {
       active = true;
       const segment = geometry.segment(start, end);
       if (segment === null) return [];
+      const description = `${span.kind} · ${elapsed(end - start)} observed${span.to === null ? " · ongoing, end not recorded" : ""}`;
       return (
         <i
           key={`${span.kind}:${span.from}:${span.to}`}
           className={`overview-span k-${span.kind}`}
-          title={span.kind}
+          title={description}
           style={{
             left: `${segment.left}%`,
             width: `${segment.width}%`,
             background: COLORS[span.kind],
+            top: `${kinds.indexOf(span.kind) * 16}px`,
           }}
-        />
+        >
+          <span>
+            {span.kind} · {elapsed(end - start)}
+          </span>
+        </i>
       );
+    });
+    const ticks = lane.ticks.filter((at) => at >= from && at <= now);
+    if (ticks.length) active = true;
+    const evidence =
+      [
+        ...lane.spans.map((span) => {
+          if (span.to === null && span.kind === "turn" && agent?.hudState === "parked")
+            return `turn: ${new Date(span.from).toISOString()} · end not recorded; seat parked, duration unknown`;
+          const visibleMs = Math.max(
+            0,
+            Math.min(now, span.to ?? openEnd) - Math.max(from, span.from),
+          );
+          return `${span.kind}: ${new Date(span.from).toISOString()} to ${span.to === null ? "ongoing (end not recorded)" : new Date(span.to).toISOString()} · ${visibleMs > 0 ? `${elapsed(visibleMs)} in this window` : "outside this window"}`;
+        }),
+        ...ticks.map(
+          (at) => `Tool start: ${new Date(at).toISOString()} · instant, no duration recorded`,
+        ),
+      ].join("; ") || "No recorded intervals or tool starts in this window.";
+    records.push({
+      id: lane.agentId,
+      name: agent ? callSign(agent) : (name ?? lane.agentId),
+      text: evidence,
     });
     return (
       <a
         key={lane.agentId}
         className="overview-lane"
+        aria-label={agent ? callSign(agent) : (name ?? lane.agentId)}
+        aria-describedby={`${id}-${lane.agentId}`}
+        title={evidence}
         href={pending && !config && !crew ? undefined : agentPath(lane.agentId)}
         onClick={
           pending && !config && !crew ? undefined : (e) => followLink(e, agentPath(lane.agentId))
@@ -90,8 +138,26 @@ export function TimelinePanel() {
         >
           {agent ? callSign(agent) : (name ?? (pending ? "Loading…" : lane.agentId))}
         </span>
-        <span className="overview-track" aria-hidden="true">
+        <span
+          className="overview-track"
+          aria-hidden="true"
+          style={{ height: `${Math.max(24, kinds.length * 16 + (ticks.length ? 16 : 0))}px` }}
+        >
           {spans}
+          {ticks.map((at, i) => (
+            <i
+              // biome-ignore lint/suspicious/noArrayIndexKey: multiple identical stateless marks can share the recorded millisecond.
+              key={`${at}-${i}`}
+              className="overview-instant"
+              style={{ left: `${geometry.position(at)}%` }}
+              title={`Tool start · ${new Date(at).toISOString()}`}
+            >
+              ◆
+            </i>
+          ))}
+        </span>
+        <span id={`${id}-${lane.agentId}`} className="sr-only">
+          {evidence}
         </span>
       </a>
     );
@@ -100,7 +166,7 @@ export function TimelinePanel() {
     <Panel
       id="timelineP"
       title="Timeline"
-      sub="last 60 minutes"
+      sub="last 60 minutes · observed spans and tool starts"
       actions={
         <a
           className="ph-link"
@@ -112,21 +178,28 @@ export function TimelinePanel() {
         </a>
       }
     >
-      <div className="pb scroll timeline-body">
-        <div
-          className="overview-lanes"
-          aria-busy={pending}
-          style={{ "--lane-count": lanes.length } as CSSProperties}
+      <div className="pb timeline-body">
+        <section
+          className="overview-lane-scroll scroll"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling keeps the shared axis visible.
+          tabIndex={0}
+          aria-label="Measured agent timeline"
         >
-          {rows}
-        </div>
-        <div className="overview-axis num muted">
-          {AXIS.map(([label, left]) => (
-            <span key={label} style={{ left: `${left}%` }}>
-              {label}
-            </span>
-          ))}
-        </div>
+          <div className="overview-axis num muted">
+            {AXIS.map(([label, left]) => (
+              <span key={label} style={{ left: `${left}%` }}>
+                {label}
+              </span>
+            ))}
+          </div>
+          <div
+            className="overview-lanes"
+            aria-busy={pending}
+            style={{ "--lane-count": lanes.length } as CSSProperties}
+          >
+            {rows}
+          </div>
+        </section>
         {timeline.error && timeline.data && (
           <p className="crit-t">Could not refresh timeline. Showing stale data.</p>
         )}
@@ -143,8 +216,27 @@ export function TimelinePanel() {
               {kind}
             </span>
           ))}
+          <span>◆ tool start · no duration inferred</span>
         </div>
+        {timeline.data && active && (
+          <details className="overview-timeline-evidence">
+            <summary>Measured intervals · UTC</summary>
+            <section
+              className="scroll"
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: complete measured evidence supports bounded keyboard scrolling.
+              tabIndex={0}
+              aria-label="Complete measured timeline evidence"
+            >
+              {records.map((record) => (
+                <p key={record.id}>
+                  <b>{record.name}</b> · {record.text}
+                </p>
+              ))}
+            </section>
+          </details>
+        )}
       </div>
+      {footer}
     </Panel>
   );
 }

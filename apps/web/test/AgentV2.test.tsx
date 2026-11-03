@@ -142,7 +142,18 @@ it("preserves the previous view with a stale reason and refreshes it without SSE
   current = populatedAgentView();
   current.awaiting.reason = "Refresh reached the new endpoint";
   fireEvent.click(screen.getByRole("button", { name: "Retry agent" }));
-  expect(await screen.findByText(/Refresh reached the new endpoint/)).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "guido-1 details" })).getByText(
+        /Refresh reached the new endpoint/,
+      ),
+    ).toBeTruthy(),
+  );
+  expect(
+    within(screen.getByRole("region", { name: "What is happening now?" })).getByText(
+      /Refresh reached the new endpoint/,
+    ),
+  ).toBeTruthy();
 });
 it("keeps the composer and queue for a seat with no run", async () => {
   const view = agentView(
@@ -168,7 +179,18 @@ it("refreshes the Agent response after Interrupt without an SSE message", async 
     },
   });
   fireEvent.click(await screen.findByRole("button", { name: "Interrupt" }));
-  expect(await screen.findByText(/Interrupted by you/)).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "guido-1 details" })).getByText(
+        /Interrupted by you/,
+      ),
+    ).toBeTruthy(),
+  );
+  expect(
+    within(screen.getByRole("region", { name: "What is happening now?" })).getByText(
+      /Interrupted by you/,
+    ),
+  ).toBeTruthy();
 });
 
 it("falls back to Plan for a link to an empty Subagents tab", async () => {
@@ -184,3 +206,64 @@ it("falls back to Plan for a link to an empty Subagents tab", async () => {
   );
   expect(within(side).queryByRole("button", { name: /Subagents/ })).toBeNull();
 });
+
+it("keeps ask/result and the next decision before context without losing run or loop facts", async () => {
+  const { container } = setup();
+  await screen.findByRole("region", { name: "guido-1 details" });
+  const story = screen.getByText("Ask → result → next").closest("section") as HTMLElement;
+  const next = screen.getByRole("region", { name: "Next move" });
+  const facts = screen.getByRole("region", { name: "Run figures" });
+  expect(story.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(next.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(container.querySelectorAll(".agent-v2-stat")).toHaveLength(5);
+  expect(container.querySelectorAll(".agent-v2-steps li")).toHaveLength(6);
+});
+
+it.each(["stopped", "idle"] as const)(
+  "retains the oldest queued current-head review on a %s seat",
+  async (state) => {
+    const view = populatedAgentView();
+    view.row.hudState = state;
+    view.row.crewPause = { seats: "all", by: "CAPCOM", reason: "Account limit reached", at: 1 };
+    view.row.queuedReview = {
+      repoId: "shop-app",
+      prNumber: 92,
+      sha: "b".repeat(40),
+      ref: "feature/92",
+      position: 2,
+      reason: "Waiting for this seat to resume",
+    };
+    view.awaiting = {
+      label: state === "stopped" ? "Stopped" : "Crew paused",
+      reason: "Account limit reached",
+      since: 1,
+    };
+    view.row.reviewing = { prNumber: 90, sha: "a".repeat(40), ref: "review/90" };
+    setup(view);
+    const evidence = await screen.findByRole("link", { name: "Review evidence for this head" });
+    expect(evidence.getAttribute("href")).toBe(`/qa?repo=shop-app&pr=92&head=${"b".repeat(40)}`);
+    expect(screen.getByText("Waiting for this seat to resume")).toBeTruthy();
+    expect(screen.getByText(/Assigned review PR #90/)).toBeTruthy();
+    expect(screen.queryByText(/Checking PR #90/)).toBeNull();
+  },
+);
+
+it.each(["original ask", "reported result", "current state reason"] as const)(
+  "keeps every character of a long %s behind its named keyboard disclosure",
+  async (label) => {
+    const view = populatedAgentView();
+    const full =
+      "A recorded operator requirement with its complete reason and recovery evidence. ".repeat(30);
+    if (label === "original ask") view.story.title = full;
+    else if (label === "reported result") view.story.report = full;
+    else view.awaiting.reason = full;
+    setup(view);
+    const read = await screen.findByRole("button", { name: `Read full ${label}` });
+    expect(read.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(read);
+    const region = screen.getByRole("region", { name: `Full ${label}` });
+    expect(region.textContent).toBe(full);
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(read.getAttribute("aria-controls")).toBe(region.id);
+  },
+);

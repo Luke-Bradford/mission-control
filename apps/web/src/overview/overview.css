@@ -35,8 +35,9 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
-  grid-template-rows: max-content minmax(160px, 1fr) max-content minmax(280px, max-content);
+  /* Each group keeps its content height; the roster and evidence lists have bounded scrolling. */
+  grid-template-rows: max-content max-content max-content;
+  align-content: start;
   gap: var(--sp-3);
   overflow-y: auto;
 }
@@ -90,21 +91,10 @@
 
 .overview-work {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 31%;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.4fr);
+  grid-template-rows: max-content;
+  align-items: start;
   gap: var(--sp-3);
-}
-
-@media (max-width: 1280px) {
-  .overview-work {
-    grid-template-columns: minmax(0, 1fr) 34%;
-  }
-}
-
-@media (min-width: 1920px) {
-  .overview-work {
-    grid-template-columns: minmax(0, 1fr) 27%;
-  }
 }
 
 .nbanner {
@@ -166,12 +156,18 @@
 .ov {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr);
-  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr) minmax(300px, 1fr);
+  grid-template-rows: minmax(280px, max-content);
   gap: var(--sp-3);
 }
 
-/* Machine and Quota sit beside the Live log, each in its own column. */
+.ov > #actP {
+  /* Size containment keeps long logs bounded by their neighbours; only the log stretches. */
+  align-self: stretch;
+}
+
+/* Quota joins Next actions beside the Live log. */
 .ov > .col {
   display: contents;
 }
@@ -188,8 +184,11 @@
 }
 
 .overview-axis {
-  position: relative;
-  height: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  height: var(--sp-5);
   margin-left: calc(var(--lane-label) + var(--sp-2));
   border-top: 1px solid var(--line-2);
   font: var(--fs-micro) / var(--lh-micro) var(--mono);
@@ -241,16 +240,10 @@
 }
 
 .overview-lanes {
-  /* the shortest lane that still holds all four sub-tracks: review sits 9.5px above the centre */
-  --lane-min: 19px;
-  --lane-max: 28px;
   position: relative;
   display: grid;
-  grid-template-rows: repeat(var(--lane-count), minmax(var(--lane-min), 1fr));
-  flex: 1 1 auto;
-  height: calc(var(--lane-count) * var(--lane-max));
-  min-height: calc(var(--lane-count) * var(--lane-min));
-  max-height: calc(var(--lane-count) * var(--lane-max));
+  grid-template-rows: repeat(var(--lane-count), max-content);
+  gap: var(--sp-2);
 }
 
 /* now: a thin cursor down the right edge of every track */
@@ -280,11 +273,7 @@
   grid-template-columns: var(--lane-label) minmax(0, 1fr);
   gap: var(--sp-2);
   align-items: center;
-  height: 100%;
-  /* Keep the 20px visual lane while extending its pointer target to 24px. */
   min-height: 24px;
-  max-height: var(--lane-max);
-  margin-block: calc(var(--sp-1) / -2);
   color: var(--fg-2);
   text-decoration: none;
   font-size: var(--fs-s);
@@ -310,45 +299,23 @@
   content: "";
 }
 
-/*
- * The track: a centre hairline ruled every 5 minutes and 15-minute gridlines matching the axis, so an
- * idle lane still reads as a track. Each kind keeps its own 3px sub-track, so overlaps stay visible.
- */
+/* Measured duration spans have labelled 16px tracks; instants use a separate diamond row. */
 .overview-track {
-  --sub: 3px;
-  --sub-gap: 1px;
   position: relative;
-  height: 100%;
+  min-height: 24px;
   overflow: hidden;
-  background:
-    linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat,
-    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 50% / calc(100% / 12) 5px
-    repeat-x,
-    linear-gradient(to right, var(--line) 1px, transparent 1px) 0 0 / 25% 100%;
+  background: linear-gradient(to right, var(--line) 1px, transparent 1px) 0 0 / 25% 100%;
 }
 
 .overview-span {
   position: absolute;
-  height: var(--sub);
+  height: 16px;
   min-width: 2px;
   border-radius: 0;
-}
-
-/* turn rides the centre line; checks and review above it, lock below */
-.overview-span.k-turn {
-  top: calc(50% - var(--sub) / 2);
-}
-
-.overview-span.k-checks {
-  top: calc(50% - 1.5 * var(--sub) - var(--sub-gap));
-}
-
-.overview-span.k-review {
-  top: calc(50% - 2.5 * var(--sub) - 2 * var(--sub-gap));
-}
-
-.overview-span.k-lock {
-  top: calc(50% + var(--sub) / 2 + var(--sub-gap));
+  overflow: hidden;
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--bg);
+  white-space: nowrap;
 }
 
 .overview-legend {
@@ -375,7 +342,9 @@
 #agentsList {
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
+  max-height: calc(12 * var(--table-row));
+  scrollbar-gutter: stable;
   container: agents / inline-size;
 }
 
@@ -563,7 +532,14 @@
   white-space: nowrap;
 }
 
-#agentsList .trow.head > span,
+#agentsList .trow.head > span {
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: var(--lh-s);
+}
+
 .agent-activity > span {
   max-width: 100%;
   overflow: hidden;
@@ -588,13 +564,14 @@
 }
 
 #agentsList .trow {
-  min-width: 0;
-  grid-template-columns: 190px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
-  gap: 0 var(--sp-1);
+  min-width: 1050px;
+  grid-template-columns: 128px 80px minmax(260px, 1fr) 96px 64px 178px 52px;
+  gap: 0 var(--sp-2);
   padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
   align-items: center;
-  height: var(--table-row);
+  height: auto;
+  min-height: var(--table-row);
   line-height: var(--lh);
 }
 
@@ -603,7 +580,11 @@
 }
 
 #agentsList .trow.head {
-  height: 20px;
+  height: var(--table-row);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
 }
 
 #agentsList .need {
@@ -712,7 +693,7 @@
 }
 
 #agentsList .agent-activity {
-  --rate-width: 50px;
+  --rate-width: 64px;
   --activity-gap: 6px;
   position: relative;
   display: grid;
@@ -738,24 +719,14 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 190px 118px minmax(180px, 1fr) 56px 56px 64px 64px;
-  }
-  #agentsList .agent-activity .spark,
-  #agentsList .activity-live {
-    display: none;
-  }
-  #agentsList .agent-activity {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  #agentsList .agent-activity > span {
-    grid-column: 1;
+    grid-template-columns: 128px 80px minmax(260px, 1fr) 96px 64px 178px 52px;
   }
 }
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 80px minmax(140px, 1fr) 50px 44px 46px 46px;
-    column-gap: var(--sp-1);
+    grid-template-columns: 128px 80px minmax(260px, 1fr) 96px 64px 178px 52px;
+    column-gap: var(--sp-2);
   }
   /* no room for the role beside the call sign: it stays in the tooltip, never cut mid-word */
   #agentsList .agent-identity > :nth-child(2) {
@@ -1111,7 +1082,7 @@
     overflow-x: auto;
   }
   #agentsList .trow {
-    min-width: 680px;
+    min-width: 1050px;
   }
   #agentsList .trow > :first-child {
     position: sticky;
@@ -1157,28 +1128,31 @@
 
 .pipeline-grid {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--sp-3);
 }
 
-/* Lanes show whole cards only (three, then Show more), so the panel is as tall as they are. */
+/* Each lane keeps one whole ticket example; its heading opens the complete lane. */
 #pipelineP > .pipeline-grid {
   flex: 0 0 auto;
 }
 
 .pipeline-stage {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 0;
   min-width: 0;
   --stage-colour: var(--muted);
 }
 
-/* A lane with no tickets keeps its header and count in a narrow column. */
+/* Quiet lanes fit their whole headings without reserving a ticket column. */
 .pipeline-stage.empty {
-  flex: 0 0 112px;
+  flex: 0 0 auto;
+  min-width: 112px;
 }
 
 .pipeline-stage.empty h3 {
-  border-bottom-color: var(--line);
+  white-space: nowrap;
 }
 
 .pipeline-stage.progress {
@@ -1198,18 +1172,31 @@
 }
 
 .pipeline-stage h3 {
+  flex: none;
   display: flex;
+  align-content: start;
   align-items: baseline;
   flex-wrap: wrap;
   gap: var(--sp-1) var(--sp-1);
   margin: 0;
-  padding-bottom: var(--sp-1);
-  border-bottom: 2px solid var(--stage-colour);
+  padding-bottom: 0;
   font-size: var(--fs-s);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
+}
+
+.pipeline-counts {
+  flex: 1;
+  margin: 0;
+  padding-bottom: var(--sp-1);
+  border-bottom: 2px solid var(--stage-colour);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.pipeline-stage.empty .pipeline-counts {
+  border-bottom-color: var(--line);
 }
 
 .pipeline-stage h3 a {
@@ -1223,6 +1210,7 @@
 
 .pipeline-chip {
   display: flex;
+  min-height: var(--sp-6);
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
@@ -1275,38 +1263,26 @@
   background: var(--c);
 }
 
-.pipeline-foot {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
-  margin-top: var(--sp-1);
-}
-
-.pipeline-more {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  padding: var(--sp-1) 0;
-}
-
 /* Overview v2 metrics and stream freshness. */
 .overview-kpis {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: var(--sp-3);
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
 }
 
 .overview-kpi {
   display: grid;
   min-width: 0;
   /* the label row grows when a narrow tile wraps its name above its window */
-  grid-template-rows: minmax(22px, auto) 26px 14px 34px;
+  grid-template-rows: minmax(16px, auto) 28px minmax(16px, auto);
   gap: var(--sp-1);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
   color: var(--fg);
   text-decoration: none;
 }
@@ -1317,9 +1293,8 @@
 }
 
 .overview-kpi .d {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: var(--lh-s);
   font-size: var(--fs-s);
   color: var(--muted);
 }
@@ -1335,7 +1310,6 @@
 }
 
 .overview-kpi .v {
-  grid-row: 2;
   font-family: var(--display);
   font-size: var(--fs-title);
   font-weight: 600;
@@ -1347,14 +1321,21 @@
   grid-row: 3;
 }
 
+.kpi-reading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
 /* the KPI's 30-minute trace: peak label on the dashed top gridline, a -30m … now axis below */
 .kpi-trace {
-  grid-row: 4;
   position: relative;
-  display: grid;
-  grid-template-rows: 24px 9px;
-  gap: 0;
+  display: block;
+  flex: 0 1 48%;
   min-width: 0;
+  height: 24px;
 }
 
 .overview-kpi .spark {
@@ -1374,7 +1355,7 @@
 }
 
 .kpi-quiet {
-  top: 9px;
+  top: 0;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1387,11 +1368,12 @@
 }
 
 .kpi-secondary {
-  grid-row: 3 / 5;
+  grid-row: 3;
   font-size: var(--fs-s);
   color: var(--fg-2);
   align-self: end;
   line-height: var(--lh-s);
+  white-space: normal;
 }
 
 .kpi-skeleton {
@@ -1517,4 +1499,628 @@
   #actP {
     contain: size;
   }
+}
+
+/* Approved Overview hierarchy: current work above the bounded evidence lists. */
+.overview-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-s);
+}
+#agentsList .trow.head > :nth-child(n + 4),
+#agentsList .trow > .num {
+  text-align: right;
+}
+.overview-kpi {
+  min-height: calc(3 * var(--sp-6));
+}
+#agentsList:focus-visible,
+.overview-lane-scroll:focus-visible,
+.overview-next:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+#agentsList .work-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1 1 100px;
+  min-width: 80px;
+  max-width: 100%;
+}
+#agentsList .work-summary .work-refs {
+  flex: none;
+  white-space: nowrap;
+}
+#agentsList .work-summary > .ellip {
+  min-width: 0;
+}
+#agentsList .ticket-cell:has(.need) {
+  flex-wrap: wrap;
+}
+#agentsList .ticket-cell .need {
+  flex: 1 1 200px;
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+#agentsList .ticket-cell .needpart {
+  min-width: 0;
+}
+.pipeline-empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--sp-6);
+  margin: var(--sp-1) 0 0;
+}
+.pipeline-stage h3 a,
+#agentsList .flight .agent-identity > a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+.pipeline-grid {
+  scrollbar-gutter: stable;
+}
+.overview-lane-scroll {
+  max-height: 160px;
+  scrollbar-gutter: stable;
+}
+.overview-work #timelineP {
+  max-height: none;
+}
+.overview-span span {
+  padding-inline: var(--sp-1);
+}
+.overview-instant {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  font: normal var(--fs-s) / var(--lh-s) var(--sans);
+  color: var(--fg);
+}
+.overview-legend {
+  flex-wrap: wrap;
+}
+.machine-window {
+  margin: var(--sp-3) 0 0;
+  line-height: var(--lh-s);
+}
+#machP .resrow {
+  grid-template-columns: 64px minmax(32px, 1fr) minmax(120px, auto);
+  gap: var(--sp-2);
+}
+#machP .resrow > .num {
+  text-align: right;
+}
+#machP .transcript-footprint {
+  grid-template-columns: 64px 0 minmax(0, 1fr);
+}
+.overview-next {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  max-height: 320px;
+  scrollbar-gutter: stable;
+}
+.overview-next-item + .overview-next-item {
+  border-left: 1px solid var(--line);
+  padding-left: var(--sp-4);
+}
+.overview-next-item h3 {
+  font: 600 var(--fs-s) / var(--lh-s) var(--sans);
+  margin: 0;
+}
+.overview-next-item p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: var(--sp-2) 0;
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+  overflow-wrap: anywhere;
+}
+.overview-next > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: var(--sp-3);
+}
+@container overview (max-width: 1050px) {
+  .overview-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ov {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .ov > #actP {
+    grid-column: 1 / -1;
+    min-height: 280px;
+  }
+}
+@container overview (max-width: 760px) {
+  .overview-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .overview-next-item + .overview-next-item {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: var(--sp-3) 0 0;
+  }
+  .ov {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.overview-timeline-evidence summary {
+  min-height: 24px;
+  margin-top: var(--sp-2);
+  cursor: pointer;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.overview-timeline-evidence > section {
+  max-height: 192px;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  overflow-wrap: anywhere;
+}
+.overview-timeline-evidence p {
+  margin: 0 0 var(--sp-3);
+}
+.overview-timeline-evidence :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.crew-scroll-note {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+/* Inset rings stay visible inside the compact cells' clipping bounds. */
+#agentsList a:focus-visible,
+#agentsList button:focus-visible,
+#agentsList select:focus-visible,
+.overview-lane:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Content redesign: stable independent columns preserve panel readers across rail changes. */
+.overview-workspace {
+  position: relative;
+  container: workspace / inline-size;
+  display: grid;
+  grid-template-columns: minmax(1050px, 1200px) minmax(340px, 1fr);
+  align-items: start;
+  gap: var(--sp-3);
+}
+.overview-primary,
+.overview-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.overview-primary > .panel,
+.overview-secondary > .panel {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+}
+#page-overview .panel > .pb {
+  padding: var(--sp-2) var(--sp-3);
+}
+.overview-primary > #actP {
+  height: 280px;
+  min-height: 280px;
+  contain: size;
+}
+.context-capacity {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  text-align: right;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  min-width: 0;
+}
+.context-track {
+  display: block;
+  height: 3px;
+  background: var(--line);
+}
+.context-track i {
+  display: block;
+  height: 100%;
+  background: var(--think);
+}
+.quota-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: baseline;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.quota-summary-row > :first-child {
+  overflow-wrap: anywhere;
+}
+.quota-summary-row > :nth-child(n + 2) {
+  text-align: right;
+}
+.github-budget {
+  margin: var(--sp-1) 0;
+}
+.quota-details {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-size: var(--fs-s);
+}
+.overview-next-compact {
+  border-top: 1px solid var(--line);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.overview-next-first {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.overview-next-first p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.overview-next-first button {
+  flex: none;
+}
+.overview-next-compact summary {
+  min-height: 24px;
+  cursor: pointer;
+}
+.overview-next-compact details > .scroll {
+  max-height: 192px;
+}
+.overview-history .history-window {
+  margin: var(--sp-2) 0 0;
+}
+.measured-reading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.measured-plot {
+  display: grid;
+  grid-template-columns: minmax(40px, auto) minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-2);
+  color: var(--accent);
+}
+.measured-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  padding-block: var(--sp-1);
+}
+.measured-y,
+.measured-x {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.measured-plot svg {
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+.measured-x {
+  display: flex;
+  justify-content: space-between;
+  grid-column: 2;
+}
+.measured-grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+.overview-history > .s {
+  font-size: var(--fs-s);
+}
+@container overview (min-width: 1050px) and (max-width: 1449px) {
+  .overview-workspace {
+    grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr);
+  }
+  .overview-primary > #agentsP {
+    width: 100cqw;
+  }
+  .overview-secondary {
+    margin-top: calc(var(--crew-height, 0px) + var(--sp-3));
+  }
+  .overview-primary > #actP > .ph {
+    flex-wrap: wrap;
+  }
+}
+@container overview (max-width: 1049px) {
+  .overview-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .overview-primary,
+  .overview-secondary {
+    display: contents;
+  }
+  .overview-workspace #agentsP {
+    order: 0;
+    width: 100%;
+  }
+  .overview-workspace #actP {
+    order: 1;
+    width: 100%;
+  }
+  .overview-workspace #quotaSummaryP {
+    order: 2;
+    width: 100%;
+  }
+  .overview-workspace #overviewHistoryP {
+    order: 3;
+    width: 100%;
+  }
+  .overview-workspace #timelineP {
+    order: 4;
+    width: 100%;
+  }
+  .overview-workspace #machP {
+    order: 5;
+    width: 100%;
+  }
+  .overview-workspace #quotaP {
+    order: 6;
+    width: 100%;
+  }
+}
+@media (max-height: 760px) {
+  #agentsList {
+    max-height: calc(7 * var(--table-row));
+  }
+}
+/* A measured plot owns its full row, so numeric values never squeeze its axes into a spark. */
+#machP .resrow:has(.machine-history) {
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-2);
+}
+#machP .resrow:has(.machine-history) > .num {
+  grid-column: 2;
+  grid-row: 1;
+}
+.machine-history {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-2);
+}
+.machine-history-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  padding-block: var(--sp-1);
+}
+.machine-history-y,
+.machine-history-x {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+#machP .machine-history .machine-chart {
+  height: 80px;
+}
+.machine-history-x {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+}
+.machine-processes {
+  margin: var(--sp-2) 0;
+}
+.crew-scroll-note[hidden] {
+  display: none;
+}
+
+@container overview (min-width: 1450px) {
+  .overview-primary > #timelineP {
+    position: absolute;
+    right: 0;
+    top: calc(var(--quota-summary-height, 160px) + var(--sp-3));
+    width: calc(100cqw - var(--primary-width, 1050px) - var(--sp-3));
+  }
+  .overview-secondary > #overviewHistoryP {
+    margin-top: calc(var(--timeline-height, 0px) + var(--sp-3));
+  }
+}
+#overviewHistoryP > .ph {
+  flex-wrap: wrap;
+}
+#overviewHistoryP > .ph h2 {
+  white-space: normal;
+}
+#overviewHistoryP > .ph .act {
+  max-width: 100%;
+}
+#overviewHistoryP select {
+  max-width: 100%;
+}
+button.quota-details {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+.allowance-scroll {
+  max-height: 320px;
+  scrollbar-gutter: stable;
+}
+.overview-allowance-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 760px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.overview-allowance-table th,
+.overview-allowance-table td {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+}
+.overview-allowance-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-weight: 500;
+  color: var(--muted);
+}
+.overview-allowance-table .num {
+  text-align: right;
+}
+#quotaP .overview-allowance-table .quotarow {
+  display: table-row-group;
+}
+.overview-allowance-table .meter {
+  min-width: 88px;
+}
+.allowance-source {
+  display: block;
+}
+.github-budget-details summary {
+  min-height: 24px;
+  cursor: pointer;
+  font-size: var(--fs-s);
+}
+.github-budget-details dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-s);
+}
+.github-budget-details dd {
+  margin: 0;
+}
+.allowance-scroll-note {
+  margin: 0 0 var(--sp-1);
+}
+.allowance-scroll-note[hidden] {
+  display: none;
+}
+#machP .agentslots {
+  flex-wrap: wrap;
+}
+#machP .slot-facts {
+  flex-basis: 100%;
+  color: var(--fg-2);
+}
+.context-capacity.hi {
+  color: var(--warn);
+}
+.context-capacity.full {
+  color: var(--crit);
+}
+.context-capacity.hi .context-track i {
+  background: var(--warn);
+}
+.context-capacity.full .context-track i {
+  background: var(--crit);
+}
+.allowance-provenance summary {
+  min-height: 24px;
+  cursor: pointer;
+  font-size: var(--fs-s);
+}
+.measured-grid {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1;
+}
+.history-data {
+  grid-column: 1 / -1;
+}
+.history-data summary {
+  min-height: 24px;
+  cursor: pointer;
+  font-size: var(--fs-s);
+}
+.history-data-scroll {
+  max-height: 192px;
+  scrollbar-gutter: stable;
+}
+.history-data table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-s);
+}
+.history-data th,
+.history-data td {
+  padding: var(--sp-1);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-weight: 400;
+}
+.history-data .num {
+  text-align: right;
+}
+.history-data thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+#overviewHistoryP > .ph .sub {
+  flex: none;
+}
+.history-data th,
+.history-data td,
+.overview-allowance-table th,
+.overview-allowance-table td {
+  height: var(--table-row);
+}
+@container agents (width < 1050px) {
+  #agentsList .trow > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+  #agentsList .trow.flight > :first-child {
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+  }
+  #agentsList .trow:not(.head):hover > :first-child,
+  #agentsList .trow.sel > :first-child {
+    background: var(--surface-2);
+  }
+}
+
+.machine-history-reading {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--fg-2);
 }

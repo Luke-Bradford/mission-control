@@ -374,12 +374,12 @@ describe("Setup tabs", () => {
     expect(within(loops).queryByRole("button", { name: /guido-1|retro-1/ })).toBeNull();
   });
 
-  it("Sessions: each seat shows model · effort · CLI version", async () => {
+  it("Sessions: each seat shows only recorded model, effort, budget and CLI version", async () => {
     load({
       "/api/config": SESSIONS_CFG,
       "/api/crew?shape=summary": {
         rows: [
-          seatRow({ cli: { version: "2.1.302", effort: "high" } }),
+          seatRow({ cli: { version: "2.1.302", effort: "high", budgetUsd: 12.5 } }),
           seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", area: [] }),
         ],
         firstRunToday: null,
@@ -395,10 +395,12 @@ describe("Setup tabs", () => {
         .map((id) => document.getElementById(id)?.textContent ?? "")
         .join(" ");
     const guido = within(p).getByRole("button", { name: /^guido-1$/ });
-    expect(guido.textContent).toContain("claude-opus-4-1 · high · CLI 2.1.302");
-    expect(described(guido)).toContain("claude-opus-4-1 · high · CLI 2.1.302");
+    expect(guido.textContent).toContain("claude-opus-4-1 · high · Budget $12.50 · CLI 2.1.302");
+    expect(described(guido)).toContain("claude-opus-4-1 · high · Budget $12.50 · CLI 2.1.302");
     const retro = within(p).getByRole("button", { name: /^retro-1$/ });
-    expect(described(retro)).toContain("claude-opus-4-1 · default");
+    expect(described(retro)).toContain("claude-opus-4-1");
+    expect(described(retro)).not.toContain("default");
+    expect(described(retro)).not.toContain("Budget");
   });
 
   it("Sessions: a repo with no observed loops has no loops panel; s/ names crew sessions only", async () => {

@@ -1,0 +1,31 @@
+
+ RUN  v3.2.7 [agent-worktree]
+
+ ✓ |web| test/AgentV2.browser.test.ts (5 tests) 4443ms
+   ✓ Agent page v2 > fits 1280 × 1000 in both themes  1048ms
+   ✓ Agent page v2 > fits 1600 × 1000 in both themes  626ms
+   ✓ Agent page v2 > fits 1920 × 1000 in both themes  617ms
+   ✓ Agent page v2 > fits 1600 × 700 in both themes  604ms
+   ✓ Agent page v2 > keeps 50 long deliverables in a visible scroller  305ms
+ ✓ |web| test/AgentDensity.browser.test.ts (15 tests) 20068ms
+   ✓ Agent density in the production App > keeps the answer first at 1280 × 1000, both rail states and schemes  1934ms
+   ✓ Agent density in the production App > keeps the answer first at 1440 × 1000, both rail states and schemes  1547ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 1000, both rail states and schemes  1618ms
+   ✓ Agent density in the production App > keeps the answer first at 1920 × 1080, both rail states and schemes  1603ms
+   ✓ Agent density in the production App > keeps the answer first at 2560 × 1440, both rail states and schemes  1703ms
+   ✓ Agent density in the production App > keeps the answer first at 1600 × 700, both rail states and schemes  1754ms
+   ✓ Agent density in the production App > keeps honest empty content and full access in both schemes  646ms
+   ✓ Agent density in the production App > keeps honest one content and full access in both schemes  655ms
+   ✓ Agent density in the production App > keeps honest long content and full access in both schemes  1329ms
+   ✓ Agent density in the production App > keeps honest many content and full access in both schemes  1681ms
+   ✓ Agent density in the production App > keeps honest loading content and full access in both schemes  706ms
+   ✓ Agent density in the production App > keeps honest error content and full access in both schemes  734ms
+   ✓ Agent density in the production App > keeps honest stale content and full access in both schemes  839ms
+   ✓ Agent density in the production App > keeps honest disconnected content and full access in both schemes  767ms
+   ✓ Agent density in the production App > retains configured controls and drafts while history and files remain lazy  1234ms
+
+ Test Files  2 passed (2)
+      Tests  20 passed (20)
+   Start at  02:26:30
+   Duration  25.97s (transform 364ms, setup 634ms, collect 410ms, tests 24.51s, environment 0ms, prepare 67ms)
+

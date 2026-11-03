@@ -1,0 +1,193 @@
+{
+  "reviewedAt": "2026-11-02T22:46:20.391Z",
+  "browser": "151.0.7922.34",
+  "receipts": [
+    {
+      "width": 1600,
+      "height": 1000,
+      "scheme": "light",
+      "scenario": "default",
+      "open": true,
+      "source": "ed31bbf082f49d416112e6a505290ca646081e68",
+      "renderedArtifact": "[controller]/overview-1360-redesign-paired-ed31bbf0/after-build",
+      "stats": {
+        "font": "\"IBM Plex Sans\", \"Segoe UI\", system-ui, sans-serif",
+        "loadedFonts": [
+          "Barlow Semi Condensed",
+          "Barlow Semi Condensed",
+          "Barlow Semi Condensed",
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "IBM Plex Mono",
+          "IBM Plex Mono"
+        ],
+        "rows": 11,
+        "loops": 0,
+        "context": [
+          "84.0k / 200k \u00b7 116k left \u00b7 42%",
+          "86.0k / 400k \u00b7 314k left \u00b7 22%",
+          "88.0k / 400k \u00b7 312k left \u00b7 22%",
+          "90.0k / 200k \u00b7 110k left \u00b7 45%",
+          "94.0k / 400k \u00b7 306k left \u00b7 24%",
+          "96.0k / 200k \u00b7 104k left \u00b7 48%",
+          "98.0k / \u2014 \u00b7 limit unknown",
+          "104k / 400k \u00b7 296k left \u00b7 26%",
+          "92.0k / 400k \u00b7 308k left \u00b7 23%",
+          "100k / 400k \u00b7 300k left \u00b7 25%",
+          "102k / 200k \u00b7 98.0k left \u00b7 51%"
+        ],
+        "panels": [
+          {
+            "id": "agentsP",
+            "rect": {
+              "x": 24,
+              "y": 195,
+              "width": 1148,
+              "height": 433,
+              "top": 195,
+              "right": 1172,
+              "bottom": 628,
+              "left": 24
+            }
+          },
+          {
+            "id": "actP",
+            "rect": {
+              "x": 24,
+              "y": 640,
+              "width": 607.625,
+              "height": 280,
+              "top": 640,
+              "right": 631.625,
+              "bottom": 920,
+              "left": 24
+            }
+          },
+          {
+            "id": "timelineP",
+            "rect": {
+              "x": 24,
+              "y": 932,
+              "width": 514.59375,
+              "height": 346,
+              "top": 932,
+              "right": 538.59375,
+              "bottom": 1278,
+              "left": 24
+            }
+          },
+          {
+            "id": "quotaP",
+            "rect": {
+              "x": 24,
+              "y": 1290,
+              "width": 607.625,
+              "height": 282.5,
+              "top": 1290,
+              "right": 631.625,
+              "bottom": 1572.5,
+              "left": 24
+            }
+          },
+          {
+            "id": "quotaSummaryP",
+            "rect": {
+              "x": 643.625,
+              "y": 640,
+              "width": 528.359375,
+              "height": 159,
+              "top": 640,
+              "right": 1171.984375,
+              "bottom": 799,
+              "left": 643.625
+            }
+          },
+          {
+            "id": "overviewHistoryP",
+            "rect": {
+              "x": 643.625,
+              "y": 811,
+              "width": 528.359375,
+              "height": 263,
+              "top": 811,
+              "right": 1171.984375,
+              "bottom": 1074,
+              "left": 643.625
+            }
+          },
+          {
+            "id": "machP",
+            "rect": {
+              "x": 643.625,
+              "y": 1086,
+              "width": 528.359375,
+              "height": 767,
+              "top": 1086,
+              "right": 1171.984375,
+              "bottom": 1853,
+              "left": 643.625
+            }
+          },
+          {
+            "id": "pipelineP",
+            "rect": {
+              "x": 24,
+              "y": 1865,
+              "width": 1148,
+              "height": 137,
+              "top": 1865,
+              "right": 1172,
+              "bottom": 2002,
+              "left": 24
+            }
+          }
+        ],
+        "scrollNote": ""
+      },
+      "beforeTab": 0,
+      "focus": {
+        "client": 567,
+        "scroll": 760,
+        "overflow": "auto",
+        "noteText": "",
+        "noteHidden": true,
+        "noteDisplay": "none",
+        "noteRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        },
+        "region": {
+          "x": 37,
+          "y": 414,
+          "width": 581.625,
+          "height": 155.5,
+          "top": 414,
+          "right": 618.625,
+          "bottom": 569.5,
+          "left": 37
+        },
+        "forecast": {
+          "x": 514.28125,
+          "y": 414,
+          "width": 282.71875,
+          "height": 32,
+          "top": 414,
+          "right": 797,
+          "bottom": 446,
+          "left": 514.28125
+        }
+      },
+      "readsBefore": 22,
+      "readsAfter": 22,
+      "errors": []
+    }
+  ]
+}

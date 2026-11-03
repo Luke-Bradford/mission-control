@@ -1,0 +1,296 @@
+
+ RUN  v3.2.7 [controller]/codex-overview-density
+
+ ✓ |web| test/doingCss.test.ts (16 tests) 15ms
+ ✓ |web| test/OverviewLayoutCss.test.ts (14 tests) 11ms
+ ❯ |web| test/AgentsPanel.test.tsx (85 tests | 1 failed) 931ms
+   ✓ shows the server's queued current-head review and reason without inferring a queue from pause 47ms
+   ✓ does not reorder or rebuild the roster on clock ticks 34ms
+   × shows FLIGHT and the crew in seven columns with a live Work line, and observed loops in the Loops strip 81ms
+     → expected  to have a length of 1 but got +0
+   ✓ keeps a long latest message clipped inside its Crew Work cell 16ms
+   ✓ names and confirms the waiver for a review-parked seat 29ms
+   ✓ waives the run chosen from the menu when a seat has several review-parked runs 24ms
+   ✓ shows a need and its action inline, leaves a quiet row clear, and keeps row navigation 19ms
+   ✓ says in words that an observed loop needs you, in the Loops strip 13ms
+   ✓ keeps needs visible for a stopped agent 16ms
+   ✓ keeps needs visible for a flight agent 14ms
+   ✓ shows Tagged you and Read unless an ask supplies the need action 20ms
+   ✓ keeps live tool prose in the row tooltip and only the loop node in the cell 14ms
+   ✓ labels Context, leaves quota in Systems and preserves paused state 16ms
+   ✓ keeps thirty idle minutes flat, excludes old/future buckets and shares the vertical scale 14ms
+   ✓ FLIGHT idle is labelled Watching 12ms
+   ✓ FLIGHT running is labelled Thinking 10ms
+   ✓ FLIGHT parked is labelled Held 10ms
+   ✓ FLIGHT stopped is labelled Stopped 6ms
+   ✓ renders a short one-word pill for running engine 8ms
+   ✓ renders a short one-word pill for stalled engine 10ms
+   ✓ renders a short one-word pill for blocked engine 9ms
+   ✓ renders a short one-word pill for parked engine 8ms
+   ✓ renders a short one-word pill for waiting engine 8ms
+   ✓ renders a short one-word pill for idle engine 7ms
+   ✓ renders a short one-word pill for free seat 7ms
+   ✓ renders a short one-word pill for stopped engine 8ms
+   ✓ renders a short one-word pill for error engine 8ms
+   ✓ renders a short one-word pill for working loop 9ms
+   ✓ renders a short one-word pill for CI loop 8ms
+   ✓ renders a short one-word pill for review loop 8ms
+   ✓ renders a short one-word pill for parked loop 8ms
+   ✓ renders a short one-word pill for done loop 8ms
+   ✓ renders the Overview crew-pause override as a short pill 8ms
+   ✓ counts FLIGHT's open asks in the coverage line: 1 16ms
+   ✓ counts FLIGHT's open asks in the coverage line: 2 10ms
+   ✓ keeps FLIGHT coverage, the latest decision and session turns on the head-agent link 11ms
+   ✓ omits next check while FLIGHT is running mid-turn 10ms
+   ✓ omits next check while FLIGHT is stalled mid-turn 10ms
+   ✓ colours context at 80% with hi 8ms
+   ✓ colours context at 100% with full 8ms
+   ✓ keeps full text in titles on compact row labels and doing lines 9ms
+   ✓ uses the live FLIGHT seat while config is unavailable, without a duplicate or loading row 11ms
+   ✓ keeps a second Work line for free seats 9ms
+   ✓ keeps seven cells with the need on the second Work line 12ms
+   ✓ retains a stale quota reading with its age and the collector note 4ms
+   ✓ advances the 30 minute window and live indicator with the panel clock 23ms
+   ✓ sorts working crew and observed loops by the last ten minutes and shares j/k order 13ms
+   ✓ keeps the full model id, CLI version and effort in the identity tooltip 9ms
+   ✓ keeps a quiet idle row to one line with prose in its title 8ms
+   ✓ keeps a quiet parked row to one line with prose in its title 9ms
+   ✓ keeps a quiet stopped row to one line with prose in its title 7ms
+   ✓ marks inactive work as last without a title: {"hudState":"idle","run":null} 8ms
+   ✓ marks inactive work as last without a title: {"hudState":"idle"} 7ms
+   ✓ marks inactive work as last without a title: {"hudState":"stopped"} 8ms
+   ✓ marks inactive work as last without a title: {"hudState":"parked","paused":true} 9ms
+   ✓ marks inactive work as last without a title: {"hudState":"running","paused":true} 10ms
+   ✓ keeps full current work for running 9ms
+   ✓ keeps full current work for waiting 9ms
+   ✓ keeps full current work for parked 7ms
+   ✓ keeps full current work for blocked 7ms
+   ✓ keeps full current work for stalled 8ms
+   ✓ keeps current work while an idle engine is in ci 8ms
+   ✓ keeps current work while an idle engine is in review 6ms
+   ✓ keeps current work while an idle engine is in parked 8ms
+   ✓ handles inactive work references: 'Run ended' 7ms
+   ✓ handles inactive work references: 'last #460' 10ms
+   ✓ handles inactive work references: 'last PR #524' 9ms
+   ✓ highlights FLIGHT when j/k selects it 11ms
+   ✓ keeps working order stable during partial minute updates and retains index ties 0ms
+   ✓ mutes a compact quota at age 3600000 only after the stale limit 2ms
+   ✓ mutes a compact quota at age 3600001 only after the stale limit 2ms
+   ✓ uses engine state and loop phase for current work 0ms
+   ✓ mutes a fresh quota when its collector reports a note 3ms
+   ✓ does not light the token dot for output without digest token evidence 10ms
+   ✓ keeps quota out of Crew regardless of visible accounts: [] 3ms
+   ✓ keeps quota out of Crew regardless of visible accounts: ["one","one"] 5ms
+   ✓ keeps quota out of Crew regardless of visible accounts: ["one","two"] 5ms
+   ✓ has no loop column or step bar for a blocked seat 7ms
+   ✓ has no loop column or step bar for a parked seat 8ms
+   ✓ has no loop column or step bar for a stopped seat 7ms
+   ✓ has no loop column or step bar for a idle seat 7ms
+   ✓ shows FLIGHT's crew pause while idle 6ms
+   ✓ shows FLIGHT's crew pause while running 6ms
+   ✓ shows FLIGHT's crew pause while stopped 6ms
+   ✓ keeps a parked FLIGHT reason in the Overview state tooltip 5ms
+ ✓ |web| test/pageRenderCounts.test.tsx (18 tests) 788ms
+ ❯ |web| test/Overview.test.tsx (129 tests | 1 failed) 2940ms
+   ✓ Overview panels > starts the stream before responses arrive and renders data without waiting for open 113ms
+   ✓ Overview panels > renders initial overview values and timeline through the resource layer in StrictMode 52ms
+   ✓ Overview panels > every panel carries its mockup id 38ms
+   ✓ Overview panels > keeps the activity map on its own page: no map panel, a link from the Timeline 72ms
+   ✓ Agents panel > keeps quota in Systems and exposes the seven Crew columns 20ms
+   ✓ Agents panel > its header opens Setup Sessions to add an agent to the first crew session 20ms
+   ✓ Agents panel > disables Add agent when there is no crew session 19ms
+   ✓ Agents panel > says Crew is off with the note when the server has crew off 20ms
+   ✓ Agents panel > says plain Crew is off with no note 21ms
+   ✓ Agents panel > says nothing about crew when it is on 25ms
+   ✓ Agents panel > shows the FLIGHT row first, with its not-running line and dashes 33ms
+   ✓ Agents panel > keeps FLIGHT's session turns in the In state tooltip 13ms
+   ✓ Agents panel > the FLIGHT row is the seat the server treats as FLIGHT: a retiring one lists as an agent 21ms
+   ✓ Agents panel > the FLIGHT row shows the live seat, once; the subtitle is the registry's working count 22ms
+   ✓ Agents panel > while the config loads the FLIGHT row says Loading…; a config error keeps not running 45ms
+   ✓ Agents panel > the FLIGHT row is not itself a button: its call sign is the button that opens the dock 26ms
+   ✓ Agents panel > subtitle reads the registry's agents working 19ms
+   ✓ Agents panel > the roster has no Loop column: a seat's loop reads in its Work and State cells 21ms
+   ✓ Agents panel > a seat's set-aside run stays in its identity tooltip, with one compact row 24ms
+   ✓ Agents panel > a free seat keeps its set-aside work available in the identity tooltip 20ms
+   ✓ Agents panel > a run in line for the test lock says how long, in amber 18ms
+   ✓ Agents panel > the need line offers Interrupt and End the run next to Answer, for a seat with a live turn 38ms
+   ✓ Agents panel > the need line of a stalled seat > holding the test lock reads Stop the run, and the row has no second Interrupt 23ms
+   ✓ Agents panel > the need line of a stalled seat > holding nothing reads the tool, with one Interrupt that stops the turn 22ms
+   ✓ Agents panel > the Loop step column keeps its alignment even when no row has a loop 40ms
+   ✓ Agents panel > a stopped studio loop shows its stop line, whole in the title 22ms
+   ✓ Agents panel > a stopped seat whose run merged says so, and keeps its ticket in Work 19ms
+   ✓ Agents panel > a seat stopped by you says so 17ms
+   ✓ Agents panel > a seat in error says its run failed and keeps its ticket in Work 23ms
+   ✓ Agents panel > a loop in error keeps its last ticket without the title 18ms
+   ✓ Agents panel > a seat in error with no reason says only Run failed 18ms
+   ✓ Agents panel > a row keeps its call sign and full short role together 23ms
+   ✓ Agents panel > an agent's row shows model, effort and CLI version with the full id on hover 29ms
+   ✓ Agents panel > an idle seat keeps open PR in its tooltip and marks Work as last 19ms
+   ✓ Agents panel > an idle seat keeps approved PR in its tooltip and marks Work as last 34ms
+   ✓ Agents panel > an idle seat keeps draft PR in its tooltip and marks Work as last 31ms
+   ✓ Agents panel > an idle seat keeps changes PR in its tooltip and marks Work as last 31ms
+   ✓ Agents panel > a seat's note outranks its review, and a seat that is not idle does not show one 33ms
+   ✓ Agents panel > a repo missing from the config leaves the PR as plain text, not a link 29ms
+   ✓ Agents panel > an idle seat with no PR stays Idle; a loop never reads as in review 28ms
+   ✓ Agents panel > the doing line shows its text before the timezone has loaded 34ms
+   ✓ Agents panel > a row with no run and no digest shows No ticket, — tokens and ctx — 26ms
+   ✓ Agents panel > a running seat keeps live tool detail in the row tooltip, not on a line of its own 21ms
+   ✓ Agents panel > a running seat keeps tool detail and elapsed time in its tooltip 20ms
+   ✓ Agents panel > a waiting seat's PR row shows the PR chip and its title, from the repo's PRs 26ms
+   ✓ Agents panel > the hover title is the visible line, PR title included 25ms
+   ✓ Agents panel > the ticket line's hover text is the ticket's whole title 22ms
+   ✓ Agents panel > a seat with no ticket has its placeholder as hover text 18ms
+   ✓ Agents panel > while the repo's PRs load the line is the bare PR line, not the last text 27ms
+   ✓ Agents panel > the repo's PRs are kept for a seat with an open review, whatever its state, and not for a note 61ms
+   ✓ Agents panel > shows ticket, title, tokens, rate, cost, ctx and the account's 5h window 20ms
+   ✓ Agents panel > a running row's cost is the live estimate 19ms
+   ✓ Agents panel > sorts error before running before idle, agents with a need first 24ms
+   ✓ Agents panel > the stalled need line counts up with the 1 s clock 22ms
+   ✓ Agents panel > a parked item shows its reason on a Blocked row; Answer opens the Item panel 29ms
+   ✓ Agents panel > a set-aside run's ready note shows in Needs you, not as a lamp or need line on the seat's row 21ms
+   ✓ Agents panel > a row is not a button around buttons:its call sign is the link to the Agent page 33ms
+   ✓ Agents panel > a ticket link inside a row opens the ticket page and does not also open the Agent page 24ms
+   ✓ Agents panel > clicking a row or its link opens the Agent page; the session filter hides other repos 26ms
+   ✓ Needs banner > says All clear, with the away strip first when away mode is on 3ms
+   ✓ Needs banner > keeps the away notice on Overview without duplicating the header's needs count 17ms
+   ✓ Needs banner > counts things by kind and goes to Needs you's home on FLIGHT 6ms
+   ✓ Needs banner, acknowledged items > still counts them, and says how many are not acknowledged 4ms
+   ✓ Needs banner, acknowledged items > counts only the operator's items; one with no owner counts 3ms
+   ✓ Needs banner, acknowledged items > is all clear when every item is someone else's 2ms
+   ✓ Needs banner, acknowledged items > adds nothing when every item is acknowledged 3ms
+   ✓ Machine panel: the test lock box > hides the test lock box when free with nobody waiting 11ms
+   ✓ Machine panel: the test lock box > held and running: the holder, its command, ticket and time, then the seats in line 16ms
+   ✓ Machine panel: the test lock box > held by a stalled seat: No output, the quiet time, and Stop the run and Open 19ms
+   ✓ Machine panel: the test lock box > shows queued seats even before there is a holder 12ms
+   ✓ Machine panel: the test lock box > held with nobody in line says so 13ms
+   ✓ Machine panel > shows the transcript footprint and each seat's files on hover 14ms
+   ✓ Machine panel > leaves out the transcript footprint when the server has none 11ms
+   ✓ Machine panel > labels CPU, memory and disk, keeping the legend on hover 11ms
+   ✓ Machine panel > the agents row: 6 of 8 seats, up to 3 per session, room for 2 more 10ms
+   ✓ Machine panel > No room for another agent when every seat is used or 2 GB is free 23ms
+   ✓ Machine panel > shows dashes and empty bars before the first sample 8ms
+   ✓ Machine panel > shows swap used of total next to memory, and no warning when starts are open 10ms
+   ✓ Machine panel > a swap that was not measured is a dash 10ms
+   ✓ Machine panel > names the reason while the hub is holding new work 12ms
+   ✓ Machine panel > a CPU not measured yet is —; zero cores is not '0 threads' 11ms
+   ✓ Account quota panel > each account window keeps its own visible reading time and hover evidence 11ms
+   × Account quota panel > shows the last successful quota and collector note while rate limited 17ms
+     → expected 'Quota & limitsused, remaining, foreca…' to contain 'read 8h 0m ago'
+   ✓ Account quota panel > one row per account, hover titles, warnings and the rewritten note 16ms
+   ✓ Account quota panel > every slot shows used %, with reset time and date on hover 12ms
+   ✓ Account quota panel > a 5h bar's hover says too little history when paceReady is false, the pace when true 10ms
+   ✓ Account quota panel > the GitHub row: what is left, the poll cost and the reset 11ms
+   ✓ Account quota panel > the GitHub row is — before any reading 11ms
+   ✓ Account quota panel > shows the collector's slowed note beside the GitHub row 11ms
+   ✓ Account quota panel > shows the slowed note even when there is no reading yet 12ms
+   ✓ Account quota panel > shows resets — once the reading's reset time has passed 10ms
+   ✓ Account quota panel > keeps the row — until the timezone has loaded 23ms
+   ✓ Account quota panel > shows the reset in the operator's timezone 21ms
+   ✓ Activity panel > keeps DOM rows and tie order across a full reload, and adds only a new delta row 39ms
+   ✓ Activity panel > updates discovered run tickets on the same DOM row, including while reading 54ms
+   ✓ Activity panel > refreshes attention text in place while reading without new entries 35ms
+   ✓ Activity panel > Needs you lists the header's set: one row per item, whatever the session 43ms
+   ✓ Activity panel > holds new rows while scrolled down and shows N new without moving the reader 42ms
+   ✓ Activity panel > updates relative time in place without replacing or moving the row 16ms
+   ✓ Activity panel > with 120 rows, a new arrival stays at the top within the row limit 131ms
+   ✓ Activity panel > renders every row when events share their time, agent, kind and text 14ms
+   ✓ Activity panel > lists newest first with glyphs; failed ends and collectors are red 15ms
+   ✓ Activity panel > Steps hides turn state rows but keeps stalled and commit rows; Everything shows all four 19ms
+   ✓ Activity panel > renders the check, commit, lock and guard kinds, and an unknown kind falls back 15ms
+   ✓ Activity panel > Steps keeps parked, error and woken state rows 18ms
+   ✓ Activity panel > a run-end row ends with its summary and shows its PR chips after the ref 19ms
+   ✓ Activity panel > renders state changes (red into error or stalled) and PR rows with the ⇡ glyph 19ms
+   ✓ Activity panel > a move into Error reads red; a move out of Error does not 15ms
+   ✓ Activity panel > a failed board move reads red; a successful one does not 13ms
+   ✓ Activity panel > refs in the server's text > a run's ref in its text is one linked chip, not text and a second chip 19ms
+   ✓ Activity panel > refs in the server's text > a PR event's repo is the ticket's, else the URL's, before the agent's 21ms
+   ✓ Activity panel > refs in the server's text > the ticket ref on a PR event opens the ticket, with the issue (not the PR's URL) on GitHub 16ms
+   ✓ Activity panel > refs in the server's text > before the config loads, a ref opens the ticket page and never links the PR's URL 14ms
+   ✓ Activity panel > refs in the server's text > an agent-less PR row does not say the repo twice 16ms
+   ✓ Activity panel > Messages lists hand-offs FROM → TO; Steps hides them; Everything shows all; Pause freezes 29ms
+   ✓ Activity panel > a long Comms message is one line of 120 characters with an always-visible link to its conversation 20ms
+   ✓ Activity panel > a comms row between agents of another session is hidden 19ms
+   ✓ Activity panel > an empty Messages list says No events yet. 25ms
+   ✓ Activity panel > hides other repos' rows under a session filter 23ms
+   ✓ Activity panel > an empty day says No events yet. 10ms
+   ✓ Overview: agent text is formatted > an Activity row and a Parked need part render Markdown 17ms
+   ✓ Overview: agent text is formatted > plain prose "__init__.py" is unchanged 23ms
+   ✓ Overview: agent text is formatted > plain prose "a*b" is unchanged 22ms
+   ✓ Overview: agent text is formatted > plain prose "1." is unchanged 19ms
+   ✓ Overview: agent text is formatted > plain prose "-" is unchanged 22ms
+   ✓ Overview: agent text is formatted > keeps an Activity row and a need part to one line: a list marker is not a list 19ms
+   ✓ Overview: what a seat is doing > a seat with an ended run is Free and hides its completed loop 11ms
+   ✓ Overview: what a seat is doing > a seat in CI says Watching and the loop's text 18ms
+   ✓ holds the configured roster, Timeline lanes and five Pipeline lanes while data is pending 16ms
+ ✓ |web| test/KpiStrip.test.tsx (11 tests) 318ms
+ ✓ |web| test/OverviewV2.test.tsx (14 tests) 250ms
+stderr | test/App.test.tsx > App > / renders its page and marks its tab
+Not implemented: navigation to another Document
+
+(node:32430) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ |web| test/OverviewTimeline.test.tsx (8 tests) 178ms
+ ✓ |web| test/App.test.tsx (42 tests) 3476ms
+   ✓ App > / has one page heading and the shell landmarks  364ms
+   ✓ App > /flight has one page heading and the shell landmarks  313ms
+   ✓ App > /board has one page heading and the shell landmarks  316ms
+   ✓ App > /agent has one page heading and the shell landmarks  309ms
+   ✓ App > /map/sample has one page heading and the shell landmarks  309ms
+   ✓ App > /comms has one page heading and the shell landmarks  317ms
+   ✓ App > /telemetry has one page heading and the shell landmarks  317ms
+   ✓ App > /audit has one page heading and the shell landmarks  309ms
+   ✓ App > /setup/loops has one page heading and the shell landmarks  312ms
+ ✓ |web| test/Review1360LockClock.test.tsx (2 tests) 96ms
+ ✓ |web| test/OverviewMeasuredHistory.test.tsx (3 tests) 70ms
+ ✓ |web| test/OverviewBudget.test.tsx (2 tests) 167ms
+ ✓ |web| test/loadFetches.test.tsx (2 tests) 293ms
+ ✓ |web| test/MapPerformance.test.tsx (8 tests) 171ms
+ ✓ |web| test/OverviewHistory.test.tsx (5 tests) 148ms
+ ✓ |web| test/PipelinePanel.test.tsx (3 tests) 89ms
+ ✓ |web| test/ContextCapacity.test.tsx (3 tests) 18ms
+ ✓ |web| test/formatContract.test.ts (1 test) 23ms
+ ✓ |web| test/clock.test.tsx (1 test) 14ms
+ ✓ |web| test/AgentsPanelCss.test.ts (10 tests) 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/AgentsPanel.test.tsx > shows FLIGHT and the crew in seven columns with a live Work line, and observed loops in the Loops strip
+AssertionError: expected  to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/AgentsPanel.test.tsx:210:44
+    208|     expect(row.querySelector(".tok")?.textContent).toContain("40/min");
+    209|     expect(row.textContent).toContain("~$2.47");
+    210|     expect(row.querySelectorAll(".meter")).toHaveLength(1);
+       |                                            ^
+    211|   }
+    212|   expect(container.querySelector("details, summary, .agent-group, .scr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |web| test/Overview.test.tsx > Account quota panel > shows the last successful quota and collector note while rate limited
+AssertionError: expected 'Quota & limitsused, remaining, foreca…' to contain 'read 8h 0m ago'
+
+Expected: "read 8h 0m ago"
+Received: "Quota & limitsused, remaining, forecasts and source ageAccount / windowUsedRemainingResetsForecast / freshnessclaude-main · 5h5h ——Reset unknownNo reading yetUsage endpoint rate limitedclaude-main · 7d7d 86%14% leftSun 18 Oct 19:00103% projected at reset · not filling at this rateapp-server · read 8 h ago · staleUsage endpoint rate limitedcodex-main · 7d7d ——Reset unknownNo reading yetAllowance sources and collection windowClaude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min. These percentages are account allowance, not raw tokens remaining.GitHub API · —GitHub API budget details · pointsNo GitHub rate-limit reading yet."
+
+ ❯ test/Overview.test.tsx:1660:31
+    1658|     const quota = container.querySelector("#quotaP") as HTMLElement;
+    1659|     await within(quota).findByText("7d 86%");
+    1660|     expect(quota.textContent).toContain("read 8h 0m ago");
+       |                               ^
+    1661|     expect(within(quota).getByText("Usage endpoint rate limited")).toB…
+    1662|     await waitFor(() =>
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 18 passed (20)
+      Tests  2 failed | 375 passed (377)
+   Start at  22:04:37
+   Duration  7.87s (transform 1.04s, setup 2.62s, collect 1.35s, tests 10.00s, environment 5.46s, prepare 665ms)
