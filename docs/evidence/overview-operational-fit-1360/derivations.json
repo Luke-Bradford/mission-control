@@ -1,10 +1,10 @@
 [
   {
     "file": "focus/normal-loops-1920x1080-dpr1-light-folded-crew-after.png",
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "sourcePng": {
       "file": "normal-loops-1920x1080-dpr1-light-folded.png",
-      "sha256": "49435e0cfecede2d5403d60c153bc105212ca5a8b7b2d67a2c15153113716a0a"
+      "sha256": "cfa1b308fb88850a928b81564752b2bd37198a3acc549873a61472cde91366ae"
     },
     "cropCss": {
       "x": 24,
@@ -45,10 +45,10 @@
   },
   {
     "file": "focus/normal-loops-1920x1080-dpr1-light-folded-metrics-after.png",
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "sourcePng": {
       "file": "normal-loops-1920x1080-dpr1-light-folded.png",
-      "sha256": "49435e0cfecede2d5403d60c153bc105212ca5a8b7b2d67a2c15153113716a0a"
+      "sha256": "cfa1b308fb88850a928b81564752b2bd37198a3acc549873a61472cde91366ae"
     },
     "cropCss": {
       "x": 24,
@@ -89,10 +89,10 @@
   },
   {
     "file": "focus/normal-loops-3840x2160-dpr1-dark-open-crew-after.png",
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "sourcePng": {
       "file": "normal-loops-3840x2160-dpr1-dark-open.png",
-      "sha256": "1206ea26c3a22a6ca91f29ed73a66211c4b0d68ec12027e940ae1c5a2e254fd5"
+      "sha256": "b04598bf999895b051812ab7a87d96b89ca7a73b316b4a40120310b64a2701e5"
     },
     "cropCss": {
       "x": 24,
@@ -133,10 +133,10 @@
   },
   {
     "file": "focus/normal-loops-3840x2160-dpr1-dark-open-metrics-after.png",
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
     "sourcePng": {
       "file": "normal-loops-3840x2160-dpr1-dark-open.png",
-      "sha256": "1206ea26c3a22a6ca91f29ed73a66211c4b0d68ec12027e940ae1c5a2e254fd5"
+      "sha256": "b04598bf999895b051812ab7a87d96b89ca7a73b316b4a40120310b64a2701e5"
     },
     "cropCss": {
       "x": 24,

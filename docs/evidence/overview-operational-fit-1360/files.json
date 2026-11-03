@@ -250,7 +250,7 @@
     {
       "file": "derivations.json",
       "bytes": 4682,
-      "sha256": "977f45c51f4a8b0a8cd26f09aa40c90be811f1ccd580d9d6185ba307fba6afa8"
+      "sha256": "7665026a4d76a9f85023f02757a986b90e940ef075c007ab5de4c44e4d54f8b8"
     },
     {
       "file": "diff/normal-loops-1280x900-dpr1-light-folded.png",
@@ -454,8 +454,8 @@
     },
     {
       "file": "helpers/curate-ceba.mjs",
-      "bytes": 11349,
-      "sha256": "c1218fff3df6cc4c9f30fe7a005aea48ddd06d7a517815a8e694e8553c2c4f78"
+      "bytes": 11743,
+      "sha256": "cac38ecaf405b94c0742e8360abe1adfe14a134fb5b05b723ceaa08cd5d5dc62"
     },
     {
       "file": "helpers/curate.mjs",
@@ -720,42 +720,42 @@
     {
       "file": "records/final-constrained-fresh-mixed-dark.json",
       "bytes": 6274,
-      "sha256": "9984a69a6cc3fe0851ca0326d693cd742c75ba2761ee26e79120b804d37a19dc"
+      "sha256": "87f8cbba8abfe6cc2e48b3e88e9e88927a591ae62f96c28be1fbd271d39832bd"
     },
     {
       "file": "records/final-constrained-fresh-mixed-light.json",
       "bytes": 6276,
-      "sha256": "21b84738ff048775fe8cace1e46cf6c9ae1d802018b813f798543da038f878fa"
+      "sha256": "78c390b8e6d848d70ed6c2030218c459f72cbf5b0a9e45d405da9b087f159d57"
     },
     {
       "file": "records/final-constrained-fresh-normal-loops-dark.json",
       "bytes": 6336,
-      "sha256": "b5eda1ab80a69056029044603ee8af036a080903b7dbdc29fe56e9770ec9559c"
+      "sha256": "858817279e34955f472621687496ca3253291ef7fe977e120e7bc4cdf6ea9016"
     },
     {
       "file": "records/final-constrained-fresh-normal-loops-light.json",
       "bytes": 6338,
-      "sha256": "471d4878bc3f78fed7bcb03846f0806657e37dfc0ba07fdf33ea5c265aa0e1be"
+      "sha256": "76eb9919b2e47c7bfd833068e24495c1328144d917ddf2898021729f376e65d9"
     },
     {
       "file": "records/final-constrained-stale-mixed-dark.json",
       "bytes": 6404,
-      "sha256": "88a8c352e76c9be9a928878067ed075a18fa2db2c633409f3fd83a5f3166b49f"
+      "sha256": "128244d5631ed24c6dadbff8ab609d9bd9a99e567be84377905d0697fd0dc832"
     },
     {
       "file": "records/final-constrained-stale-mixed-light.json",
       "bytes": 6406,
-      "sha256": "59424c673baf4beb4358c8cfec30dae295f9cd2d688fec80e6bc0dc3d49dc3b9"
+      "sha256": "423fc6e0a234b3df0e04d4b71c884c13be0623aee1512cd0ce697b89ce2be32f"
     },
     {
       "file": "records/final-constrained-stale-normal-loops-dark.json",
       "bytes": 6466,
-      "sha256": "9b961389775dfcbfb0be07e6d3dc17126614941831d706b328c43b9756a46048"
+      "sha256": "ad21360c839dca006c657d6712bf302c224bdccf02c876a4603a88ee8fee9726"
     },
     {
       "file": "records/final-constrained-stale-normal-loops-light.json",
       "bytes": 6468,
-      "sha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207"
+      "sha256": "9225624c894cf82fbfe083cfbf2002470366653e30d078ff28b84bec5aeddae9"
     },
     {
       "file": "records/mc-1393-ci-migration-five-files.log",
@@ -959,8 +959,8 @@
     },
     {
       "file": "records/normalization.json",
-      "bytes": 26846,
-      "sha256": "87bae7704d8ecc3ca52ae0b180da51160258702713271345517bf0e656658ad9"
+      "bytes": 26845,
+      "sha256": "b97673b841cfcb1a8a5ae6454b6671abf6d857f2c42e92f0ed6b25c0996f9995"
     },
     {
       "file": "records/overview-ci-attempt1-public-summary.json",

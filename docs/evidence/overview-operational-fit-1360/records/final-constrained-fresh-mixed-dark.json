@@ -1,7 +1,7 @@
 [
   {
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
-    "capturedAt": "2026-11-03T17:56:12.285Z",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
+    "capturedAt": "2026-11-03T20:30:05.210Z",
     "fixtureClock": 1792238400000,
     "apiSha256": "472cf0f497223e0d336c441d86489a5174ffdece4dd69565085a2ec6fb6f2420",
     "helperSha256": "a27600da59ea92098bacd42189cd4b46863d07712b01a6895da4e7c38615e8fd",
@@ -107,8 +107,8 @@
     "errors": []
   },
   {
-    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
-    "capturedAt": "2026-11-03T17:56:12.469Z",
+    "source": "ceba037e0b63760703cb91e203a91270d63dfc8f",
+    "capturedAt": "2026-11-03T20:30:05.373Z",
     "fixtureClock": 1792238400000,
     "apiSha256": "472cf0f497223e0d336c441d86489a5174ffdece4dd69565085a2ec6fb6f2420",
     "helperSha256": "a27600da59ea92098bacd42189cd4b46863d07712b01a6895da4e7c38615e8fd",
