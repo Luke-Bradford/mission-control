@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ListScrollCue } from "./ListScrollCue.tsx";
 
 /**
@@ -11,16 +11,32 @@ export function Reason({
   full,
   className = "vnow",
   label,
+  brief = false,
 }: {
   line: string;
   full: string | null;
   className?: string;
   label?: string;
+  brief?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  const preview = useRef<HTMLSpanElement>(null);
   const region = useRef<HTMLElement>(null);
   const revealPending = useRef(false);
   const detailId = useId();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text can change overflow without changing the clamped box size.
+  useEffect(() => {
+    if (!brief || !preview.current) return;
+    const element = preview.current;
+    const measure = () => setClipped(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    document.fonts?.ready.then(measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, [brief, line]);
+  const disclosure = full !== null && (!brief || full !== line || clipped || open);
   // Keep the focused box within its ancestors while native scrolling preserves the reading position.
   const reveal = (reader: HTMLElement) => {
     if (revealPending.current) return;
@@ -34,11 +50,11 @@ export function Reason({
   };
   return (
     <>
-      <div className={className}>
-        <span className="ellip" title={line}>
+      <div className={`${className}${brief ? " vbrief" : ""}`}>
+        <span className="ellip" title={line} ref={preview}>
           {line}
         </span>
-        {full !== null && (
+        {disclosure && (
           <button
             type="button"
             className="sm ghost"

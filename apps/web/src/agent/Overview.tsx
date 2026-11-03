@@ -20,11 +20,7 @@ function BriefReason({ text, limit, label }: { text: string; limit: number; labe
   const line = firstLine(text).slice(0, limit);
   const abbreviated = line !== text;
   return (
-    <Reason
-      line={abbreviated ? `${line.trimEnd()}…` : line}
-      full={abbreviated ? text : null}
-      label={label}
-    />
+    <Reason line={abbreviated ? `${line.trimEnd()}…` : line} full={text} label={label} brief />
   );
 }
 function Age({ at }: { at: number }) {

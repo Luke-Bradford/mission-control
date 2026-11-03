@@ -351,6 +351,19 @@
   overflow: visible;
   text-overflow: clip;
 }
+.agent-v2 .vbrief {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+}
+.agent-v2 .vbrief .ellip {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.agent-v2 .vbrief > button {
+  justify-self: start;
+}
 .agent-v2-next {
   flex-wrap: wrap;
 }

@@ -83,6 +83,90 @@ describeRendered("Agent density in the production App", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+  it(
+    "offers full text when a short character-count summary wraps beyond four lines",
+    async () => {
+      for (const theme of ["light", "dark"] as const) {
+        const fixture = agentDensityFixture();
+        fixture.view.story.title = "M".repeat(159);
+        fixture.view.story.report = "W".repeat(199);
+        const page = await renderAt({
+          page: "test/agentV2Browser.html",
+          width: 1280,
+          height: 700,
+          colorScheme: theme,
+          search: "?dock=open",
+          api: fixture.api,
+        });
+        expect(await page.evaluate(waitForText, "Ask → result → next")).toBe(true);
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        }, null);
+        const previews = await page.evaluate(
+          () =>
+            [...document.querySelectorAll(".agent-v2-story .vbrief .ellip")].map((element) => ({
+              text: element.textContent,
+              height: element.getBoundingClientRect().height,
+              lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+              scrollHeight: element.scrollHeight,
+              hasReader: !!element.parentElement?.querySelector('button[aria-label^="Read full"]'),
+            })),
+          null,
+        );
+        expect(previews.map((preview) => preview.text)).toEqual([
+          fixture.view.story.title,
+          fixture.view.story.report,
+        ]);
+        for (const preview of previews) {
+          expect(preview.height).toBeLessThanOrEqual(preview.lineHeight * 4 + 1);
+          expect(preview.scrollHeight).toBeGreaterThan(preview.height);
+          expect(preview.hasReader).toBe(true);
+        }
+        for (const [label, full] of [
+          ["original ask", fixture.view.story.title],
+          ["reported result", fixture.view.story.report],
+        ]) {
+          await page.click(`[aria-label="Read full ${label}"]`);
+          await page.press("Tab");
+          const reader = await page.evaluate(async (label) => {
+            const element = document.querySelector(`[aria-label="Full ${label}"]`) as HTMLElement;
+            const start = performance.now();
+            const read = () => {
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              const last = [...range.getClientRects()].at(-1);
+              return {
+                text: element.textContent,
+                active: document.activeElement === element,
+                painted:
+                  !!last &&
+                  element.contains(
+                    document.elementFromPoint(
+                      last.x + Math.min(last.width / 2, 20),
+                      last.y + last.height / 2,
+                    ),
+                  ),
+              };
+            };
+            let facts = read();
+            while ((!facts.active || !facts.painted) && performance.now() - start < 1000) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+              facts = read();
+            }
+            return facts;
+          }, label);
+          expect(reader).toEqual({ text: full, active: true, painted: true });
+          await page.click(`[aria-label="Read full ${label}"]`);
+        }
+        expect(page.errors()).toEqual([]);
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it.each(["empty", "one", "long", "many", "loading", "error", "stale", "disconnected"] as const)(
     "keeps honest %s content and full access in both schemes",
     async (scenario) => {
@@ -122,6 +206,28 @@ describeRendered("Agent density in the production App", () => {
           ).toContain(fixture.view.story.title);
         }
         if (scenario === "long") {
+          const previews = await page.evaluate(
+            () =>
+              [...document.querySelectorAll(".agent-v2-story .vbrief .ellip")].map((element) => {
+                const style = getComputedStyle(element);
+                return {
+                  height: element.getBoundingClientRect().height,
+                  lineHeight: parseFloat(style.lineHeight),
+                  scrollHeight: element.scrollHeight,
+                };
+              }),
+            null,
+          );
+          expect(previews).toHaveLength(2);
+          for (const preview of previews) {
+            expect(preview.height).toBeLessThanOrEqual(preview.lineHeight * 4 + 1);
+            expect(preview.scrollHeight).toBeGreaterThan(preview.height);
+          }
+          expect(
+            await page.reachable(
+              '[aria-label="Read full original ask"], [aria-label="Read full reported result"]',
+            ),
+          ).not.toContain(false);
           expect(await page.unclipped(".agent-v2-identity")).not.toContain(false);
           expect(
             await page.evaluate(() => {
