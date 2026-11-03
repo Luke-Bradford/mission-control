@@ -50,6 +50,7 @@ describeRendered("Overview transcript footprint in a browser", () => {
         height: 1000,
         api,
       });
+      await page.click("#machineSummaryP > .ph button");
       const row = await page.box("#machP .transcript-footprint");
       expect(row.width).toBeGreaterThan(0);
       await page.screenshot(join(SHOTS, `overview-transcripts-${width}.png`));

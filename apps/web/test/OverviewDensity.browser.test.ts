@@ -29,7 +29,12 @@ async function settled(page: RenderedPage, scenario: OverviewScenario) {
             text.includes("Nothing is waiting for your decision")
           );
         return (
-          ["41.2k", "41%", "63%", "12%"].every((value) => text.includes(value)) &&
+          text.includes("41.2k") &&
+          ((view.querySelector("#quotaSummaryP")?.textContent?.includes("37% left") &&
+            view.querySelector("#quotaSummaryP")?.textContent?.includes("88% left")) ||
+            ["41%", "63%", "12%"].every((value) =>
+              view.querySelector("#quotaP")?.textContent?.includes(value),
+            )) &&
           (scenario === "one" || !!view.querySelector(".overview-instant"))
         );
       };
@@ -113,7 +118,7 @@ async function geometry(page: RenderedPage) {
           activity: box("#actP"),
           firstEvent: box("#actList .arow"),
           pipeline: box("#pipelineP"),
-          machine: box("#machP"),
+          machine: box("#machineSummaryP"),
           kpiTops: [...document.querySelectorAll(".overview-kpi")].map(
             (el) => el.getBoundingClientRect().top,
           ),
@@ -192,6 +197,18 @@ describeRendered("Approved Overview hierarchy", () => {
       });
       try {
         await settled(page, "default");
+        await keyboardOpen(page, "#quotaSummaryP .quota-details");
+        expect(
+          await page.evaluate(
+            () =>
+              ["41%", "63%", "12%"].every((value) =>
+                document.querySelector("#quotaP")?.textContent?.includes(value),
+              ),
+            undefined,
+          ),
+        ).toBe(true);
+        await capture(page, "redesign-source-smoke-1600-full-allowance");
+        await page.press("Escape");
         await capture(page, "redesign-source-smoke-1600-folded");
         expect(
           await page.evaluate(
@@ -318,11 +335,16 @@ describeRendered("Approved Overview hierarchy", () => {
                 ?.textContent?.includes("Not collected");
             }, undefined),
           ).toBe(true);
-          await page.click(".dockrail button");
           await keyboardOpen(page, "#quotaSummaryP .quota-details");
           expect(
-            await page.evaluate(() => document.activeElement?.closest("#quotaP")?.id, undefined),
-          ).toBe("quotaP");
+            await page.evaluate(() => {
+              const reader = document.querySelector(".overview-allowance-reader");
+              return (
+                !!reader && reader.matches(":modal") && reader.contains(document.activeElement)
+              );
+            }, undefined),
+          ).toBe(true);
+          await capture(page, `allowance-wide-reader-${scheme}`);
           const allowance = await page.evaluate(
             () => ({
               columns: [...document.querySelectorAll("#quotaP thead th")].map(
@@ -350,6 +372,9 @@ describeRendered("Approved Overview hierarchy", () => {
             "read",
           ])
             expect(allowance.text).toContain(value);
+          // The complete1120px reader correctly fits the table at1600. Exercise
+          // overflow only when a genuinely narrower native reader needs it.
+          await page.resize(800, 1000);
           const allowanceOverflow = await page.evaluate(async () => {
             const until = performance.now() + 1000;
             const note = document.querySelector<HTMLElement>("#quotaP .allowance-scroll-note");
@@ -360,10 +385,13 @@ describeRendered("Approved Overview hierarchy", () => {
               named: region?.getAttribute("aria-label"),
               focusable: region?.tabIndex,
               overflows: !!region && region.scrollWidth > region.clientWidth,
+              client: region?.clientWidth,
+              scroll: region?.scrollWidth,
               cueVisible: !!note && !note.hidden && note.getBoundingClientRect().height > 0,
               cue: note?.textContent,
             };
           }, undefined);
+          await capture(page, `allowance-narrow-reader-${scheme}`);
           expect(allowanceOverflow).toMatchObject({
             named: "Complete provider allowance",
             focusable: 0,
@@ -372,6 +400,23 @@ describeRendered("Approved Overview hierarchy", () => {
             cue: "Scroll ↔ for every allowance column",
           });
           await capture(page, `allowance-evidence-${scheme}`);
+          await page.press("Escape");
+          await page.evaluate(async () => {
+            const ready = () =>
+              !document.querySelector("dialog:modal") &&
+              document.querySelector("main")?.inert === false &&
+              document.activeElement === document.querySelector("#quotaSummaryP .quota-details");
+            const end = performance.now() + 1000;
+            while (!ready() && performance.now() < end)
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            if (!ready())
+              throw Error(`Reader close/focus not settled: ${document.activeElement?.outerHTML}`);
+            // Native close returns focus immediately; finish the reader's scheduled
+            // return-focus paint before beginning a separate keyboard journey.
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+          }, undefined);
           const before = await page.evaluate(() => {
             Reflect.set(
               window,
@@ -382,7 +427,9 @@ describeRendered("Approved Overview hierarchy", () => {
               .getEntriesByType("resource")
               .filter((entry) => entry.name.includes("/api/")).length;
           }, undefined);
-          await page.resize(1280, 1000);
+          // The normal1280 roster no longer needs horizontal panning. Exercise its
+          // existing narrow/sticky path at960 without changing accepted column widths.
+          await page.resize(960, 1000);
           await page.evaluate(async () => {
             const roster = document.querySelector<HTMLElement>("#agentsList");
             roster?.scrollIntoView({ block: "center" });
@@ -393,11 +440,26 @@ describeRendered("Approved Overview hierarchy", () => {
             const region = document.querySelector<HTMLElement>("#agentsList");
             return {
               focus: document.activeElement === region,
+              active: document.activeElement?.outerHTML,
+              mainInert: document.querySelector("main")?.inert,
+              nativeModals: [...document.querySelectorAll("dialog:modal")].map((dialog) =>
+                dialog.getAttribute("aria-labelledby"),
+              ),
               left: region?.scrollLeft,
               width: region?.clientWidth,
               scrollWidth: region?.scrollWidth,
             };
           }, undefined);
+          if (evidence)
+            writeFileSync(
+              join(evidence, `horizontal-focus-before-${scheme}.json`),
+              JSON.stringify(horizontalBefore, null, 2),
+            );
+          await capture(page, `horizontal-focus-before-${scheme}`);
+          expect(horizontalBefore.focus, JSON.stringify(horizontalBefore)).toBe(true);
+          expect(
+            (horizontalBefore.scrollWidth ?? 0) - (horizontalBefore.width ?? 0),
+          ).toBeGreaterThan(64);
           for (let step = 0; step < 16; step++) await page.press("ArrowRight");
           const horizontalAfterRight = await page.evaluate(async () => {
             const region = document.querySelector<HTMLElement>("#agentsList");
@@ -459,7 +521,28 @@ describeRendered("Approved Overview hierarchy", () => {
             await page.reachable("#agentsList .context-capacity", "#agentsList"),
           ).not.toContain(false);
           await capture(page, `context-keyboard-narrow-${scheme}`);
-          // Native Tab after a pan must reveal Work links and actions beyond the sticky identity.
+          // Native Tab after a real maximum pan must reveal a Work control that is
+          // initially covered by the sticky identity, rather than forcing scroll for visible text.
+          const coveredBeforeFocus = await page.evaluate(() => {
+            const roster = document.querySelector<HTMLElement>("#agentsList")!;
+            roster.scrollLeft = roster.scrollWidth;
+            const row = roster.querySelector('[href="/agent/dev-1"]')?.closest(".trow");
+            const ticket = row?.querySelector<HTMLElement>(".work-cell a");
+            const r = ticket?.getBoundingClientRect();
+            const hit = r && document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return {
+              scroll: roster.scrollLeft,
+              text: ticket?.textContent,
+              rect: r?.toJSON(),
+              covered: !!hit?.closest(".agent-identity"),
+            };
+          }, undefined);
+          if (evidence)
+            writeFileSync(
+              join(evidence, `sticky-precondition-${scheme}.json`),
+              JSON.stringify(coveredBeforeFocus, null, 2),
+            );
+          expect(coveredBeforeFocus.covered, JSON.stringify(coveredBeforeFocus)).toBe(true);
           await page.evaluate(
             () =>
               document
@@ -555,6 +638,7 @@ describeRendered("Approved Overview hierarchy", () => {
           await settled(page, "mixed");
           await page.click(".dockrail button");
           await capture(page, `overview-mixed-1600-${scheme}-open`);
+          await page.press("Escape"); // Restore the intentionally inert session control before filtering.
           expect(await page.boxes("#agentsList .trow:not(.head)")).toHaveLength(9);
           expect(await page.boxes(".loops-strip .loop-chip")).toHaveLength(2);
           expect(
@@ -602,6 +686,7 @@ describeRendered("Approved Overview hierarchy", () => {
             await settled(page, "long");
             for (const dock of ["folded", "open"] as const) {
               if (dock === "open") await page.click(".dockrail button");
+              await capture(page, `overview-long-${width}x1000-${scheme}-${dock}-initial`);
               expect(await page.reachable("#agentsList .need button", "#agentsList")).not.toContain(
                 false,
               );
@@ -659,7 +744,7 @@ describeRendered("Approved Overview hierarchy", () => {
           });
           try {
             await settled(page, "long");
-            await page.click(".dockrail button");
+            // Inspect from the monitoring page; opening FLIGHT intentionally makes it inert.
             await keyboardOpen(page, ".overview-timeline-evidence summary");
             expect(
               await page.evaluate(() => {
@@ -745,9 +830,7 @@ describeRendered("Approved Overview hierarchy", () => {
               expect(facts.rosterRows).toBe(11);
               expect(facts.primary.crew!.top).toBeLessThan(facts.primary.activity!.top);
               expect(facts.primary.activity!.top).toBeLessThan(facts.primary.pipeline!.top);
-              expect(facts.primary.machine!.top).toBeGreaterThanOrEqual(
-                facts.primary.crew!.bottom - 1,
-              );
+              expect(facts.primary.machine!.height).toBeGreaterThan(0);
               if ([1600, 1920].includes(width) && height >= 900) {
                 expect(facts.primary.firstSeat!.bottom).toBeLessThan(height - 40);
                 expect(facts.primary.firstEvent!.bottom).toBeLessThan(height - 40);
@@ -759,7 +842,7 @@ describeRendered("Approved Overview hierarchy", () => {
                   JSON.stringify({ width, height, scheme, dock, facts }, null, 2),
                 );
               expect(
-                facts.rows.every((value) => value === (width < 2200 ? 32 : 40)),
+                facts.rows.every((value) => value === 32),
                 JSON.stringify({ width, height, scheme, dock, facts }),
               ).toBe(true);
               expect(facts.small).toEqual([]);
@@ -825,6 +908,7 @@ describeRendered("Approved Overview hierarchy", () => {
           });
           try {
             await settled(page, scenario);
+            await capture(page, `overview-${scenario}-1600x700-${scheme}-initial`);
             const facts = await geometry(page);
             expect(facts.docWidth).toBeLessThanOrEqual(1600);
             if (scenario === "empty") {

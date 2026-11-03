@@ -1806,6 +1806,7 @@
   justify-content: space-between;
   gap: var(--sp-2);
   margin-bottom: var(--sp-1);
+  flex-wrap: wrap;
 }
 .measured-plot {
   display: grid;
@@ -2336,6 +2337,35 @@ button.quota-details {
   }
   .overview-primary > #actP > .ph {
     flex-wrap: wrap;
+  }
+}
+
+/* A visible operational warning consumes a real row above the canvas. Compact
+ * only the two-column monitoring budget: retain Crew geometry, every warning,
+ * full-size controls, chart scales and complete readers rather than clipping. */
+@container overview-canvas (min-width: 1562px) and (max-width: 2075px) {
+  #page-overview:has(> .overview-constraints) .overview-primary {
+    gap: 8px;
+  }
+  #page-overview:has(> .overview-constraints) .overview-primary > #actP {
+    height: 188px;
+    min-height: 188px;
+  }
+  #page-overview:has(> .overview-constraints) .overview-analytical {
+    gap: 4px;
+  }
+  #page-overview:has(> .overview-constraints)
+    .overview-analytical
+    :is(#quotaSummaryP, #timelineP, #overviewHistoryP, #machineSummaryP)
+    > .ph {
+    min-height: 32px;
+    padding-block: 0;
+  }
+  #page-overview:has(> .overview-constraints) #overviewHistoryP {
+    min-height: 176px;
+  }
+  #page-overview:has(> .overview-constraints) #overviewHistoryP .measured-reading {
+    margin-bottom: 0;
   }
 }
 @container overview-canvas (max-width: 1049px) {

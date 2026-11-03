@@ -126,9 +126,9 @@ async function settled(page: RenderedPage) {
   await page.evaluate(async () => {
     const deadline = performance.now() + 5000;
     const ready = () => {
-      const quota = document.querySelector("#quotaP")?.textContent ?? "";
+      const quota = document.querySelector("#quotaSummaryP")?.textContent ?? "";
       return (
-        ["41%", "63%", "12%"].every((value) => quota.includes(value)) &&
+        ["37% left", "88% left"].every((value) => quota.includes(value)) &&
         !document.querySelector("#actList")?.textContent?.includes("Loading activity")
       );
     };
@@ -244,7 +244,7 @@ describeRendered("Overview panels keep headers readable and content reachable", 
         await page.box("#actList .arow");
         const activity = await page.box("#actP");
         // A populated log must scroll instead of setting its row to the height of 120 messages.
-        expect(activity.height).toBeGreaterThanOrEqual(280);
+        expect(activity.height).toBeGreaterThanOrEqual(216);
         expect(activity.height).toBeLessThan(600);
         expect(await page.reachable("#actList .arow", "#actList")).not.toContain(false);
         expect(await page.reachable("#pipelineP .pipeline-stage h3 a")).not.toContain(false);

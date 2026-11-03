@@ -89,7 +89,7 @@ const api = {
 describeRendered("Overview v2 layout in a browser", () => {
   for (const colorScheme of ["light", "dark"] as const) {
     it.each([1280, 1600, 1920])(
-      `lays out as the mockup at %i wide, ${colorScheme}`,
+      `retains compact monitoring and complete readers at %i wide, ${colorScheme}`,
       async (width) => {
         mkdirSync(SHOTS, { recursive: true });
         const page = await renderAt({
@@ -107,11 +107,12 @@ describeRendered("Overview v2 layout in a browser", () => {
         // Crew and activity own the primary column; measured panels remain independent.
         const crew = await page.box("#agentsP");
         const timeline = await page.box("#timelineP");
-        const machine = await page.box("#machP");
+        const machine = await page.box("#machineSummaryP");
         const log = await page.box("#actP");
         const summary = await page.box("#quotaSummaryP");
         expect(log.y).toBeGreaterThanOrEqual(crew.y + crew.height - 1);
-        expect(machine.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
+        // Machine belongs to its independent analytical stack, not the primary row.
+        expect(machine.height).toBeGreaterThan(0);
         if (width === 1920) {
           expect(summary.x).toBeGreaterThanOrEqual(crew.x + crew.width);
           expect(timeline.y).toBeGreaterThanOrEqual(summary.y + summary.height - 1);
@@ -127,20 +128,42 @@ describeRendered("Overview v2 layout in a browser", () => {
         expect(strip.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
         expect(await page.boxes("#agentsP .loop-chip")).toHaveLength(2);
 
-        // The empty In review lane is narrow beside its flexible neighbours.
+        // Reviewed8ce uses five aligned summaries; quiet lanes have words, not a blank card.
         const lanes = await page.boxes("#pipelineP .pipeline-stage");
         expect(lanes).toHaveLength(5);
         const empty = await page.box("#pipelineP .pipeline-stage.empty");
         const full = await page.box("#pipelineP .pipeline-stage.progress");
-        expect(empty.width).toBeLessThan(full.width);
-
-        // Pipeline is secondary; all full evidence panels precede it without clipping.
-        const quota = await page.box("#quotaP");
-        const pipeline = await page.box("#pipelineP");
-        expect(quota.y).toBeGreaterThanOrEqual(log.y + log.height - 1);
-        for (const panel of [crew, log, timeline, quota, machine]) {
-          expect(pipeline.y).toBeGreaterThanOrEqual(panel.y + panel.height - 1);
+        expect(empty.width).toBeGreaterThanOrEqual(112);
+        expect(empty.width).toBeLessThanOrEqual(full.width + 1);
+        expect(empty.height).toBeLessThanOrEqual(96);
+        const laneFacts = await page.evaluate(
+          () =>
+            [...document.querySelectorAll("#pipelineP .pipeline-stage")].map((lane) => ({
+              heading: lane.querySelector("h3")!.getBoundingClientRect().top,
+              count: lane.querySelector(".pipeline-counts")!.getBoundingClientRect().top,
+              quiet: lane.classList.contains("empty"),
+              text: lane.textContent,
+              href: lane.querySelector("h3 a")?.getAttribute("href"),
+              cards: lane.querySelectorAll(".pipeline-chip").length,
+            })),
+          undefined,
+        );
+        for (const lane of laneFacts) {
+          expect(lane.href).toMatch(/^\/board\?stage=/);
+          if (lane.quiet) {
+            expect(lane.text).toContain("Observed empty");
+            expect(lane.cards).toBe(0);
+          }
+          for (const peer of laneFacts.filter(
+            (candidate) => Math.abs(candidate.heading - lane.heading) <= 1,
+          ))
+            expect(Math.abs(peer.count - lane.count)).toBeLessThanOrEqual(1);
         }
+        expect((await page.box("#pipelineP")).height).toBeLessThanOrEqual(280);
+
+        // Pipeline follows live Activity; analytical panels size their own columns.
+        const pipeline = await page.box("#pipelineP");
+        expect(pipeline.y).toBeGreaterThanOrEqual(log.y + log.height - 1);
 
         // A long Comms message is one line and its "read" link stays visible and reachable.
         await page.evaluate(() => {
@@ -181,8 +204,19 @@ describeRendered("Overview v2 layout in a browser", () => {
           "In state",
         ]);
 
-        // Lower panels remain reachable in the Overview scroll region.
-        expect(await page.reachable("#quotaP", ".overview-grid")).not.toContain(false);
+        // The complete existing allowance table is reached through its native reader.
+        await page.click("#quotaSummaryP .quota-details");
+        expect(await page.boxes("#quotaP tbody tr")).toHaveLength(3);
+        expect(await page.reachable("#quotaP tbody tr", ".evidence-body")).not.toContain(false);
+        await page.press("Escape");
+        await page.click("#machineSummaryP > .ph button");
+        expect(
+          await page.evaluate(
+            () => document.querySelectorAll("#machP .transcript-footprint").length,
+            undefined,
+          ),
+        ).toBe(0);
+        expect(await page.reachable("#machP .machine-window", ".evidence-body")).toEqual([true]);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,

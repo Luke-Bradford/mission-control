@@ -57,6 +57,9 @@ export function MeasuredHistory({
           Latest {latest == null ? "—" : format(latest)} {unit}
         </span>
         <span className="num">Peak {format(peak)}</span>
+        {peak === 0 && (
+          <span className="muted measured-zero">No activity in the measured minutes.</span>
+        )}
       </div>
       <div className={recent ? "measured-evidence" : undefined}>
         <div className="measured-plot">
@@ -118,7 +121,6 @@ export function MeasuredHistory({
           </section>
         )}
       </div>
-      {peak === 0 && <p className="s muted">No activity in the measured minutes.</p>}
       <HistoryDataTable
         values={values}
         format={format}
