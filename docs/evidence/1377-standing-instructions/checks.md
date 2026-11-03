@@ -27,10 +27,11 @@ The web child is #1378. Overview and production deployment remain separate.
   and recreate the fixture directory. The first process run reached initial/repeated/operator-message assertions;
   it did not prove rotation or resume passed.
 
-## Final source validation — 3 November 2026
+## Pre-review source validation — 3 November 2026
 
 Validated source head: `a4fb1f7890e8c7a73c6020e2ed642dfb310a3d79`.
-The final evidence commit changes only this Markdown file; application/test sources stay at that validated tree.
+The initial evidence-only freeze was 84de9b5a; its application/test sources matched that validated tree.
+Independent review subsequently found the focus lifecycle issue documented below.
 
 | Command/run | Actual result |
 | --- | --- |
@@ -104,3 +105,45 @@ Notice failure semantics: `pending` means no durable Comms receipt; `inbox` mean
 including when immediate notification failed or the seat is busy; `notified` records a successful immediate
 notification in that flush. A retry does not duplicate stored Comms. Concurrent mutation responses use their
 own instruction/action receipt, not another recipient's status. Global order mutations create no seat notice rows.
+
+
+## Independent failed review and correction — 3 November 2026
+
+The independent whole-branch review of source `a4fb1f78` (frozen as docs successor `84de9b5a`)
+found one Important issue and one Minor issue. The Important repro imported label:new after a config
+reload, then a live run's final delivery reimported its captured label:old and created another focus entry.
+The Minor issue left the instruction-focus:<seat> warning open after import later succeeded.
+
+The failed state is retained on [draft PR 1381's review/rework record](https://github.com/Luke-Bradford/mission-control/pull/1381#issuecomment-6591839676).
+Saved failed QA report: `f3d764f1f174341448c7de46b19d25cc18803ab495f108c56afc8d9544b6933e`.
+Reader route: `/qa?repo=mission-control&pr=1381&report=f3d764f1f174341448c7de46b19d25cc18803ab495f108c56afc8d9544b6933e`.
+The independent scratch repro and its original red log remain unchanged under the controller's retained artifacts.
+The original repro failed 1 of 1 tests: expected label:new and ID 2, observed label:old and ID 3.
+This failed history is not replaced by the correction's green results.
+
+The controller canceled [initial CI run 41550710419](https://github.com/Luke-Bradford/mission-control/actions/runs/41550710419)
+after the Important review finding. That cancellation avoided a full run on a known unmergeable head;
+it is not a failed test outcome or a successful CI result. New exact-head CI remains required after correction.
+
+Correction source: `3f50fc559ecd8b52eeb4109a208de8d3b34bc062`, a descendant of the preserved failed freeze.
+Final delivery now resolves the current configured seat and refuses a seat removed while delivery waits.
+Queue/refill and reorder focus checks resolve current configuration before importing a selector, including
+null and omitted focus. The existing config-import callback is extracted for a direct failure/recovery test;
+success clears only its matching open warning and emits an attention update. No authority or selector grammar changes.
+
+Correction validation:
+
+- Core/server sequential typecheck passed before the correction regression run.
+- `pnpm exec vitest run apps/server/test/supervisor-instructions.test.ts apps/server/test/standing-instructions-api.test.ts apps/server/test/queue.test.ts apps/server/test/queue-reorder.test.ts --maxWorkers=3`:
+  170 passed, 4 files, 15.28 seconds. Provider 12; API/notice 9; queue 116; reorder 33.
+- Permanent provider regression adapts the independent repro and covers label:new, explicit null,
+  omitted focus and removal while delivery is queued. Queue regressions cover the same reload/removal cases.
+- The Minor regression creates an actual 64-entry capacity failure, frees capacity, imports successfully,
+  and proves only that warning clears. A subsequent successful retry emits no redundant attention change.
+- `pnpm -s lint`, all-workspace `pnpm -s typecheck`, and `pnpm -s build` passed on correction source 3f50fc55.
+  The test run preceded the source commit with identical source/test content. Raw correction lint/build
+  receipts are retained by the controller in its temporary check artifacts; no full local suite was run.
+
+Same-reviewer narrow verification of the complete correction delta and unchanged original scratch repro
+is pending. The failed QA/status stays retained. No corrected push, new QA approval, merge, deployment,
+UI acceptance or actual-provider compliance is claimed by this evidence update.
