@@ -8,7 +8,9 @@ import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { orderHref } from "../instructions/links.ts";
 import { githubItemHref } from "../links.ts";
+import { followLink } from "../router.ts";
 import { decidedToday, decisionAnchor, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 import { Pending } from "./Pending.tsx";
@@ -30,6 +32,7 @@ export function DecidedRow({
   tz: string | null;
 }) {
   const nameOf = useSeatName();
+  const orderId = d.orderId;
   const repos = useResource<ConfigView>(RESOURCES.config).data?.repos ?? [];
   const [refRepo, refNumber] = d.ref?.split("#") ?? [];
   const refUrl =
@@ -92,6 +95,15 @@ export function DecidedRow({
       <div className="s">
         <b>{d.decision}</b> · {d.basis}
       </div>
+      {orderId !== null && orderId !== undefined && (
+        <a
+          className="instruction-link"
+          href={orderHref(orderId)}
+          onClick={(event) => followLink(event, orderHref(orderId))}
+        >
+          Saved order #{d.orderId} · retained reference
+        </a>
+      )}
       {err !== null && (
         <p className="note err" role="alert">
           {err}
