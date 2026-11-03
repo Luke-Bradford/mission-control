@@ -6,6 +6,7 @@ import { agentDensityFixture } from "./agentDensityFixture.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 
 const { renderAt } = browserSession();
+type ReadWindow = Window & { __agentReads: string[] };
 const waitForText = async (expected: string) => {
   const start = performance.now();
   while (
@@ -293,6 +294,78 @@ describeRendered("Agent density in the production App", () => {
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1, null),
         ).toBe(true);
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+  it(
+    "retains configured controls and drafts while history and files remain lazy",
+    async () => {
+      for (const theme of ["light", "dark"] as const) {
+        const page = await renderAt({
+          page: "test/agentV2Browser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme: theme,
+          search: "?dock=open",
+          api: agentDensityFixture().api,
+        });
+        await page.box(".agent-v2-story");
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          const logged = window as ReadWindow;
+          logged.__agentReads = [];
+          const original = window.fetch.bind(window);
+          window.fetch = (input, init) => {
+            logged.__agentReads.push(String(input));
+            return original(input, init);
+          };
+        }, null);
+        await page.click(".agent-v2-actions summary");
+        await page.box(".agent-v2-menu");
+        expect(
+          await page.evaluate(() => document.querySelector(".agent-v2-menu")?.textContent, null),
+        ).toContain("Rename");
+        await page.click(".agent-v2-actions summary");
+        await page.click("#agentInput");
+        await page.press("a");
+        await page.press("b");
+        await page.click('button[title="Collapse FLIGHT to its rail"]');
+        await page.click('button[aria-label^="Expand FLIGHT:"]');
+        await page.resize(1280, 700);
+        await page.resize(1600, 1000);
+        expect(
+          await page.evaluate(
+            () => (document.querySelector("#agentInput") as HTMLInputElement).value,
+            null,
+          ),
+        ).toBe("ab");
+        const before = await page.evaluate(() => (window as ReadWindow).__agentReads, null);
+        expect(before.some((path) => /\/runs(?:\?|$)|\/prs\?|\/files(?:\?|$)/.test(path))).toBe(
+          false,
+        );
+        await page.click(".agent-v2-history > summary");
+        await page.box("#loopP .vsteps");
+        expect(
+          await page.evaluate(
+            () => (window as ReadWindow).__agentReads.some((path) => /\/runs(?:\?|$)/.test(path)),
+            null,
+          ),
+        ).toBe(true);
+        await page.click("#sideP .seg button:nth-child(3)");
+        expect(
+          await page.evaluate(async () => {
+            const start = performance.now();
+            while (
+              !(window as ReadWindow).__agentReads.some((path) => /\/files(?:\?|$)/.test(path)) &&
+              performance.now() - start < 1000
+            )
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            return (window as ReadWindow).__agentReads.some((path) => /\/files(?:\?|$)/.test(path));
+          }, null),
+        ).toBe(true);
+        expect(page.errors()).toEqual([]);
         await page.close();
       }
     },

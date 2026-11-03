@@ -1,8 +1,14 @@
-import { GUARD_RULES } from "@mc/core";
+import {
+  type ConfigView,
+  type CrewChanges,
+  GUARD_RULES,
+  type RunLoopView,
+  type RunView,
+} from "@mc/core";
 import { RESOURCES } from "../src/data.ts";
 import { agentView, populatedAgentView } from "./agentV2Fixture.ts";
 import { type DesktopScenario, desktopFixture } from "./desktopFixtures.ts";
-import { NOW, seatRow } from "./fixtures.ts";
+import { CREW_CONFIG, NOW, run, seatRow } from "./fixtures.ts";
 
 /** Fictional, settled API contracts for the actual App. No fixture number is a live claim. */
 export function agentDensityFixture(scenario: DesktopScenario = "default") {
@@ -65,8 +71,98 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
   }
   const rows =
     scenario === "empty" ? [] : [view.row, ...fixture.rows.filter((row) => row.id !== view.row.id)];
-  const api = {
+  const crewConfig = CREW_CONFIG.crew;
+  if (!crewConfig) throw new Error("The Agent density fixture needs a configured crew");
+  for (const [index, row] of rows.entries()) {
+    row.area = [`fixture-seat-${index + 1}/**`];
+    row.model = row.run?.model ?? row.model ?? "sonnet";
+    if (row !== view.row && row.run) row.run = { ...row.run, id: `fixture-run-${row.id}` };
+  }
+  const seats = rows.map((row) => ({
+    id: row.id,
+    role: row.role ?? "GUIDO",
+    mode: row.mode ?? "writer",
+    accountId: row.accountId,
+    model: row.model ?? "sonnet",
+    area: row.area,
+  }));
+  const config: ConfigView = {
+    ...CREW_CONFIG,
+    operator: { id: "operator", timezone: "UTC" },
+    crew: {
+      ...crewConfig,
+      sessions: [{ id: "s1", repoId: "shop-app", checkout: "/mc/clone", seats }],
+    },
+  };
+  const changes: CrewChanges = {
+    sessions: [{ id: "s1", seats: seats.map(({ mode: _mode, ...seat }) => seat) }],
+    pending: [],
+    restartNeeded: [],
+    error: null,
+    checkedAt: NOW,
+  };
+  const loopView: RunLoopView = {
+    runId: view.row.run?.id ?? "r-12",
+    startedAt: view.row.run?.startedAt,
+    endedAt: view.row.run?.endedAt,
+    loop: view.row.loop
+      ? {
+          phase: "parked",
+          reportedEvidenceId: 1,
+          prNumber: 77,
+          pushStartedAt: NOW - 300000,
+          pushFor: "a".repeat(40),
+          unparkedAt: null,
+          ciFails: 1,
+          ciFailedSha: "a".repeat(40),
+          relayedSha: null,
+          transient: 0,
+          lastRefusal: null,
+          epoch: 1,
+          budgetExtra: 0,
+          parked: { kind: "review", reason: "Keyboard check remains", ended: false },
+          touches: null,
+          cardFor: null,
+          mergeHold: { by: "CAPCOM", reason: "Keyboard check remains", at: NOW - 300000 },
+        }
+      : null,
+    events: [],
+    tries: [],
+    round: view.row.loop ? 2 : null,
+    budget: null,
+    review: null,
+  };
+  const savedRuns = (row: typeof view.row): RunView[] =>
+    row.run
+      ? [
+          {
+            ...run({
+              ...row.run,
+              agentId: row.id,
+              repoId: row.repoId,
+              sessionId: row.sessionId ?? "s1",
+              ticket: row.ticket,
+              summary: row.summary,
+            }),
+            prs: [],
+            ticketTitle: row.ticketTitle,
+          },
+        ]
+      : [];
+  const api: Record<string, unknown> = {
     ...fixture.api,
+    "/api/config": config,
+    "/api/crew/changes": changes,
+    "/api/crew/sessions": [
+      {
+        id: "s1",
+        readable: true,
+        folders: rows.map((row, index) => ({
+          name: `fixture-seat-${index + 1}`,
+          owners: [row.id],
+        })),
+      },
+    ],
     [RESOURCES.guardHits.path]: {
       hits: [],
       counts: Object.fromEntries(Object.keys(GUARD_RULES).map((key) => [key, 0])),
@@ -96,15 +192,25 @@ export function agentDensityFixture(scenario: DesktopScenario = "default") {
       more: false,
     },
     [RESOURCES.runHandoff(view.row.run?.id ?? "r-12").path]: null,
-    [RESOURCES.runLoop(view.row.run?.id ?? "r-12").path]: {
-      loop: {
-        phase: "parked",
-        parked: { kind: "review", reason: "Keyboard check remains", ended: false },
-      },
-    },
-    [RESOURCES.runs(view.row.id).path]: [],
+    [RESOURCES.runLoop(view.row.run?.id ?? "r-12").path]: loopView,
+    [RESOURCES.runs(view.row.id).path]: savedRuns(view.row),
     [RESOURCES.files(view.row.id).path]: { files: [], note: null },
     [RESOURCES.focus(view.row.id).path]: { focus: null },
   };
+  for (const row of rows)
+    if (row !== view.row) {
+      api[RESOURCES.agentDetail(row.id).path] = agentView(row);
+      api[RESOURCES.stream(row.id).path] = {
+        runId: row.run?.id ?? null,
+        events: [],
+        tasks: [],
+        more: false,
+        truncated: false,
+      };
+      api[RESOURCES.focus(row.id).path] = { focus: null };
+      api[RESOURCES.runs(row.id).path] = savedRuns(row);
+      api[RESOURCES.files(row.id).path] = { files: [], note: null };
+      if (row.run) api[RESOURCES.runHandoff(row.run.id).path] = null;
+    }
   return { view, rows, api };
 }
