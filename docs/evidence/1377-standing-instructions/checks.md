@@ -226,8 +226,81 @@ the controller tool history; no standalone raw-log hash is invented for those ru
 | mc-1377-final-pause-ci-build.log | f214bc05b10329d40ae7ffb83f4d836121401e81b2231d77f47d0d191aa91195 |
 | mc-1377-final-hud-projection.log | 6025b638aa557b3ea0fea39c48f2e57f672dca280c4fe08fb98b689b50f5a2a7 |
 
-Current handoff: corrected source is frozen locally for the same reviewer's narrow verification, including
+Handoff at 74b9e585: corrected source was frozen locally for the same reviewer's narrow verification, including
 the original unchanged two-case pause repro. The controller owns corrected remote composition, new exact-head
 CI, QA disposition, merge and Update. This record claims neither a final review/CI pass nor merge/deployment.
 Server-only visual N/A reflects no apps/web source or user-visible control implementation in this child;
 #1378 remains responsible for that UI. No actual-provider compliance or live paid-crew outcome is claimed.
+
+
+## Third CI failure and prompt-audit correction — 3 November 2026
+
+The second same-reviewer narrow check was clean on 0086af6f at 10:09:35 UTC: the unchanged original pause
+probe passed 2/2 (2.23s), HUD memo/routes passed 22/22 (2.43s), and strict catalog/readers/replay deltas
+were clean by static review. Original red evidence was preserved. Final docs head 74b9e585 had identical
+application/test sources. This scoped result did not substitute for CI.
+
+[Exact-head CI 41617003617](https://github.com/Luke-Bradford/mission-control/actions/runs/41617003617)
+then failed on 74b9e585. server-process (2) reported 3 failed/407 passed, 496.39s; server (1), server (2),
+server-process (1), web-core and validate were successful; the aggregate check failed. Two failures were
+strict startWatch comparisons still expecting the original BRIEF without its required guidance envelope.
+The third was a real Important regression: deferring prompt identity recording until after first send
+allowed launch when prompt audit storage failed, then swallowed the first-delivery rejection.
+
+Failed 74b snapshot and all three CI failures remain retained in saved QA
+`ed6858a41a16f8cdb8f516d9e25341e5f3c36ed637f0bbae0dfa1a6c039b9678`.
+Reader: `/qa?repo=mission-control&pr=1381&report=ed6858a41a16f8cdb8f516d9e25341e5f3c36ed637f0bbae0dfa1a6c039b9678`.
+[Public failed-head rework record](https://github.com/Luke-Bradford/mission-control/pull/1381#issuecomment-6602148290).
+The earlier canceled 41550710419 and failed 41551990597 runs above retain their distinct actual outcomes.
+
+Correction source: `92ee33998d23db42c116cec9e8c3fe138b092366`. Prompt identity is again recorded before
+any token/provider launch, preserving the original unchanged no-spawn test. A pending first delivery retains
+that exact prepared hash. Immediately before input, the freshly resolved full envelope replaces only that
+hash through a compare-and-swap; the database also refuses replacement after a delivered receipt exists.
+Thus guidance may change between preparation and delivery without losing the actual first-envelope identity.
+The first sections are recorded only after input succeeds. Any first-delivery failure now rejects the start,
+closes the empty session and leaves the run failed instead of returning success. All three initial start
+paths use that same failure handling. No provider, daemon or authority policy was changed.
+
+The two startWatch comparisons remain full exact-array comparisons, wrapping the unchanged original BRIEF
+and its exact blank-line first payload in the specified envelope. Existing model, detached checkout,
+sandbox and hook assertions remain intact. Five new fake-provider cases prove watch/writer current guidance,
+actual delivered hash and byte total, rejected replacement after delivery, watch/writer final-audit failure
+with zero delivered turns and a failed closed run, and refusal to overwrite an unexpected prepared identity.
+
+An initial selected process run passed 8, with 293 filtered (6.52s), followed by core/server sequential types.
+After adding the delivered-receipt guard, the final bounded checks below all completed with exit 0 on content
+frozen as source 92ee3399. No broad suite or shard retry was run locally.
+
+```sh
+pnpm exec vitest run --project server-process apps/server/test/supervisor-instructions.test.ts --maxWorkers=3 > /tmp/mc-1377-prompt-audit-instructions-final.log 2>&1
+pnpm exec vitest run --project server-process apps/server/test/supervisor-review.test.ts apps/server/test/supervisor-start.test.ts --maxWorkers=3 -t 'runs with no ticket and no branch|appends first after a blank line|does not spawn when recording the prompt version fails' > /tmp/mc-1377-prompt-audit-ci-final.log 2>&1
+pnpm exec vitest run --project server apps/server/test/prompt-cost.test.ts apps/server/test/store.test.ts --maxWorkers=3 -t 'prompt|section|immutable model' > /tmp/mc-1377-prompt-audit-cost-store.log 2>&1
+pnpm -s typecheck > /tmp/mc-1377-prompt-audit-final-types.log 2>&1
+pnpm -s lint > /tmp/mc-1377-prompt-audit-final-lint.log 2>&1
+pnpm -s build > /tmp/mc-1377-prompt-audit-final-build.log 2>&1
+```
+
+Results in command order: 22/22 instruction process tests (17.17s); the exact three CI failures passed,
+276 filtered (3.29s); 7 cost/store checks passed, 199 filtered (954ms); all workspace types passed;
+lint passed, 51 warnings/7 infos/no errors, 60 core modules/no cycles; compatibility build passed (984ms).
+The lane was released immediately after each bounded pack, before inspecting/reporting results.
+
+| Retained `/tmp` artifact basename | SHA-256 |
+| --- | --- |
+| mc-1377-independent-pause-green-0086af6f.log | 1921ee5c59fab715f0659b81337ded6a405e602979314f992dfcfb20556a62fe |
+| mc-1377-independent-hud-routes-0086af6f.log | a9aaa13cfc79bec09ca42aec8f861a070a4a9c763d8e9530dc0da00763d96ea5 |
+| mc-1381-74b-ci-failed.log | f83ce5e79badd2271cfe8705a8efa0f742970aa017a4af40eb62123694730438 |
+| mc-1377-prompt-audit-focused.log | ca6fa6711e4f17e18edd9f665bf821e07b4040bc5a7fed581a1db165280a0afd |
+| mc-1377-prompt-audit-types.log | 7fc3112653bbe3068c43cebe1a512b2969f3333b9f1d374ef846b631460fd46d |
+| mc-1377-prompt-audit-instructions-final.log | 8a534877b4d5d80ebe34df238aae2f866da9198edfc54fa693d9cc78b21e551e |
+| mc-1377-prompt-audit-ci-final.log | 1d90692921322707baa37a42d71abe5f08f12ab9e03d464514ee37dc5e5c0ac7 |
+| mc-1377-prompt-audit-cost-store.log | 2f464926ed9df98530ad4c8ce8997c60a8b84180599461ceaea332a88cba7327 |
+| mc-1377-prompt-audit-final-types.log | 89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e |
+| mc-1377-prompt-audit-final-lint.log | acdc54472b3ce5e4ec8d3312609f49fe6cd7e318cf38c61ed81560c035cf9d94 |
+| mc-1377-prompt-audit-final-build.log | f8b542cf86ed714ace3330348ae52f2a517e96b2d81d9bc29796e09f0a38c687 |
+
+Source 92ee3399 is frozen for the same reviewer's narrow correction verification. That review and fresh
+corrected-head CI remain pending; the controller owns remote publication, final QA, merge and Update.
+No screenshot acceptance applies to this server/core/runtime correction, no web controls are delivered,
+and no actual paid-provider or live-crew compliance is claimed.
