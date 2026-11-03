@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
 import { type EvidenceReader, OverviewEvidence } from "../src/overview/OverviewEvidence.tsx";
 import { ContextSummaryPanel } from "../src/overview/OverviewInvestigation.tsx";
@@ -89,6 +89,57 @@ it("leaves complete evidence unmounted until requested and preserves it after cl
   } finally {
     HTMLDialogElement.prototype.showModal = originalShow;
     HTMLDialogElement.prototype.close = originalClose;
+  }
+});
+
+it("preserves a new focus choice after reader close while restoring genuinely lost focus", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+  const show = HTMLDialogElement.prototype.showModal,
+    close = HTMLDialogElement.prototype.close;
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.open = false;
+  };
+  try {
+    const ref = createRef<EvidenceReader>();
+    render(
+      <>
+        <button type="button" onClick={() => ref.current?.show()}>
+          Inspect focus evidence
+        </button>
+        <button type="button">Next legitimate control</button>
+        <OverviewEvidence ref={ref} title="Focus evidence">
+          <p>Existing evidence</p>
+        </OverviewEvidence>
+      </>,
+    );
+    const opener = screen.getByText("Inspect focus evidence"),
+      next = screen.getByText("Next legitimate control");
+    const flush = () =>
+      act(() => {
+        for (const callback of frames.splice(0)) callback(performance.now());
+      });
+    opener.focus();
+    fireEvent.click(opener);
+    const closeButton = screen.getByText("Close");
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    next.focus(); // User intent arrives after native close but before queued fallback restoration.
+    flush();
+    expect(document.activeElement).toBe(next);
+    opener.focus();
+    fireEvent.click(opener);
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    flush(); // A control left inside the closed native reader is genuinely lost.
+    expect(document.activeElement).toBe(opener);
+  } finally {
+    HTMLDialogElement.prototype.showModal = show;
+    HTMLDialogElement.prototype.close = close;
+    vi.unstubAllGlobals();
   }
 });
 
