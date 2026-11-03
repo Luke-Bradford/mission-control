@@ -80,6 +80,7 @@ import {
   ownReply,
   pending,
   wakeFacts,
+  wakeReasons,
 } from "../src/flight/state.ts";
 import {
   createFlightWatch,
@@ -5070,4 +5071,38 @@ it("does not rearm triage or wake a seat when stopped during author refresh", as
   await vi.advanceTimersByTimeAsync(FLIGHT_IDLE_MS);
   expect(emitted).toEqual([]);
   expect(sendCalls).toEqual([]);
+});
+
+it("wakes once for a new or revoked order and retries a failed delivery without an unchanged-order loop", async () => {
+  await watch.check();
+  facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+  nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+  const order = store.instructions.create(
+    null,
+    { kind: "text", text: "QA first" },
+    "operator",
+    nowMs,
+  ).entry;
+  const changed = flightState({ config, store, busy: [], now: nowMs });
+  expect(
+    wakeReasons("{}", wakeFacts(changed)).some((reason) => reason.id.startsWith("instructions:")),
+  ).toBe(false);
+  sendFails = true;
+  await watch.check();
+  expect(sendCalls).toHaveLength(1);
+  sendFails = false;
+  nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+  await watch.check();
+  expect(sendCalls).toHaveLength(2);
+  facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+  nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+  await watch.check();
+  expect(sendCalls).toHaveLength(2);
+  store.instructions.revoke(order.id, null, "operator", nowMs);
+  await watch.check();
+  expect(sendCalls).toHaveLength(3);
+  facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+  nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+  await watch.check();
+  expect(sendCalls).toHaveLength(3);
 });

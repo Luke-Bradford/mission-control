@@ -331,6 +331,7 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud.ts";
+import { announceInstruction } from "../instruction-notices.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -355,6 +356,7 @@ import { QueueReorderError } from "../queue-reorder.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { InstructionInput } from "../standing-instructions.ts";
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
@@ -386,7 +388,6 @@ export interface FlightToolsDeps {
   hubOrigin?: string;
   /** Where screenshots are kept for a durable reference; absent: the image is not stored. */
   hudShots?: HudShotStore;
-  focus?: (seatId: string, focus: string | null) => Promise<unknown>;
   queueReorder?: (
     seatId: string,
     move: string,
@@ -481,6 +482,8 @@ const DiscussionReplyArgs = z.strictObject({
   messageId: z.string().min(1).max(100),
 });
 const LogDecisionArgs = z.strictObject({
+  kind: z.enum(["note", "re-plan"]).optional(),
+  orderId: z.number().int().positive().optional(),
   discussion: DiscussionReplyArgs.optional(),
   seat: z.string().regex(SEAT_ID).optional(),
   about: text(FLIGHT_ABOUT_ARG_MAX),
@@ -1091,7 +1094,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const record = (
     at: number,
     d: Pick<FlightDecision, "kind" | "about" | "decision" | "basis"> &
-      Partial<Pick<FlightDecision, "seatId" | "targetRunId" | "ref" | "questionId">>,
+      Partial<Pick<FlightDecision, "seatId" | "targetRunId" | "ref" | "questionId" | "orderId">>,
   ) =>
     store.addFlightDecision({
       at,
@@ -1109,6 +1112,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const c = flightCall(deps, ctx, LogDecisionArgs, args);
     if (!c.ok) return c.result;
     const { seat, about, decision, basis, discussion } = c.args;
+    if (discussion && (c.args.kind === "re-plan" || c.args.orderId !== undefined))
+      return fail("A discussion reply cannot be a re-plan decision.");
     if (discussion) {
       if (
         !store.replyDiscussion(
@@ -1127,8 +1132,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const mine = flightSeat(config)?.session.seats.some((s) => s.id === seat) === true;
       if (!mine) return { text: notInSessionText(seat), isError: true };
     }
+    const { kind = "note", orderId } = c.args;
+    const order = orderId === undefined ? null : store.instructions.get(orderId);
+    if (
+      (kind === "re-plan" && (!order || order.seatId !== null)) ||
+      (kind !== "re-plan" && orderId !== undefined)
+    )
+      return fail("A re-plan requires a saved global order ID; notes have no order ID.");
     const at = now();
-    record(at, { kind: "note", seatId: seat ?? null, about, decision, basis });
+    record(at, {
+      kind,
+      seatId: seat ?? null,
+      about,
+      decision,
+      basis,
+      ...(orderId === undefined ? {} : { orderId }),
+    });
     bus.emit("flight");
     return { text: FLIGHT_NOTED };
   }
@@ -1540,16 +1559,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { seat, text: body, unpark, runId, basis } = c.args;
     const cfg = seatCfg(seat);
     if (cfg === undefined) return fail(notInSessionText(seat));
-    if (c.args.read_focus) return { text: JSON.stringify({ focus: cfg.focus ?? null }) };
+    store.instructions.syncFocus(cfg, now());
+    if (c.args.read_focus)
+      return { text: JSON.stringify({ focus: store.instructions.focus(seat).effectiveFocus }) };
     if (c.args.focus !== undefined) {
-      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
-      if (!deps.focus) return fail("Focus writes unavailable.");
       try {
-        await deps.focus(seat, c.args.focus);
-        bus.emit("agents");
-        return { text: JSON.stringify({ focus: c.args.focus }) };
-      } catch {
-        return fail("Focus could not be saved; reload and try again.");
+        const result = await announceInstruction(
+          { config, store, bus, supervisor: deps.supervisor, now },
+          store.instructions.create(
+            seat,
+            { kind: "focus", focus: c.args.focus },
+            "flight",
+            now(),
+            basis,
+          ),
+        );
+        return { text: JSON.stringify({ focus: result.effectiveFocus, ...result }) };
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : "Focus could not be saved.");
       }
     }
     if (body === undefined) return fail("A message is required.");
@@ -3902,13 +3929,77 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.editCard,
     MC_TOOL_NAMES.setFields,
   ]);
+  const InstructArgs = z.strictObject({
+    seat: z.string().regex(SEAT_ID),
+    kind: z.enum(["text", "focus"]),
+    text: z.string().optional(),
+    focus: seatFocus.optional(),
+    replacesId: z.number().int().positive().optional(),
+    basis: basisArg,
+  });
+  const RevokeArgs = z.strictObject({ id: z.number().int().positive(), basis: basisArg });
+  const instructionTools: McTool[] = [
+    {
+      name: MC_TOOL_NAMES.instructSeat,
+      description:
+        "Save a dated seat instruction (text or selector focus). Operator entries outrank yours; you cannot replace them. Global orders belong to the operator.",
+      inputSchema: z.toJSONSchema(InstructArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: async (ctx, args) => {
+        const checked = flightCall(deps, ctx, InstructArgs, args);
+        if (!checked.ok) return checked.result;
+        const { seat, basis, ...input } = checked.args;
+        const cfg = seatCfg(seat);
+        if (!cfg) return fail(notInSessionText(seat));
+        const parsed = InstructionInput.safeParse(input);
+        if (!parsed.success) return fail("Give text or focus matching the instruction kind.");
+        try {
+          store.instructions.syncFocus(cfg, now());
+          const result = await announceInstruction(
+            { config, store, bus, supervisor: deps.supervisor, now },
+            store.instructions.create(seat, parsed.data, "flight", now(), basis),
+          );
+          return { text: JSON.stringify(result) };
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : "Instruction was not saved.");
+        }
+      },
+    },
+    {
+      name: MC_TOOL_NAMES.revokeInstruction,
+      description:
+        "Revoke one of your seat instructions, retaining its history. You cannot revoke an operator instruction or global order.",
+      inputSchema: z.toJSONSchema(RevokeArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: async (ctx, args) => {
+        const checked = flightCall(deps, ctx, RevokeArgs, args);
+        if (!checked.ok) return checked.result;
+        const entry = store.instructions.get(checked.args.id);
+        if (!entry?.seatId || !seatCfg(entry.seatId)) return fail("Seat instruction unavailable.");
+        try {
+          const result = await announceInstruction(
+            { config, store, bus, supervisor: deps.supervisor, now },
+            store.instructions.revoke(entry.id, entry.seatId, "flight", now(), checked.args.basis),
+          );
+          return { text: JSON.stringify(result) };
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : "Instruction was not revoked.");
+        }
+      },
+    },
+  ];
   const flightTools: McTool[] = [
+    ...instructionTools,
     {
       name: MC_TOOL_NAMES.logDecision,
-      description: `For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
+      description: `Use kind re-plan with orderId to name the saved global order that changed your plan; ordinary calls default to note. For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
       inputSchema: {
         type: "object",
         properties: {
+          kind: { type: "string", enum: ["note", "re-plan"] },
+          orderId: { type: "integer", minimum: 1 },
           discussion: z.toJSONSchema(DiscussionReplyArgs),
           seat: {
             type: "string",
@@ -4332,6 +4423,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   ];
   // An allowlist keeps future posting or config tools held until their away behaviour is explicit.
   const awayLocalTools: ReadonlySet<string> = new Set([
+    MC_TOOL_NAMES.instructSeat,
+    MC_TOOL_NAMES.revokeInstruction,
     MC_TOOL_NAMES.logDecision,
     MC_TOOL_NAMES.waitOn,
     MC_TOOL_NAMES.readTicket,
@@ -4379,7 +4472,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const rowAdded = (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore;
       const landed =
         result.isError !== true
-          ? tool.name !== MC_TOOL_NAMES.acceptRuling || rowAdded
+          ? (tool.name !== MC_TOOL_NAMES.acceptRuling &&
+              tool.name !== MC_TOOL_NAMES.instructSeat &&
+              tool.name !== MC_TOOL_NAMES.revokeInstruction) ||
+            rowAdded
           : // a call that recorded a decision before it failed wrote something (a filed ticket
             // that then missed the project); so may an attempt that left no row. A refused call
             // wrote nothing, so only the tools that can write before they fail are looked at.

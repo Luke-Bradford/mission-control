@@ -56,6 +56,8 @@ export const FLIGHT_DECISION_KINDS = [
   "unpark",
   "note",
   "memory",
+  "re-plan",
+  "instruction",
   "promote",
   "end",
   "ticket",
@@ -89,6 +91,7 @@ export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
 
 export interface FlightDecision {
+  orderId?: number;
   id: number;
   at: number;
   kind: FlightDecisionKind;
@@ -1092,7 +1095,15 @@ export interface FlightState {
     /** True only when this hold currently prevents queued work from moving. */
     blocking: boolean;
   }[];
-  recent: { id: number; time: string; kind: FlightDecisionKind; about: string; decision: string }[];
+  instructionRevision?: string;
+  recent: {
+    orderId?: number;
+    id: number;
+    time: string;
+    kind: FlightDecisionKind;
+    about: string;
+    decision: string;
+  }[];
   /** The runaway breaker: while tripped every FLIGHT write is refused until the operator lifts it. */
   breaker: { tripped: boolean; reason: string | null };
   /** Pending scheduled work; only due entries prompt a wake. */

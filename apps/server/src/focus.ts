@@ -1,5 +1,7 @@
 import type { BoardItem } from "@mc/core";
 import { z } from "zod";
+import type { CcConfig } from "./config.ts";
+import type { Store } from "./store.ts";
 
 /** FLIGHT translates natural language into lane/label selectors or stable ticket refs. */
 const tokens = (focus: string): string[] => focus.trim().split(/[\s,]+/);
@@ -26,4 +28,17 @@ export function matchesFocus(focus: string | null | undefined, card: BoardItem):
       .filter((t) => !t.includes("#"))
       .every((t) => card.labels.includes(t.startsWith("label:") ? t.slice(6) : t))
   );
+}
+
+/** Async queue work can outlive a config reload. Resolve before importing, and fail closed on removal. */
+export function matchesConfiguredFocus(
+  config: CcConfig,
+  store: Store,
+  seatId: string,
+  card: BoardItem,
+): boolean {
+  const current = config.crew?.sessions
+    .flatMap((session) => session.seats)
+    .find((seat) => seat.id === seatId);
+  return current !== undefined && matchesFocus(store.instructions.syncFocus(current), card);
 }

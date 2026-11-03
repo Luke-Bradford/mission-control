@@ -1,3 +1,7 @@
+import {
+  flushInstructionNotices,
+  importInstructionFocus as importConfiguredInstructionFocus,
+} from "./instruction-notices.ts";
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
  * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
@@ -111,7 +115,6 @@ import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
-import { setSeatFocus } from "./seat-focus.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir, Store } from "./store.ts";
 import {
@@ -770,11 +773,6 @@ export async function main(): Promise<void> {
     hudShots,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
-    focus: (seatId, focus) => {
-      if (preview && process.env.MC_CONFIG === undefined)
-        throw new Error("Focus writes unavailable.");
-      return setSeatFocus(config, configPath, crewReloader, seatId, focus, Date.now());
-    },
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
@@ -866,6 +864,18 @@ export async function main(): Promise<void> {
     log: (line) => log(`crew: ${line}`),
   });
 
+  const importInstructionFocus = () =>
+    importConfiguredInstructionFocus({ config, store, bus, log });
+  importInstructionFocus();
+  const offInstructionNotices = bus.subscribe((topic) => {
+    if (topic === "config") importInstructionFocus();
+    if (topic === "config" || topic === "flight")
+      void flushInstructionNotices({ config, store, bus, supervisor }).catch((error) =>
+        log(`instruction notice: ${String(error)}`),
+      );
+  });
+  void flushInstructionNotices({ config, store, bus, supervisor });
+
   const mapRing = new CallRing(() => {
     const seats = new Set(
       configuredAgents(config)
@@ -955,6 +965,7 @@ export async function main(): Promise<void> {
       await previews?.closeAll();
       stopDiscovery();
       crewReloader.stop();
+      offInstructionNotices();
       flightWatch.stop();
       engine.stop();
       await scheduler.stop();

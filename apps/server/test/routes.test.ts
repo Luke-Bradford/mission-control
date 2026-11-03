@@ -11,6 +11,7 @@ import { Store } from "../src/store.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const API_SRC = join(ROOT, "apps/server/src/api.ts");
+const API_SOURCES = [API_SRC, join(ROOT, "apps/server/src/standing-instructions-api.ts")];
 const WEB_DATA = join(ROOT, "apps/web/src/data.ts");
 
 /** A route as the server registers it: `GET /api/crew`, `POST /api/seats/:id/start`. */
@@ -85,27 +86,29 @@ function matches(route: RouteKey, web: RouteKey): boolean {
 }
 
 /**
- * `// Reader: <where>` comments in api.ts, keyed by the route statement under each. The route's
+ * `// Reader: <where>` comments in registered router modules, keyed by the route statement under each. The route's
  * path is a string literal, or a constant api.ts exports (e.g. `GUARD_CHECK_ROUTE`).
  */
 function readerComments(): Map<RouteKey, string> {
-  const lines = readFileSync(API_SRC, "utf8").split("\n");
   const out = new Map<RouteKey, string>();
   const exported = apiModule as Record<string, unknown>;
-  lines.forEach((line, i) => {
-    const text = /^\s*\/\/ Reader: (.*\S)\s*$/.exec(line)?.[1];
-    if (text === undefined) return;
-    const rest = lines.slice(i + 1, i + 9).join("\n");
-    const literal = /\bapi\.(get|post|put|delete)\b[^"]*"(\/[^"]*)"/.exec(rest);
-    const named = /\bapi\.(get|post|put|delete)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
-    const constPath = named ? exported[named[2] as string] : undefined;
-    // the nearer route statement wins: a named path ahead of a later literal is the route
-    if (named && typeof constPath === "string" && (!literal || named.index < literal.index)) {
-      out.set(`${(named[1] as string).toUpperCase()} /api${constPath}`, text);
-    } else if (literal) {
-      out.set(`${(literal[1] as string).toUpperCase()} /api${literal[2]}`, text);
-    }
-  });
+  for (const source of API_SOURCES) {
+    const lines = readFileSync(source, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      const text = /^\s*\/\/ Reader: (.*\S)\s*$/.exec(line)?.[1];
+      if (text === undefined) return;
+      const rest = lines.slice(i + 1, i + 9).join("\n");
+      const literal = /\bapi\.(get|post|put|delete)\b[^"]*"(\/[^"]*)"/.exec(rest);
+      const named = /\bapi\.(get|post|put|delete)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
+      const constPath = named ? exported[named[2] as string] : undefined;
+      // the nearer route statement wins: a named path ahead of a later literal is the route
+      if (named && typeof constPath === "string" && (!literal || named.index < literal.index)) {
+        out.set(`${(named[1] as string).toUpperCase()} /api${constPath}`, text);
+      } else if (literal) {
+        out.set(`${(literal[1] as string).toUpperCase()} /api${literal[2]}`, text);
+      }
+    });
+  }
   return out;
 }
 
@@ -227,6 +230,14 @@ describe("the route table", () => {
     expect(readers.get("POST /api/attention/:key/dismiss")).toContain(
       "apps/web/src/comms/answer.ts",
     );
+  });
+
+  it("keeps extracted instruction routes covered by real planned or existing readers", () => {
+    const readers = readerComments();
+    expect(readers.get("GET /api/flight/orders")).toContain("apps/web/src/flight/KnowsTab.tsx");
+    expect(readers.get("GET /api/flight/orders/:id")).toContain("apps/web/src/flight/DidTab.tsx");
+    expect(readers.get("POST /api/seats/:id/focus")).toContain("apps/web/src/agent/SideTabs.tsx");
+    expect(orphans(["POST /api/undocumented"], [], readers)).toEqual(["POST /api/undocumented"]);
   });
 
   it("matches by method as well as path", () => {

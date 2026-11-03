@@ -538,6 +538,9 @@ export function crew(
   /** The Overview's rows: no event timelines are built, current or set-aside (see `crewSummary`). */
   summary = false,
 ): Crew {
+  // Import operator config before capturing the memo's store version. Row projection stays read-only.
+  for (const session of config.crew?.sessions ?? [])
+    for (const seat of session.seats) store.instructions.syncFocus(seat, now);
   const { value, ...basis } = memoised(
     store,
     now,
@@ -680,7 +683,9 @@ function buildCrew(
         ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
           ? { displayCallSign: agent.seat.displayCallSign }
           : {}),
-        ...(agent.kind === "crew" ? { focus: agent.seat.focus ?? null } : {}),
+        ...(agent.kind === "crew"
+          ? { focus: store.instructions.focus(agent.id).effectiveFocus }
+          : {}),
         repoId: agent.repoId,
         index,
         hudState: state,

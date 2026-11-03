@@ -69,6 +69,8 @@ const prep = vi.hoisted(() => ({
   failRemove: false,
   /** Set: every line written to a CLI session throws, as to one whose process is gone. */
   failWrite: false,
+  /** Historical crash fixture: leave a live keeper with no first input, without a known write failure. */
+  dropWrite: false,
   sessions: [] as import("../src/runtime/session.ts").CrewSession[],
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
@@ -182,6 +184,7 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
               }
               return target.close();
             };
+          if (key === "send" && prep.dropWrite) return () => {};
           if (key === "send" && prep.failWrite) {
             return () => {
               throw new Error("session ended");
@@ -478,6 +481,7 @@ beforeEach(() => {
   prep.closeGate = null;
   prep.closing = 0;
   prep.failWrite = false;
+  prep.dropWrite = false;
   prep.sessions = [];
   prep.peers = [];
   prep.handoffGate = null;

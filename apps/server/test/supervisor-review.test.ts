@@ -44,6 +44,7 @@ import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/review-preview.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
+import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
@@ -445,7 +446,11 @@ describe("startWatch", () => {
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
-    await until(() => expect(userLines()).toEqual([BRIEF]));
+    await until(() =>
+      expect(userLines()).toEqual([
+        instructionEnvelope(store, FLIGHT, out.runId, true, BRIEF).text,
+      ]),
+    );
   });
 
   it("refreshes FLIGHT credentials after a hub restart without ending its run", async () => {
@@ -492,8 +497,12 @@ describe("startWatch", () => {
   it("appends first after a blank line", async () => {
     const { sup } = flightMake();
     sup.start();
-    await sup.startWatch("flight-1", { first: "X" });
-    await until(() => expect(userLines()).toEqual([`${BRIEF}\n\nX`]));
+    const { runId } = await sup.startWatch("flight-1", { first: "X" });
+    await until(() =>
+      expect(userLines()).toEqual([
+        instructionEnvelope(store, FLIGHT, runId, true, `${BRIEF}\n\nX`).text,
+      ]),
+    );
   });
 
   it("is refused for a retiring watch seat", async () => {

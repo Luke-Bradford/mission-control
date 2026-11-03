@@ -37,6 +37,7 @@ export * from "./review.ts";
 export * from "./roles.ts";
 export * from "./runs.ts";
 export * from "./runtime.ts";
+export * from "./standing-instructions.ts";
 export * from "./summary.ts";
 export * from "./tool-trim.ts";
 export * from "./topics.ts";
