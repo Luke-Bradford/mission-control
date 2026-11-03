@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ✓ |server| apps/server/test/flight-tools.test.ts (686 tests | 684 skipped) 117ms
+ ✓ |server| apps/server/test/decision-defaults.test.ts (11 tests | 10 skipped) 49ms
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 694 skipped (697)
+   Start at  16:28:28
+   Duration  1.82s (transform 828ms, setup 0ms, collect 1.35s, tests 167ms, environment 0ms, prepare 61ms)
+

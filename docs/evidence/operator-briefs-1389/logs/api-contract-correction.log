@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ✓ |server| apps/server/test/api.test.ts (401 tests | 384 skipped) 1042ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed | 384 skipped (401)
+   Start at  18:15:40
+   Duration  2.39s (transform 851ms, setup 0ms, collect 1.20s, tests 1.04s, environment 0ms, prepare 27ms)
+

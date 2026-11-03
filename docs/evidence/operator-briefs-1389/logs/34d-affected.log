@@ -1,0 +1,502 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ✓ |server| apps/server/test/queue-reorder.test.ts (36 tests) 2239ms
+ ✓ |server| apps/server/test/brief-choices.test.ts (21 tests) 1502ms
+ ✓ |server| apps/server/test/person-replies.test.ts (16 tests) 1173ms
+ ✓ |server| apps/server/test/brief-action-api.test.ts (16 tests) 709ms
+ ✓ |server| apps/server/test/decision-defaults.test.ts (11 tests) 677ms
+ ✓ |server| apps/server/test/external-merge.test.ts (14 tests) 496ms
+stderr | apps/server/test/api.test.ts > away settings > GET fails closed when the stored value is unreadable
+Invalid away settings: holding away mode on with all permissions off.
+
+ ✓ |server| apps/server/test/comms-decisions.test.ts (6 tests) 467ms
+ ❯ |server| apps/server/test/api.test.ts (401 tests | 2 failed) 41065ms
+   ✓ audit > defaults to 30d and returns the audit response shape 130ms
+   ✓ audit > accepts the 7d range 65ms
+   ✓ audit > accepts the 30d range 62ms
+   ✓ audit > accepts the 90d range 57ms
+   ✓ audit > accepts the 365d range 55ms
+   ✓ audit > labels long runners with their seat's loop kind and whether the operator can act 66ms
+   ✓ audit > caps each list at 50 and reports the full counts of the lists it cut 70ms
+   ✓ audit > rejects an invalid range 59ms
+   ✓ Comms API > keeps ended runs and old crew traffic behind explicit history, including an empty current view 65ms
+   ✓ Comms API > returns cursor-derived unread counts for every page scope and keeps scopes isolated 78ms
+   ✓ Comms API > GET /api/comms/counts gives each seat's last-24-hour count and the unread counts of its agent page 62ms
+   ✓ Comms API > sends, reacts to, and pins CAPCOM messages with validation and exactly-once direct delivery 65ms
+   ✓ Comms API > rejects malformed reaction and pin message IDs without adding related rows 63ms
+   ✓ Comms API > serves each link's count with its newest message for the Comms graph 62ms
+   ✓ Comms API > reports each sender's p95 message length over the shared 24-hour Comms range 69ms
+   ✓ Comms API > keeps a link's count but not its words when an end is no Comms agent 69ms
+   ✓ Comms API > reports chatter rounds, run token cost, and FLIGHT's single step-in 67ms
+   ✓ Comms API > does not flag chatter whose seven rounds span more than two hours 61ms
+   ✓ Comms API > only records FLIGHT stepping into the flagged pair after it crosses the threshold 75ms
+   ✓ Comms API > reports the wait and FLIGHT deadline for unanswered questions and blockers 58ms
+   ✓ Comms API > serves boundary-safe linked tickets, ordered mentions, pins and link counts 67ms
+   ✓ Comms API > returns ticket metadata only when Comms identifies its repository 59ms
+   ✓ Comms API > keeps a clicked message's repository when issue numbers and PRs overlap 63ms
+   ✓ Comms API > uses a PR link's ticket only as repository context 70ms
+   ✓ repo profiles and the add-repo preview > GET /api/repos/profiles describes each configured repo, from stored rows 62ms
+   ✓ repo profiles and the add-repo preview > POST /api/repos/preview reads GitHub once and writes nothing 58ms
+   ✓ repo profiles and the add-repo preview > validates the body like the add route 60ms
+   ✓ repo profiles and the add-repo preview > answers 404 for an unknown owner and 502 when GitHub fails 64ms
+   ✓ repo profiles and the add-repo preview > requires JSON and a same-origin request 59ms
+   ✓ account model catalogs > does not fabricate Claude choices from configured roles 60ms
+   ✓ account model catalogs > returns the catalog discovered for each Codex binding only 68ms
+   ✓ add a repo (POST /api/repos) > writes config.yaml, applies the repo live and emits config 150ms
+   ✓ add a repo (POST /api/repos) > 400 for a github name with a space, nothing written 57ms
+   ✓ add a repo (POST /api/repos) > 400 for a 51-entry status map, nothing written 67ms
+   ✓ add a repo (POST /api/repos) > 400 for an extra key, nothing written 59ms
+   ✓ add a repo (POST /api/repos) > 400 for flightPowers (only the config file sets it), nothing written 58ms
+   ✓ add a repo (POST /api/repos) > 409 for a repo already in the file or already loaded 64ms
+   ✓ add a repo (POST /api/repos) > 409 when the server has no config path 62ms
+   ✓ add a repo (POST /api/repos) > 500 when the write fails; logs the reason 73ms
+   ✓ add a repo (POST /api/repos) > 409 when the current file does not load; says so, never the contents 63ms
+   ✓ add a repo (POST /api/repos) > 409 when config.yaml is a symbolic link; the link and its target are unchanged 58ms
+   ✓ repo onboarding (POST /api/repos/onboard) > writes a repo and setup fields together, only applying live state after success 193ms
+   ✓ repo onboarding (POST /api/repos/onboard) > leaves disk and live state unchanged when setup or session preparation is refused 97ms
+   ✓ repo onboarding (POST /api/repos/onboard) > requires GitHub's default branch again during final submission 97ms
+   ✓ repo onboarding (POST /api/repos/onboard) > rejects converted repo identity drift even when both default branches are main 119ms
+   ✓ repo onboarding (POST /api/repos/onboard) > keeps unrelated disk crew changes out of live state while onboarding 212ms
+   ✓ repo onboarding (POST /api/repos/onboard) > rejects a non-default branch during checkout preflight 59ms
+   ✓ repo setup (POST /api/repos/:repoId/setup) > does not apply an unrelated on-disk flight_powers change 97ms
+   ✓ POST /api/github/refresh > answers 202 and asks for a refresh 62ms
+   ✓ board setup > GET reports what is missing, without the project id, and writes nothing 60ms
+   ✓ board setup > GET reports no missing labels when all are present, matched without case 56ms
+   ✓ board setup > GET reports only the type labels the repo lacks 54ms
+   ✓ board setup > GET answers 502 when the labels cannot be read 60ms
+   ✓ board setup > POST creates the missing fields and type labels, refreshes the board, and a second POST creates nothing 59ms
+   ✓ board setup > targets the repo's own owner and project number 59ms
+   ✓ board setup > answers 404 for an unknown repo and never calls GitHub 56ms
+   ✓ board setup > answers 502 with GitHub's message when GitHub fails, and does not refresh 56ms
+   ✓ board setup > after Owner fails following Stage: 502 with no created, GET shows Owner missing, retry creates only Owner 73ms
+   ✓ board setup > answers 502 when a label cannot be created, and the next POST creates the rest 55ms
+   ✓ board setup > answers 502 without claiming a created field when the token cannot be read 66ms
+   ✓ board setup > requires JSON and a same-origin request 58ms
+   ✓ GET /api/machine > answers { latest: null } before the first sample, then the scheduler's latest 59ms
+   ✓ GET /api/machine > carries the crew's seat cap, configured seats and largest session 60ms
+   ✓ GET /api/machine > carries the crew folder transcript footprint 61ms
+   ✓ local access > serves /api without any cookie 256ms
+   ✓ local access > checks profile safety inside the supervisor account exclusion 64ms
+   ✓ local access > refuses a new CLI profile while an existing sandbox could read it 60ms
+   ✓ local access > grants no cross-origin read or preflight 65ms
+   ✓ local access > refuses a POST whose Origin is the literal null (403) 55ms
+   ✓ local access > has no login, logout, setup or auth-state routes 60ms
+   ✓ local access > an unknown /api path is 404 64ms
+   ✓ local access > refuses a non-JSON POST (415) 61ms
+   ✓ local access > refuses a POST from a foreign Origin (403) 58ms
+   ✓ local access > refuses a cross-site request under /api (403) before its handler runs 54ms
+   ✓ local access > lets same-origin, none and header-less GETs reach the handler 61ms
+   ✓ local access > refuses an unexpected Host (421) 60ms
+   ✓ local access > the operator can persist, read and clear a crew pause 58ms
+   ✓ local access > refuses an empty reason or unknown pause seats 63ms
+   × local access > every registered /api route is in the route table 58ms
+     → expected Set{ …(188) } to deeply equal Set{ 'GET /api/audit', …(186) }
+   ✓ local access > never logs a cookie or authorization header 66ms
+   ✓ agents > serves durable outgoing and received handoffs, and rejects unknown runs 65ms
+   ✓ agents > runs honours ?limit and validates it as an integer 1..500 56ms
+   ✓ agents > runs carry their PRs and the resolved ticket 58ms
+   ✓ agent files > worktree missing is 503 with fixed text, and git is never run 62ms
+   ✓ agent files > returns the worktree's changed files 56ms
+   ✓ agent files > every git call failing is 502 with fixed text (no path, no git message) 71ms
+   ✓ agent files > a total failure keeps the filter note in the 502 76ms
+   ✓ agent files > logs original files errors, diff=false 60ms
+   ✓ agent files > logs original files errors, diff=true 57ms
+   ✓ agent files > unknown agent is 404 55ms
+   ✓ agent file diff > worktree missing is 503 with fixed text, and git is never run 61ms
+   ✓ agent file diff > returns the file's diff 64ms
+   ✓ agent file diff > a path not in the list is 404; a missing or repeated path is 400 59ms
+   ✓ agent file diff > git failing is 502 with fixed text and its original error is logged 61ms
+   ✓ agent file diff > unknown agent is 404 54ms
+   ✓ agent file diff > with real git: a listed file's diff; ../etc/passwd and unlisted paths are 404 163ms
+   ✓ agent file diff > with real git: a listed name that cleaning changed is 404, and the ignored file it names is never read 96ms
+   ✓ agent stream > serves the latest run's events with lastOutputAt 53ms
+   ✓ agent stream > no runs: an empty stream with the reason 54ms
+   ✓ agent stream > a missing transcript: the reason as fixed text, never the path 59ms
+   ✓ agent stream > pages the stream older: ?before an event's id returns the events ahead of it 64ms
+   ✓ agent stream > validates limit (1..500, default 200) and 404s an unknown agent 56ms
+   ✓ agent stream > reads an unchanged transcript once; a new mtime, size, limit or run path reads again 58ms
+   ✓ agent stream > lastOutputAt is the transcript mtime when that is newer than the last event (heartbeats) 56ms
+   ✓ pause control > pause on a ta-loop creates an empty PAUSE file and the agent shows paused: true 60ms
+   ✓ pause control > resume removes PAUSE, and is fine when it is already absent 73ms
+   ✓ pause control > pause on a studio loop is 409 and writes nothing 59ms
+   ✓ pause control > a missing stateDir is 503 'source missing', with no path in the response 64ms
+   ✓ pause control > other fs failures are 503 with fixed text, no path 64ms
+   ✓ pause control > an unknown agent is 404 67ms
+   ✓ pause control > with noLoopWrites, pause and resume are 409 before touching the state dir 73ms
+   ✓ crew and attention > GET /api/agents/:id returns saved presentation facts without an eager full loop history 71ms
+   ✓ crew and attention > GET /api/crew lists every loop in config order with firstRunToday 69ms
+   ✓ crew and attention > GET /api/crew?shape=summary drops each row's events and digest bulk; /api/crew/:id is the full row 58ms
+   ✓ crew and attention > a crew run's stored ticket title shows on /api/crew and /api/agents/:id/runs, null when none 59ms
+   ✓ crew and attention > the board's title wins over the run's stored one, and fills in a run with none 54ms
+   ✓ crew and attention > a stored title is the run's own ticket's: not shown for the ticket taken from a PR 56ms
+   ✓ crew and attention > GET /api/crew takes the ticket from the latest run's PR, with its PRs and summary 65ms
+   ✓ crew and attention > GET /api/attention lists items with their ack, and never deletes an ack 62ms
+   × crew and attention > GET /api/attention includes an item's brief, and no brief field without one 59ms
+     → expected { for: 'operator', …(11) } to deeply equal { for: 'operator', …(9) }
+   ✓ crew and attention > POST /api/attention/ack acks the keys, emits attention, and the next GET shows them acked 58ms
+   ✓ crew and attention > POST /api/attention/ack of a crew error acks its row, so it leaves the list 65ms
+   ✓ crew and attention > POST /api/attention/:key/handled closes the thread locally, emits attention, and calls no GitHub 61ms
+   ✓ crew and attention > POST /api/attention/:key/handled answers 404 for a stale or unknown key 60ms
+   ✓ crew and attention > GET /api/notifications lists open threads and the ones handled today 76ms
+   ✓ crew and attention > POST /api/attention/:key/dismiss dismisses an open parked note, emits attention, and the next GET leaves it out 56ms
+   ✓ crew and attention > POST /api/attention/:key/dismiss dismisses a hard-rule flag 59ms
+   ✓ crew and attention > POST /api/attention/:key/dismiss answers 404 for a key that is not an open note and 400 for a body 60ms
+   ✓ crew and attention > GET /api/crew and /api/attention see the test lock: a waiting seat is waiting, not stalled 56ms
+   ✓ crew and attention > POST /api/attention/ack validates the body (400) and acks nothing 53ms
+   ✓ away settings > GET /api/away/digest assembles one item per group without saving a digest 57ms
+   ✓ away settings > digest accepts a since timestamp and stores away start only on activation 66ms
+   ✓ away settings > GET answers the defaults when nothing is stored 64ms
+   ✓ away settings > POST saves the full settings, emits settings, and GET returns them 74ms
+   ✓ away settings > POST refuses anything but a full AwaySettings with a real calendar date (400) 71ms
+   ✓ away settings > GET fails closed when the stored value is unreadable 74ms
+   ✓ limits > projected and stopForecast come from projectAtReset/stopForecast over the current window 75ms
+   ✓ limits > a 5h row's paceReady is false when its samples span under 30 minutes, true from 30 56ms
+   ✓ limits > a 7d row's fullAt is when a rising pace reaches 100%, before the reset 55ms
+   ✓ limits > stale is false at exactly 60 minutes and true beyond 74ms
+   ✓ limits > includes the Claude usage retry while its collector is backing off 60ms
+   ✓ ticket detail > returns the issue as a TicketView, asking the repo's own owner and name 61ms
+   ✓ ticket detail > maps a cross-repo sub-issue and PR to their configured repo through config.repos 64ms
+   ✓ ticket detail > cuts a body over 20 000 characters and says so 63ms
+   ✓ ticket detail > cuts a body by code point, so an emoji is never split 63ms
+   ✓ ticket detail > answers 404 for an unknown repo or a bad number without calling GitHub 61ms
+   ✓ ticket detail > answers 404 when GitHub has no such issue, as a null or as a NOT_FOUND error 74ms
+   ✓ ticket detail > answers 502 when GitHub fails 64ms
+   ✓ boards, escalations, health > boards/:repoId returns the repo's items, 404 for an unknown repo 67ms
+   ✓ boards, escalations, health > serves a light map with an indexed graph only on demand, excluding observed loops 221ms
+   ✓ boards, escalations, health > keeps a 1,074-file repository under 60 KB with 4,616 graph edges and history excluded 230ms
+   ✓ boards, escalations, health > reuses the map payload while its inputs are unchanged and rebuilds when one changes  301ms
+   ✓ boards, escalations, health > the map's tree is built once per default-branch head > builds the tree once however often the map loads, and again when the head moves  1512ms
+   ✓ boards, escalations, health > the map's tree is built once per default-branch head > answers a repeat tree request with 304 and a seat's move rebuilds only the live part  855ms
+   ✓ boards, escalations, health > the map's tree is built once per default-branch head > answers the map in under 500 ms once the tree is cached  805ms
+   ✓ boards, escalations, health > does not build the map until a viewer requests it 249ms
+   ✓ boards, escalations, health > carries the repo's resolved area and hard-rule globs in the map snapshot  439ms
+   ✓ boards, escalations, health > carries each seat's area and the hard rules the engine enforces in the map snapshot 197ms
+   ✓ boards, escalations, health > scopes FLIGHT claude activity to the current turn and selected repo 187ms
+   ✓ boards, escalations, health > scopes FLIGHT codex activity to the current turn and selected repo 186ms
+   ✓ boards, escalations, health > keeps aside churn after reassignment and drops it after merge 187ms
+   ✓ boards, escalations, health > flags a park from a run the operator stopped, so the map never calls it stuck 178ms
+   ✓ boards, escalations, health > uses the loop park reason and its state age for waiting 184ms
+   ✓ boards, escalations, health > assembles claude map calls, churn, parsed tests and measured context 199ms
+   ✓ boards, escalations, health > assembles codex map calls, churn, parsed tests and measured context 206ms
+   ✓ boards, escalations, health > exposes repo-scoped modified seat entries from the live map ring  1220ms
+   ✓ boards, escalations, health > serves computed map conflicts from stored open PR tips without changing the checkout 217ms
+   ✓ boards, escalations, health > does not report a clean merge when the map checkout is unavailable 59ms
+   ✓ boards, escalations, health > repos/:repoId/prs returns the stored pull requests, 404 for an unknown repo 61ms
+   ✓ boards, escalations, health > prs/flow returns every open PR with its ownership flow 70ms
+   ✓ boards, escalations, health > repos/:repoId/prs?linked=1 returns only PRs linked to a ticket 59ms
+   ✓ boards, escalations, health > repos/:repoId/prs lists open PRs plus the last 7 days, summary checks, full detail by number 57ms
+   ✓ boards, escalations, health > repos/:repoId/prs?shape=summary carries the review state: queued place for an open PR, null otherwise 71ms
+   ✓ boards, escalations, health > repos returns the configured repos as id, github, project and projectUrl 53ms
+   ✓ boards, escalations, health > GET /api/repos and /api/repos/profiles carry projectUrl after a board read 56ms
+   ✓ boards, escalations, health > health carries the engine's recent tick durations 62ms
+   ✓ boards, escalations, health > escalations and health return the store rows 57ms
+   ✓ activity > takes an exclusive since timestamp and an optional limit 58ms
+   ✓ activity > reuses slow responses until a topic changes or ten seconds pass 94ms
+   ✓ activity > lists run starts/ends, new escalations and failing collectors from the last 24h, newest first 55ms
+   ✓ activity > keeps the newest ACTIVITY_LIMIT events 158ms
+   ✓ telemetry > intersects repo-qualified tickets, agent, account and range and clears scope 71ms
+   ✓ telemetry > defaults to 6h, accepts each range and refuses an unknown one with 400 60ms
+   ✓ telemetry > scopes by a configured agent and account; anything else is a 400 65ms
+   ✓ config > returns the loaded config with defaults filled and never the password hash 56ms
+   ✓ config > reads the GitHub login once, and answers null when it cannot be read 70ms
+   ✓ config > does not retry a failed GitHub login read until the back-off has passed 61ms
+   ✓ config > carries the template profiles: built-in without a file, the error when it cannot load 193ms
+   ✓ config > marks a retiring seat 68ms
+   ✓ reload > is 409 without a reloader 62ms
+   ✓ reload > is 400 with the error when the file does not load 65ms
+   ✓ reload > is 200 with what was applied 68ms
+   ✓ reload > uses machine-capacity thresholds applied by reload immediately 65ms
+   ✓ reload > refuses a foreign origin and a non-JSON body 63ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > needs a writable config 81ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > validates the body 64ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > saves a display call sign through the guarded seat editor 139ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > writes, then reloads once 97ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > maps errors to statuses with their text 87ms
+   ✓ set a session's seats (POST /api/crew/sessions/:sessionId/seats) > refuses cross-site writes 64ms
+   ✓ crew changes > is the empty shape without a reloader 56ms
+   ✓ crew changes > is the reloader's status 69ms
+   ✓ SSE stream > reports browser stream opens and closes 66ms
+   ✓ SSE stream > stops map polling after the last map stream closes 66ms
+   ✓ SSE stream > claude: sends ordered map calls only to the selected repo and keeps changed pings  1062ms
+   ✓ SSE stream > codex: sends ordered map calls only to the selected repo and keeps changed pings  1066ms
+   ✓ SSE stream > finishes the previous run's calls after its seat is cleared  2093ms
+   ✓ SSE stream > finishes the previous run's calls after its seat is reassigned  2097ms
+   ✓ SSE stream > emits event: changed with the topic, sends heartbeats, and cleans up on close 114ms
+   ✓ SSE stream > batches machine pushes to one event per ten seconds and cancels on close 56ms
+   ✓ SSE stream > app.close() ends open streams 53ms
+   ✓ crew routes > identifies an operator start while away 62ms
+   ✓ crew routes > holds a constrained operator start unless force records an override 68ms
+   ✓ crew routes > transfers one seat explicitly and returns the supervisor outcome 64ms
+   ✓ crew routes > start answers { runId, branch } and emits agents 53ms
+   ✓ crew routes > start with the engine > starts a writer seat's run looped when the engine is on, in a draft repo too 57ms
+   ✓ crew routes > start with the engine > starts a writer seat's run looped in a merge repo too 70ms
+   ✓ crew routes > start with the engine > starts it with no loop when the engine is off or absent 63ms
+   ✓ crew routes > start with the engine > never loops a read-only seat's run 63ms
+   ✓ crew routes > stores FYI messages without waking the seat, while interrupt and end still emit agents 57ms
+   ✓ crew routes > records the operator stop and its optional reason 68ms
+   ✓ crew routes > ends a set-aside run by id, and refuses an unknown run, a bad body and a supervisor refusal 52ms
+   ✓ crew routes > refuses bad bodies with 400 and calls nothing 58ms
+   ✓ crew routes > ends only the exact blocked run named by a watch action 62ms
+   ✓ crew routes > refuses a stale watch stop target before ending any run 56ms
+   ✓ crew routes > ends a run without a hold by default, and with one when asked 51ms
+   ✓ crew routes > names the blank-text refusal 57ms
+   ✓ crew routes > stores an FYI at the cap whole without waking ("x") 54ms
+   ✓ crew routes > stores an FYI at the cap whole without waking ("\u0001") 69ms
+   ✓ crew routes > rejects 1201 characters with 400 before delivery or storage 50ms
+   ✓ crew routes > rejects 8225 characters with 413 before delivery or storage 52ms
+   ✓ crew routes > stores FYI message text as typed, indentation included 55ms
+   ✓ crew routes > the watch seat > starts with {} through startWatch 54ms
+   ✓ crew routes > the watch seat > refuses an issue with 400 56ms
+   ✓ crew routes > the watch seat > a dev seat with {} is refused with ISSUE_REQUIRED 62ms
+   ✓ crew routes > returns an empty schedule without FLIGHT 57ms
+   ✓ crew routes > serves only actual pending plans ordered by due time, including later and overdue work 67ms
+   ✓ crew routes > GET /api/flight/brief > has no session and nine empty sections without a watch seat 56ms
+   ✓ crew routes > GET /api/flight/brief > lists FLIGHT's saved sections in order 62ms
+   ✓ crew routes > GET /api/flight > has no seat without a watch seat 65ms
+   ✓ crew routes > GET /api/flight > lists the last day's decisions, newest first 77ms
+   ✓ crew routes > GET /api/flight > GET /api/flight returns FLIGHT's wakes by section 66ms
+   ✓ crew routes > GET /api/flight > lists every recent controller decision beyond the main decision limit 72ms
+   ✓ crew routes > GET /api/flight > serves FLIGHT's last wake, what woke it and the next scheduled wake 59ms
+   ✓ crew routes > GET /api/flight > counts the wakes of FLIGHT's current run as its turn 58ms
+   ✓ crew routes > GET /api/flight > is live from FLIGHT's session, not its run row (#798) 57ms
+   ✓ crew routes > accepts the largest issue number 63ms
+   ✓ crew routes > answers 404 for an unknown seat, a loop id included 56ms
+   ✓ crew routes > answers 409 when the supervisor is disabled, with its note when it has one 64ms
+   ✓ crew routes > answers 409 when no supervisor is wired 60ms
+   ✓ crew routes > passes the supervisor's status and text through, and emits nothing 57ms
+   ✓ crew routes > answers 422 with the start check's text 63ms
+   ✓ crew routes > maps a CheckoutError to 422 with its fixed text 70ms
+   ✓ crew routes > logs a CheckoutError's detail (a path, git's text) and never sends it 55ms
+   ✓ crew routes > hides an unexpected error behind fixed text 60ms
+   ✓ crew routes > logs an unexpected error's message at warn 62ms
+   ✓ crew routes > checks that the crew is enabled before the seat, and the seat before the body 60ms
+   ✓ crew routes > GET context hides a supervisor failure behind fixed text 59ms
+   ✓ crew routes > GET context answers the usage, or null 57ms
+   ✓ crew routes > GET /api/crew/sessions lists top-level folders only, with owners from the seats' areas 67ms
+   ✓ crew routes > GET /api/crew/sessions answers a missing checkout with no folders, not a 500 55ms
+   ✓ crew routes > GET /api/crew/sessions is empty without a crew section 68ms
+   ✓ crew routes > GET /api/crew/status answers the supervisor's status 58ms
+   ✓ crew routes > refuses a foreign Origin 64ms
+   ✓ update routes > GET /api/version answers the updater's version 61ms
+   ✓ update routes > POST /api/version/check answers the updater's check 58ms
+   ✓ update routes > POST /api/version/check answers the updater's 502 with its text 56ms
+   ✓ update routes > POST /api/version/check answers an unexpected failure with its own text, not update's 57ms
+   ✓ update routes > POST /api/version/check refuses a body other than {} with 400, and a foreign Origin 58ms
+   ✓ update routes > answers 200 { upToDate } and restarts nothing 63ms
+   ✓ update routes > restarts a successful Update when the client disconnects before its response 59ms
+   ✓ update routes > records a successful manual update for telemetry: {"restarting":true} 60ms
+   ✓ update routes > records a successful manual update for telemetry: {"swapped":true} 61ms
+   ✓ update routes > passes a refusal (409) and a failed step (500) through, and restarts nothing 76ms
+   ✓ update routes > answers the last update's log, so the page can show why it failed 59ms
+   ✓ update routes > answers a log it cannot read with fixed text, never the errno or the path 65ms
+   ✓ update routes > hides an unexpected error behind fixed text 61ms
+   ✓ update routes > refuses a body other than {} with 400 and updates nothing 67ms
+   ✓ update routes > refuses a foreign Origin 65ms
+   ✓ update routes > with no updater wired: version says why, update answers 409 65ms
+   ✓ seat ids in the agent routes > GET /api/agents/<seat id>/runs lists the seat's runs 61ms
+   ✓ seat ids in the agent routes > GET /api/agents/<seat id>/stream reads the seat's latest run transcript 66ms
+   ✓ seat ids in the agent routes > GET /api/agents/<seat id>/stream reads Codex events with vendor codex 65ms
+   ✓ seat ids in the agent routes > GET /api/agents/<seat id>/stream reads Codex events with vendor undefined 78ms
+   ✓ seat ids in the agent routes > a seat's Files tab > a writer seat lists its committed, uncommitted and untracked files, and diffs one  378ms
+   ✓ seat ids in the agent routes > a seat's Files tab > a run set aside in review, with no seat worktree, is read from the run's aside 233ms
+   ✓ seat ids in the agent routes > a seat's Files tab > answers 502 when the worktree's .git pointer was rewritten to another repository 255ms
+   ✓ seat ids in the agent routes > a seat's Files tab > a writer seat with no worktree answers the no-worktree note, and 404 for a diff 146ms
+   ✓ seat ids in the agent routes > a seat's Files tab > a read-only seat answers the read-only note and runs no git 154ms
+   ✓ seat ids in the agent routes > GET /api/telemetry?agent=<seat id> is accepted 85ms
+   ✓ seat ids in the agent routes > GET /api/telemetry?agent=guido-1 returns only that seat's series 61ms
+   ✓ seat ids in the agent routes > refuses an unknown agent with the configured-id text 61ms
+   ✓ the first loop's engine > does not tell the engine about an unlabelled FYI to a looped seat 75ms
+   ✓ the first loop's engine > does not for a run no loop drives, or a seat with no run 74ms
+   ✓ the first loop's engine > resumes a parked looped run through the engine, though its seat holds no run (#477) 66ms
+   ✓ the first loop's engine > mc operator resumes a run through the route in process, with a token FLIGHT never holds (#1214) 85ms
+   ✓ the first loop's engine > resumes a ruling park without accepting a review waiver 94ms
+   ✓ the first loop's engine > resumes a review-failed park without accepting a review waiver 58ms
+   ✓ the first loop's engine > resumes a review park by explicitly accepting its review waiver 59ms
+   ✓ the first loop's engine > resumes a review-ruling park by explicitly accepting its review waiver 71ms
+   ✓ the first loop's engine > refuses a body 71ms
+   ✓ the first loop's engine > refuses no engine 80ms
+   ✓ the first loop's engine > refuses an unlooped run 92ms
+   ✓ the first loop's engine > answers ok when the engine lifts the park 69ms
+   ✓ the first loop's engine > names the check that refused the resume 80ms
+   ✓ the first loop's engine > queues rework for a set-aside review park and uses the non-waiving engine resume path 67ms
+   ✓ the first loop's engine > queues rework for a set-aside review-ruling park and uses the non-waiving engine resume path 58ms
+   ✓ the first loop's engine > refuses rework for a blocked park without queuing a message 62ms
+   ✓ the first loop's engine > refuses rework for a ci park without queuing a message 65ms
+   ✓ the first loop's engine > refuses rework for a ruling park without queuing a message 64ms
+   ✓ the first loop's engine > does not queue rework when the engine cannot lift the parked run 62ms
+   ✓ the first loop's engine > enforces rework text bounds and refuses loop writes in a preview 68ms
+   ✓ the first loop's engine > records the operator's message as CAPCOM to the seat, about its run's ticket 62ms
+   ✓ the first loop's engine > records an FYI to a seat with no run against no ticket 84ms
+   ✓ the first loop's engine > does not deliver or store when the seat leaves during secret scanning 70ms
+   ✓ the first loop's engine > does not wake a looped run for an unlabelled FYI 69ms
+   ✓ the first loop's engine > carries the engine's note in /api/crew/status, and nothing extra without an engine 69ms
+   ✓ the first loop's engine > serves measured attempts including review usage, and keeps a new run's tasks empty 66ms
+   ✓ the first loop's engine > shows the budget only when HUD and enforced usage match: {"cacheRead":0,"cacheCreate":0,"budget":105000} 89ms
+   ✓ the first loop's engine > shows the budget only when HUD and enforced usage match: {"cacheRead":20,"cacheCreate":0,"budget":null} 99ms
+   ✓ the first loop's engine > shows the budget only when HUD and enforced usage match: {"cacheRead":0,"cacheCreate":20,"budget":null} 75ms
+   ✓ the first loop's engine > GET /api/runs/:id/attempts returns retained history and rejects unknown runs 64ms
+   ✓ the first loop's engine > caps the served review round at the run profile limit 66ms
+   ✓ the first loop's engine > serves an older run's timestamps and profile limits from its loop view 57ms
+   ✓ the first loop's engine > GET /api/runs/:id/loop returns the run's prompt sections 59ms
+   ✓ the first loop's engine > GET /api/runs/:id/loop answers the run's loop and its events, or 404 68ms
+   ✓ the first loop's engine > omits toolStarts from /api/crew digests 64ms
+   ✓ the first loop's engine > serves full missing-report diagnostics only on the single-run loop view 89ms
+   ✓ test lock history > returns seven days newest first, local today waits and medians after three done holds 67ms
+   ✓ test lock history > reads further back with days, up to ninety, and refuses more 63ms
+   ✓ QA board data > serves CI runs, newest first, from the days asked 61ms
+   ✓ QA board data > serves milestones with due dates and progress 59ms
+   ✓ QA board data > serves the QA flow figures with the registry's definitions 65ms
+   ✓ QA board data > serves findings with category and resolution 70ms
+   ✓ QA board data > keeps old unresolved findings on open PRs and serves review-round summaries 66ms
+   ✓ bounds uncached telemetry reads, filters first and persists immutable counts 89ms
+   ✓ does not log successful GET requests 94ms
+   ✓ logs one response line for a 500 66ms
+   ✓ logs a 4xx response once 64ms
+   ✓ logs a successful request taking over one second  1072ms
+   ✓ logs the error message and stack of an explicit 5xx response 58ms
+   ✓ keeps claim keys and the review round for a retained run past seven days 62ms
+   ✓ logs the original caught exception with generic response: false 62ms
+   ✓ logs the original caught exception with generic response: true 55ms
+   ✓ builds without Fastify's request-logging deprecation warning 56ms
+   ✓ operator token > refuses a mutating route without the operator token (401) 64ms
+   ✓ operator token > requires the operator token for PR flow 63ms
+   ✓ operator token > controller check route > needs the operator token 62ms
+   ✓ operator token > controller check route > rejects a bad body 73ms
+   ✓ operator token > controller check route > records a verdict through the engine and names a refusal 70ms
+   ✓ operator token > controller check route > answers 409 when loop writes are off, and for an engine that cannot record it 82ms
+   ✓ operator token > controller check route > a plain resume of the park is refused with the route to use 61ms
+   ✓ operator token > uat route > needs the operator token 63ms
+   ✓ operator token > uat route > rejects a bad body 66ms
+   ✓ operator token > uat route > records a verdict for the waiting head and names a refusal 67ms
+   ✓ operator token > uat route > refuses a stale displayed head before calling the engine 71ms
+   ✓ operator token > uat route > answers 404 for a PR that is not waiting and 409 when loop writes are off 60ms
+   ✓ operator token > uat route > a plain resume of the park is refused with the route to use 67ms
+   ✓ operator token > merge hold route > needs the operator token 65ms
+   ✓ operator token > merge hold route > rejects a bad body, an unknown run and a run without a loop 75ms
+   ✓ operator token > merge hold route > holds and releases as the controller, and names a refusal 68ms
+   ✓ operator token > merge hold route > answers 409 when loop writes or the engine are off 67ms
+   ✓ operator token > leaves GET routes and the guard check as they were 69ms
+   ✓ operator token > runs a mutating route with the operator token 60ms
+   ✓ operator token > hands the token to a same-origin page only 60ms
+   ✓ operator token > refuses the token to the HUD screenshot browser, whatever spelling of the path it uses 64ms
+   ✓ POST /api/flight/runaway/lift > refuses a body with fields 60ms
+   ✓ POST /api/flight/runaway/lift > answers 409 when the breaker is not tripped 66ms
+   ✓ POST /api/flight/runaway/lift > dismissing the breaker's flag lifts the breaker 57ms
+   ✓ POST /api/flight/runaway/lift > lifts a tripped breaker, clears its flag and logs the lift 56ms
+   ✓ FLIGHT ledger views > returns empty views without a FLIGHT session 57ms
+   ✓ FLIGHT ledger views > orders now by priority then age, orders next by due time, and caps each list at five 76ms
+   ✓ overview > limits the All pipeline to repos with crew sessions 59ms
+   ✓ overview > shares crew across crew, attention and Overview, expiring at the next two-second bucket 67ms
+   ✓ overview > invalidates shared crew on agents 51ms
+   ✓ overview > invalidates shared crew on boards 54ms
+   ✓ overview > invalidates shared crew on escalations 61ms
+   ✓ overview > invalidates shared crew on health 59ms
+   ✓ overview > invalidates shared crew on settings 56ms
+   ✓ overview > invalidates shared crew on config 58ms
+   ✓ overview > invalidates shared crew on guard 58ms
+   ✓ overview > keeps shared crew for the unrelated limits topic 59ms
+   ✓ overview > keeps shared crew for the unrelated machine topic 54ms
+   ✓ overview > keeps shared crew for the unrelated attention topic 55ms
+   ✓ overview > keeps shared crew for the unrelated flight topic 62ms
+   ✓ overview > rebuilds shared crew when the configured selection changes 60ms
+   ✓ overview > shares attention for two seconds and invalidates on non-machine topics 61ms
+   ✓ overview > serves live figures and validates the selected session 53ms
+   ✓ overview > serves the registry's server figures for the session filter and 404s an unknown session 53ms
+   ✓ bounds tag text in attention and reads the whole message on open 58ms
+   ✓ labels the test lock route's holder and waiting entries 63ms
+   ✓ starts, lists and closes an operator-only PR preview 79ms
+   ✓ reports ordinary child-preview requests to the parent activity callback 59ms
+   ✓ lighter reads and compressed responses > GET /api/crew rows carry neither attemptUsage nor toolStarts, and keep minuteTokens 60ms
+   ✓ lighter reads and compressed responses > GET /api/repos/:repoId/prs/titles > gives the stored PRs' numbers and titles in number order 61ms
+   ✓ lighter reads and compressed responses > GET /api/repos/:repoId/prs/titles > answers 400 for no numbers, 0, a non-number or more than 50 56ms
+   ✓ lighter reads and compressed responses > GET /api/repos/:repoId/prs/titles > answers 404 for an unknown repo 61ms
+   ✓ lighter reads and compressed responses > GET /api/notifications/events?after= gives the events after that id, all of them for an unknown id 69ms
+   ✓ lighter reads and compressed responses > GET /api/away/digest?meta=1 gives only active and startedAt 55ms
+   ✓ lighter reads and compressed responses > compression > answers brotli, then gzip, and says the body varies on the request 67ms
+   ✓ lighter reads and compressed responses > compression > sends plain when the client names no encoding, and leaves small bodies alone 61ms
+ ✓ |server| apps/server/test/flight-tools.test.ts (696 tests) 41832ms
+ ✓ |server| apps/server/test/engine.test.ts (450 tests) 35833ms
+   ✓ the engine runs reviews > the merge > requests an independent check before FLIGHT clearance for apps/server/src/flight/tools.ts, accepts the operator API verdict, then merges  317ms
+ ✓ |server| apps/server/test/store.test.ts (199 tests) 11490ms
+   ✓ comms > keeps the newest Comms window for target undefined  385ms
+   ✓ comms > keeps the newest Comms window for target run-1  385ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |server| apps/server/test/api.test.ts > local access > every registered /api route is in the route table
+AssertionError: expected Set{ …(188) } to deeply equal Set{ 'GET /api/audit', …(186) }
+
+- Expected
++ Received
+
+@@ -118,10 +118,11 @@
+    "POST /api/accounts",
+    "POST /api/accounts/:id/check",
+    "POST /api/accounts/:id/models/refresh",
+    "POST /api/agents/:id/pause",
+    "POST /api/agents/:id/resume",
++   "POST /api/attention/:key/choice",
+    "POST /api/attention/:key/discussion",
+    "POST /api/attention/:key/dismiss",
+    "POST /api/attention/:key/handled",
+    "POST /api/attention/:key/hold",
+    "POST /api/attention/:key/hold/release",
+
+ ❯ apps/server/test/api.test.ts:2754:33
+    2752|     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));
+    2753|     expect(registered.length).toBeGreaterThan(0);
+    2754|     expect(new Set(registered)).toEqual(table);
+       |                                 ^
+    2755|   });
+    2756| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |server| apps/server/test/api.test.ts > crew and attention > GET /api/attention includes an item's brief, and no brief field without one
+AssertionError: expected { for: 'operator', …(11) } to deeply equal { for: 'operator', …(9) }
+
+- Expected
++ Received
+
+@@ -11,10 +11,11 @@
+          "mc#466",
+        ],
+      },
+    ],
+    "for": "operator",
++   "id": 1,
+    "options": [
+      {
+        "answer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "A",
+      },
+@@ -23,6 +24,11 @@
+        "label": "B",
+      },
+    ],
+    "original": "Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question Original question ",
+    "recommendation": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
++   "state": {
++     "completeness": "incomplete",
++     "freshness": "unknown",
++     "reason": "Needs a refreshed brief: historical source/action binding is unknown.",
++   },
+  }
+
+ ❯ apps/server/test/api.test.ts:3593:29
+    3591|     bus.emit("attention");
+    3592|     const items = (await get("/api/attention")).json() as AttentionIte…
+    3593|     expect(items[0]?.brief).toEqual(brief);
+       |                             ^
+    3594|   });
+    3595| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 10 passed (11)
+      Tests  2 failed | 1864 passed (1866)
+   Start at  18:12:22
+   Duration  54.74s (transform 1.31s, setup 0ms, collect 5.44s, tests 137.48s, environment 1ms, prepare 403ms)
+

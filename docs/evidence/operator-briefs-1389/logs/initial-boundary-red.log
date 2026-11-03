@@ -1,0 +1,759 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ❯ |server| apps/server/test/flight-tools.test.ts (686 tests | 1 failed | 684 skipped) 138ms
+   ↓ cuts FLIGHT text by code points without splitting non-ASCII characters
+   ↓ wait_on > is a FLIGHT tool, granted to the read-only watch role
+   ↓ wait_on > records a wait decision on the target, and keeps the time for the wake that ends it
+   ↓ wait_on > refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT
+   ↓ log_decision > is shown only to a role that is granted it
+   ↓ log_decision > refuses a seat that is not a watch seat
+   ↓ log_decision > refuses an ended or foreign run
+   ↓ log_decision > refuses bad arguments
+   ↓ log_decision > keeps decision fields whole at their limits and refuses an oversized decision
+   ↓ log_decision > records a note and emits flight
+   ↓ log_decision > refuses a seat that is not in its session
+   ↓ log_decision > has no hourly limit on notes
+   ↓ resume_seat > does not report a stopped seat's held run as resumed when resumeRun is a no-op
+   ↓ resume_seat > clears a stopped seat before resuming, and reports success only once it is live
+   ↓ resume_seat > reports a resume as live when the supervisor shows the session alive
+   ↓ resume_seat > does not resume a seat whose session is already alive or busy
+   ↓ resume_seat > refuses a held run and leaves the operator's stop
+   ↓ resume_seat > refuses when the machine has no headroom
+   ↓ resume_seat > says a seat with no unfinished run holds none to resume
+   ↓ resume_seat > refuses a seat that is not a build or plan seat in FLIGHT's session
+   ↓ resume_seat > uses controller authority on a standard repo too
+   ↓ resume_seat > reports a failed resume that ended its run
+   ↓ resume_seat > puts the crew pause back when a failed resume ended the run
+   ↓ resume_seat > keeps a newer operator pause and stop when a resume does not go live
+   ↓ resume_seat > leaves the operator's stop alone when the seat is busy
+   ↓ resume_seat > says what a failed resume put back, and lifts nothing in its account
+   ↓ resume_seat > sets no run id on a stop it restores on an ended run
+   ↓ resume_seat > does not claim the current state of what a newer operator change left alone
+   ↓ resume_seat > does not report a resume that started nothing on a stale running row, and keeps the pause
+   ↓ resume_seat > does not say a stop is lifted when the operator stopped the seat again
+   ↓ resume_seat > lets a live, paused seat out of its pause without resuming it
+   ↓ resume_seat > resumes a row left running with no session
+   ↓ resume_seat > refuses a run in another lane
+   ↓ resume_seat > refuses a planner seat while Away is on
+   ↓ resume_seat > refuses a run held in another repo and leaves the operator's stop
+   ↓ resume_seat > refuses a budget limit before resuming
+   ↓ resume_seat > refuses a account limit before resuming
+   ↓ resume_seat > refuses a away quota unknown limit before resuming
+   ↓ resume_seat > refuses a away quota reserve limit before resuming
+   ↓ tool list > lists each tool and shows it only to a granted role
+   ↓ screenshot_hud > renders with controller authority regardless of the legacy powers tier
+   ↓ screenshot_hud > stores the screenshot and cites an opaque reference in the answer
+   ↓ screenshot_hud > still returns the image when it cannot be stored
+   ↓ screenshot_hud > keeps queued renders when the legacy powers tier changes
+   ↓ screenshot_hud > runs a queued render after the one before it failed
+   ↓ screenshot_hud > has no limit on attempted launches
+   ↓ screenshot_hud > permits only one render globally at a time
+   ↓ seat schema > carries the seat id pattern on start_seat and message_seat
+   ↓ seatFree > is false for a seat with an unended run or named busy
+   ↓ read_ticket > answers the ticket with its column
+   ↓ read_ticket > shows the size when the card has one
+   ↓ read_ticket > says not on the board, and notes a cut body
+   ↓ read_ticket > refuses a throw and a missing issue
+   ↓ read_ticket > has no hourly limit on reads
+   ↓ read_ticket > answers a planner seat, from its own repo
+   ↓ read_ticket > reads a planner's own session's repo, not FLIGHT's
+   ↓ read_ticket > reads for a planner too, with no limit
+   ↓ read_ticket > refuses an ended planner run
+   ↓ read_ticket > refuses a seat that is neither FLIGHT nor a planner, and bad issue numbers
+   ↓ answer_question > messages the seat, records the answer and emits flight
+   ↓ answer_question > keeps a hub-assembled 1500-character question and its long answer whole
+   ↓ answer_question > records the answer as FLIGHT to the asker, about its run's ticket
+   ↓ answer_question > refuses a bare pass, pointing at brief_item, and changes nothing (#758)
+   ↓ answer_question > returns a send failure and records nothing
+   ↓ answer_question > passes a question to the operator with FLIGHT's brief, without a message
+   ↓ answer_question > hands a passed question back to FLIGHT when it keeps it, so it can answer it (#758)
+   ↓ answer_question > answers a question passed without a brief before #758, closing it once delivered
+   ↓ answer_question > keeps a question passed with FLIGHT's brief out of FLIGHT's digest: it is the operator's
+   ↓ answer_question > records the pass when a question passed without a brief is briefed for the operator
+   ↓ answer_question > refuses an answer with a pass, or neither
+   ↓ answer_question > refuses an unknown or answered question
+   ↓ answer_question > refuses a question from a seat outside FLIGHT's session
+   ↓ answer_question > keeps a passed question open through later FLIGHT messages and answers
+   ↓ answer_question > refuses FLIGHT's own question
+   ↓ answer_question > refuses when the asking run has ended
+   ↓ answer_question > has no hourly cap on answers
+   ↓ start_seat > reassigns an ended author's ticket through the existing start checks and logs the handoff
+   ↓ start_seat > refuses to reassign a ticket with a live author and never ends it
+   ↓ start_seat > reassigns a removed author only when it has a durable crew handoff
+   ↓ start_seat > continues the preserved author's open PR from In progress
+   ↓ start_seat > continues the preserved author's open PR from In review
+   ↓ start_seat > refuses a start while absolute disk capacity is constrained
+   ↓ start_seat > refuses a start while percentage disk capacity is constrained
+   ↓ start_seat > refuses a start while swap capacity is constrained
+   ↓ start_seat > refuses a start while memory capacity is constrained
+   ↓ start_seat > paths > logs a grant decision for the ticket's Paths: files, then starts the seat
+   ↓ start_seat > paths > refuses a path the ticket does not list, and logs nothing
+   ↓ start_seat > paths > refuses paths on a ticket with no Paths: line
+   ↓ start_seat > paths > refuses a file that cannot be granted
+   ↓ start_seat > FLIGHT explicitly starts otherwise excluded work as a draft while away
+   ↓ start_seat > reaches the inner start quota check while away
+   ↓ start_seat > can apply an authorised controller start on a standard repo
+   ↓ start_seat > starts the seat with the loop when the engine is on
+   ↓ start_seat > records the assignment as FLIGHT to the seat, about the ticket
+   ↓ start_seat > starts with no options when the engine is off
+   ↓ start_seat > refuses a profile without its reason, or a reason without its profile
+   ↓ start_seat > passes a profile and its reason on as an override by FLIGHT
+   ↓ start_seat > passes the override and the loop together when the engine is on
+   ↓ start_seat > refuses an unknown profile before starting
+   ↓ start_seat > starts a Size M card without a plan so its developer can write it
+   ↓ start_seat > refuses a card assigned to another login, and starts one assigned to the hub
+   ↓ start_seat > refuses a seat outside its session
+   ↓ start_seat > areas > refuses a card whose area is not the seat's
+   ↓ start_seat > areas > refuses a card with two area labels
+   ↓ start_seat > 1: refuses a seat that is not a developer seat
+   ↓ start_seat > 2: starts in a merge repo, with every other check still applying
+   ↓ start_seat > refuses a ticket the engine has taken for another seat, in a merge repo
+   ↓ start_seat > 3: refuses a seat with a run, or busy
+   ↓ start_seat > 4: refuses an account at its usage stop
+   ↓ start_seat > 5: has no hourly cap on starts
+   ↓ start_seat > 6: starts the same ticket three times in a day, with no refusal
+   ↓ start_seat > 7: refuses a card that is missing, in the wrong column, active or blocked
+   ↓ start_seat > 8: needs a Ready column, the ready label or a Plan section
+   ↓ start_seat > starts a Backlog card with a Plan section in its body
+   ↓ start_seat > returns a refused start's own text, and a generic one for any other failure
+   ↓ start_seat > returns the supervisor's 422 text as it is
+   ↓ start_seat > refuses when GitHub cannot be reached for the ticket
+   ↓ start_seat > the shared start check > 1: another lane
+   ↓ start_seat > the shared start check > 2: two areas
+   ↓ start_seat > the shared start check > 3: no area label
+   ↓ start_seat > the shared start check > 4: another seat's area
+   ↓ start_seat > the shared start check > 0: a closed card, or one in Done
+   ↓ start_seat > the shared start check > 5: a ticket with a run
+   ↓ start_seat > the shared start check > 6: a card assigned to another login
+   ↓ start_seat > the shared start check > 7: an open blocker, or an open Depends on issue
+   ↓ start_seat > the shared start check > 7b: a Depends on line the card stores, naming the dependency and its PR
+   ↓ start_seat > the shared start check > 8: a research ticket
+   ↓ start_seat > the shared start check > 9: a missing Done when or Size
+   ↓ start_seat > the shared start check > 10: starts Size M with no plan
+   ↓ start_seat > acts on the live card > refuses a ticket closed on GitHub that the cached board still shows open
+   ↓ start_seat > acts on the live card > refuses a ticket moved to Blocked since the last poll
+   ↓ start_seat > acts on the live card > refuses when the live card cannot be read
+   ↓ start_seat > acts on the live card > refuses a ticket whose previous run's PR is still open, past the 24-hour limit
+   ↓ start_seat planner > refuses planner starts while away even with research=true
+   ↓ start_seat planner > refuses planner starts while away even with research=false
+   ↓ start_seat planner > starts the planner with no loop on a complete Size M Backlog ticket
+   ↓ start_seat planner > a planner start does not hold back a developer start on the same ticket
+   ↓ start_seat planner > refuses a ticket that has a plan
+   ↓ start_seat planner > refuses a body with an unclosed code fence
+   ↓ start_seat planner > refuses a ticket missing its needs
+   ↓ start_seat planner > restarts a ticket whatever seat started it before
+   ↓ start_seat planner > refuses a ticket with no Size even when the repo does not need one
+   ↓ start_seat planner > refuses Size S
+   ↓ start_seat planner > refuses a card with two areas
+   ↓ start_seat planner > has no hourly cap on starts
+   ↓ start_seat planner > starts a build seat as before, and refuses a watch seat
+   ↓ message_seat > refuses a long message and directs FLIGHT to the structured report
+   ↓ message_seat > wakes through the supervisor inbox boundary and records it
+   ↓ message_seat > records the message as a labelled handoff from FLIGHT, without the prefix, about its run's ticket
+   ↓ message_seat > records a message to a seat with no run against no ticket
+   ↓ message_seat > asks the supervisor to close no questions
+   ↓ message_seat > refuses its own seat, RETRO and a stranger
+   ↓ message_seat > has no per-seat or hourly cap on messages
+   ↓ message_seat > returns a send failure
+   ↓ message_seat > does not deliver or store when the seat leaves during secret scanning
+   ↓ comms_pin > lets the live FLIGHT run pin and unpin a stored message
+   ↓ comms_pin > refuses every non-FLIGHT caller
+   ↓ comms_pin > refuses a guessed private message outside FLIGHT's inbox
+   ↓ message_seat unpark > un-parks a silent park by FLIGHT
+   ↓ message_seat unpark > records a message when the engine did not un-park
+   ↓ message_seat unpark > a set-aside run, by runId > un-parks it without a word to the seat, which is on another run
+   ↓ message_seat unpark > a set-aside run, by runId > still sends to the seat when the run is the one it holds
+   ↓ message_seat unpark > a set-aside run, by runId > refuses another seat's run, an ended run, and a runId without unpark
+   ↓ message_seat unpark > leaves a budget park to the operator
+   ↓ message_seat unpark > cannot lift a review park with a message
+   ↓ message_seat unpark > cannot lift a review-ruling park with a message
+   ↓ message_seat unpark > cannot lift a ruling park with a message
+   ↓ message_seat unpark > cannot lift a review-failed park with a message
+   ↓ message_seat unpark > lifts a nothing park
+   ↓ message_seat unpark > lifts a gate park
+   ↓ message_seat unpark > lifts a conflict park
+   ↓ message_seat unpark > leaves an ended park to the operator
+   ↓ message_seat unpark > refuses a run that is not parked, or no run
+   ↓ message_seat unpark > un-parks one run 5 times, with no refusal
+   ↓ message_seat unpark > refuses with the engine off
+   ↓ end_run > five identical end_run calls trip the runaway breaker
+   ↓ end_run > ends a parked run and leaves the seat idle, with its basis recorded
+   ↓ end_run > ends a working run with its reason on a superuser repo, and refuses a run that has ended
+   ↓ end_run > can end an unheld working run on a standard repo
+   ↓ end_run > ends a stalled run on a standard repo: its seat running with no output for ten minutes
+   ↓ end_run > reads the files, interrupts a seat that is in a turn, reads again, then ends it
+   ↓ end_run > does not interrupt an idle working seat, which has no turn to stop
+   ↓ end_run > refuses a dirty run on any repo before touching its process, and has no discard
+   ↓ end_run > refuses when the interrupted seat wrote files in its last moments
+   ↓ end_run > does not end a working run that is held (a stopped seat, an overdue question)
+   ↓ end_run > refuses FLIGHT's own run, a run outside the session and a non-developer seat's run
+   ↓ end_run > has no hourly cap on ends
+   ↓ end_run > refuses a run with uncommitted work, naming the paths, and ends nothing
+   ↓ end_run > refuses when the worktree cannot be read
+   ↓ end_run > ends a parked run that is set aside, through endAsideRun
+   ↓ end_run > refuses a set-aside run that is not parked, and a set-aside run with uncommitted work
+   ↓ end_run > reports a failed end and records nothing
+   ↓ accept_ruling > starts the re-run, and records it with its basis
+   ↓ accept_ruling > accepts the ruling when the re-run passed
+   ↓ accept_ruling > refuses the ruling when the re-run failed, and sends the failure back
+   ↓ accept_ruling > says the re-run is still going, recording nothing
+   ↓ accept_ruling > passes the engine's refusals on
+   ↓ accept_ruling > has no hourly limit on re-runs
+   ↓ accept_ruling > refuses with the engine off, a run that is not a developer's, and another seat's token
+   ↓ accept_ruling > takes no extra arguments
+   ↓ sync_main > five identical sync_main calls trip the runaway breaker
+   ↓ sync_main > advertises and dispatches a separate sync_main schema for each caller mode
+   ↓ sync_main > merges main through the engine, and records it
+   ↓ sync_main > names a conflict the author resolves
+   ↓ sync_main > says a branch that has main already is current, recording nothing
+   ↓ sync_main > passes the engine's refusals on
+   ↓ sync_main > has no hourly cap on merges of main
+   ↓ sync_main > refuses a run that is not a developer's, and with the engine off
+   ↓ flight_state > keeps the wake inputs out of what FLIGHT reads, and marks its items seen
+   ↓ flight_state > exposes the hub's away bug decision key only for the current head
+   ↓ flight_state > marks signals delivered by flight_state while retaining active faults as told
+   ↓ flight_state > is FLIGHT's alone, read-only and takes no arguments
+   ↓ flight_state > refreshes the delivered snapshot with the state returned to the calling run
+   ↓ flight_state > lists a merged PR the first time FLIGHT reads it, and not again
+   ↓ flight_state > lists each paused or stopped seat as unavailable, with its control record
+   ↓ flight_state > does not call a crash an operator stop
+   ↓ flight_state > does not call a paused or stopped review seat idle
+   ↓ flight_state > lists a run set aside in review, with its park, and the seat's run ids
+   ↓ flight_state > answers the crew now
+   ↓ flight_state > carries the hub's lane and login, and each ticket's lane label and assignees
+   ↓ flight_state > carries the runaway breaker, and no per-hour limits
+   ↓ flight_state > reports the transferred run's destination quota
+   ↓ flight_state > marks a silent running seat stalled, and every seat on an account at its stop
+   ↓ promote > is shown only to a granted role
+   ↓ promote > moves a complete Backlog ticket to Ready and records it
+   ↓ promote > moves Size M with no plan to Ready for its developer to plan
+   ↓ promote > refuses an incomplete ticket for Ready, then moves it to Refinement
+   ↓ promote > names only what is missing, and honours the rules' needs
+   ↓ promote > moves Refinement to Ready and back to Backlog
+   ↓ promote > can move unstarted Ready work to Backlog without owning the earlier promotion (false)
+   ↓ promote > can move unstarted Ready work to Backlog without owning the earlier promotion (true)
+   ↓ promote > refuses a move from a column outside the pairs
+   ↓ promote > refuses a bad argument or a stale run
+   ↓ promote > refuses in a draft workspace
+   ↓ promote > refuses with the engine off
+   ↓ promote > refuses when promote_backlog is off
+   ↓ promote > has no hourly cap on moves
+   ↓ promote > refuses a card that is not on the board
+   ↓ promote > reads a card the board cache has not seen yet, caches it and moves it
+   ↓ promote > reads the live card even when the cache holds it, and the live card wins
+   ↓ promote > reads the board again after the live read, so a poll that landed meanwhile is kept
+   ↓ promote > fails closed when the live read gives nothing or throws, whatever the cache holds
+   ↓ promote > refuses a card whose re-read fails
+   ↓ promote > refuses a ticket with a run
+   ↓ promote > refuses Ready when GitHub cannot be reached, but not Refinement
+   ↓ promote > refuses two area labels, or none
+   ↓ promote > refuses a ticket that waits on an open dependency
+   ↓ promote > answers a failed move, and records nothing
+   ↓ promote > holds > holds a Ready card FLIGHT did not move, behind an open PR
+   ↓ promote > holds > holds a Refinement card too
+   ↓ promote > holds > refuses a hold on a card with a run
+   ↓ promote > holds > refuses a hold behind a merged, closed or unknown PR
+   ↓ promote > holds > refuses waits_on on a move that is not to Backlog, and a hold from Backlog
+   ↓ promote > holds > keeps a new hold while the stored board still shows the card in Ready
+   ↓ promote > holds > releases a hold whose card a run has taken, though the board never showed it in Backlog
+   ↓ promote > holds > releases the hold when the card is promoted again
+   ↓ promote > holds > keeps the hold when the promote again is refused
+   ↓ create_ticket > links accepted recommendation work before a project failure and never recreates it on retry
+   ↓ create_ticket > recovers a created issue marker after a lost response without a second issue write
+   ↓ create_ticket > creates no issue when assessment wins during the issue-list await
+   ↓ create_ticket > keeps the created issue link and assessment when assessment wins during creation
+   ↓ create_ticket > recovers a lost creation response after assessment without overwriting that decision
+   ↓ create_ticket > fails closed after an ambiguous creation with no visible marker
+   ↓ create_ticket > counts partial project-recovery writes before a failed board read
+   ↓ create_ticket > refuses an unaccepted or foreign recommendation before GitHub reads
+   ↓ create_ticket > counts tickets that were filed and then failed at the project, so they cannot go on unbounded
+   ↓ create_ticket > does not claim Backlog in a draft repo, where no card moves
+   ↓ create_ticket > lists the repo's open issues for the duplicate check, not a search
+   ↓ create_ticket > serialises calls, so the duplicate check sees the earlier call's issue
+   ↓ create_ticket > writes nothing while the engine is off
+   ↓ create_ticket > is shown only to a granted role
+   ↓ create_ticket > files the issue with its labels, adds it to the project, moves it to Backlog and records it
+   ↓ create_ticket > refuses a seat that is not FLIGHT
+   ↓ create_ticket > refuses no area
+   ↓ create_ticket > refuses two areas
+   ↓ create_ticket > refuses no lane
+   ↓ create_ticket > refuses two lanes
+   ↓ create_ticket > refuses an unknown label
+   ↓ create_ticket > refuses a repeated label
+   ↓ create_ticket > takes each type label
+   ↓ create_ticket > refuses a body without ## Outcome or ## Done when
+   ↓ create_ticket > refuses a title that matches an open issue exactly, naming it
+   ↓ create_ticket > has no hourly cap on filed tickets
+   ↓ create_ticket > refuses a mention, an issue reference, and a secret, without calling gh
+   ↓ create_ticket > lets a #n of the repo's own issues through, so a Depends on line works
+   ↓ create_ticket > work cut from an open PR > is refused without a Depends on line, naming the line to add
+   ↓ create_ticket > work cut from an open PR > is filed once it carries the Depends on line
+   ↓ create_ticket > refuses bad arguments
+   ↓ create_ticket > answers a gh failure with a fixed text and logs it, redacting known secrets
+   ↓ create_ticket > says so when the issue is filed but not added to the project, and still records it
+   ↓ create_ticket > reports an unconfirmed Backlog move but still counts the ticket as filed
+   ↓ create_ticket > with a size and priority > sets them on the project item it added, then moves it to Backlog
+   ↓ create_ticket > with a size and priority > refuses an invalid size or priority before any write
+   ↓ create_ticket > with a size and priority > refuses before any write when the board lacks the option
+   ↓ create_ticket > with a size and priority > can set validated board fields without a legacy powers tier gate
+   ↓ create_ticket > with a size and priority > says so when the fields could not be set, and still records the ticket
+   ↓ create_ticket > refuses an unparseable gh answer, and records nothing
+   ↓ comment_ticket > keeps comments as drafts while away
+   ↓ comment_ticket > refuses away posts and allows them after off or expiry (false)
+   ↓ comment_ticket > refuses away posts and allows them after off or expiry (true)
+   ↓ comment_ticket > refuses the external writes of merge_pr while away
+   ↓ comment_ticket > refuses the external writes of promote while away
+   ↓ comment_ticket > refuses the external writes of edit_card while away
+   ↓ comment_ticket > refuses the external writes of create_ticket while away
+   ↓ comment_ticket > refuses the external writes of rerun_ci while away
+   ↓ comment_ticket > refuses the external writes of accept_ruling while away
+   ↓ comment_ticket > refuses the external writes of settle_park while away
+   ↓ comment_ticket > refuses the external writes of sync_main while away
+   ↓ comment_ticket > writes nothing while the engine is off
+   ↓ comment_ticket > is shown only to a granted role
+   ↓ comment_ticket > posts the comment in the session repo and records it
+   ↓ comment_ticket > refuses a seat that is not FLIGHT
+   ↓ comment_ticket > has no hourly cap on comments
+   ↓ comment_ticket > lets a #n of the repo's own issues through
+   ↓ comment_ticket > refuses a mention, another repo's issue, and a secret
+   ↓ comment_ticket > refuses bad arguments
+   ↓ comment_ticket > answers a gh failure with a fixed text, and records nothing
+   × brief_item > 1389 refuses incomplete operator decision context before any brief or pass write 73ms
+     → expected undefined to be true // Object.is equality
+   ✓ brief_item > 1389 keeps ordinary for-flight triage lightweight 65ms
+   ↓ brief_item > refuses to triage FLIGHT's own question tag
+   ↓ brief_item > caps the original source text in a brief
+   ↓ brief_item > stores a brief on an operator item and emits attention
+   ↓ brief_item > stores structured evidence and recommends an option by stable identity
+   ↓ brief_item > binds person replies to the exact source and rejects a draft against an edited message
+   ↓ brief_item > records stored Teams replies as drafted while keeping them copy-only
+   ↓ brief_item > includes the live test lock in triage and can brief it
+   ↓ brief_item > fills the original question and removes an answered question from triage
+   ↓ brief_item > stores the full triage brief and passes an item up immediately
+   ↓ brief_item > keeps an item, lists it as handling, then passes it up or removes it on resolution
+   ↓ brief_item > requires passing up a mvp-ready escalation with a brief
+   ↓ brief_item > requires passing up a operator-decision escalation with a brief
+   ↓ brief_item > requires passing up a autonomy-question escalation with a brief
+   ↓ brief_item > refuses briefing hard-rule information as a decision without deleting its engine marker
+   ↓ brief_item > requires passing up hub-update-held with a brief
+   ↓ brief_item > requires passing up flag:r1:diagnostic with a brief
+   ↓ brief_item > requires passing up flag:r1:floor:abc with a brief
+   ↓ brief_item > requires passing up ratelimit:r1 with a brief
+   ↓ brief_item > requires passing up a budget park with a brief
+   ↓ brief_item > requires passing up a account park with a brief
+   ↓ brief_item > keeps FLIGHT's own brief without an arbitrary one-day handback
+   ↓ brief_item > keeps a operator brief when the same stray is recorded again (its time stays first-seen)
+   ↓ brief_item > keeps a flight brief when the same stray is recorded again (its time stays first-seen)
+   ↓ brief_item > requires an ask when for is undefined
+   ↓ brief_item > requires an ask when for is operator
+   ↓ brief_item > keeps legacy context uncut, allows no options, and rejects oversized text
+   ↓ brief_item > keeps the newest brief on a key
+   ↓ brief_item > has no hourly limit on briefs of its own
+   ↓ brief_item > refuses a key that is not the operator's item
+   ↓ brief_item > refuses one or five options, and a seat that is not FLIGHT
+   ↓ update_brief > refuses retired goals before writing any part of the brief
+   ↓ update_brief > refuses retired in_progress before writing any part of the brief
+   ↓ update_brief > refuses retired coming_up before writing any part of the brief
+   ↓ update_brief > refuses retired risks before writing any part of the brief
+   ↓ update_brief > refuses retired recently_done before writing any part of the brief
+   ↓ update_brief > requires a change and pairs section with text: {}
+   ↓ update_brief > requires a change and pairs section with text: {"section":"operator"}
+   ↓ update_brief > requires a change and pairs section with text: {"text":"notes"}
+   ↓ update_brief > requires a change and pairs section with text: {"section":"operator","watch":{"remove":["missing"]}}
+   ↓ update_brief > requires a change and pairs section with text: {"text":"notes","planned":{"upsert":[]}}
+   ↓ update_brief > updates plans and watches without touching the brief sections
+   ↓ update_brief > replaces one section and leaves the others
+   ↓ update_brief > clears a section with an empty text
+   ↓ update_brief > holds the 4000-character cap
+   ↓ update_brief > refuses an unknown section and a non-FLIGHT seat
+   ↓ update_brief > has no hourly limit on edits
+   ↓ update_brief > is carried by flight_state
+   ↓ read_ticket of a loop escalation > reads an open loop escalation's issue in another configured repo, and nothing else there
+   ↓ read_ticket of a loop escalation > still reads the session repo when repo names it
+   ↓ read_pr > answers the diff summary, checks by name and review state
+   ↓ read_pr > caps files and checks and cleans text
+   ↓ read_pr > refuses another seat, a missing PR and GitHub down
+   ↓ read_pr > has no hourly limit on the three readers
+   ↓ read_ci_log > reads the cleaned tail of the first failed Actions job
+   ↓ read_ci_log > cuts the tail at FLIGHT_CI_LOG_MAX on a whole line
+   ↓ read_ci_log > reads a named check and refuses unknown, passing or non-Actions ones
+   ↓ read_ci_log > skips a failed non-Actions check for a later failed Actions job
+   ↓ read_ci_log > says when nothing failed or the log is empty
+   ↓ list_tickets > lists from project items with column, lane label and assignees, though the board is empty
+   ↓ list_tickets > passes label and assignee to GitHub
+   ↓ list_tickets > caps at limit and at FLIGHT_LIST_PAGES pages
+   ↓ draft_reply > stores a reply without GitHub calls, and exposes no posting tool
+   ↓ draft_reply > retains recipient context supplied to draft_reply
+   ↓ draft_reply > is available through FLIGHT's MCP grant, which has no draft posting tool
+   ↓ draft_reply > refuses invalid targets and non-FLIGHT callers
+   ↓ correlated discussion replies > returns tagged replies only to their original item, including late replies
+   ↓ structured FLIGHT brief and arrivals > round trips bounded watch entries through the tool and restart, updates and removes them
+   ↓ structured FLIGHT brief and arrivals > hides the whole stale lock item and never retargets a stale draft
+   ↓ structured FLIGHT brief and arrivals > records explicit No action once per arrival version and retains history after board changes
+   ↓ structured FLIGHT brief and arrivals > refuses invented successful actions and invalid watch payloads without saving prose
+   ↓ records draft_reply only after it stores a real draft, without inventing an arrival
+   ↓ persists distinct completed drafts and optional metadata, preserving unknown completion time
+   ↓ replaces a queued outcome with the performed assignment while keeping one stable arrival
+   ↓ shows Stop only for the exact blocked hold, including after restart
+   ↓ bounds watch storage atomically and keeps newest arrival versions through restart
+   ↓ supplies Board arrival identity in flight_state so outcomes need no guessed version
+   ↓ serves every pending watch draft while bounding only finished draft history
+   ↓ returns null repository metadata for arrivals written before provenance was stored
+   ↓ persists Issue arrival provenance (mc, github, https://github.com/o/mc/issues/7) through restart
+   ↓ persists PullRequest arrival provenance (mc, github, https://github.com/o/mc/pull/7) through restart
+   ↓ persists Issue arrival provenance (mc, teams, https://teams.microsoft.com/message/555) through restart
+   ↓ persists Issue arrival provenance (, teams, https://teams.microsoft.com/message/555) through restart
+   ↓ persists Issue arrival provenance (mc, github, https://github.com.evil.test/o/mc/issues/7) through restart
+   ↓ persists Issue arrival provenance (mc, teams, https://evil.test/message/555) through restart
+   ↓ scheduled FLIGHT work > persists stable plans across restart, updates them, and removes completed or cancelled plans
+   ↓ scheduled FLIGHT work > rejects an overflowing watch without changing plans, watch, brief or the edit budget
+   ↓ scheduled FLIGHT work > bounds stored plans across calls and rolls back a batch that exceeds the limit
+   ↓ scheduled FLIGHT work > rejects missing targets, invalid times and unbounded labels and plan lists
+   ↓ superuser housekeeping > merge_pr retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > settle_park retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > hold_pr retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > rerun_ci retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > edit_card retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > dismiss_item retains the engine-off check without a powers-tier gate
+   ↓ superuser housekeeping > rechecks away inside the queued merge_pr handler
+   ↓ superuser housekeeping > rechecks away inside the queued settle_park handler
+   ↓ superuser housekeeping > rechecks away inside the queued rerun_ci handler
+   ↓ superuser housekeeping > rechecks away inside the queued edit_card handler
+   ↓ superuser housekeeping > does not announce a refused clearance
+   ↓ superuser housekeeping > clears before posting the basis
+   ↓ superuser housekeeping > requires independent current-head controller evidence for apps/server/src/api.ts
+   ↓ superuser housekeeping > requires independent current-head controller evidence for apps/server/src/flight-approvals.ts
+   ↓ superuser housekeeping > requires independent current-head controller evidence for apps/server/src/flight/tools.ts
+   ↓ superuser housekeeping > requires independent current-head controller evidence for packages/core/src/flight-access.ts
+   ↓ superuser housekeeping > requires independent current-head controller evidence for roles/FLIGHT.md
+   ↓ superuser housekeeping > requires independent current-head controller evidence for .claude/skills/flight-ops/SKILL.md
+   ↓ superuser housekeeping > cannot accept a ruling park
+   ↓ superuser housekeeping > cannot accept a review-failed park
+   ↓ superuser housekeeping > cannot accept a conflict park
+   ↓ superuser housekeeping > settle_park respects the merge lane check
+   ↓ superuser housekeeping > settle_park says when the run is not parked
+   ↓ superuser housekeeping > settle_park cannot settle a controller check with a review action (lift)
+   ↓ superuser housekeeping > settle_park cannot settle a controller check with a review action (accept)
+   ↓ superuser housekeeping > settle_park cannot settle a controller check with a review action (rework)
+   ↓ superuser housekeeping > settle_park cannot settle a controller check with a review action (rereview)
+   ↓ superuser housekeeping > lift only settles stuck parks, as often as it judges right
+   ↓ superuser housekeeping > settle_park says why the engine refused: head-moved
+   ↓ superuser housekeeping > settle_park says why the engine refused: pr-not-open
+   ↓ superuser housekeeping > settle_park says why the engine refused: held
+   ↓ superuser housekeeping > settle_park says why the engine refused: floor-enforced
+   ↓ superuser housekeeping > settle_park says why the engine refused: second-review-done
+   ↓ superuser housekeeping > settle_park says why the engine refused: no-second-reviewer
+   ↓ superuser housekeeping > second_review hands the engine FLIGHT's reason and reports the first verdict
+   ↓ superuser housekeeping > grants review reworks with a fix list, as many as it judges right on one head
+   ↓ superuser housekeeping > keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal
+   ↓ superuser housekeeping > keeps budget, ruling and operator-held parks out of rework
+   ↓ superuser housekeeping > hold_pr holds a run in its lane and logs a decision
+   ↓ superuser housekeeping > hold_pr releases FLIGHT's own hold
+   ↓ superuser housekeeping > hold_pr cannot release a hold set by CAPCOM
+   ↓ superuser housekeeping > hold_pr needs a reason to hold and respects the lane
+   ↓ superuser housekeeping > refused reruns cost no shared budget
+   ↓ superuser housekeeping > posts a checked basis and clears exactly the head it read
+   ↓ superuser housekeeping > merge_pr refuses .github/workflows/ci.yml even on a stale awaiting-flight record
+   ↓ superuser housekeeping > merge_pr refuses .github/actions/setup/action.yml even on a stale awaiting-flight record
+   ↓ superuser housekeeping > merge_pr refuses .github/CODEOWNERS even on a stale awaiting-flight record
+   ↓ superuser housekeeping > merge_pr refuses CLAUDE.md even on a stale awaiting-flight record
+   ↓ superuser housekeeping > merge_pr refuses a PR that waits for the operator's acceptance
+   ↓ superuser housekeeping > merge_pr refuses an operator stop and another lane
+   ↓ superuser housekeeping > respects a question that has passed through FLIGHT's answer window
+   ↓ superuser housekeeping > refuses a non-collaborator fork and unsafe comment bases
+   ↓ superuser housekeeping > rerun_ci has no hourly budget
+   ↓ superuser housekeeping > sets fields and assigns only configured GitHub accounts
+   ↓ superuser housekeeping > reads a card the board cache has not seen yet, instead of refusing
+   ↓ superuser housekeeping > refuses a card that is on no board even after the re-read
+   ↓ superuser housekeeping > never dismisses operator items or guard acknowledgements
+   ↓ superuser housekeeping > settles a seat's Comms question to CAPCOM with a basis, and it leaves Needs you
+   ↓ superuser housekeeping > gives each Comms refusal its own text
+   ↓ superuser housekeeping > settles FLIGHT's own stale Comms item with its reason
+   ↓ superuser housekeeping > settles FLIGHT's ticketless Comms blocker with its reason
+   ↓ superuser housekeeping > settles FLIGHT's production-shaped PR-ref Comms blocker
+   ↓ superuser housekeeping > refuses always_ask and another lane's cards
+   ↓ superuser housekeeping > settles a lane conflict leaving exactly one lane label
+   ↓ superuser housekeeping > dismisses the note of a resolved PR but never a budget or Update hold
+   ↓ superuser housekeeping > dismiss_item respects real stopped records even for ended runs
+   ↓ superuser housekeeping > dismiss_item respects real account records even for ended runs
+   ↓ superuser housekeeping > dismiss_item respects real approval records even for ended runs
+   ↓ superuser housekeeping > marks a non-collaborator's ticket text and digest, while caching permissions
+   ↓ superuser housekeeping > refuses unconfigured assignees
+   ↓ track > keeps #533 ledger tools available while away
+   ↓ track > creates and updates by key, retaining omitted fields and refusing invalid titles and owners
+   ↓ track > clears nullable fields, validates lines and accepts session, operator and lane owners
+   ↓ track > refuses status done and directs closing through untrack
+   ↓ track > refuses status dropped and directs closing through untrack
+   ↓ track > refuses changing an existing key's kind, including when reopening
+   ↓ track > has no hourly edit cap on track or untrack, and records no decisions
+   ↓ track > caps open entries but allows updating and closing them
+   ↓ track > emits an input schema with optional defaulted ledger filters
+   ↓ track > defaults to open entries and pages after applying filters
+   ↓ track > lists ordered entries with optional kind and status filters
+   ↓ untrack > can drop an entry and refuses open statuses
+   ↓ untrack > closes with an outcome, refuses closed and missing keys, and clears the outcome on reopening
+   ↓ headline > saves, limits and clears the headline separately from the nine brief sections
+   ↓ repo memory > keeps remember, recall and forget available while away
+   ↓ repo memory > remember preserves operator-authored notes
+   ↓ repo memory > forget preserves operator-authored notes
+   ↓ repo memory > forget uses the delete result without reading bodies and checks the cap first
+   ↓ repo memory > normalises whitespace and case, rejects hidden characters and refuses missing deletes
+   ↓ repo memory > has no hourly cap on memory edits or notes
+   ↓ repo memory > state exposes titles only, recall includes author, and state marks the retrospective shown
+   ↓ repo memory > replaces by topic, persists across reopen, and forgets
+   ↓ repo memory > enforces body, source, topic and capacity at the tools and storage boundary
+   ↓ repo memory > recalls by literal substring and kind, with a ten-note limit and repo isolation
+   ↓ repo memory > allows the operator to read, replace and delete, with token and boundary validation
+   ↓ gh_read > reads evidence with an explicit GET, marked untrusted
+   ↓ gh_read > checks the run and watch role without a powers-tier gate
+   ↓ gh_read > uses the calling seat's session repo and powers
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews","method":"POST"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews","method":"DELETE"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews","-f":"body=x"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews","-F":"body=@file"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews","--input":"file"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"POST repos/o/mc/pulls/9/reviews"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews -f body=x"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews -F body=@file"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews --input file"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"graphql"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/settings"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/other/pulls"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/../issues"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/commits/%2e%2e"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/commits/%252e%252e"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews?_method=POST"} without running gh
+   ↓ gh_read > refuses unsafe arguments {"path":"repos/o/mc/pulls/9/reviews?method=DELETE"} without running gh
+   ↓ gh_read > cuts oversized output with a marker, preserving the untrusted label
+   ↓ gh_read > redacts known and patterned secrets, including the API token
+   ↓ gh_read > has no hourly limit on gh_read
+   ↓ gh_read > tells FLIGHT when GitHub returns not found
+   ↓ gh_read > serializes reads per seat while allowing other seats to read
+   ↓ gh_read > has no limit on attempts, failed ones included
+   ↓ FLIGHT reads and changes focus through message_seat without sending a seat message
+   ↓ FLIGHT applies a queue reorder, records it as a reorder, and cannot approve legacy items
+   ↓ queue-reorder cap and failures > has no hourly move cap
+   ↓ queue-reorder cap and failures > lets two parallel reorders by different seats both through
+   ↓ queue-reorder cap and failures > records an unconfirmed swap and answers with an error
+   ↓ close_ticket > closes as a duplicate in one gh call that comments and names the replacement
+   ↓ close_ticket > closes as not planned with gh's own reason spelling
+   ↓ close_ticket > refuses while the engine is off regardless of powers tier
+   ↓ close_ticket > refuses while away
+   ↓ close_ticket > refuses the same issue as its own replacement
+   ↓ close_ticket > refuses a closed replacement, on the board or on GitHub
+   ↓ close_ticket > refuses an off-board replacement, and one in another lane
+   ↓ close_ticket > refuses an issue that is not on the board, and one in another lane
+   ↓ close_ticket > refuses an always_ask ticket
+   ↓ close_ticket > refuses an always_ask replacement
+   ↓ close_ticket > refuses an issue with a live run
+   ↓ close_ticket > refuses an issue that is already closed
+   ↓ close_ticket > refuses an issue with an open PR, from GitHub or from the stored PRs
+   ↓ close_ticket > refuses an issue that open tickets are blocked by
+   ↓ close_ticket > refuses an issue with open sub-issues
+   ↓ close_ticket > refuses when GitHub cannot be read
+   ↓ close_ticket > has no hourly cap on closes
+   ↓ close_ticket > logs the redacted error and records an unconfirmed close when gh fails and the issue stays open
+   ↓ close_ticket > records a normal close when gh fails after the issue closed anyway
+   ↓ close_ticket > records an unconfirmed close when gh exits 0 but the re-read fails or shows it open
+   ↓ close_ticket > on a board of 150 waiting tickets, refuses and names the one that depends on it
+   ↓ close_ticket > on a board of 150 waiting tickets, closes when none of them mention it
+   ↓ close_ticket > reads a mentioning ticket's body and lets the close through when it does not depend on it
+   ↓ close_ticket > refuses when the search fails or answers something unreadable
+   ↓ close_ticket > refuses when the search hit its result limit, so it may be missing tickets
+   ↓ close_ticket > reads every waiting ticket that mentions it, however many, and closes when none depend on it
+   ↓ close_ticket > reads the waiting tickets' bodies at most four at a time
+   ↓ close_ticket > does not record a zero-exit close of an issue someone else had already closed
+   ↓ close_ticket > refuses when a waiting ticket's body says Depends on it, or cannot be read
+   ↓ close_ticket > refuses when the board card shows unfinished sub-issues beyond the live read
+   ↓ attention hold tools > FLIGHT holds and releases with {"kind":"manual"}
+   ↓ attention hold tools > FLIGHT holds and releases with {"kind":"crew"}
+   ↓ attention hold tools > FLIGHT holds and releases with {"kind":"date","at":1792670401000}
+   ↓ attention hold tools > FLIGHT holds and releases with {"kind":"ticket","ticket":"demo#12"}
+   ↓ attention hold tools > holds a controller check for its actual wait condition without a one-day cap
+   ↓ attention hold tools > refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)
+   ↓ attention hold tools > refuses other seats without changing holds
+   ↓ attention hold tools > refuses {"kind":"bad"} with the route error
+   ↓ attention hold tools > refuses {"kind":"date","at":-1} with the route error
+   ↓ attention hold tools > refuses {"kind":"ticket","ticket":"bad"} with the route error
+   ↓ attention hold tools > refuses {"kind":"manual","extra":true} with the route error
+   ↓ attention hold tools > refuses a hold_item that closes a cycle of item holds, storing nothing
+   ↓ attention hold tools > refuses missing items and blank reasons
+   ↓ brief_item with a hold (#760) > files a {"kind":"date","at":1792670401000} hold, drops the item from Needs you, and wakes FLIGHT when it is met
+   ↓ brief_item with a hold (#760) > files a {"kind":"ticket","ticket":"demo#12"} hold, drops the item from Needs you, and wakes FLIGHT when it is met
+   ↓ brief_item with a hold (#760) > files a {"kind":"crew"} hold, drops the item from Needs you, and wakes FLIGHT when it is met
+   ↓ brief_item with a hold (#760) > files a {"kind":"ci","pr":"demo#9","state":"passing"} hold, drops the item from Needs you, and wakes FLIGHT when it is met
+   ↓ brief_item with a hold (#760) > files a {"kind":"item","key":"note:blocked:other"} hold, drops the item from Needs you, and wakes FLIGHT when it is met
+   ↓ brief_item with a hold (#760) > refuses to wait on item note:blocked:wait-test
+   ↓ brief_item with a hold (#760) > refuses to wait on item note:gone
+   ↓ brief_item with a hold (#760) > refuses an item hold that closes a cycle, storing neither brief nor hold
+   ↓ brief_item with a hold (#760) > refuses to hold the not-triaging item, as hold_item does (#758)
+   ↓ brief_item with a hold (#760) > refuses a manual hold, which would never resurface
+   ↓ brief_item with a hold (#760) > files no hold when the brief is refused
+   ↓ add_controller_check > creates the section when missing and moves the identical done-when line
+   ↓ add_controller_check > appends to a section that is there, changing nothing else
+   ↓ add_controller_check > writes nothing when the item is already a check
+   ↓ add_controller_check > refuses a closed ticket, on GitHub or on the board
+   ↓ add_controller_check > refuses a cut body, the engine off and Away
+   ↓ add_controller_check > refuses a multi-line item and a heading
+   ↓ add_controller_check > says so when the edit does not show on GitHub
+   ↓ an unrestricted FLIGHT (#1015) > seats > starts a seat the operator stopped, and says so in the decision
+   ↓ an unrestricted FLIGHT (#1015) > seats > starts a paused seat by letting it out of the pause, naming FLIGHT
+   ↓ an unrestricted FLIGHT (#1015) > seats > can apply an authorised pause lift without a powers tier gate
+   ↓ an unrestricted FLIGHT (#1015) > seats > puts everything back when the start itself fails
+   ↓ an unrestricted FLIGHT (#1015) > seats > keeps a new operator pause applied before the actual run is prepared
+   ↓ an unrestricted FLIGHT (#1015) > seats > a failed start leaves a pause or stop the operator set meanwhile
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > dismisses an operator-owned note, but never a guard, Update or operator-approval item
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > edits a whole issue body and refuses a secret
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > edit_issue never drops or changes the Controller check, and reads the ticket first
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > set_fields leaves Ready and Backlog to promote, and keeps one area label
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > set_fields records a status move under its own kind, with no hourly cap
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > sets status, size, priority, labels and a milestone in one call
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > fails closed when the live card cannot be read, whatever the cache says
+   ↓ an unrestricted FLIGHT (#1015) > board and decisions > refuses set_fields on an always_ask card
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > edit_issue refuses while the operator is away, and writes nothing
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields refuses while the operator is away, and writes nothing
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > edit_issue refuses another lane's ticket
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields refuses another lane's ticket
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields refuses a ticket with a live run, and any lane label change
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields says which fields landed when a later one fails
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields refuses a draft workspace, a closed card and an invalid label list
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields judges only the labels it adds, so an older odd label does not block it
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > set_fields moves a card only to Blocked
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > edit_issue refuses a ticket with a live run, and a write it cannot read back
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > dismiss_item acks an open PR of the hub's own login, and a crew error
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > dismiss_item settles an ordinary flag the engine raised about a run, but not one with no run
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > dismiss_item leaves a person's message and FLIGHT's own question to the operator
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > edit_issue does not report a title that did not land
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > dismiss_item leaves another lane's item and one briefed for the operator
+   ↓ an unrestricted FLIGHT (#1015) > what each new write refuses > dismiss_item refuses an item it cannot find
+   ↓ FLIGHT's full access (#1214) > operator > resumes a run through the hub's own route and records a FLIGHT decision
+   ↓ FLIGHT's full access (#1214) > operator > records the body, and a refusal from the route is an error that is still on the ledger
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/flight/approvals, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/accounts, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/repos, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/runs/r-pr/resume?x=1, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/runs/../accounts, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /api/runs/a/b/resume, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses GET /api/operator/bootstrap, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses GET /api/hud-screenshots/abc, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > refuses POST /mcp, a route outside the list
+   ↓ FLIGHT's full access (#1214) > operator > counts a GET as a read and a POST as a write for the runaway breaker
+   ↓ FLIGHT's full access (#1214) > operator > reads any other /api path with GET, leaving no decision
+   ↓ FLIGHT's full access (#1214) > operator > refuses a call that carries a known secret
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > refuses a hard-rule path with no approval, and names how to get one
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > clears the PR once a controller's approval for that head is recorded, and says so on the ledger
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > does not take an approval for another head
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > does not take an approval for another PR
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > does not take an approval for a head named too briefly
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > does not take an approval for a different rule
+   ↓ FLIGHT's full access (#1214) > merge past the repo rules > does not take an approval for an expired window
+   ↓ FLIGHT's full access (#1214) > gh_write > closes a PR on FLIGHT's own repo, as a decision
+   ↓ FLIGHT's full access (#1214) > gh_write > refuses another repo, by name or by id
+   ↓ FLIGHT's full access (#1214) > gh_write > comments with the text on stdin, and labels and reopens
+   ↓ FLIGHT's full access (#1214) > gh_write > records the actual edit and label delta on the Audit ledger
+   ↓ FLIGHT's full access (#1214) > gh_write > refuses an @mention and a secret in the text
+   ↓ FLIGHT's full access (#1214) > gh_write > redacts known secrets from Audit basis and bounds a long actual edit body
+   ↓ FLIGHT's full access (#1214) > gh_write > leaves an always_ask ticket alone
+   ↓ FLIGHT's full access (#1214) > gh_write > refuses when the card could not be read live, so a rate limit does not open the floor
+   ↓ FLIGHT's full access (#1214) > gh_write > lets an issue that is not on the board through the card check
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses main
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses archive/old
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses has space
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses ../x
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses a branch with an open PR and one a live run is on
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > refuses when the open PRs could not be read
+   ↓ FLIGHT's full access (#1214) > gh_write > delete_branch > deletes a stale branch
+   ↓ FLIGHT's full access (#1214) > crew_tidy > removes a clean ended worktree and keeps its branch
+   ↓ FLIGHT's full access (#1214) > crew_tidy > refuses a dirty worktree and removes nothing
+   ↓ FLIGHT's full access (#1214) > crew_tidy > refuses a live run's worktree, a run that has not ended, and an unknown run
+   ↓ FLIGHT's full access (#1214) > crew_tidy > refuses a worktree outside the crew's folder
+   ↓ FLIGHT's full access (#1214) > crew_tidy > prunes local branches and says which
+   ↓ the runaway breaker > trips on 5 identical calls in 30 minutes, then refuses writes with its text and raises one brief
+   ↓ the runaway breaker > does not trip on the same tool with different arguments, such as messages with different text
+   ↓ the runaway breaker > six moves of one ticket above different tickets do not trip; five identical ones do
+   ↓ the runaway breaker > still lets FLIGHT read while tripped, including a focus read
+   ↓ the runaway breaker > does not count focus reads
+   ↓ the runaway breaker > leaves bookkeeping out of the repeat rule: five track calls on one key do not trip it
+   ↓ the runaway breaker > counts bookkeeping toward the hourly total, with no decision rows
+   ↓ the runaway breaker > counts screenshot_hud, failed attempts too
+   ↓ the runaway breaker > stays clear after a lift, even with an unrelated write straight after
+   ↓ the runaway breaker > does not count refused calls: six refused merge_pr calls do not trip
+   ↓ the runaway breaker > counts a loop of unconfirmed queue reorders, which record a decision and return an error
+   ↓ the runaway breaker > does not count refused edit_card, edit_issue or set_fields calls, which write nothing
+   ↓ the runaway breaker > counts a loop of edit_card calls whose card edit lands and whose label write then fails
+   ↓ the runaway breaker > counts a loop of field edits that land part-way and then fail
+   ↓ the runaway breaker > does not trip on six identical headline updates
+   ↓ the runaway breaker > lets writes through again once the operator lifts it, and logs the lift
+   ↓ the runaway breaker > keeps its own flag out of FLIGHT's hands
+   ↓ the runaway breaker > leaves a stopped account in force
+   ↓ standing instructions and linked re-plans > logs a typed saved-order reference and retains it after revocation
+   ↓ standing instructions and linked re-plans > offers only seat instruction writers, preserving operator entries and idempotent revocation
+ ❯ |server| apps/server/test/decision-defaults.test.ts (11 tests | 1 failed | 10 skipped) 51ms
+   × decision defaults > 1389 never derives default authority from an unbound legacy recommendation 51ms
+     → expected { option: { id: 'go', …(2) }, …(2) } to be null
+   ↓ decision defaults > does not sweep the Update hold
+   ↓ decision defaults > does not sweep an approval
+   ↓ decision defaults > does not sweep a budget park
+   ↓ decision defaults > does not sweep an observed-loop escalation
+   ↓ decision defaults > never defaults an operator decision on a confinement-floor PR
+   ↓ decision defaults > never defaults a non-flag note held by a stopped seat
+   ↓ decision defaults > does not default a brief stored before defaultAt existed
+   ↓ decision defaults > starts the wait when a default is first stamped, not at an older ask's time
+   ↓ decision defaults > stores a recommendation on a protected brief without a deadline
+   ↓ decision defaults > applies an ordinary reversible decision once at its deadline
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |server| apps/server/test/decision-defaults.test.ts > decision defaults > 1389 never derives default authority from an unbound legacy recommendation
+AssertionError: expected { option: { id: 'go', …(2) }, …(2) } to be null
+
+- Expected: 
+null
+
++ Received: 
+{
+  "briefAt": 1793272800000,
+  "dueAt": 1793275200000,
+  "option": {
+    "answer": "Proceed.",
+    "id": "go",
+    "label": "Go",
+  },
+}
+
+ ❯ apps/server/test/decision-defaults.test.ts:83:81
+     81| describe("decision defaults", () => {
+     82|   it("1389 never derives default authority from an unbound legacy reco…
+     83|     expect(decisionDefault(store, item("note:legacy", "ready"), config…
+       |                                                                                 ^
+     84|   });
+     85| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |server| apps/server/test/flight-tools.test.ts > brief_item > 1389 refuses incomplete operator decision context before any brief or pass write
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected: 
+true
+
++ Received: 
+undefined
+
+ ❯ apps/server/test/flight-tools.test.ts:4957:28
+    4955|   it("1389 refuses incomplete operator decision context before any bri…
+    4956|     const result = await call("brief_item", B());
+    4957|     expect(result.isError).toBe(true);
+       |                            ^
+    4958|     expect(result.text).toContain("whyOperator");
+    4959|     expect(store.briefs().size).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 1 passed | 694 skipped (697)
+   Start at  16:09:49
+   Duration  1.84s (transform 813ms, setup 0ms, collect 1.35s, tests 189ms, environment 0ms, prepare 58ms)
+

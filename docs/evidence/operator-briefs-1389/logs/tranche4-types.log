@@ -1,0 +1,3 @@
+Scope: 2 of 6 workspace projects
+$ tsc --noEmit
+$ tsc --noEmit

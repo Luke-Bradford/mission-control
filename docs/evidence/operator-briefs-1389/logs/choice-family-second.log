@@ -1,0 +1,135 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ✓ |server| apps/server/test/flight-tools.test.ts (686 tests | 641 skipped) 2654ms
+ ❯ |server| apps/server/test/person-replies.test.ts (16 tests | 2 failed | 13 skipped) 242ms
+   ↓ hydrates bounded earlier comments and source identity, with no assessment before FLIGHT briefs it
+   ↓ round-trips legacy and structured briefs, binds drafts and never posts on generation or GET
+   ↓ refuses a stale reply after source edit, including through the generic draft route
+   ↓ refuses a stale reply after source arrival, including through the generic draft route
+   ↓ posts only on explicit approval, makes repeated Post idempotent and records handled-through
+   ↓ keeps a failed post pending and does not mark it handled
+   ↓ never posts Teams replies, records copying locally and supports Let FLIGHT handle it
+   ↓ does not expose an assessment or copy a reply after the source is edited
+   ↓ serializes approval across different replies and draft routes for the same item
+   ↓ keeps JSON and origin guards on explicit approval and refuses unreadable sources
+   ↓ Let FLIGHT handle it records a local handoff with the catalogue promise
+   ↓ hydrates and approves a reply when configured owner/repo casing differs
+   ↓ merges bounded issue and review comment history in time order using GET only
+   × 1389 posts an explicit bound choice through the actual source re-read and draft service 118ms
+     → {"error":"The prepared action or its reversible source changed."}: expected 409 to be 200 // Object.is equality
+   × 1389 refuses a source edited remotely during bound reply dispatch without posting 64ms
+     → expected { Object (error) } to match object { state: 'unknown', …(1) }
+(1 matching property omitted from actual)
+   ✓ 1389 records a bound Teams copied reply locally and never posts 60ms
+ ✓ |server| apps/server/test/brief-action-api.test.ts (12 tests) 527ms
+ ✓ |server| apps/server/test/brief-choices.test.ts (12 tests) 716ms
+ ✓ |server| apps/server/test/decision-defaults.test.ts (11 tests) 566ms
+ ✓ |server| apps/server/test/comms-decisions.test.ts (6 tests) 506ms
+ ❯ |server| apps/server/test/queue-reorder.test.ts (35 tests | 1 failed | 33 skipped) 223ms
+   ↓ proposes an approval with stable refs and catalogue options, with no board write
+   ↓ applies FLIGHT's reorder directly without leaving an approval item
+   ↓ leaves no approval note or pending record when the direct reorder is refused after saving
+   ↓ refuses an always_ask card (reorder)
+   ↓ refuses an always_ask card (propose)
+   ↓ never exposes an operator approval while a direct reorder waits for the writer
+   ↓ deny and replay never write, including after reopening the store
+   ↓ approved swaps change the actual board-driven queue and cannot be replayed
+   ↓ rejects a stale priority proposal without writing
+   ↓ rejects a stale area proposal without writing
+   ↓ rejects a stale lane proposal without writing
+   ↓ rejects a stale status proposal without writing
+   ↓ rejects a stale identity proposal without writing
+   ↓ rejects a stale focus proposal without writing
+   ↓ rejects a stale retiring proposal without writing
+   ↓ rejects a stale active proposal without writing
+   ↓ rejects a stale disabled proposal without writing
+   ↓ equal priorities cannot promise an order the queue ignores
+   ↓ a second write failure is visible and recoverable, with no success or replay
+   ↓ concurrent approval calls write once
+   ↓ API returns the approval item, enforces JSON/origin guards and keeps approval operator-only
+   ↓ an approval survives restart and still revalidates before writing
+   ↓ operator token guards approval before any board write
+   ↓ unconfirmed writes leave a recovery item across reload and never report success
+   ↓ first write failure stops the second write
+   ↓ also revalidates the card being overtaken: priority
+   ↓ also revalidates the card being overtaken: area
+   ↓ also revalidates the card being overtaken: lane
+   ↓ also revalidates the card being overtaken: status
+   ↓ rejects swaps that allocate the promoted card to another seat before writing
+   ↓ uses direct issue snapshots despite a stale project list throughout approval
+   ↓ rejects changed direct issue priorities even when the project list still matches
+   ↓ rechecks allocation at approval if another seat joins after the proposal
+   ✓ 1389 defaults only FLIGHT's own validated direct queue judgment through real allocation and writes 104ms
+   × 1389 executes a bound explicit queue proposal through the actual serialized resolver 118ms
+     → {"error":"The source, brief, target or scope changed; refresh before choosing."}: expected 409 to be 200 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |server| apps/server/test/person-replies.test.ts > 1389 posts an explicit bound choice through the actual source re-read and draft service
+AssertionError: {"error":"The prepared action or its reversible source changed."}: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ apps/server/test/person-replies.test.ts:498:48
+    496|   try {
+    497|     const response = await app.inject({ method: "POST", url: `/api/att…
+    498|     expect(response.statusCode, response.body).toBe(200); expect(respo…
+       |                                                ^
+    499|     expect(gh).toHaveBeenCalledOnce(); expect(store.notification("101"…
+    500|     expect(store.drafts()).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |server| apps/server/test/person-replies.test.ts > 1389 refuses a source edited remotely during bound reply dispatch without posting
+AssertionError: expected { Object (error) } to match object { state: 'unknown', …(1) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "state": "unknown",
+-   "text": StringContaining "Source changed",
++   "error": "The prepared action or its reversible source changed.",
+  }
+
+ ❯ apps/server/test/person-replies.test.ts:509:29
+    507|   try {
+    508|     const response = await app.inject({ method: "POST", url: `/api/att…
+    509|     expect(response.json()).toMatchObject({ state: "unknown", text: ex…
+       |                             ^
+    510|     expect(gh).not.toHaveBeenCalled(); expect(store.notification("101"…
+    511|   } finally { await app.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |server| apps/server/test/queue-reorder.test.ts > 1389 executes a bound explicit queue proposal through the actual serialized resolver
+AssertionError: {"error":"The source, brief, target or scope changed; refresh before choosing."}: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ apps/server/test/queue-reorder.test.ts:492:48
+    490|     const request = { briefId: item.brief?.id, sourceRevision: item.br…
+    491|     const response = await app.inject({ method: "POST", url: `/api/att…
+    492|     expect(response.statusCode, response.body).toBe(200);
+       |                                                ^
+    493|     expect(response.json()).toMatchObject({ state: "applied" });
+    494|     expect(deps.edit).toHaveBeenCalledTimes(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 5 passed (7)
+      Tests  3 failed | 88 passed | 687 skipped (778)
+   Start at  17:10:56
+   Duration  9.47s (transform 1.00s, setup 0ms, collect 2.67s, tests 5.44s, environment 0ms, prepare 238ms)
+

@@ -1,0 +1,464 @@
+$ biome check . && node --experimental-strip-types scripts/check-core-cycles.ts
+apps/server/src/code-health/size-source.ts:77:73 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    75 │   const shas = [...new Set(entries.map((entry) => entry.sha))];
+    76 │   const data = shas.length
+  > 77 │     ? await (deps.blobs ?? readBlobs)([...base, "cat-file", "--batch"], shas.join("\n") + "\n")
+       │                                                                         ^^^^^^^^^^^^^^^^^^^^^^
+    78 │     : Buffer.alloc(0);
+    79 │   if (data.length > SIZE_BLOB_BYTES_MAX) throw Error("Size blob output limit");
+  
+  i Unsafe fix: Use a template literal.
+  
+     75  75 │     const shas = [...new Set(entries.map((entry) => entry.sha))];
+     76  76 │     const data = shas.length
+     77     │ - ····?·await·(deps.blobs·??·readBlobs)([...base,·"cat-file",·"--batch"],·shas.join("\n")·+·"\n")
+         77 │ + ····?·await·(deps.blobs·??·readBlobs)([...base,·"cat-file",·"--batch"],·`${shas.join("\n")}\n`)
+     78  78 │       : Buffer.alloc(0);
+     79  79 │     if (data.length > SIZE_BLOB_BYTES_MAX) throw Error("Size blob output limit");
+  
+
+apps/server/src/qa-reports.ts:593:26 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    591 │         throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
+    592 │       }
+  > 593 │       const sourcePath = `/` + repo.github + `/pull/${input.prNumber}`;
+        │                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    594 │       if (
+    595 │         source.origin !== "https://github.com" ||
+  
+  i Unsafe fix: Use a template literal.
+  
+     591  591 │           throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
+     592  592 │         }
+     593      │ - ······const·sourcePath·=·`/`·+·repo.github·+·`/pull/${input.prNumber}`;
+          593 │ + ······const·sourcePath·=·`/${repo.github}/pull/${input.prNumber}`;
+     594  594 │         if (
+     595  595 │           source.origin !== "https://github.com" ||
+  
+
+apps/server/test/code-health-git.test.ts:92:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    90 │     writeFileSync(
+    91 │       join(checkout, "new.ts"),
+  > 92 │       readFileSync(join(checkout, "new.ts"), "utf8") + "export const extra = true;\n",
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    93 │     );
+    94 │     writeFileSync(join(checkout, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+  
+  i Unsafe fix: Use a template literal.
+  
+     90  90 │       writeFileSync(
+     91  91 │         join(checkout, "new.ts"),
+     92     │ - ······readFileSync(join(checkout,·"new.ts"),·"utf8")·+·"export·const·extra·=·true;\n",
+         92 │ + ······`${readFileSync(join(checkout,·"new.ts"),·"utf8")}export·const·extra·=·true;\n`,
+     93  93 │       );
+     94  94 │       writeFileSync(join(checkout, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+  
+
+apps/server/test/code-health-git.test.ts:248:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    246 │     });
+    247 │     for (const output of [
+  > 248 │       header + "1\t0\t\0old.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    249 │       header + "1\t0\t../outside.ts\0",
+    250 │       header + header,
+  
+  i Unsafe fix: Use a template literal.
+  
+    246 246 │       });
+    247 247 │       for (const output of [
+    248     │ - ······header·+·"1\t0\t\0old.ts\0",
+        248 │ + ······`${header}1\t0\t\0old.ts\0`,
+    249 249 │         header + "1\t0\t../outside.ts\0",
+    250 250 │         header + header,
+  
+
+apps/server/test/code-health-git.test.ts:249:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    247 │     for (const output of [
+    248 │       header + "1\t0\t\0old.ts\0",
+  > 249 │       header + "1\t0\t../outside.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    250 │       header + header,
+    251 │       header + "-\t1\ta.ts\0",
+  
+  i Unsafe fix: Use a template literal.
+  
+    247 247 │       for (const output of [
+    248 248 │         header + "1\t0\t\0old.ts\0",
+    249     │ - ······header·+·"1\t0\t../outside.ts\0",
+        249 │ + ······`${header}1\t0\t../outside.ts\0`,
+    250 250 │         header + header,
+    251 251 │         header + "-\t1\ta.ts\0",
+  
+
+apps/server/test/code-health-git.test.ts:251:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    249 │       header + "1\t0\t../outside.ts\0",
+    250 │       header + header,
+  > 251 │       header + "-\t1\ta.ts\0",
+        │       ^^^^^^^^^^^^^^^^^^^^^^^
+    252 │     ])
+    253 │       expect(() => parseGitFileLog(output)).toThrow();
+  
+  i Unsafe fix: Use a template literal.
+  
+    249 249 │         header + "1\t0\t../outside.ts\0",
+    250 250 │         header + header,
+    251     │ - ······header·+·"-\t1\ta.ts\0",
+        251 │ + ······`${header}-\t1\ta.ts\0`,
+    252 252 │       ])
+    253 253 │         expect(() => parseGitFileLog(output)).toThrow();
+  
+
+apps/server/src/api.ts:67:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    65 │   flightShellBreakerWrite,
+    66 │   flightShellWrite,
+  > 67 │   flightTicketWrites,
+       │   ^^^^^^^^^^^^^^^^^^^
+  > 68 │   fullAt5h,
+        ...
+  > 76 │   GUARD_HOOK_EVENTS,
+  > 77 │   GUARD_RULES,
+       │   ^^^^^^^^^^^
+    78 │   GUARD_WINDOW_DAYS,
+    79 │   type GuardHitsView,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+      65   65 │     flightShellBreakerWrite,
+      66   66 │     flightShellWrite,
+      67      │ - ··flightTicketWrites,
+      68   67 │     fullAt5h,
+      69   68 │     GITHUB_RATE_SETTING,
+    ········· │ 
+      75   74 │     GUARD_HITS_LIMIT,
+      76   75 │     GUARD_HOOK_EVENTS,
+      77      │ - ··GUARD_RULES,
+      78   76 │     GUARD_WINDOW_DAYS,
+      79   77 │     type GuardHitsView,
+  
+
+apps/server/src/api.ts:277:40 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    275 │ import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+    276 │ import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
+  > 277 │ import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
+        │                                        ^^^^^^^^^^^
+    278 │ import {
+    279 │   flightBriefView,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    277 │ import·{·liftRunaway,·noteFlightWrite,·runawayTrip·}·from·"./flight/runaway.ts";
+        │                                        ------------                             
+
+apps/server/src/api.ts:287:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    285 │ import {
+    286 │   FLIGHT_APPROVAL_MAX_MS,
+  > 287 │   findApproval,
+        │   ^^^^^^^^^^^^^
+  > 288 │   grantApproval,
+  > 289 │   useApproval,
+        │   ^^^^^^^^^^^
+    290 │ } from "./flight-approvals.ts";
+    291 │ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     285  285 │   import {
+     286  286 │     FLIGHT_APPROVAL_MAX_MS,
+     287      │ - ··findApproval,
+     288  287 │     grantApproval,
+     289      │ - ··useApproval,
+     290  288 │   } from "./flight-approvals.ts";
+     291  289 │   import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+  
+
+apps/server/src/brief-prepare.ts:368:15 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    366 │             throw new BriefError(409, "The configured approval repo changed.");
+    367 │           const pr = store.pullRequest(target.repoId, target.number);
+  > 368 │           if (!pr || pr.state !== "open" || pr.headSha !== target.sha)
+        │               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    369 │             throw new BriefError(409, "The approval PR/head changed.");
+    370 │         }
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    366 366 │               throw new BriefError(409, "The configured approval repo changed.");
+    367 367 │             const pr = store.pullRequest(target.repoId, target.number);
+    368     │ - ··········if·(!pr·||·pr.state·!==·"open"·||·pr.headSha·!==·target.sha)
+        368 │ + ··········if·(pr?.state·!==·"open"·||·pr.headSha·!==·target.sha)
+    369 369 │               throw new BriefError(409, "The approval PR/head changed.");
+    370 370 │           }
+  
+
+apps/server/src/brief-prepare.ts:420:11 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    418 │         const loop = store.run(action.runId)?.loop;
+    419 │         if (
+  > 420 │           !loop ||
+        │           ^^^^^^^^
+  > 421 │           loop.phase !== "parked" ||
+        │           ^^^^^^^^^^^^^^^^^^^^^^^
+    422 │           loop.parked?.kind !== action.parkKind ||
+    423 │           loop.parked.ended ||
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    418 418 │           const loop = store.run(action.runId)?.loop;
+    419 419 │           if (
+    420     │ - ··········!loop·||
+    421     │ - ··········loop.phase·!==·"parked"·||
+        420 │ + ··········loop?.phase·!==·"parked"·||
+    422 421 │             loop.parked?.kind !== action.parkKind ||
+    423 422 │             loop.parked.ended ||
+  
+
+apps/server/src/external-reviews.ts:293:25 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    291 │                         repo.github,
+    292 │                         manifest,
+  > 293 │                         deps.evidence!.baseUrl,
+        │                         ^^^^^^^^^^^^^^
+    294 │                       ),
+    295 │                   };
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    291 291 │                           repo.github,
+    292 292 │                           manifest,
+    293     │ - ························deps.evidence!.baseUrl,
+        293 │ + ························deps.evidence?.baseUrl,
+    294 294 │                         ),
+    295 295 │                     };
+  
+
+apps/server/src/flight/external-merge.ts:44:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    42 │   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
+    43 │   const sha = cached?.headSha;
+  > 44 │   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    45 │     return fail("No open external PR in this merge workspace.");
+    46 │   if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+  
+  i Unsafe fix: Change to an optional chain.
+  
+     42  42 │     const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
+     43  43 │     const sha = cached?.headSha;
+     44     │ - ··if·(!cached·||·cached.state·!==·"open"·||·!sha·||·repo.autonomy·!==·"merge")
+         44 │ + ··if·(cached?.state·!==·"open"·||·!sha·||·repo.autonomy·!==·"merge")
+     45  45 │       return fail("No open external PR in this merge workspace.");
+     46  46 │     if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+  
+
+apps/server/src/flight/tools.ts:246:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    244 │   RECALL_DESCRIPTION,
+    245 │   REMEMBER_DESCRIPTION,
+  > 246 │   type RepoId,
+        │   ^^^^^^^^^^^
+    247 │   type RepoRules,
+    248 │   RUN_ID_NEEDS_UNPARK,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     244  244 │     RECALL_DESCRIPTION,
+     245  245 │     REMEMBER_DESCRIPTION,
+     246      │ - ··type·RepoId,
+     247  246 │     type RepoRules,
+     248  247 │     RUN_ID_NEEDS_UNPARK,
+  
+
+apps/server/src/instruction-notices.ts:44:47 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    42 │           .find((s) => seatDef(s).loop === "watch");
+    43 │         if (notice.by === "flight" && !flight) continue;
+  > 44 │         const from = notice.by === "flight" ? flight!.id : COMMS_CAPCOM;
+       │                                               ^^^^^^^
+    45 │         try {
+    46 │           const message = await sendComms(
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     42  42 │             .find((s) => seatDef(s).loop === "watch");
+     43  43 │           if (notice.by === "flight" && !flight) continue;
+     44     │ - ········const·from·=·notice.by·===·"flight"·?·flight!.id·:·COMMS_CAPCOM;
+         44 │ + ········const·from·=·notice.by·===·"flight"·?·flight?.id·:·COMMS_CAPCOM;
+     45  45 │           try {
+     46  46 │             const message = await sendComms(
+  
+
+apps/server/src/qa-reports.ts:385:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    383 │       missing.push("Before/after evidence or a visual applicability reason is missing.");
+    384 │     if (
+  > 385 │       base.visual.manifest &&
+        │       ^^^^^^^^^^^^^^^^^^^^^^^
+  > 386 │       base.visual.manifest.pairs.some(
+         ...
+  > 393 │           ),
+  > 394 │       )
+        │       ^
+    395 │     )
+    396 │       missing.push("Some native before/after images were unavailable for retention.");
+  
+  i Unsafe fix: Change to an optional chain.
+  
+     383  383 │         missing.push("Before/after evidence or a visual applicability reason is missing.");
+     384  384 │       if (
+     385      │ - ······base.visual.manifest·&&
+     386      │ - ······base.visual.manifest.pairs.some(
+          385 │ + ······base.visual.manifest?.pairs.some(
+     387  386 │           (pair) =>
+     388  387 │             !base.visual.pairs.some(
+  
+
+apps/server/src/runtime/supervisor.ts:4001:32 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    3999 │       const subject = external ? await readSubject() : null;
+    4000 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+  > 4001 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+         │                                ^^^^^^^^
+    4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 │       if (
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    3999 3999 │         const subject = external ? await readSubject() : null;
+    4000 4000 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001      │ - ······const·issue·=·external·?·subject!.ticket.number·:·issueOf(author!);
+         4001 │ + ······const·issue·=·external·?·subject?.ticket.number·:·issueOf(author!);
+    4002 4002 │         const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 4003 │         if (
+  
+
+packages/core/test/guard.test.ts:2925:10 lint/suspicious/noTemplateCurlyInString ━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected template string placeholder.
+  
+    2923 │     "npx $X open .",
+    2924 │     'npx "$X" open .',
+  > 2925 │     "npx ${X} open .",
+         │          ^^^^
+    2926 │     "npx $(echo -y) open .",
+    2927 │     "npx `echo -y` open .",
+  
+  i Turn the string into a template string.
+  
+
+packages/core/test/runtime.test.ts:100:33 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+     98 │       expect(args).not.toContain(flag);
+     99 │     expect(args[args.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+  > 100 │     const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+        │                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    101 │     expect(settings.sandbox).toEqual({ enabled: false });
+    102 │     expect(settings.hooks.PreToolUse).toHaveLength(1);
+  
+
+apps/server/src/brief-source.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    125 125 │               : null,
+    126 126 │             head: store.newestRunCommit(id)?.sha ?? null,
+    127     │ - ··········reviews:·store
+    128     │ - ············.reviewsOfRun(id)
+    129     │ - ············.map((review)·=>·({
+    130     │ - ··············id:·review.id,
+    131     │ - ··············sha:·review.sha,
+    132     │ - ··············state:·review.state,
+    133     │ - ··············blocking:·review.blocking,
+    134     │ - ············})),
+        127 │ + ··········reviews:·store.reviewsOfRun(id).map((review)·=>·({
+        128 │ + ············id:·review.id,
+        129 │ + ············sha:·review.sha,
+        130 │ + ············state:·review.state,
+        131 │ + ············blocking:·review.blocking,
+        132 │ + ··········})),
+    135 133 │           }
+    136 134 │         : { id, missing: true };
+    ······· │ 
+    257 255 │                 : null,
+    258 256 │               mergeHold: externalMergeHold(store, repo ?? "", Number(number)),
+    259     │ - ············reviews:·store
+    260     │ - ··············.reviewsOfPr(repo·??·"",·Number(number))
+    261     │ - ··············.map((review)·=>·({
+    262     │ - ················id:·review.id,
+    263     │ - ················sha:·review.sha,
+    264     │ - ················state:·review.state,
+    265     │ - ················blocking:·review.blocking,
+    266     │ - ··············})),
+        257 │ + ············reviews:·store.reviewsOfPr(repo·??·"",·Number(number)).map((review)·=>·({
+        258 │ + ··············id:·review.id,
+        259 │ + ··············sha:·review.sha,
+        260 │ + ··············state:·review.state,
+        261 │ + ··············blocking:·review.blocking,
+        262 │ + ············})),
+    267 263 │             }
+    268 264 │           : { ref, missing: true };
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 66.
+Checked 1134 files in 755ms. No fixes applied.
+Found 1 error.
+Found 78 warnings.
+Found 7 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+
+[ELIFECYCLE] Command failed with exit code 1.

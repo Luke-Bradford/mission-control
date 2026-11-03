@@ -1,0 +1,27 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |server| apps/server/test/brief-choices.test.ts [ apps/server/test/brief-choices.test.ts ]
+ FAIL  |server| apps/server/test/decision-defaults.test.ts [ apps/server/test/decision-defaults.test.ts ]
+ FAIL  |server| apps/server/test/flight-tools.test.ts [ apps/server/test/flight-tools.test.ts ]
+TypeError: Cannot read properties of undefined (reading 'shape')
+ ❯ apps/server/src/brief-schema.ts:30:82
+     28|   z.strictObject({ kind: z.literal("merge-hold"), target, action: z.en…
+     29|   z.strictObject({ kind: z.literal("breaker-recovery") }),
+     30|   z.strictObject({ kind: z.literal("attention-hold"), reason: Attentio…
+       |                                                                                  ^
+     31|   z.strictObject({ kind: z.literal("attention-dismiss") }),
+     32|   z.strictObject({ kind: z.literal("record-decision") }),
+ ❯ apps/server/src/brief-prepare.ts:3:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  no tests
+   Start at  16:57:42
+   Duration  1.91s (transform 799ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 90ms)
+

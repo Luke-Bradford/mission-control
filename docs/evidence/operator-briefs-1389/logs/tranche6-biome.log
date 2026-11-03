@@ -1,0 +1,352 @@
+["pnpm", "exec", "biome", "check", "--write", "apps/server/src/attention-hold-schema.ts", "apps/server/src/brief-api.ts", "apps/server/src/brief-choices.ts", "apps/server/src/brief-dispatch-context.ts", "apps/server/src/brief-dispatch.ts", "apps/server/src/brief-prepare.ts", "apps/server/src/brief-routine.ts", "apps/server/src/brief-schema.ts", "apps/server/src/brief-source.ts", "apps/server/test/brief-action-api.test.ts", "apps/server/test/brief-choices.test.ts", "apps/server/test/brief-fixture.ts", "apps/server/test/supervisor-brief-choice.test.ts", "packages/core/src/attention-model.ts", "packages/core/src/briefs.ts", "apps/server/src/api.ts", "apps/server/src/attention-holds.ts", "apps/server/src/comms-decisions.ts", "apps/server/src/comms.ts", "apps/server/src/decision-defaults.ts", "apps/server/src/engine/engine.ts", "apps/server/src/flight/tools.ts", "apps/server/src/hud.ts", "apps/server/src/main.ts", "apps/server/src/queue-reorder.ts", "apps/server/src/runtime/supervisor.ts", "apps/server/src/scheduler.ts", "apps/server/src/store.ts", "apps/server/test/comms-decisions.test.ts", "apps/server/test/decision-defaults.test.ts", "apps/server/test/engine.test.ts", "apps/server/test/external-merge.test.ts", "apps/server/test/flight-tools.test.ts", "apps/server/test/person-replies.test.ts", "apps/server/test/queue-reorder.test.ts", "apps/server/test/store.test.ts", "packages/core/src/flight.ts", "packages/core/src/index.ts", "packages/core/src/types.ts"]
+apps/server/src/api.ts:67:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    65 │   flightShellBreakerWrite,
+    66 │   flightShellWrite,
+  > 67 │   flightTicketWrites,
+       │   ^^^^^^^^^^^^^^^^^^^
+  > 68 │   fullAt5h,
+        ...
+  > 76 │   GUARD_HOOK_EVENTS,
+  > 77 │   GUARD_RULES,
+       │   ^^^^^^^^^^^
+    78 │   GUARD_WINDOW_DAYS,
+    79 │   type GuardHitsView,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+      65   65 │     flightShellBreakerWrite,
+      66   66 │     flightShellWrite,
+      67      │ - ··flightTicketWrites,
+      68   67 │     fullAt5h,
+      69   68 │     GITHUB_RATE_SETTING,
+    ········· │ 
+      75   74 │     GUARD_HITS_LIMIT,
+      76   75 │     GUARD_HOOK_EVENTS,
+      77      │ - ··GUARD_RULES,
+      78   76 │     GUARD_WINDOW_DAYS,
+      79   77 │     type GuardHitsView,
+  
+
+apps/server/src/api.ts:277:40 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    275 │ import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
+    276 │ import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
+  > 277 │ import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
+        │                                        ^^^^^^^^^^^
+    278 │ import {
+    279 │   flightBriefView,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    277 │ import·{·liftRunaway,·noteFlightWrite,·runawayTrip·}·from·"./flight/runaway.ts";
+        │                                        ------------                             
+
+apps/server/src/api.ts:287:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    285 │ import {
+    286 │   FLIGHT_APPROVAL_MAX_MS,
+  > 287 │   findApproval,
+        │   ^^^^^^^^^^^^^
+  > 288 │   grantApproval,
+  > 289 │   useApproval,
+        │   ^^^^^^^^^^^
+    290 │ } from "./flight-approvals.ts";
+    291 │ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     285  285 │   import {
+     286  286 │     FLIGHT_APPROVAL_MAX_MS,
+     287      │ - ··findApproval,
+     288  287 │     grantApproval,
+     289      │ - ··useApproval,
+     290  288 │   } from "./flight-approvals.ts";
+     291  289 │   import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+  
+
+apps/server/src/brief-prepare.ts:368:15 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    366 │             throw new BriefError(409, "The configured approval repo changed.");
+    367 │           const pr = store.pullRequest(target.repoId, target.number);
+  > 368 │           if (!pr || pr.state !== "open" || pr.headSha !== target.sha)
+        │               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    369 │             throw new BriefError(409, "The approval PR/head changed.");
+    370 │         }
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    366 366 │               throw new BriefError(409, "The configured approval repo changed.");
+    367 367 │             const pr = store.pullRequest(target.repoId, target.number);
+    368     │ - ··········if·(!pr·||·pr.state·!==·"open"·||·pr.headSha·!==·target.sha)
+        368 │ + ··········if·(pr?.state·!==·"open"·||·pr.headSha·!==·target.sha)
+    369 369 │               throw new BriefError(409, "The approval PR/head changed.");
+    370 370 │           }
+  
+
+apps/server/src/brief-prepare.ts:420:11 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    418 │         const loop = store.run(action.runId)?.loop;
+    419 │         if (
+  > 420 │           !loop ||
+        │           ^^^^^^^^
+  > 421 │           loop.phase !== "parked" ||
+        │           ^^^^^^^^^^^^^^^^^^^^^^^
+    422 │           loop.parked?.kind !== action.parkKind ||
+    423 │           loop.parked.ended ||
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    418 418 │           const loop = store.run(action.runId)?.loop;
+    419 419 │           if (
+    420     │ - ··········!loop·||
+    421     │ - ··········loop.phase·!==·"parked"·||
+        420 │ + ··········loop?.phase·!==·"parked"·||
+    422 421 │             loop.parked?.kind !== action.parkKind ||
+    423 422 │             loop.parked.ended ||
+  
+
+apps/server/src/flight/tools.ts:246:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    244 │   RECALL_DESCRIPTION,
+    245 │   REMEMBER_DESCRIPTION,
+  > 246 │   type RepoId,
+        │   ^^^^^^^^^^^
+    247 │   type RepoRules,
+    248 │   RUN_ID_NEEDS_UNPARK,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     244  244 │     RECALL_DESCRIPTION,
+     245  245 │     REMEMBER_DESCRIPTION,
+     246      │ - ··type·RepoId,
+     247  246 │     type RepoRules,
+     248  247 │     RUN_ID_NEEDS_UNPARK,
+  
+
+apps/server/src/runtime/supervisor.ts:4001:32 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    3999 │       const subject = external ? await readSubject() : null;
+    4000 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+  > 4001 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+         │                                ^^^^^^^^
+    4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 │       if (
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    3999 3999 │         const subject = external ? await readSubject() : null;
+    4000 4000 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001      │ - ······const·issue·=·external·?·subject!.ticket.number·:·issueOf(author!);
+         4001 │ + ······const·issue·=·external·?·subject?.ticket.number·:·issueOf(author!);
+    4002 4002 │         const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 4003 │         if (
+  
+
+apps/server/src/runtime/supervisor.ts:4001:65 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    3999 │       const subject = external ? await readSubject() : null;
+    4000 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+  > 4001 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+         │                                                                 ^^^^^^^
+    4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 │       if (
+  
+
+apps/server/src/runtime/supervisor.ts:4002:31 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4000 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+  > 4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+         │                               ^^^^^^^^
+    4003 │       if (
+    4004 │         (!external && author!.repoId !== info.repo.id) ||
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4000 4000 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001 4001 │         const issue = external ? subject!.ticket.number : issueOf(author!);
+    4002      │ - ······const·head·=·external·?·subject!.sha·:·(store.runPush(author!.id)?.sha·??·null);
+         4002 │ + ······const·head·=·external·?·subject?.sha·:·(store.runPush(author!.id)?.sha·??·null);
+    4003 4003 │         if (
+    4004 4004 │           (!external && author!.repoId !== info.repo.id) ||
+  
+
+apps/server/src/runtime/supervisor.ts:4002:61 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4000 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+  > 4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+         │                                                             ^^^^^^^
+    4003 │       if (
+    4004 │         (!external && author!.repoId !== info.repo.id) ||
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4000 4000 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4001 4001 │         const issue = external ? subject!.ticket.number : issueOf(author!);
+    4002      │ - ······const·head·=·external·?·subject!.sha·:·(store.runPush(author!.id)?.sha·??·null);
+         4002 │ + ······const·head·=·external·?·subject!.sha·:·(store.runPush(author?.id)?.sha·??·null);
+    4003 4003 │         if (
+    4004 4004 │           (!external && author!.repoId !== info.repo.id) ||
+  
+
+apps/server/src/runtime/supervisor.ts:4004:23 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4002 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 │       if (
+  > 4004 │         (!external && author!.repoId !== info.repo.id) ||
+         │                       ^^^^^^^
+    4005 │         issue === null ||
+    4006 │         (head !== review.sha &&
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4002 4002 │         const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4003 4003 │         if (
+    4004      │ - ········(!external·&&·author!.repoId·!==·info.repo.id)·||
+         4004 │ + ········(!external·&&·author?.repoId·!==·info.repo.id)·||
+    4005 4005 │           issue === null ||
+    4006 4006 │           (head !== review.sha &&
+  
+
+apps/server/src/runtime/supervisor.ts:4022:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4020 │       let ticket: TicketView | null;
+    4021 │       try {
+  > 4022 │         ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
+         │                             ^^^^^^^^
+    4023 │       } catch (e) {
+    4024 │         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4020 4020 │         let ticket: TicketView | null;
+    4021 4021 │         try {
+    4022      │ - ········ticket·=·external·?·subject!.ticket·:·await·deps.fetchTicket(info.repo,·issue);
+         4022 │ + ········ticket·=·external·?·subject?.ticket·:·await·deps.fetchTicket(info.repo,·issue);
+    4023 4023 │         } catch (e) {
+    4024 4024 │           throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
+  
+
+apps/server/test/engine.test.ts:836:16 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    834 │     };
+    835 │     store.upsertPullRequests(REPO, [pr], clock);
+  > 836 │     const id = store.requestReview({
+        │                ^^^^^^^^^^^^^^^^^^^^^
+  > 837 │       authorRunId: identity,
+         ...
+  > 845 │       at: clock,
+  > 846 │     })!;
+        │     ^^^
+    847 │     h.engine = h.make({
+    848 │       externalReviews: {
+  
+
+apps/server/test/external-merge.test.ts:158:11 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    156 │   const deps = {
+    157 │     config,
+  > 158 │     repo: config.repos[0]!,
+        │           ^^^^^^^^^^^^^^^^
+    159 │     store,
+    160 │     bus,
+  
+
+apps/server/test/external-merge.test.ts:198:29 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    196 │     async (failure) => {
+    197 │       const h = harness();
+  > 198 │       if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+        │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    199 │       if (failure === "review") {
+    200 │         const id = store.reviewsOfPr("sample", 7)[0]!.id;
+  
+
+apps/server/test/external-merge.test.ts:200:20 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    198 │       if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+    199 │       if (failure === "review") {
+  > 200 │         const id = store.reviewsOfPr("sample", 7)[0]!.id;
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    201 │         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
+    202 │       }
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    198 198 │         if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+    199 199 │         if (failure === "review") {
+    200     │ - ········const·id·=·store.reviewsOfPr("sample",·7)[0]!.id;
+        200 │ + ········const·id·=·store.reviewsOfPr("sample",·7)[0]?.id;
+    201 201 │           store.setReviewState(id, ["reported"], "superseded", { at: 4 });
+    202 202 │         }
+  
+
+apps/server/test/flight-tools.test.ts:97:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    95 │   NEW_LOOP,
+    96 │   NOT_ON_BOARD,
+  > 97 │   needsSuperuserText,
+       │   ^^^^^^^^^^^^^^^^^^
+    98 │   needsYouItems,
+    99 │   OPERATOR_HEADER,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+       95    95 │     NEW_LOOP,
+       96    96 │     NOT_ON_BOARD,
+       97       │ - ··needsSuperuserText,
+       98    97 │     needsYouItems,
+       99    98 │     OPERATOR_HEADER,
+  
+
+Skipped 16 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+Checked 39 files in 399ms. Fixed 21 files.
+Found 17 warnings.

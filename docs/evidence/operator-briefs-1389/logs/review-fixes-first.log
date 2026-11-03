@@ -1,0 +1,17 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs
+
+ ✓ |server| apps/server/test/brief-dispatch-context.test.ts (2 tests) 1ms
+ ✓ |server| apps/server/test/brief-action-api.test.ts (18 tests) 698ms
+ ✓ |server-process| apps/server/test/supervisor-brief-choice.test.ts (5 tests) 3499ms
+   ✓ 1389 refuses an expected-run change in the actual queued provider message  734ms
+   ✓ 1389 invokes the bound source guard again immediately before a real provider write  680ms
+   ✓ 1389 preserves the existing pause check inside the queued message path  660ms
+   ✓ 1389 preserves the bound send-back guard in the final real provider queue  674ms
+   ✓ 1389 keeps keyed delivery deduplication scoped to the exact bound decision epoch  719ms
+
+ Test Files  3 passed (3)
+      Tests  25 passed (25)
+   Start at  20:33:51
+   Duration  6.17s (transform 1.19s, setup 0ms, collect 1.78s, tests 4.20s, environment 0ms, prepare 115ms)
+

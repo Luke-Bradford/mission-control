@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /Users/lukebradford/.local/share/mission-control/controller/review-1389-34d52951
+
+stdout | apps/server/test/supervisor-review-1389.test.ts > REVIEW1389 engine send-back retains final brief guard in queued provider send
+REVIEW1389 final-send facts { result: 'sent', checks: 1, lines: 2 }
+
+ ❯ |server-process| apps/server/test/supervisor-review-1389.test.ts (1 test | 1 failed) 681ms
+   × REVIEW1389 engine send-back retains final brief guard in queued provider send 650ms
+     → expected { checks: 1, lines: 2 } to deeply equal { checks: 2, lines: 1 }
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |server-process| apps/server/test/supervisor-review-1389.test.ts > REVIEW1389 engine send-back retains final brief guard in queued provider send
+AssertionError: expected { checks: 1, lines: 2 } to deeply equal { checks: 2, lines: 1 }
+
+- Expected
++ Received
+
+  {
+-   "checks": 2,
+-   "lines": 1,
++   "checks": 1,
++   "lines": 2,
+  }
+
+ ❯ apps/server/test/supervisor-review-1389.test.ts:19:44
+     17|  if(result==="sent") await until(()=>expect(userLines()).toHaveLength(…
+     18|  console.info("REVIEW1389 final-send facts",{result,checks,lines:userL…
+     19|  expect({checks,lines:userLines().length}).toEqual({checks:2,lines:1});
+       |                                            ^
+     20| });
+     21| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  18:19:34
+   Duration  1.62s (transform 573ms, setup 0ms, collect 802ms, tests 681ms, environment 0ms, prepare 26ms)
+

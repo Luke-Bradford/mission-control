@@ -1,0 +1,185 @@
+["pnpm", "exec", "biome", "check", "--write", "apps/server/test/brief-dispatch-context.test.ts", "apps/server/src/brief-api.ts", "apps/server/src/brief-dispatch-context.ts", "apps/server/src/brief-prepare.ts", "apps/server/src/brief-source.ts", "apps/server/src/engine/engine.ts", "apps/server/src/runtime/supervisor.ts", "apps/server/src/store.ts", "apps/server/test/brief-action-api.test.ts", "apps/server/test/engine.test.ts", "apps/server/test/supervisor-brief-choice.test.ts"]
+apps/server/src/brief-prepare.ts:368:15 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    366 │             throw new BriefError(409, "The configured approval repo changed.");
+    367 │           const pr = store.pullRequest(target.repoId, target.number);
+  > 368 │           if (!pr || pr.state !== "open" || pr.headSha !== target.sha)
+        │               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    369 │             throw new BriefError(409, "The approval PR/head changed.");
+    370 │         }
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    366 366 │               throw new BriefError(409, "The configured approval repo changed.");
+    367 367 │             const pr = store.pullRequest(target.repoId, target.number);
+    368     │ - ··········if·(!pr·||·pr.state·!==·"open"·||·pr.headSha·!==·target.sha)
+        368 │ + ··········if·(pr?.state·!==·"open"·||·pr.headSha·!==·target.sha)
+    369 369 │               throw new BriefError(409, "The approval PR/head changed.");
+    370 370 │           }
+  
+
+apps/server/src/brief-prepare.ts:425:11 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    423 │         const loop = store.run(action.runId)?.loop;
+    424 │         if (
+  > 425 │           !loop ||
+        │           ^^^^^^^^
+  > 426 │           loop.phase !== "parked" ||
+        │           ^^^^^^^^^^^^^^^^^^^^^^^
+    427 │           loop.parked?.kind !== action.parkKind ||
+    428 │           loop.parked.ended ||
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    423 423 │           const loop = store.run(action.runId)?.loop;
+    424 424 │           if (
+    425     │ - ··········!loop·||
+    426     │ - ··········loop.phase·!==·"parked"·||
+        425 │ + ··········loop?.phase·!==·"parked"·||
+    427 426 │             loop.parked?.kind !== action.parkKind ||
+    428 427 │             loop.parked.ended ||
+  
+
+apps/server/src/runtime/supervisor.ts:4003:32 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4001 │       const subject = external ? await readSubject() : null;
+    4002 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+  > 4003 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+         │                                ^^^^^^^^
+    4004 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4005 │       if (
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4001 4001 │         const subject = external ? await readSubject() : null;
+    4002 4002 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4003      │ - ······const·issue·=·external·?·subject!.ticket.number·:·issueOf(author!);
+         4003 │ + ······const·issue·=·external·?·subject?.ticket.number·:·issueOf(author!);
+    4004 4004 │         const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4005 4005 │         if (
+  
+
+apps/server/src/runtime/supervisor.ts:4003:65 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4001 │       const subject = external ? await readSubject() : null;
+    4002 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+  > 4003 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+         │                                                                 ^^^^^^^
+    4004 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4005 │       if (
+  
+
+apps/server/src/runtime/supervisor.ts:4004:31 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4002 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4003 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+  > 4004 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+         │                               ^^^^^^^^
+    4005 │       if (
+    4006 │         (!external && author!.repoId !== info.repo.id) ||
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4002 4002 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4003 4003 │         const issue = external ? subject!.ticket.number : issueOf(author!);
+    4004      │ - ······const·head·=·external·?·subject!.sha·:·(store.runPush(author!.id)?.sha·??·null);
+         4004 │ + ······const·head·=·external·?·subject?.sha·:·(store.runPush(author!.id)?.sha·??·null);
+    4005 4005 │         if (
+    4006 4006 │           (!external && author!.repoId !== info.repo.id) ||
+  
+
+apps/server/src/runtime/supervisor.ts:4004:61 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4002 │       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4003 │       const issue = external ? subject!.ticket.number : issueOf(author!);
+  > 4004 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+         │                                                             ^^^^^^^
+    4005 │       if (
+    4006 │         (!external && author!.repoId !== info.repo.id) ||
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4002 4002 │         if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
+    4003 4003 │         const issue = external ? subject!.ticket.number : issueOf(author!);
+    4004      │ - ······const·head·=·external·?·subject!.sha·:·(store.runPush(author!.id)?.sha·??·null);
+         4004 │ + ······const·head·=·external·?·subject!.sha·:·(store.runPush(author?.id)?.sha·??·null);
+    4005 4005 │         if (
+    4006 4006 │           (!external && author!.repoId !== info.repo.id) ||
+  
+
+apps/server/src/runtime/supervisor.ts:4006:23 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4004 │       const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4005 │       if (
+  > 4006 │         (!external && author!.repoId !== info.repo.id) ||
+         │                       ^^^^^^^
+    4007 │         issue === null ||
+    4008 │         (head !== review.sha &&
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4004 4004 │         const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+    4005 4005 │         if (
+    4006      │ - ········(!external·&&·author!.repoId·!==·info.repo.id)·||
+         4006 │ + ········(!external·&&·author?.repoId·!==·info.repo.id)·||
+    4007 4007 │           issue === null ||
+    4008 4008 │           (head !== review.sha &&
+  
+
+apps/server/src/runtime/supervisor.ts:4024:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    4022 │       let ticket: TicketView | null;
+    4023 │       try {
+  > 4024 │         ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
+         │                             ^^^^^^^^
+    4025 │       } catch (e) {
+    4026 │         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    4022 4022 │         let ticket: TicketView | null;
+    4023 4023 │         try {
+    4024      │ - ········ticket·=·external·?·subject!.ticket·:·await·deps.fetchTicket(info.repo,·issue);
+         4024 │ + ········ticket·=·external·?·subject?.ticket·:·await·deps.fetchTicket(info.repo,·issue);
+    4025 4025 │         } catch (e) {
+    4026 4026 │           throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
+  
+
+apps/server/test/engine.test.ts:839:16 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    837 │     };
+    838 │     store.upsertPullRequests(REPO, [pr], clock);
+  > 839 │     const id = store.requestReview({
+        │                ^^^^^^^^^^^^^^^^^^^^^
+  > 840 │       authorRunId: identity,
+         ...
+  > 848 │       at: clock,
+  > 849 │     })!;
+        │     ^^^
+    850 │     h.engine = h.make({
+    851 │       externalReviews: {
+  
+
+Skipped 12 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+Checked 11 files in 179ms. Fixed 10 files.
+Found 9 warnings.

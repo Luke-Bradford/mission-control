@@ -1,0 +1,16 @@
+Scope: 2 of 6 workspace projects
+$ tsc --noEmit
+$ tsc --noEmit
+src/brief-choices.ts(80,60): error TS2345: Argument of type 'AttentionBrief | undefined' is not assignable to parameter of type 'AttentionBrief'.
+  Type 'undefined' is not assignable to type 'AttentionBrief'.
+src/brief-choices.ts(85,32): error TS18048: 'current' is possibly 'undefined'.
+src/brief-choices.ts(85,109): error TS18048: 'current' is possibly 'undefined'.
+src/brief-choices.ts(92,30): error TS2345: Argument of type 'AttentionBrief | undefined' is not assignable to parameter of type 'AttentionBrief'.
+  Type 'undefined' is not assignable to type 'AttentionBrief'.
+src/brief-choices.ts(108,22): error TS2322: Type 'AttentionBrief | undefined' is not assignable to type 'AttentionBrief'.
+  Type 'undefined' is not assignable to type 'AttentionBrief'.
+src/hud.ts(1351,82): error TS2345: Argument of type 'OwnedItem' is not assignable to parameter of type 'AttentionItem'.
+  Property 'acked' is missing in type 'OwnedItem' but required in type 'AttentionItem'.
+/Users/lukebradford/.local/share/mission-control/controller/codex-1389-complete-briefs/apps/server:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @mc/server@0.0.0 typecheck: `tsc --noEmit`
+Exit status 2
