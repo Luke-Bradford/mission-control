@@ -44,6 +44,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
   };
   const announce = (result: Parameters<typeof announceInstruction>[1]) =>
     announceInstruction({ config, store, bus, supervisor: deps.supervisor, now }, result);
+  // Reader: apps/web/src/flight/KnowsTab.tsx (planned #1378 active and revoked global orders)
   api.get("/flight/orders", async (req, reply) => {
     const parsed = query.safeParse(req.query);
     if (!parsed.success)
@@ -52,6 +53,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
         .send({ error: "Use a positive history cursor and limit from 1 to 100." });
     return store.instructions.list(null, parsed.data.before, parsed.data.limit);
   });
+  // Reader: apps/web/src/flight/DidTab.tsx (planned #1378 exact retained order behind a re-plan)
   api.get<{ Params: { id: string } }>("/flight/orders/:id", async (req, reply) => {
     const parsed = id.safeParse(req.params.id);
     const entry = parsed.success ? store.instructions.get(parsed.data) : null;
@@ -59,6 +61,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       return reply.code(404).send({ error: "Order unavailable." });
     return entry;
   });
+  // Reader: apps/web/src/flight/KnowsTab.tsx (planned #1378 operator add/replace order action)
   api.post("/flight/orders", { preHandler: auth }, async (req, reply) => {
     // Presence is immutable declared provenance even if its run ended during body parsing.
     if (by(req) === "flight")
@@ -76,6 +79,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       return failure(error, reply);
     }
   });
+  // Reader: apps/web/src/flight/KnowsTab.tsx (planned #1378 operator revoke order action)
   api.post<{ Params: { id: string } }>(
     "/flight/orders/:id/revoke",
     { preHandler: auth },
@@ -92,6 +96,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       }
     },
   );
+  // Reader: apps/web/src/flight/CrewBoardTab.tsx (planned #1378 named-seat instruction index)
   api.get("/flight/instructions", async () => ({
     seats: seats().map((seat) => {
       store.instructions.syncFocus(seat, now());
@@ -102,6 +107,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       };
     }),
   }));
+  // Reader: apps/web/src/pages/Agent.tsx (planned #1378 active and revoked seat instructions)
   api.get<{ Params: { id: string } }>("/seats/:id/instructions", async (req, reply) => {
     const parsed = query.safeParse(req.query);
     if (!parsed.success)
@@ -115,6 +121,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       return failure(error, reply);
     }
   });
+  // Reader: apps/web/src/pages/Agent.tsx (planned #1378 operator add/replace seat instruction action)
   api.post<{ Params: { id: string } }>(
     "/seats/:id/instructions",
     { preHandler: auth },
@@ -139,6 +146,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       }
     },
   );
+  // Reader: apps/web/src/pages/Agent.tsx (planned #1378 operator revoke seat instruction action)
   api.post<{ Params: { id: string; instructionId: string } }>(
     "/seats/:id/instructions/:instructionId/revoke",
     { preHandler: auth },
@@ -157,6 +165,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
     },
   );
   // Kept wire-compatible with the delivered Queue focus editor.
+  // Reader: apps/web/src/agent/SideTabs.tsx (existing Queue focus reader)
   api.get<{ Params: { id: string } }>("/seats/:id/focus", async (req, reply) => {
     try {
       store.instructions.syncFocus(target(req.params.id), now());
@@ -166,6 +175,7 @@ export function registerInstructionRoutes(api: FastifyInstance, deps: AppDeps): 
       return failure(error, reply);
     }
   });
+  // Reader: apps/web/src/agent/SideTabs.tsx (existing Queue focus save/clear action)
   api.post<{ Params: { id: string } }>(
     "/seats/:id/focus",
     { preHandler: auth },

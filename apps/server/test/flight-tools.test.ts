@@ -534,7 +534,7 @@ beforeEach(() => {
     },
     now: () => nowMs,
   });
-  const t = tools[0];
+  const t = tools.find((candidate) => candidate.name === "log_decision");
   if (t === undefined) throw new Error("no tool");
   tool = t;
   live("flight-1", "r-flight");
@@ -1198,6 +1198,8 @@ const need = <T>(value: T | null | undefined): T => {
 describe("tool list", () => {
   it("lists each tool and shows it only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
+      "instruct_seat",
+      "revoke_instruction",
       "log_decision",
       "wait_on",
       "read_ticket",
@@ -3610,6 +3612,7 @@ describe("flight_state", () => {
       atStop: false,
     };
     expect(await state()).toEqual({
+      instructionRevision: "0",
       signals: [],
       triage: [],
       // mc#4 is blocked by an open mc#9

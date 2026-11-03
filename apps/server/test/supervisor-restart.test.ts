@@ -1688,7 +1688,12 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(seatState("flight-1")).toBe("idle"));
     const transcript = store.run(runId)?.transcriptPath ?? "";
     await first.sup.message("flight-1", "QUIET", { interrupt: false });
-    await until(() => expect(userLines()).toContain("QUIET"));
+    const originalMarker = "# Original message and working context\n";
+    await until(() =>
+      expect(userLines().some((line) => line.split(originalMarker).at(-1) === "QUIET")).toBe(true),
+    );
+    const quietDelivery = userLines().find((line) => line.split(originalMarker).at(-1) === "QUIET");
+    if (!quietDelivery) throw new Error("Original QUIET message missing from delivered envelope");
     await first.sup.stopAll();
     prep.oldKeeperHello = true;
     const { sup } = watchMake();
@@ -1702,7 +1707,8 @@ describe("a seat keeps running through a restart", () => {
     expect(readFileSync(transcript, "utf8")).not.toContain("QUIETED");
     // the CLI starts its turn: the turn and its own end are seen
     writeFileSync(`${recordFile}.go`, "");
-    await until(() => expect(readFileSync(transcript, "utf8")).toContain("echo: QUIETED"));
+    const completedEcho = JSON.stringify(`echo: ${quietDelivery.replace("QUIET", "QUIETED")}`);
+    await until(() => expect(readFileSync(transcript, "utf8")).toContain(completedEcho));
     await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(2));
     expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });

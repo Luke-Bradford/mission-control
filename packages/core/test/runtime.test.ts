@@ -326,6 +326,8 @@ describe("the allowlist in phase 2b", () => {
       startSeat: "mcp__mc__start_seat",
       reassignTicket: "mcp__mc__reassign_ticket",
       messageSeat: "mcp__mc__message_seat",
+      instructSeat: "mcp__mc__instruct_seat",
+      revokeInstruction: "mcp__mc__revoke_instruction",
       commsRead: "mcp__mc__comms_read",
       commsInbox: "mcp__mc__comms_inbox",
       commsSend: "mcp__mc__comms_send",
