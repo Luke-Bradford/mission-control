@@ -88,7 +88,7 @@ export const OverviewEvidence = forwardRef<
           const lost =
             active === document.body ||
             !active?.isConnected ||
-            !!active.closest("[hidden], [inert], dialog:not([open])");
+            !!active.closest("[hidden], dialog:not([open])");
           // Native close may already have restored focus, or the user moved on.
           if (lost && control?.isConnected) control.focus();
         });
