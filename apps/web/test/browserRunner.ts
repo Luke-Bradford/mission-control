@@ -61,6 +61,8 @@ export interface RenderOptions {
   /** The viewport width in CSS pixels. */
   width: number;
   height?: number;
+  /** Physical pixels per CSS pixel; layout decisions still use CSS viewport dimensions. */
+  deviceScaleFactor?: number;
   /** The query string after the harness page, such as `?trace=run-1`. */
   search?: string;
   /** The `prefers-color-scheme` to emulate; the browser's own (light) when omitted. */
@@ -87,7 +89,7 @@ interface Page {
   close(): Promise<void>;
 }
 interface Browser {
-  newPage(options: { viewport: { width: number; height: number } }): Promise<Page>;
+  newPage(options: { viewport: { width: number; height: number }; deviceScaleFactor?: number }): Promise<Page>;
   close(): Promise<void>;
 }
 interface Chromium {
@@ -203,6 +205,7 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       page: entry,
       width,
       height = DEFAULT_HEIGHT,
+      deviceScaleFactor = 1,
       search = "",
       colorScheme,
       api = {},
@@ -211,7 +214,7 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       const root = outDir;
       // One browser per page: a single-process browser (the sandbox fallback) dies with its page.
       const browser = await launch(BROWSER);
-      const page = await browser.newPage({ viewport: { width, height } });
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
       await page.route(new RegExp(`^${ORIGIN}/`), async (route) => {
