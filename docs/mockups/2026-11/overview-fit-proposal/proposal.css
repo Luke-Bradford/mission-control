@@ -10,3 +10,8 @@
 @container(min-width:1280px){.kpis{height:96px;min-height:96px;grid-template-columns:repeat(8,minmax(0,1fr))}.kpi{min-height:0}.kpi .mini{display:block}.kpi .value{font-size:24px;line-height:28px}.kpi .definition{font-size:12px}}
 [hidden]{display:none!important}.loops>b{font-family:"IBM Plex Mono",monospace}.rail>button{font-size:12px}.filtered-log .activity-line.extra-event{display:grid}
 .span-track .instant{transform:translateX(-50%) rotate(45deg)}
+
+/* Two-column side panels flow normally; three-column mode releases the same wrappers into the grid. */
+.analytical{grid-column:2;grid-row:1;display:flex;flex-direction:column;gap:12px;min-width:0}.resources{padding-top:0}.machine-plot{grid-template-columns:48px minmax(0,1fr)}.machine-endpoints{margin-left:56px}.history-comparisons{grid-template-columns:repeat(3,minmax(0,788px));justify-content:center}.large-history-title{max-width:2388px;margin-left:auto;margin-right:auto}
+@container(min-width:2074px){.analytical{display:contents}.resources{padding-top:0}}
+@media(max-width:1699px){.analytical{grid-column:1;grid-row:2}}
