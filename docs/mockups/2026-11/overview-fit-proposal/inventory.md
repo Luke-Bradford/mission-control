@@ -1,3 +1,5 @@
+> **Historical inventory for rejected 008b362d proposal.** The operator rejected its true-4K composition after publication. The previous target-area clean review below does not override that rejection. See [the corrected design contract](design-contract.md) for the active proposal and new source-bound evidence when available. Production remains paused.
+
 # Overview operational canvas proposal
 
 This is one design proposal from product base `99e8404ea2e78e442dee828092f6b997582ddbe7`.
