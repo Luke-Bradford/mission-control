@@ -117,6 +117,7 @@ import {
   seatBusyText,
   seatCallSign,
   seatDef,
+  seatInstructionBlock,
   type TicketView,
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
@@ -210,6 +211,7 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
+  cloneGitDir,
   existingCheckout,
   existingDetached,
   existingFlightCheckout,
@@ -235,8 +237,16 @@ import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
-import { assertSeatGitConfig, assertSeatGitVersion, SeatGitError } from "./git.ts";
+import { assertSeatGitConfig, assertSeatGitVersion, crewGit, SeatGitError } from "./git.ts";
 import { runSeatGrants } from "./grants.ts";
+import {
+  type DeliveryEnvelope,
+  DirectionContextError,
+  directionKey,
+  instructionEnvelope,
+  needsDirectionContext,
+  readDirectionContext,
+} from "./instruction-context.ts";
 import {
   CODEX_DELIVERY,
   endKeeper,
@@ -1337,17 +1347,47 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
-  function writeLine(l: Live, text: string): void {
+  function writeLine(l: Live, text: string): DeliveryEnvelope {
+    // Reload applies focus by replacing seat objects. Never import the launch-time copy again.
+    const current = findSeat(l.info.seat.id);
+    if (!current)
+      throw new SupervisorError(
+        409,
+        "Seat was removed before delivery. Restore its configuration before messaging this run.",
+      );
+    const envelope = instructionEnvelope(
+      store,
+      current.seat,
+      l.run.id,
+      seatDef(l.info.seat).loop === "watch",
+      text,
+    );
+    const pending = pendingPromptVersions.get(l.run.id);
+    if (pending) {
+      // Fail closed before any provider input. A failed send keeps the prepared identity retryable.
+      pending.hash = savePromptVersion(l.run, pending.rolePath, envelope.text, pending.hash);
+    }
     try {
-      l.session.send(text);
+      l.session.send(envelope.text);
     } catch {
       throw noLive(l.info);
+    }
+    store.setSetting(`instruction.delivered:${l.run.id}`, envelope.revision);
+    if (pending) {
+      pendingPromptVersions.delete(l.run.id);
+      savePromptSections(
+        l.run,
+        envelope.text,
+        [...envelope.pieces, ...pending.briefPieces],
+        pending.system,
+      );
     }
     l.inTurn = true;
     l.parkedTurn = false;
     l.rateLimitedUntil = null;
     // A completed Codex interrupt leaves the seat idle until the replacement is sent.
     if (l.run.vendor === "codex") setState(l, "running", null);
+    return envelope;
   }
 
   async function sendInterrupt(l: Live): Promise<void> {
@@ -1446,7 +1486,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
-  /** The audit identity includes both generated developer instructions and the first user brief. */
+  const pendingPromptVersions = new Map<
+    string,
+    {
+      hash: string;
+      rolePath: string;
+      briefPieces: readonly PromptPiece[];
+      system: readonly PromptPiece[] | null;
+    }
+  >();
   function recordPromptVersion(
     run: Run,
     rolePath: string,
@@ -1454,17 +1502,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     briefPieces: readonly PromptPiece[],
     system: readonly PromptPiece[] | null,
   ): void {
+    const current = need(run.agentId);
+    const envelope = instructionEnvelope(
+      store,
+      current.seat,
+      run.id,
+      seatDef(current.seat).loop === "watch",
+      brief,
+    );
+    // Preserve the original no-spawn guard. Final delivery replaces only this prepared identity.
+    const hash = savePromptVersion(run, rolePath, envelope.text);
+    pendingPromptVersions.set(run.id, { hash, rolePath, briefPieces, system });
+  }
+  /** Archive the prepared brief, then replace only that identity with the final queued envelope. */
+  function savePromptVersion(
+    run: Run,
+    rolePath: string,
+    brief: string,
+    preparedHash?: string,
+  ): string {
     const instructions = readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8");
     const payload = ["developer-instructions", instructions, "first-brief", brief].join("\0");
-    store.setRunPromptVersion(
-      run.id,
-      createHash("sha256").update(payload).digest("hex"),
-      rolePath,
-      now(),
-    );
+    const hash = createHash("sha256").update(payload).digest("hex");
+    store.setRunPromptVersion(run.id, hash, rolePath, now(), preparedHash);
+    return hash;
+  }
+  function savePromptSections(
+    run: Run,
+    brief: string,
+    briefPieces: readonly PromptPiece[],
+    system: readonly PromptPiece[] | null,
+  ): void {
     // a launch that kept its prompt file (a resume, a transfer) sent nothing new
     if (system === null) return;
     try {
+      const instructions = readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8");
       store.recordPromptSections(
         run.id,
         0,
@@ -1476,6 +1548,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
     } catch (e) {
       log(`${run.agentId}: could not record the prompt's sections: ${errText(e)}`);
+    }
+  }
+
+  async function deliverFirstLine(l: Live, text: string, markRead: () => void): Promise<void> {
+    try {
+      await enqueue(l, () => {
+        writeLine(l, text);
+        markRead();
+      });
+    } catch (cause) {
+      pendingPromptVersions.delete(l.run.id);
+      log(`${l.run.agentId}: could not deliver first brief: ${errText(cause)}`);
+      await l.session.close();
+      throw new SupervisorError(
+        500,
+        "Could not deliver the first brief. Check prompt audit storage and current seat guidance before retrying.",
+        { cause },
+      );
     }
   }
 
@@ -1615,6 +1705,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? await deps.flightEnvironment?.()
         : undefined;
     if (stopping) throw new Error(SHUTTING_DOWN);
+    if (seatDef(info.seat).loop === "watch" && needsDirectionContext(store, run.id)) {
+      const sha = (
+        await crewGit(
+          checkout.path,
+          ["rev-parse", "HEAD"],
+          await cloneGitDir(info.session.checkout),
+          { gitDir: checkout.gitDir },
+        )
+      ).trim();
+      store.setSetting(
+        directionKey(run.id),
+        JSON.stringify(await readDirectionContext(info.session.checkout, sha, resume)),
+      );
+    }
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
     return launch(
@@ -1711,6 +1815,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           repoDocs?.claudeMd ?? null,
           [advice, references].filter(Boolean).join("\n\n"),
           repoDocs?.agentsMd ?? null,
+          store.instructions.active(info.seat.id).length
+            ? seatInstructionBlock(store.instructions.active(info.seat.id))
+            : "",
         ),
         {
           mode: 0o600,
@@ -1719,7 +1826,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const block = (heading: string, body: string | null | undefined): number =>
         body == null || body.trim() === "" ? 0 : textBytes(`\n\n${heading}\n\n${body}`);
       system = [
-        { section: "orders", bytes: textBytes(advice) },
+        {
+          section: "orders",
+          bytes:
+            textBytes(advice) +
+            (store.instructions.active(info.seat.id).length
+              ? textBytes(seatInstructionBlock(store.instructions.active(info.seat.id)))
+              : 0),
+        },
         {
           section: "rules",
           bytes:
@@ -2043,6 +2157,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function removeRunFiles(runId: string): void {
+    pendingPromptVersions.delete(runId);
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -2609,14 +2724,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const dir = crewKeeperDir(deps.dbPath, runId);
     const cursor = store.keeperCursor(runId);
     let checkoutMissing = false;
+    let checkoutProblem = "could not resume: checkout missing";
     const info = findSeat(row.seatId);
     const run = store.run(runId);
     if (info && run?.endedAt === null && run.reviewId == null) {
       const def = seatDef(info.seat);
       if (def.mode === "read-only" && def.loop !== "plan") {
         try {
-          await readOnlyCheckout(info, row, run);
-        } catch {
+          const checkout = await readOnlyCheckout(info, row, run);
+          if (def.loop === "watch" && needsDirectionContext(store, run.id)) {
+            const sha = (
+              await crewGit(
+                checkout.path,
+                ["rev-parse", "HEAD"],
+                await cloneGitDir(info.session.checkout),
+                { gitDir: checkout.gitDir },
+              )
+            ).trim();
+            store.setSetting(
+              directionKey(run.id),
+              JSON.stringify(await readDirectionContext(info.session.checkout, sha, true)),
+            );
+          }
+        } catch (error) {
+          if (error instanceof DirectionContextError) checkoutProblem = error.message;
           if (runGone(runId, row.seatId)) return;
           // Discover the keeper first: an exit keeps its reason; a missing keeper goes through resume.
           checkoutMissing = true;
@@ -2663,7 +2794,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dropGrant(row.seatId, runId);
         await found.session.close();
         if (runGone(runId, row.seatId)) return;
-        return failResume(row, "could not resume: checkout missing");
+        return failResume(row, checkoutProblem);
       }
       // no await before the seat is tracked: the replay's first line must find its listeners
       return attachOne(row, runId, found.session, found.hello, cursor);
@@ -2833,6 +2964,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  function errorDirectionMessage(error: unknown): string {
+    return error instanceof DirectionContextError
+      ? `${RESUME_FAILED}: ${error.message}`
+      : `${RESUME_FAILED}: ${CANNOT_START}`;
+  }
+
   async function resumeOne(row: SeatSessionRow): Promise<void> {
     const info = findSeat(row.seatId);
     if (!info) return failResume(row, "could not resume: seat removed");
@@ -2890,7 +3027,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         deferredRecoveries.add(run.id);
         return;
       }
-      return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
+      return failResume(row, errorDirectionMessage(e));
     }
     // Keep the error that the successful resume is about to replace in Activity.
     if (row.state === "error") {
@@ -3617,7 +3754,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -3633,7 +3773,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }
@@ -3655,10 +3797,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(500, CANNOT_START);
       }
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId, branch: checkout.branch };
     } finally {
       if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
@@ -3773,7 +3912,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -3789,7 +3931,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }
@@ -3807,10 +3951,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
-      await enqueue(l, () => {
-        writeLine(l, firstBrief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, firstBrief, () => markInboxRead(seatId, inbox));
       return { runId };
     } finally {
       starting.delete(seatId);
@@ -4083,7 +4224,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          reason:
+            e instanceof SeatGitError || e instanceof DirectionContextError
+              ? `${CANNOT_START}: ${e.message}`
+              : CANNOT_START,
           worktree: scratch.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -4100,7 +4244,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          e instanceof SeatGitError || e instanceof DirectionContextError
+            ? `${CANNOT_START}: ${e.message}`
+            : CANNOT_START,
           { cause: e },
         );
       }
@@ -4118,10 +4264,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
+      await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId };
     } finally {
       starting.delete(seatId);
@@ -4509,7 +4652,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!claimed) return "dup";
       try {
         const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
-        writeLine(l, inbox.text);
+        const envelope = writeLine(l, inbox.text);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {
           try {
@@ -4517,7 +4660,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               runId,
               cost.wake,
               now(),
-              promptSections(inbox.text, cost.pieces, "orders"),
+              promptSections(envelope.text, [...envelope.pieces, ...cost.pieces], "orders"),
             );
           } catch (e) {
             log(`${seatId}: could not record the wake's sections: ${errText(e)}`);

@@ -50,7 +50,7 @@ import {
 } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
-import { matchesFocus } from "../focus.ts";
+import { matchesConfiguredFocus } from "../focus.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -329,7 +329,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
           issue: card.issueNumber,
           label,
           seats: group
-            .filter(({ seat }) => matchesFocus(seat.focus, card))
+            .filter(({ seat }) => matchesConfiguredFocus(config, store, seat.id, card))
             .map(({ seat }) => seat.id),
         });
     }
@@ -428,7 +428,7 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
     const l = areaLabelsOf(rules, c);
     const label = l[0];
     return (
-      matchesFocus(seat.focus, c) &&
+      matchesConfiguredFocus(config, store, seat.id, c) &&
       holder.has(c.issueNumber) &&
       l.length === 1 &&
       label !== undefined &&
@@ -509,7 +509,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   // The card may have moved since the poll, and another seat may have been started on it by hand.
   if (
     card === undefined ||
-    !matchesFocus(found.seat.focus, card) ||
+    !matchesConfiguredFocus(config, store, found.seat.id, card) ||
     hudColumnOf(card) !== "Ready" ||
     store.activeTickets().has(ref)
   ) {
@@ -583,7 +583,10 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (
     pausedSeat(store, seatId, null) ||
     !current ||
-    !matchesFocus(current.seat.focus, { ...card, labels: latest.labels ?? [] })
+    !matchesConfiguredFocus(config, store, current.seat.id, {
+      ...card,
+      labels: latest.labels ?? [],
+    })
   ) {
     store.untake(seatId, repoId, issue);
     return;

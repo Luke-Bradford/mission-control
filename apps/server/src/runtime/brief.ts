@@ -330,7 +330,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
       : `1. Read the ticket and ${REVIEW_DIFF_FILE}. Open a whole file, or the code that calls it, only where the diff leaves a doubt.`,
     "2. Run the test files that cover the change, and check that each new behaviour has a test that would fail without it. Mutation-check only to prove a finding: break the code in this copy, confirm a test fails, then put it back.",
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
-    "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
+    "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete correction outcome within the ticket's scope and constraints. If recomposition is needed, explain the violated requirement.",
     "5. Call mc report_findings once with every finding, verdict, checked coverage, worksWell, limitations and followUps (each with disposition and ticket when deferred). List test commands with reported counts; attach at, exitCode and evidence only when you have receipts. Give visualReason only for a nonvisual change. Keep the returned immutable QA report permalink in handoffs. Missing evidence is recorded as incomplete. Then stop.",
     "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
     "",
@@ -472,6 +472,7 @@ export function rolePrompt(
   claudeMd: string | null,
   references = "",
   agentsMd: string | null = null,
+  seatInstructions = "",
 ): string {
   let out = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n${references === "" ? "" : `\n${references}\n`}`;
   for (const [heading, body] of [
@@ -480,6 +481,7 @@ export function rolePrompt(
   ] as const) {
     if (body !== null && body.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${body}`;
   }
+  if (seatInstructions !== "") out = `${out.trimEnd()}\n\n${seatInstructions}`;
   return out;
 }
 

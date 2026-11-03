@@ -1451,6 +1451,14 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/prs/flow"],
+  ["GET", "/api/flight/orders"],
+  ["GET", "/api/flight/orders/:id"],
+  ["POST", "/api/flight/orders", { text: "Fixture order" }],
+  ["POST", "/api/flight/orders/:id/revoke", {}],
+  ["GET", "/api/flight/instructions"],
+  ["GET", "/api/seats/guido-1/instructions"],
+  ["POST", "/api/seats/guido-1/instructions", { kind: "text", text: "Fixture instruction" }],
+  ["POST", "/api/seats/guido-1/instructions/:instructionId/revoke", {}],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
   ["GET", "/api/flight/schedule"],
@@ -2313,6 +2321,20 @@ describe("local access", () => {
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url.startsWith("/api/code-health/evidence/")) continue; // issued references are covered by code-health-reader.test.ts
+      if (
+        method === "POST" &&
+        (url.startsWith("/api/flight/orders") ||
+          url.includes("/instructions") ||
+          url.endsWith("/focus"))
+      ) {
+        // Instruction mutations need a configured operator key; route-specific tests cover authenticated writes.
+        expect((await post(url, json, body)).statusCode).toBe(401);
+        continue;
+      }
+      if (url === "/api/flight/orders/:id") {
+        expect((await get(url)).statusCode).toBe(404);
+        continue;
+      }
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
         expect((await post(url, json, body)).statusCode).toBe(401);
@@ -2392,7 +2414,6 @@ describe("local access", () => {
         continue;
       }
       if (
-        (method === "POST" && url.endsWith("/focus")) ||
         url.includes("/queue/reorder") ||
         url === "/api/profiles" ||
         url === "/api/sources/teams/selection" ||

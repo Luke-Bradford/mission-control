@@ -1,0 +1,44 @@
+
+ RUN  v3.2.7 <controller>/codex-925-qa-image-baseline
+
+ ❯ |web| test/QaReport.browser.test.ts (5 tests | 2 failed | 3 skipped) 2497ms
+   × Accountable QA report > keeps image-error and retry controls focused in the real shell, light 798ms
+     → expected { failed: true, focused: false, …(1) } to deeply equal { failed: true, focused: true, …(1) }
+   × Accountable QA report > keeps image-error and retry controls focused in the real shell, dark 431ms
+     → expected { failed: true, focused: false, …(1) } to deeply equal { failed: true, focused: true, …(1) }
+   ↓ Accountable QA report > keeps paired evidence and command receipts inspectable at desktop widths and both themes
+   ↓ Accountable QA report > opens a saved report after merge without a queue item or acceptance controls
+   ↓ Accountable QA report > keeps fifty long commands keyboard-scrollable and never substitutes evidence for a different head
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/QaReport.browser.test.ts > Accountable QA report > keeps image-error and retry controls focused in the real shell, light
+ FAIL  |web| test/QaReport.browser.test.ts > Accountable QA report > keeps image-error and retry controls focused in the real shell, dark
+AssertionError: expected { failed: true, focused: false, …(1) } to deeply equal { failed: true, focused: true, …(1) }
+
+- Expected
++ Received
+
+  {
+    "failed": true,
+-   "focused": true,
++   "focused": false,
+    "href": "https://evidence.example/before.png",
+  }
+
+ ❯ test/QaReport.browser.test.ts:79:24
+     77|         }, null);
+     78|         await page.screenshot(join(shots, `qa-image-${colorScheme}-err…
+     79|         expect(failed).toEqual({
+       |                        ^
+     80|           failed: true,
+     81|           focused: true,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  13:12:18
+   Duration  3.19s (transform 194ms, setup 303ms, collect 225ms, tests 2.50s, environment 0ms, prepare 32ms)
+

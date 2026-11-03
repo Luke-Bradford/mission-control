@@ -411,11 +411,6 @@ beforeEach(() => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
     },
-    focus: async (seatId, focus) => {
-      const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === seatId);
-      if (!seat) throw new Error("Missing seat");
-      seat.focus = focus;
-    },
     queueReorder: async (seat, move, above) => reorderImpl(seat, move, above),
     seen: stateSeen,
     config: cfg,
@@ -539,7 +534,7 @@ beforeEach(() => {
     },
     now: () => nowMs,
   });
-  const t = tools[0];
+  const t = tools.find((candidate) => candidate.name === "log_decision");
   if (t === undefined) throw new Error("no tool");
   tool = t;
   live("flight-1", "r-flight");
@@ -1203,6 +1198,8 @@ const need = <T>(value: T | null | undefined): T => {
 describe("tool list", () => {
   it("lists each tool and shows it only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
+      "instruct_seat",
+      "revoke_instruction",
       "log_decision",
       "wait_on",
       "read_ticket",
@@ -3615,6 +3612,7 @@ describe("flight_state", () => {
       atStop: false,
     };
     expect(await state()).toEqual({
+      instructionRevision: "0",
       signals: [],
       triage: [],
       // mc#4 is blocked by an open mc#9
@@ -8240,7 +8238,7 @@ it("FLIGHT reads and changes focus through message_seat without sending a seat m
     basis: "Operator asked",
   });
   expect(result.isError).not.toBe(true);
-  expect(cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1")?.focus).toBe("label:catalog");
+  expect(store.instructions.focus("guido-1").effectiveFocus).toBe("label:catalog");
   const read = await call("message_seat", {
     seat: "guido-1",
     read_focus: true,
@@ -10299,5 +10297,55 @@ describe("the runaway breaker", () => {
     expect(await call("start_seat", { seat: "guido-1", issue: 7, basis: "ready" })).toEqual(
       refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
     );
+  });
+});
+
+describe("standing instructions and linked re-plans", () => {
+  it("logs a typed saved-order reference and retains it after revocation", async () => {
+    const order = store.instructions.create(
+      null,
+      { kind: "text", text: "QA first" },
+      "operator",
+      NOW,
+    ).entry;
+    const result = await call("log_decision", args({ kind: "re-plan", orderId: order.id }));
+    expect(result.isError).not.toBe(true);
+    expect(store.flightDecisions(0, 1)[0]).toMatchObject({ kind: "re-plan", orderId: order.id });
+    store.instructions.revoke(order.id, null, "operator", NOW + 1);
+    expect(store.flightDecisions(0, 1)[0].orderId).toBe(order.id);
+    const before = store.flightDecisions(0, 10);
+    expect((await call("log_decision", args({ kind: "re-plan" }))).isError).toBe(true);
+    expect((await call("log_decision", args({ kind: "re-plan", orderId: 99999 }))).isError).toBe(
+      true,
+    );
+    expect(store.flightDecisions(0, 10)).toEqual(before);
+  });
+  it("offers only seat instruction writers, preserving operator entries and idempotent revocation", async () => {
+    const protectedEntry = store.instructions.create(
+      "guido-1",
+      { kind: "text", text: "Operator rule" },
+      "operator",
+      NOW,
+    ).entry;
+    expect(
+      (await call("revoke_instruction", { id: protectedEntry.id, basis: "Try" })).isError,
+    ).toBe(true);
+    const saved = await call("instruct_seat", {
+      seat: "guido-1",
+      kind: "text",
+      text: "Keep tests focused",
+      basis: "Ticket scope",
+    });
+    expect(saved.isError).not.toBe(true);
+    const entry = JSON.parse(saved.text).entry;
+    expect(entry).toMatchObject({ by: "flight", seatId: "guido-1" });
+    expect(store.flightDecisions(0, 10).filter((d) => d.kind === "instruction")).toHaveLength(1);
+    expect(
+      (await call("revoke_instruction", { id: entry.id, basis: "Completed" })).isError,
+    ).not.toBe(true);
+    const before = store.flightDecisions(0, 10);
+    await call("revoke_instruction", { id: entry.id, basis: "Retry" });
+    expect(store.flightDecisions(0, 10)).toEqual(before);
+    expect(tools.some((t) => /^(?:save|revoke)_order$/.test(t.name))).toBe(false);
   });
 });

@@ -69,6 +69,8 @@ export interface RenderOptions {
   colorScheme?: "light" | "dark";
   /** JSON answers by request path and query (`/api/limits`); any other request is a 404. */
   api?: Record<string, unknown>;
+  /** Explicit raw asset replies by URL; keeps fixture images independent of external networking. */
+  assets?: Record<string, { contentType: string; body: string | Buffer; status?: number }>;
 }
 
 interface Route {
@@ -209,6 +211,7 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       search = "",
       colorScheme,
       api = {},
+      assets = {},
     }) {
       if (!BROWSER || !outDir) throw new Error("the harness did not build");
       const root = outDir;
@@ -238,6 +241,11 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
           body: JSON.stringify({ error: "not found" }),
         });
       });
+      for (const [assetUrl, response] of Object.entries(assets)) {
+        const absolute = new URL(assetUrl, ORIGIN).href;
+        const pattern = new RegExp(`^${absolute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+        await page.route(pattern, async (route) => route.fulfill(response));
+      }
       if (colorScheme) await page.emulateMedia({ colorScheme });
       await page.goto(`${ORIGIN}/${entry}${search}`, { waitUntil: "load" });
       const measure = (selector: string) =>

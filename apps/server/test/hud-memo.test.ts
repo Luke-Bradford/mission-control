@@ -321,3 +321,44 @@ describe("the crew and Needs-you memo", () => {
     expect(reads.mock.calls.length).toBeGreaterThan(n);
   });
 });
+
+it("imports focus before the memo basis and keeps warm projection free of bookkeeping writes", () => {
+  config.crew = {
+    worktrees: join(dir, "crew"),
+    maxSeats: 1,
+    sessions: [
+      {
+        id: "session",
+        repoId: "shop-app",
+        checkout: join(dir, "checkout"),
+        seats: [
+          {
+            id: "builder",
+            role: "GUIDO",
+            accountId: "claude-main",
+            model: "sonnet",
+            area: [],
+            focus: "label:catalog",
+          },
+        ],
+      },
+    ],
+  };
+  const batchedRuns = vi.spyOn(store, "runsForAgents");
+  const first = crew(config, store, NOW, undefined, noVersion);
+  expect(first.rows.find((row) => row.id === "builder")?.focus).toBe("label:catalog");
+  const importedVersion = store.readVersion();
+  crew(config, store, NOW + 1, undefined, noVersion);
+  expect(store.readVersion()).toBe(importedVersion);
+  expect(batchedRuns).toHaveBeenCalledTimes(1);
+  const old = config.crew.sessions[0].seats[0];
+  config.crew.sessions[0].seats.splice(0, 1, { ...old, focus: null });
+  expect(
+    crew(config, store, NOW + 2, undefined, noVersion).rows.find((row) => row.id === "builder")
+      ?.focus,
+  ).toBeNull();
+  const clearedVersion = store.readVersion();
+  crew(config, store, NOW + 3, undefined, noVersion);
+  expect(store.readVersion()).toBe(clearedVersion);
+  expect(batchedRuns).toHaveBeenCalledTimes(2);
+});
