@@ -1,0 +1,52 @@
+{
+  "renderedSource": "8ce4d79ba77aafb71469d8025821c5806ef6bd44",
+  "recordedAt": "2026-11-03T14:44:10Z",
+  "findings": [
+    {
+      "id": "operator-008b-composition",
+      "severity": "Important",
+      "source": "0c92ee23dfe9973203167e0299a6d1950c024dbc",
+      "publishedHead": "008b362dc7748279ef2eb3129f5eb4b826a3d842",
+      "finding": "True4K canvas capped2880px; tall primary workspace delayed detached comparisons, repeated token plot, and enlarged Machine traces consumed space without enough investigative detail. Operator rejected the recommendation.",
+      "failedQa": "1fe40c8e16ae4629b1d5bf5abe9ed501855fca0efc1e859919f20e3244a7a749",
+      "resolution": "Independent operational domains; acceptedCrew geometry retained; no detached/repeated history region; bounded host plots plus process/transcript/queue facts; useful full-window comparison based on actual column width. Reference-case composition reviewed independently within22e whole pass; threshold issue below separately corrected.",
+      "status": "reworked; original recommendation withdrawn"
+    },
+    {
+      "id": "independent-22e-threshold",
+      "severity": "Important",
+      "source": "22e12b8d99182a52feefbc2359fdbafcefa64d50",
+      "finding": "At2800x1600folded and3200x1800expanded, viewport trigger selected3164px minimum tracks in smaller canvas, placing Crew before scrollorigin and clipping right-side actions. Five histories also exceeded short height.",
+      "before": [
+        "failed-22e/2800x1600-dark-folded-full.png",
+        "failed-22e/3200x1800-dark-open-full.png"
+      ],
+      "correctionSource": "8ce4d79ba77aafb71469d8025821c5806ef6bd44",
+      "resolution": "Namedcanvas3164px threshold; independent1920px viewport-height threshold for five histories; compact selector/reader fallback preserved. Captions count displayed rows.",
+      "after": [
+        "independent-8ce/2800x1600-dark-folded-full.png",
+        "independent-8ce/3200x1800-dark-open-full.png"
+      ],
+      "independentReceipt": "independent-8ce/render-checks.json",
+      "status": "closed by same independent reviewer; source-bound narrow recheck"
+    },
+    {
+      "id": "author-iteration-failures",
+      "sourcePhases": [
+        "de0c9e03",
+        "2f334460",
+        "74faa6b3",
+        "32560fa6"
+      ],
+      "finding": "Early reparent JS exception, wrong provider flex order, full account table disclosed in500px column, then unnamed-container dependency hid Context summary. Author found and corrected these before22e freeze.",
+      "evidence": "phases/ manifests and logs retain actual source/outcomes; uncurated private scratch PNGs remain separate. A process exit0 or geometry pass was not accepted as a visual pass.",
+      "status": "corrected before22e; not relabelled current evidence"
+    }
+  ],
+  "remainingLimits": [
+    "Standalone fictional proposal, not production App or live operational data.",
+    "Current normal contexts and local interactions only; no new full exceptional-state/many/long matrix or real browser zoom/text-enlargement check.",
+    "Future implementation must prove resource/read/clock boundaries, permissions/forms/routes and real App state transitions.",
+    "Product checkpoint63 and old7440preview remain unchanged; preview does not show8ce."
+  ]
+}

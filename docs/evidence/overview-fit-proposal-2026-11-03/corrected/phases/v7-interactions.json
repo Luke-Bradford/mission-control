@@ -1,0 +1,237 @@
+{
+  "source": "74faa6b35167fa27b7ee953a2c4e78dd0d7286ac",
+  "startedSource": "74faa6b3",
+  "completedAt": "2026-11-03T14:17:16.882Z",
+  "scope": "Standalone fictional native proposal; existing filters, canonical histories, native reader End/return, modal draft/focus, complete allowance keyboard pan. Not production App or API proof.",
+  "errors": [],
+  "requests": [],
+  "receipts": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "light",
+      "filters": [
+        {
+          "filter": "all",
+          "visible": [
+            "review",
+            "steps",
+            "review",
+            "steps",
+            "steps",
+            "review"
+          ]
+        },
+        {
+          "filter": "review",
+          "visible": [
+            "review",
+            "review",
+            "review"
+          ]
+        },
+        {
+          "filter": "steps",
+          "visible": [
+            "steps",
+            "steps",
+            "steps",
+            "steps",
+            "steps"
+          ]
+        },
+        {
+          "filter": "merges",
+          "visible": [
+            "merges"
+          ]
+        },
+        {
+          "filter": "guard",
+          "visible": [
+            "guard"
+          ]
+        },
+        {
+          "filter": "needs",
+          "visible": [
+            "needs"
+          ]
+        },
+        {
+          "filter": "comms",
+          "visible": [
+            "comms"
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "measure": "tokens",
+          "visible": [
+            "tokens"
+          ]
+        },
+        {
+          "measure": "spend",
+          "visible": [
+            "spend"
+          ]
+        },
+        {
+          "measure": "inflight",
+          "visible": [
+            "inflight"
+          ]
+        },
+        {
+          "measure": "ci",
+          "visible": [
+            "ci"
+          ]
+        },
+        {
+          "measure": "needs",
+          "visible": [
+            "needs"
+          ]
+        }
+      ],
+      "raw": {
+        "scrollTop": 559,
+        "max": 559,
+        "region": {
+          "x": 401,
+          "y": 105.25,
+          "width": 1118,
+          "height": 920,
+          "top": 105.25,
+          "right": 1519,
+          "bottom": 1025.25,
+          "left": 401
+        },
+        "last": {
+          "x": 1088.09375,
+          "y": 971.75,
+          "width": 414.90625,
+          "height": 36.5,
+          "top": 971.75,
+          "right": 1503,
+          "bottom": 1008.25,
+          "left": 1088.09375
+        },
+        "text": "3",
+        "painted": true,
+        "focused": true
+      },
+      "machine": {
+        "scrollTop": 2287,
+        "max": 2287,
+        "region": {
+          "x": 401,
+          "y": 105.25,
+          "width": 1118,
+          "height": 920,
+          "top": 105.25,
+          "right": 1519,
+          "bottom": 1025.25,
+          "left": 401
+        },
+        "last": {
+          "x": 421,
+          "y": 928.75,
+          "width": 193.421875,
+          "height": 25.5,
+          "top": 928.75,
+          "right": 614.421875,
+          "bottom": 954.25,
+          "left": 421
+        },
+        "text": "Open DEV-3 / its queued work",
+        "painted": true,
+        "focused": true
+      },
+      "modal": {
+        "role": "dialog",
+        "modal": "true",
+        "inert": true
+      },
+      "images": [
+        {
+          "file": "1920-light-raw-history-native-end.png",
+          "capturedAt": "2026-11-03T14:17:15.903Z",
+          "bytes": 212384,
+          "sha256": "373e747356c9403f89fb5d07c84977ec6d1c2ad0774409644b990bb8f0052ba7"
+        },
+        {
+          "file": "1920-light-machine-lock-native-end.png",
+          "capturedAt": "2026-11-03T14:17:16.186Z",
+          "bytes": 292874,
+          "sha256": "213f9870266d1367f102f0b4e4565b4a02c4282e5d8e3460e34ecd668e34944d"
+        },
+        {
+          "file": "1920-light-flight-draft-retained.png",
+          "capturedAt": "2026-11-03T14:17:16.373Z",
+          "bytes": 375772,
+          "sha256": "a872f8698743ca0e11b51922720cf0d5f38818c435fbc6b5b005c5f411076ef2"
+        }
+      ]
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "theme": "dark",
+      "flight": "open",
+      "before": {
+        "left": 0,
+        "max": 168,
+        "cue": true
+      },
+      "allowance": {
+        "left": 168,
+        "max": 168,
+        "region": {
+          "x": 1101,
+          "y": 245,
+          "width": 498,
+          "height": 335,
+          "top": 245,
+          "right": 1599,
+          "bottom": 580,
+          "left": 1101
+        },
+        "last": {
+          "x": 1462.859375,
+          "y": 245,
+          "width": 128.140625,
+          "height": 52.5,
+          "top": 245,
+          "right": 1591,
+          "bottom": 297.5,
+          "left": 1462.859375
+        },
+        "text": {
+          "x": 1470.859375,
+          "y": 263,
+          "width": 92.515625,
+          "height": 15,
+          "top": 263,
+          "right": 1563.375,
+          "bottom": 278,
+          "left": 1470.859375
+        },
+        "heading": "Source / next try",
+        "painted": true
+      },
+      "images": [
+        {
+          "file": "2560-dark-open-allowance-keyboard-right.png",
+          "capturedAt": "2026-11-03T14:17:16.790Z",
+          "bytes": 488935,
+          "sha256": "073f4c4fdcff92f6c5b8e43ee36ee761042c894cd4d9e5c2ef675340f9b33ed5"
+        }
+      ]
+    }
+  ],
+  "harnessSha256": "98fa1bd7082ea2f77ddb80b2e95beeba3597aff164a56f6a57d8a5027bb0512c"
+}

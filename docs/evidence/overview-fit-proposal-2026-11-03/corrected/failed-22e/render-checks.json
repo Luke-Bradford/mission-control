@@ -1,0 +1,231 @@
+{
+  "source": "22e12b8d99182a52feefbc2359fdbafcefa64d50",
+  "scope": "Independent bounded threshold render of exact native proposal; one browser worker, two sequential pages; fictional fixture; no interactions or production/API/provider actions.",
+  "completedAt": "2026-11-03T14:28:14.844Z",
+  "receipts": [
+    {
+      "source": "22e12b8d99182a52feefbc2359fdbafcefa64d50",
+      "capturedAt": "2026-11-03T14:28:14.637Z",
+      "file": "2800x1600-dark-folded-full.png",
+      "sha256": "8d7685df0df6316ebed1ad2a0c7f36fb00f5e325ebeffd3c48d6b6766612d2da",
+      "facts": {
+        "viewport": {
+          "width": 2800,
+          "height": 1600,
+          "dpr": 1
+        },
+        "rail": "folded",
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2728,
+          "height": 1521,
+          "top": 49,
+          "right": 2728,
+          "bottom": 1570,
+          "left": 0
+        },
+        "mainScroll": {
+          "clientWidth": 2728,
+          "scrollWidth": 2946,
+          "clientHeight": 1521,
+          "scrollHeight": 1826,
+          "scrollLeft": 0,
+          "scrollTop": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2680,
+          "height": 1777.5,
+          "top": 73,
+          "right": 2704,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "columns": "1280px 960px 900px",
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2680,
+          "height": 1669.5,
+          "top": 181,
+          "right": 2704,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "crew": {
+          "x": -218,
+          "y": 181,
+          "width": 1280,
+          "height": 460,
+          "top": 181,
+          "right": 1062,
+          "bottom": 641,
+          "left": -218
+        },
+        "observations": {
+          "x": 2046,
+          "y": 181,
+          "width": 900,
+          "height": 1669.5,
+          "top": 181,
+          "right": 2946,
+          "bottom": 1850.5,
+          "left": 2046
+        },
+        "nextAction": {
+          "x": 2047,
+          "y": 545.5,
+          "width": 898,
+          "height": 48,
+          "top": 545.5,
+          "right": 2945,
+          "bottom": 593.5,
+          "left": 2047
+        },
+        "flight": {
+          "x": 2728,
+          "y": 73,
+          "width": 48,
+          "height": 1473,
+          "top": 73,
+          "right": 2776,
+          "bottom": 1546,
+          "left": 2728
+        },
+        "needsHistory": {
+          "x": 2046,
+          "y": 1618.5,
+          "width": 900,
+          "height": 232,
+          "top": 1618.5,
+          "right": 2946,
+          "bottom": 1850.5,
+          "left": 2046
+        },
+        "documentScrollWidth": 2800,
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ]
+      },
+      "requests": [],
+      "errors": []
+    },
+    {
+      "source": "22e12b8d99182a52feefbc2359fdbafcefa64d50",
+      "capturedAt": "2026-11-03T14:28:14.830Z",
+      "file": "3200x1800-dark-open-full.png",
+      "sha256": "37dc63267d56349e0d09faf7906f0c5ffdb6bebfa2f77fd90a0a871836e1aedc",
+      "facts": {
+        "viewport": {
+          "width": 3200,
+          "height": 1800,
+          "dpr": 1
+        },
+        "rail": "open",
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2776,
+          "height": 1721,
+          "top": 49,
+          "right": 2776,
+          "bottom": 1770,
+          "left": 0
+        },
+        "mainScroll": {
+          "clientWidth": 2776,
+          "scrollWidth": 2970,
+          "clientHeight": 1721,
+          "scrollHeight": 1826,
+          "scrollLeft": 0,
+          "scrollTop": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2728,
+          "height": 1777.5,
+          "top": 73,
+          "right": 2752,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "columns": "1280px 960px 900px",
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2728,
+          "height": 1669.5,
+          "top": 181,
+          "right": 2752,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "crew": {
+          "x": -194,
+          "y": 181,
+          "width": 1280,
+          "height": 460,
+          "top": 181,
+          "right": 1086,
+          "bottom": 641,
+          "left": -194
+        },
+        "observations": {
+          "x": 2070,
+          "y": 181,
+          "width": 900,
+          "height": 1669.5,
+          "top": 181,
+          "right": 2970,
+          "bottom": 1850.5,
+          "left": 2070
+        },
+        "nextAction": {
+          "x": 2071,
+          "y": 545.5,
+          "width": 898,
+          "height": 48,
+          "top": 545.5,
+          "right": 2969,
+          "bottom": 593.5,
+          "left": 2071
+        },
+        "flight": {
+          "x": 2776,
+          "y": 73,
+          "width": 400,
+          "height": 1673,
+          "top": 73,
+          "right": 3176,
+          "bottom": 1746,
+          "left": 2776
+        },
+        "needsHistory": {
+          "x": 2070,
+          "y": 1618.5,
+          "width": 900,
+          "height": 232,
+          "top": 1618.5,
+          "right": 2970,
+          "bottom": 1850.5,
+          "left": 2070
+        },
+        "documentScrollWidth": 3200,
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ]
+      },
+      "requests": [],
+      "errors": []
+    }
+  ]
+}

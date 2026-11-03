@@ -1,77 +1,85 @@
-# Overview operational canvas proposal
+# Corrected Overview layout proposal
 
-One design proposal, with a compact 1080p monitoring view and deliberate investigation detail on taller CSS screens. No production files changed; no live/API/provider actions or GitHub publication.
+Current design source: **8ce4d79ba77aafb71469d8025821c5806ef6bd44**. Artifact curation is pending its final source/hash review. This is a fictional standalone HTML/CSS proposal, not a production App or live-data pass. No provider/API/crew actions occurred.
 
-[Open the native proposal](../../mockups/2026-11/overview-fit-proposal/index.html) · [complete inventory and size budgets](../../mockups/2026-11/overview-fit-proposal/inventory.md) · [phase/source/hash bindings](phase-bindings.json) · [original review transcript](review-transcript.md) · [finding resolution map](resolution-map.json).
+[Open the native proposal](../../mockups/2026-11/overview-fit-proposal/index.html) · [design contract](../../mockups/2026-11/overview-fit-proposal/design-contract.md) · [retained content and disclosure](../../mockups/2026-11/overview-fit-proposal/inventory.md).
 
-Final visual source is `0c92ee23dfe9973203167e0299a6d1950c024dbc`, from base `99e8404ea2e78e442dee828092f6b997582ddbe7`. All images use explicitly fictional source-shaped data. The private actual-live audit supplied composition measurements; none of its real identities/screenshots are included. Earlier proposal phases remain labelled with their own sources and capture times.
+The former008b recommendation is withdrawn. The operator rejected its true-4K composition. Its [original gallery](README-008b-rejected.md), prior inventory and evidence remain historical, including older target-area passing review. That review never overrides the later rejection. Saved failedQA: `1fe40c8e16ae4629b1d5bf5abe9ed501855fca0efc1e859919f20e3244a7a749`.
 
-## Current five full contexts
+Current-source context images, threshold before/after evidence, actual coverage and limits are linked below. Source correction review is clean; final artifact review is pending. The old7440 preview still serves0c; it is not an8ce preview. Product implementation remains held.
 
-| Actual CSS viewport / DPR / theme / FLIGHT | Full view | Timeline label proof | Machine time/unit proof |
-| --- | --- | --- | --- |
-| 1920x1080-dpr1-light-folded | [full](final/1920x1080-dpr1-light-folded-full.png) | [Timeline](final/1920x1080-dpr1-light-folded-timeline.png) | [Machine](final/1920x1080-dpr1-light-folded-machine.png) |
-| 1920x1080-dpr1-dark-folded | [full](final/1920x1080-dpr1-dark-folded-full.png) | [Timeline](final/1920x1080-dpr1-dark-folded-timeline.png) | [Machine](final/1920x1080-dpr1-dark-folded-machine.png) |
-| 2560x1440-dpr1-light-open | [full](final/2560x1440-dpr1-light-open-full.png) | [Timeline](final/2560x1440-dpr1-light-open-timeline.png) | [Machine](final/2560x1440-dpr1-light-open-machine.png) |
-| 2560x1440-dpr1-dark-open | [full](final/2560x1440-dpr1-dark-open-full.png) | [Timeline](final/2560x1440-dpr1-dark-open-timeline.png) | [Machine](final/2560x1440-dpr1-dark-open-machine.png) |
-| 3840x2160-dpr1-dark-folded | [full](final/3840x2160-dpr1-dark-folded-full.png) | [Timeline](final/3840x2160-dpr1-dark-folded-timeline.png) | [Machine](final/3840x2160-dpr1-dark-folded-machine.png) |
+## Current source8ce contexts
 
-The1920 composition is1200 / 588px. Crew 460px, activity 216px and Pipeline 112px retain the accepted row/column geometry. Analytical children flow normally: Provider 144 +Timeline 224 +history 184 +Machine 252 +36px gaps =840px. Machine ends at1021; actual main scrollHeight/clientHeight are1001 / 1001 with scrollTop 0. No scrollbar was hidden to obtain that result.
+All current rows below are actual captures of unchanged8ce rendered assets, with the same fictional snapshot at3Nov2026,12:00UTC. The capture helper verifies those assets against Git before launching Chromium. Capture UTC is separate from the fixture clock. [Current render receipt](corrected/render-checks.json) records actual times, viewport/DPR, browser/platform, loaded font families, asset/helper hashes and scroll state. [Source bindings](corrected/source-bindings.json) identifies every retained PNG and normalized record.
 
-At 2560/open, the three columns are1050 / 507 / 507px. The full allowance table is visible below Pipeline; eight Timeline lanes and larger measured Machine traces use the extra height. At true3840 CSS width, all 13 lanes,12 events, full window comparison and all five measured histories are visible. These are additional useful comparisons, not enlarged empty cards.
+| CSS viewport / theme / FLIGHT | Current viewport | Earlier rejected proposal viewport, where matched |
+| --- | --- | --- |
+| 1920×1080 light / folded | [8ce](corrected/contexts/1920x1080-dpr1-light-folded-full.png) | [0c / published008b](final/1920x1080-dpr1-light-folded-full.png) |
+| 1920×1080 dark / folded | [8ce](corrected/contexts/1920x1080-dpr1-dark-folded-full.png) | [0c / published008b](final/1920x1080-dpr1-dark-folded-full.png) |
+| 3840×2160 light / folded | [8ce](corrected/contexts/3840x2160-dpr1-light-folded-full.png) | No matched old folded/light frame retained |
+| 3840×2160 dark / folded | [8ce](corrected/contexts/3840x2160-dpr1-dark-folded-full.png) | [Rejected0c / published008b](final/3840x2160-dpr1-dark-folded-full.png) |
+| 2560×1440 light / open | [8ce](corrected/contexts/2560x1440-dpr1-light-open-full.png) | [0c / published008b](final/2560x1440-dpr1-light-open-full.png) |
+| 2560×1440 dark / open | [8ce](corrected/contexts/2560x1440-dpr1-dark-open-full.png) | [0c / published008b](final/2560x1440-dpr1-dark-open-full.png) |
 
-FLIGHT at1920 is a temporary keyboard modal over the analytical side: global constraints and crew/log remain visible, while background interaction is inert. Close/Escape restores the canvas and draft/focus. At 2560/3840it sits alongside the canvas. This is an explicit interaction tradeoff, not a claim that covered charts remain simultaneously usable.
+These are proposal-iteration comparisons, not production before/after. Normal fictional seats, values and clock are retained; the DOM/composition changes. Earlier sources/timestamps remain their own. No pixel-diff or automatic visual-quality verdict is claimed.
 
-## Source-bound complete detail and physical scaling
+The same settled4K/dark viewport has focused [provider](corrected/focused/3840x2160-dpr1-dark-folded-provider.png), [Machine](corrected/focused/3840x2160-dpr1-dark-folded-machine.png) and [Timeline](corrected/focused/3840x2160-dpr1-dark-folded-timeline.png) crops. Their context filenames and exact crop bounds are in the receipt. [1920×1080 DPR2 dark/open](corrected/contexts/1920x1080-dpr2-dark-open-full.png) is physical3840×2160 while retaining1920CSS composition. It demonstrates the temporary conversation overlay; covered analytics are intentionally inert, not simultaneously usable.
 
-These are actual V3 / f79 captures, before the final label and target corrections. They are not relabelled current screenshots. The full-reader/modal/filter code they prove is unchanged by those narrow corrections.
+## Composition and retained strengths
 
-| Proof | Actual image |
+| Dimension | Concrete author observation on the current images |
 | --- | --- |
-| 1920x1080-dpr2-light-folded-full.png | [V3 actual capture](v3/1920x1080-dpr2-light-folded-full.png) |
-| 1920x1080-dpr2-dark-open-full.png | [V3 actual capture](v3/1920x1080-dpr2-dark-open-full.png) |
-| 3840x2160-dpr1-light-open-full.png | [V3 actual capture](v3/3840x2160-dpr1-light-open-full.png) |
-| 1600x700-dpr1-light-folded-full.png | [V3 actual capture](v3/1600x700-dpr1-light-folded-full.png) |
-| detail-subcent-cost.png | [V3 actual capture](v3/detail-subcent-cost.png) |
-| detail-machine-histories.png | [V3 actual capture](v3/detail-machine-histories.png) |
-| detail-machine-processes-visible.png | [V3 actual capture](v3/detail-machine-processes-visible.png) |
-| detail-machine-transcripts-visible.png | [V3 actual capture](v3/detail-machine-transcripts-visible.png) |
-| detail-machine-lock-queue-actions-visible.png | [V3 actual capture](v3/detail-machine-lock-queue-actions-visible.png) |
-| detail-provider-provenance-end.png | [V3 actual capture](v3/detail-provider-provenance-end.png) |
+| Task / hierarchy | All eleven normal crew seats and the two observed loops stay immediately below the compact metrics. Held/queued reasons, context usage/remaining and named actions remain apparent. Recent Activity follows Crew; Pipeline follows Activity. The low/stale account warning and next decision remain visible. |
+| Composition / space | At1080p the accepted1200px Crew sits beside a588px analytical stack. At true4K three independent domains start at the same baseline: primary1280px, provider/host about1280px, observations about1136px. The primary ends after its normal content; useful information in another domain never waits for it. There is no detached comparison grid or duplicate dashboard token plot. Remaining whitespace is disclosed, not treated as proof of quality or filled with invented rows. |
+| Tables / text | Crew preserves128/80/flexible/96/64/178/52px fields and32px rows, visible IDs and right-aligned tabular values. Work receives the remaining readable width; full work/reasons use named actions. Provider gets a complete seven-field table only when its own column is at least900px; narrower columns keep the explicit tightest-window summary and complete reader. Units and unknowns remain words. |
+| Charts / meaning | Five unique histories use labelled30-minute axes, units, latest/peak, explicit gaps and exact recent readings at wide/tall sizes. Compact views select the same canonical measures. CPU/RAM/disk have bounded plots; RAM means percent, disk means freeGiB. Machine space also exposes process/test split, transcript footprint and named lock/queue facts instead of enlarging steady traces alone. Timeline distinguishes observed durations and instantaneous starts. |
+| Responsive behavior | Actual canvas width gates track minima. Usable height separately gates five large histories. Expanded FLIGHT leaves readable columns where inline;1920 uses a temporary modal with draft/focus restoration. The threshold failure and correction below demonstrate why reference screenshots alone were insufficient. |
+| Interaction / states | Current local proof exercises all seven Activity filters, five canonical history choices, native reader End/paint/focus return, modal Tab/Escape/draft and a reader returning inside FLIGHT. The normal fixture includes held/queued/idle/stopped, unknown context/allowance, stale allowance and missing history samples. This is not a test of live loading/error/disconnected transitions or production permissions. |
 
-[V3 interaction receipt](v3/interaction-checks.json) records 18 real Tab targets confined in the modal, nested-reader return, retained draft and restored focus, all seven filters with actual visible rows, and complete-detail paint bounds. Process/transcript/lock sections were truly scrolled into view: scrollTop 2125 / 2125 / 2259 of 2287, with every 4 / 12 / 6 row/action painted. The old V2 End-named frame is explicitly rejected below.
+## Independent threshold failure and correction
 
-The1920×1080DPR 2 images are3840×2160 physical pixels but retain the1920 CSS composition. Smaller/shorter views retain native scrolling and explicit limits;1600×700 uses a96px strip and shows more recent activity, but not every normal seat/module in the initial screen. This is not presented as a full-page fit.
+Fresh independent review of22e found an Important responsive failure. A viewport rule selected3164px minimum tracks in a smaller canvas, placing Agent/State before the scroll origin and clipping the next action. Height also selected five histories too soon. [Resolution record](corrected/resolutions.json) and [independent review transcript](corrected/independent-review-transcript.md) preserve the disposition and limits.
 
-## Qualitative author observations
+| Same fictional viewport / theme / rail | Failed22e | Independently rechecked8ce |
+| --- | --- | --- |
+| 2800×1600 dark / folded | [Before](corrected/failed-22e/2800x1600-dark-folded-full.png) | [After](corrected/independent-8ce/2800x1600-dark-folded-full.png) |
+| 3200×1800 dark / open | [Before](corrected/failed-22e/3200x1800-dark-open-full.png) | [After](corrected/independent-8ce/3200x1800-dark-open-full.png) |
 
-- Crew retains fixed fields,32px rows and useful flexible Work width. Ticket IDs, held/queued state and context used/window/remaining stay apparent; full titles/reasons have a named route. Cost is this run; rate is a 30m average; neither is provider allowance.
-- Live activity stays directly below Crew. Full filter set and event links remain; extra height shows twelve meaningful events. Pipeline follows with aligned headers/examples and unambiguous total/unshown counts.
-- Provider summary labels its tightest-window selection. Stale/unknown remaining and resets remain words, and the global low-allowance constraint stays visible. Complete source/freshness/backoff and all windows are available, inline on taller screens.
-- Timeline0/50/100% labels align exactly with the measured span track. Finalchk12m/rev10mglyphs are painted inside their bars. This proposal uses short readable kinds with a legend; a production implementation must place labels outside still-shorter spans instead of clipping.
-- Machine compact traces retain endpoints/window/current/peak/range. Richer plots and raw data use real vertical capacity; complete process/transcript/lock detail is preserved. Disk means free GiB; RAM plot means percent, alongside its GiB denominator.
-- Allfivehistory comparisons retain units, nonzero sub-cent cost ticks, fractional count axis ticks, and missing-minute gaps. Raw samples remain accessible. No new collection or duplicate poll is implied by this design.
+[Original failed receipt](corrected/failed-22e/render-checks.json) remains unchanged except declared local-path normalization. The same reviewer independently rendered those cases and the height fallback: [3840×1919 selected history](corrected/independent-8ce/3840x1919-dark-folded-full.png), [3840×1920 five histories](corrected/independent-8ce/3840x1920-dark-folded-full.png), [receipt](corrected/independent-8ce/render-checks.json). The Important finding is closed for8ce;22e remains failed history. No broader independent interaction/zoom/state rerun is inferred.
 
-## Historical failures, not accepted final evidence
+The author's separate [seven-case threshold pack](corrected/phases/author-threshold-8ce.json) covers the original reproductions, actual canvas3163/3164px, viewport height1919/1920px and4K short/full. Its raw screenshots remain private except selected independent representatives above. A manifest listing a frame does not mean every scratch PNG is committed.
 
-| Phase / reason | Actual representative |
-| --- | --- |
-| v1 · retained critique/failed proof | [original](v1/1920x1080-dpr1-light-folded-full.png) |
-| v1 · retained critique/failed proof | [original](v1/3840x2160-dpr1-dark-folded-full.png) |
-| v1 · retained critique/failed proof | [original](v1/1920x1080-dpr1-dark-open-full.png) |
-| v2 · retained critique/failed proof | [original](v2/1920x1080-dpr1-light-folded-full.png) |
-| v2 · retained critique/failed proof | [original](v2/2560x1440-dpr1-light-open-signals.png) |
-| v2 · retained critique/failed proof | [original](v2/detail-machine-lock-transcripts-end.png) |
+## Current local interactions and limits
 
-Complete normalized phase manifests retain all originalframehashes and actual UTCs, including uncurated private frames; they do not claim every raw PNG is in Git. Final scope and alloriginalreportedissues are in the [resolution map](resolution-map.json).
+[Current interaction receipt](corrected/interaction-checks.json) is one sequential1920/light native-proposal scenario, not a Vitest suite count. It retains [raw history at native End](corrected/interactions/1920-light-raw-history-native-end.png), [complete Machine transcript/lock detail at native End](corrected/interactions/1920-light-machine-lock-native-end.png), and [retained FLIGHT draft](corrected/interactions/1920-light-flight-draft-retained.png). Bounds, final painted content, focus and modal facts are recorded; text presence alone was not the criterion. No API or provider requests occurred.
 
-## Reproduce
+Initial curation retained **seven full contexts, three scoped crops, one interaction scenario and selected independent threshold before/after/height proof**. The separate required16-case normal-data matrix below now completes every requested viewport/theme/rail combination; it is not an exhaustive data-state matrix. No current empty/one/50/long layout matrix, actual browser zoom/text enlargement, full-App state transitions, resource/clock performance or production auth/forms/routes proof is claimed. Earlier broader prototype phases stay historical and are not relabelled8ce. The initial curation retains19PNGs (about7.9MiB), followed by16 matrix PNG paths (seven byte-identical to already-retained current contexts); original31historical PNGs remain in Git. All are fictional proposal data. Real operational audit images remain private.
 
-With the repository dependencies and a local Playwright Chromium installed, run from a checkout:
+Product checkpoint63 remains held. The old7440 preview remains frozen0c and is not silently replaced. Publication, current-head CI and final immutable QA registration follow artifact review; the existing failed008b QA remains linked above.
+
+## Reproduce this corrected phase
+
+Use a local checkout with repository Playwright dependencies and Chromium already installed. An optional third argument names another local dependency checkout; no install or network action is performed.
 
 ```sh
-node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/capture.ts "$PWD" /tmp/overview-fit-current
-node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/capture-full-interactions.ts "$PWD" /tmp/overview-fit-full
+node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/corrected/helpers/capture-current.ts "$PWD" /tmp/overview-corrected
+node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/corrected/helpers/check-current-interactions.ts "$PWD" /tmp/overview-corrected-interactions
 ```
 
-The portable adapters take explicit `ROOT` / `OUTPUT` paths and use only local file URLs. Their original executed helper snapshots and transformations are identified in [phase bindings](phase-bindings.json); adapters are not falsely claimed as the byte-identical executed scripts. Existing full App integration, actual permissions/auth/error transitions, lazy reads and clock isolation remain future implementation checks. This artifact is a proposal assessment, not a production or live-data pass.
+These are the exact executed portable helpers, bound by their hashes. The capture helper verifies unchanged8ce rendered assets before rendering. The interaction helper does not enforce asset hashes: reproduction requires unchanged8ce rendered assets, established separately before running it. It records the actual checkout source separately from its declared renderedSource8ce. The retained execution ran on8ce, and artifact review independently confirmed the current rendered assets match8ce. [Capture log](corrected/logs/mc-overview-fit-proposal-curated-8ce.log), [interaction log](corrected/logs/mc-overview-fit-proposal-curated-8ce-interactions.log), phase manifests and normalization hashes retain actual outcomes. Early author JS/order/disclosure/container regressions remain labelled in the resolutions and phase records; exit0 was never a substitute for inspecting the page.
+
+
+## Complete required16-case matrix
+
+A separate exact8ce pass covers CSS1920×1080,2560×1440,3840×2160 and1920×1080DPR2, each in light/dark and folded/open FLIGHT: **all16combinations**. [Named matrix/summary](corrected/required16/summary.json), [actual render receipt](corrected/required16/render-checks.json), [exit0 log](corrected/logs/mc-overview-fit-proposal-required16-8ce-corrected.log), [exact executed helper](corrected/helpers/capture-required-matrix.ts). Earlier executed capture/interaction helpers and receipts are unchanged. All16 full PNGs are retained; seven are byte-identical to earlier current contexts, not additional unique scenarios.
+
+| CSS viewport / DPR | Light folded | Light open | Dark folded | Dark open |
+| --- | --- | --- | --- | --- |
+| 1920×1080 / 1 | [view](corrected/required16/1920x1080-dpr1-light-folded-full.png) | [view](corrected/required16/1920x1080-dpr1-light-open-full.png) | [view](corrected/required16/1920x1080-dpr1-dark-folded-full.png) | [view](corrected/required16/1920x1080-dpr1-dark-open-full.png) |
+| 2560×1440 / 1 | [view](corrected/required16/2560x1440-dpr1-light-folded-full.png) | [view](corrected/required16/2560x1440-dpr1-light-open-full.png) | [view](corrected/required16/2560x1440-dpr1-dark-folded-full.png) | [view](corrected/required16/2560x1440-dpr1-dark-open-full.png) |
+| 3840×2160 / 1 | [view](corrected/required16/3840x2160-dpr1-light-folded-full.png) | [view](corrected/required16/3840x2160-dpr1-light-open-full.png) | [view](corrected/required16/3840x2160-dpr1-dark-folded-full.png) | [view](corrected/required16/3840x2160-dpr1-dark-open-full.png) |
+| 1920×1080 / 2 | [view](corrected/required16/1920x1080-dpr2-light-folded-full.png) | [view](corrected/required16/1920x1080-dpr2-light-open-full.png) | [view](corrected/required16/1920x1080-dpr2-dark-folded-full.png) | [view](corrected/required16/1920x1080-dpr2-dark-open-full.png) |
+
+The first16-case execution captured all frames but exited1: its added `elementFromPoint` predicate wrongly expected background Crew links to receive hits while1920/open intentionally makes the background inert. [Failed receipt](corrected/required16/failed-inert-predicate-render-checks.json), [failed helper](corrected/helpers/capture-required-matrix-failed.ts) and [exit1 log](corrected/logs/mc-overview-fit-proposal-required16-8ce.log) remain retained. No proposal-source change followed. The corrected separate execution verifies modal/inert semantics and Crew visibility bounds outside the overlay there; hit-test results remain recorded as nonapplicable. Nonmodal cases require actual identity hits. No temporary removal of inert was used, and no product failure is inferred from that invalid predicate.
+
+All16 have eleven crew seats, two loops, worded held/queued/stopped/unknown states, the stale/low allowance warning and next-decision text, correct origins and no outer horizontal/vertical scrolling. Geometry/critical-field guards support the images; they do not determine visual quality. The author inspected actual4K/open and2560/folded frames in both schemes, plus1920DPR2/light/open. At4K/open all independent domains and five histories coexist with inline FLIGHT. At2560/folded the accepted Crew remains1280px, with compact provider/history disclosure and complete-reader access. No new composition defect was observed.1920/open retains its documented temporary modal tradeoff. Fresh narrow extra-evidence review remains pending; unrelated filters/readers and smaller/exceptional production states were not rerun.
