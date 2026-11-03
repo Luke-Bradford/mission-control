@@ -124,14 +124,12 @@ export function briefSourceRevision(
               }
             : null,
           head: store.newestRunCommit(id)?.sha ?? null,
-          reviews: store
-            .reviewsOfRun(id)
-            .map((review) => ({
-              id: review.id,
-              sha: review.sha,
-              state: review.state,
-              blocking: review.blocking,
-            })),
+          reviews: store.reviewsOfRun(id).map((review) => ({
+            id: review.id,
+            sha: review.sha,
+            state: review.state,
+            blocking: review.blocking,
+          })),
         }
       : { id, missing: true };
   });
@@ -256,14 +254,12 @@ export function briefSourceRevision(
               ? externalPrControl(store, repo ?? "", Number(number), row.headSha)
               : null,
             mergeHold: externalMergeHold(store, repo ?? "", Number(number)),
-            reviews: store
-              .reviewsOfPr(repo ?? "", Number(number))
-              .map((review) => ({
-                id: review.id,
-                sha: review.sha,
-                state: review.state,
-                blocking: review.blocking,
-              })),
+            reviews: store.reviewsOfPr(repo ?? "", Number(number)).map((review) => ({
+              id: review.id,
+              sha: review.sha,
+              state: review.state,
+              blocking: review.blocking,
+            })),
           }
         : { ref, missing: true };
     }),
