@@ -5,68 +5,54 @@ import { KpiStrip } from "../overview/KpiStrip.tsx";
 import { MachinePanel } from "../overview/MachinePanel.tsx";
 import { NeedsBanner } from "../overview/NeedsBanner.tsx";
 import {
+  type MeasuredHistoryReader,
   OverviewMeasuredPanel,
   OverviewTimelinePanel,
 } from "../overview/OverviewAnalyticalPanels.tsx";
 import { OverviewConstraints } from "../overview/OverviewConstraints.tsx";
 import { type EvidenceReader, OverviewEvidence } from "../overview/OverviewEvidence.tsx";
 import { OverviewHeader } from "../overview/OverviewHeader.tsx";
-import {
-  ContextSummaryPanel,
-  OverviewHistoryComparison,
-} from "../overview/OverviewInvestigation.tsx";
+import { ContextSummaryPanel } from "../overview/OverviewInvestigation.tsx";
+import { OverviewCanvas } from "../overview/OverviewLayout.tsx";
+import { OverviewProvider } from "../overview/OverviewProvider.tsx";
 import { PipelinePanel } from "../overview/PipelinePanel.tsx";
-import { QuotaPanel } from "../overview/QuotaPanel.tsx";
-import { QuotaSummaryPanel } from "../overview/QuotaSummaryPanel.tsx";
 import "../overview/overview.css";
 
-/**
- * Overview (catalogue 2.1): what needs the operator, the crew, activity, the machine and quota.
- * The Crew Activity Map is its own page (`/map`); the Timeline links to it.
- */
+/** Independent operational domains; existing resources and routes retain their ownership. */
 export function Overview() {
-  const allowance = useRef<EvidenceReader>(null),
-    machine = useRef<EvidenceReader>(null);
+  const machine = useRef<EvidenceReader>(null),
+    history = useRef<MeasuredHistoryReader>(null);
   return (
     <section id="page-overview">
       <OverviewHeader />
       <OverviewConstraints />
       <NeedsBanner awayOnly />
-      <div className="overview-grid">
+      <OverviewCanvas>
         <div className="overview-metrics">
-          <KpiStrip />
+          <KpiStrip onHistory={(measure) => history.current?.show(measure)} />
         </div>
         <div className="overview-workspace">
           <div className="overview-primary">
             <AgentsPanel />
             <ActivityPanel />
             <PipelinePanel />
-            <OverviewEvidence
-              ref={allowance}
-              title="Complete provider allowance"
-              inlineQuery="(min-width: 2200px) and (min-height: 1300px)"
-              className="overview-allowance-reader"
-            >
-              <QuotaPanel />
-            </OverviewEvidence>
           </div>
           <div className="overview-analytical">
-            <div className="overview-signals">
-              <QuotaSummaryPanel onInspect={() => allowance.current?.show()} />
-              <OverviewTimelinePanel />
-              <OverviewMeasuredPanel />
-            </div>
-            <div className="overview-resources">
+            <div className="overview-provider-host">
+              <OverviewProvider />
               <MachinePanel compact onInspect={() => machine.current?.show()} />
               <ContextSummaryPanel />
             </div>
+            <div className="overview-observations">
+              <OverviewTimelinePanel />
+              <OverviewMeasuredPanel ref={history} />
+            </div>
           </div>
         </div>
-        <OverviewHistoryComparison />
         <OverviewEvidence ref={machine} title="Complete machine, transcripts and test lock">
           <MachinePanel />
         </OverviewEvidence>
-      </div>
+      </OverviewCanvas>
     </section>
   );
 }

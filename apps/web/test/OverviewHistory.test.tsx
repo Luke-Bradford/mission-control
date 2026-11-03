@@ -1,33 +1,52 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
+import { OverviewHistoryPanel } from "../src/overview/OverviewHistoryPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, OVERVIEW, seatRow } from "./fixtures.ts";
 
-it("uses every KPI's minute series instead of hourly history", async () => {
+it("retains every minute series in one canonical plot with KPI history access and no new reads", async () => {
   const kpis = Object.fromEntries(
     Object.entries(OVERVIEW.kpis).map(([key, value]) => [
       key,
       { ...value, series: [1, 2, 4], perHour: [100, 200] },
     ]),
   );
-  stubFetch({ "/api/overview": { ...OVERVIEW, kpis } });
-  render(<KpiStrip />);
+  const source = stubFetch({ "/api/overview": { ...OVERVIEW, kpis } });
+  const inspect = vi.fn();
+  render(
+    <>
+      <KpiStrip onHistory={inspect} />
+      <OverviewHistoryPanel />
+    </>,
+  );
   await screen.findByText("41.2k");
-  // Registry figures without a minute history (working, merged, cycle time) draw no trace.
-  expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(5);
-  for (const graph of screen.getAllByRole("img")) {
-    // 0 at the baseline (y 23), the peak (4) on the top gridline (y 3), newest at the right edge
+  const selector = screen.getByRole("combobox", { name: "Measured Overview history" });
+  const controls = [
+    ["tokens", /Inspect Tokens\/min/],
+    ["spend", /Inspect Cost/],
+    ["inflight", /Inspect In progress/],
+    ["ci", /Inspect CI pass rate/],
+    ["needs", /Inspect Needs you/],
+  ] as const;
+  for (const [measure, name] of controls) {
+    fireEvent.click(screen.getByRole("button", { name }));
+    expect(inspect).toHaveBeenLastCalledWith(measure);
+    fireEvent.change(selector, { target: { value: measure } });
+    const graphs = screen.getAllByRole("img");
+    expect(graphs).toHaveLength(1);
+    const graph = graphs[0];
+    // Minute values1/2/4, never hourly100/200. CI retains its meaningful0–100% scale.
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
-      "M0.0,18.0L50.0,13.0L100.0,3.0",
+      measure === "ci" ? "M0.0,21.8L50.0,21.6L100.0,21.2" : "M0.0,17.3L50.0,12.5L100.0,3.0",
     );
-    expect(graph.getAttribute("aria-label")).toMatch(/peak .+ · latest /);
-    expect(graph.querySelectorAll("circle")).toHaveLength(0);
+    expect(graph.getAttribute("aria-label")).toContain("last 3 complete minutes");
   }
   expect(screen.getByText("+$3.00 · 30m")).toBeTruthy();
   expect(screen.getByText("+3 pp · 30m")).toBeTruthy();
+  expect(source.mock.calls.filter(([path]) => String(path) === "/api/overview")).toHaveLength(1);
 });
 
 it("keeps empty minute series honest even when hourly figures exist", async () => {

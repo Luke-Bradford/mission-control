@@ -26,6 +26,7 @@ export function MeasuredHistory({
   label,
   at,
   description,
+  recent = false,
 }: {
   values: (number | null)[];
   format: (n: number) => string;
@@ -35,6 +36,7 @@ export function MeasuredHistory({
   label: string;
   at: number;
   description?: string;
+  recent?: boolean;
 }) {
   const tz = useTz();
   const readings = values.filter((v): v is number => v !== null);
@@ -56,42 +58,65 @@ export function MeasuredHistory({
         </span>
         <span className="num">Peak {format(peak)}</span>
       </div>
-      <div className="measured-plot">
-        <div className="measured-y num">
-          <span>{tickFormat(top)}</span>
-          <span>{tickFormat(top / 2)}</span>
-          <span>{tickFormat(0)}</span>
+      <div className={recent ? "measured-evidence" : undefined}>
+        <div className="measured-plot">
+          <div className="measured-y num">
+            <span>{tickFormat(top)}</span>
+            <span>{tickFormat(top / 2)}</span>
+            <span>{tickFormat(0)}</span>
+          </div>
+          <svg
+            viewBox="0 0 100 24"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`${label} · ${unit} · last ${values.length} complete minutes · missing samples remain gaps`}
+          >
+            {[3, 12.5, 22].map((y) => (
+              <line className="measured-grid" key={y} x1={0} x2={100} y1={y} y2={y} />
+            ))}
+            {geometry.line && (
+              <path
+                d={geometry.line}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          <div className="measured-x num">
+            <span>
+              {tz && end !== null ? hhmm(end - values.length * 60_000, tz) : `−${values.length}m`}
+            </span>
+            <span>
+              {tz && end !== null
+                ? hhmm(end - (values.length / 2) * 60_000, tz)
+                : `−${values.length / 2}m`}
+            </span>
+            <span>{tz && end !== null ? hhmm(end, tz) : "Last minute"}</span>
+          </div>
         </div>
-        <svg
-          viewBox="0 0 100 24"
-          preserveAspectRatio="none"
-          role="img"
-          aria-label={`${label} · ${unit} · last ${values.length} complete minutes · missing samples remain gaps`}
-        >
-          {[3, 12.5, 22].map((y) => (
-            <line className="measured-grid" key={y} x1={0} x2={100} y1={y} y2={y} />
-          ))}
-          {geometry.line && (
-            <path
-              d={geometry.line}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-        </svg>
-        <div className="measured-x num">
-          <span>
-            {tz && end !== null ? hhmm(end - values.length * 60_000, tz) : `−${values.length}m`}
-          </span>
-          <span>
-            {tz && end !== null
-              ? hhmm(end - (values.length / 2) * 60_000, tz)
-              : `−${values.length / 2}m`}
-          </span>
-          <span>{tz && end !== null ? hhmm(end, tz) : "Last minute"}</span>
-        </div>
+        {recent && (
+          <section
+            className="history-recent"
+            aria-label={`Latest ${Math.min(5, values.length)} ${unit} readings`}
+          >
+            <h3>Latest complete minutes</h3>
+            <dl>
+              {values.slice(-5).map((value, index, shown) => {
+                const minutes = shown.length - index;
+                return (
+                  <div key={minutes}>
+                    <dt>
+                      {tz && end !== null ? hhmm(end - minutes * 60_000, tz) : `−${minutes}m`}
+                    </dt>
+                    <dd className="num">{value === null ? "Not collected" : format(value)}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </section>
+        )}
       </div>
       {peak === 0 && <p className="s muted">No activity in the measured minutes.</p>}
       <HistoryDataTable
@@ -111,15 +136,21 @@ export function OverviewHistoryPanel({
   compact = false,
   onInspect,
   id,
+  recent = false,
+  selectedHistory,
+  onSelectHistory,
 }: {
   id?: string;
   measure?: History;
   compact?: boolean;
   onInspect?: (measure: History) => void;
+  recent?: boolean;
+  selectedHistory?: History;
+  onSelectHistory?: (measure: History) => void;
 } = {}) {
   const [session] = useSession(),
     [choice, setSelected] = useState<History>("tokens");
-  const selected = measure ?? choice;
+  const selected = measure ?? selectedHistory ?? choice;
   const source = useResource<OverviewSummary>(RESOURCES.overview(session));
   const k = source.data?.kpis;
   const values =
@@ -174,12 +205,12 @@ export function OverviewHistoryPanel({
       title={LABELS[selected]}
       sub="30m history"
       actions={
-        measure ? undefined : (
-          <>
+        <>
+          {!measure && (
             <select
               aria-label="Measured Overview history"
               value={selected}
-              onChange={(e) => setSelected(e.target.value as History)}
+              onChange={(e) => (onSelectHistory ?? setSelected)(e.target.value as History)}
             >
               {Object.entries(LABELS).map(([id, label]) => (
                 <option key={id} value={id}>
@@ -187,13 +218,13 @@ export function OverviewHistoryPanel({
                 </option>
               ))}
             </select>
-            {onInspect && (
-              <button type="button" className="sm" onClick={() => onInspect(selected)}>
-                Inspect
-              </button>
-            )}
-          </>
-        )
+          )}
+          {onInspect && (
+            <button type="button" className="sm" onClick={() => onInspect(selected)}>
+              Inspect
+            </button>
+          )}
+        </>
       }
     >
       <div className="pb overview-history">
@@ -215,6 +246,7 @@ export function OverviewHistoryPanel({
             unit={unit}
             label={LABELS[selected]}
             at={source.data.at}
+            recent={recent}
             description={compact ? `${definition} Missing intervals remain gaps.` : undefined}
           />
         ) : (

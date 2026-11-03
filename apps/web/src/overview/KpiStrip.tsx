@@ -3,10 +3,10 @@ import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { elapsed, hhmm, kTokens, percent, plural } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
-import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
+import type { History } from "./OverviewHistoryPanel.tsx";
 
 /** A tile's change over its 30 minutes: one sign, and `±` when it rounds to nothing. */
 export const change = (
@@ -26,50 +26,6 @@ export const dollars = (n: number): string => `$${n.toFixed(2)}`;
 /** A change in percentage points. */
 export const points = (n: number): string => `${Math.round(n)} pp`;
 
-/**
- * A KPI's last 30 minutes on its own scale: the trace, its real peak labelled on the dashed top
- * gridline (the scale itself never drops under 1, so a peak under 1 sits below it), and a -30m … now
- * axis. An all-zero series is the bare baseline and says so.
- */
-function KpiTrace({
-  values,
-  color,
-  label,
-  format,
-  live,
-}: {
-  values: (number | null)[];
-  color: string;
-  label: string;
-  format: (n: number) => string;
-  /** The summary is loaded and its last read succeeded: the now-cursor pulses. */
-  live: boolean;
-}) {
-  const quiet = quietSeries(values);
-  const readings = values.filter((v): v is number => v !== null);
-  // zeros are no activity; no readings at all (e.g. no completed cycles) is no data
-  const empty = readings.length === 0 ? "history not collected" : "no activity";
-  const peak = Math.max(0, ...readings);
-  const latest = values.at(-1);
-  const aria = quiet
-    ? `${label} · ${empty}`
-    : `${label} · peak ${format(peak)}${latest == null ? "" : ` · latest ${format(latest)}`}`;
-  return (
-    <span className="kpi-trace">
-      {readings.length > 0 && <Sparkline values={values} color={color} label={aria} live={live} />}
-      {quiet ? (
-        <span className="kpi-quiet" aria-hidden="true">
-          {empty}
-        </span>
-      ) : (
-        <span className="kpi-peak sr-only" aria-hidden="true" title="Peak in the last 30 minutes">
-          {format(peak)}
-        </span>
-      )}
-    </span>
-  );
-}
-
 interface Tile {
   /** A registry figure (`METRICS` in @mc/core): its label, hover and value come from there. */
   metric?: MetricId;
@@ -88,7 +44,7 @@ interface Tile {
 }
 
 /** Live Overview KPIs, scoped by the header's session filter. */
-export function KpiStrip() {
+export function KpiStrip({ onHistory }: { onHistory?: (measure: History) => void } = {}) {
   const tz = useTz();
   const [session] = useSession();
   const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
@@ -203,61 +159,72 @@ export function KpiStrip() {
         </div>
       )}
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
-        {tiles.map((tile) => {
+        {tiles.map((tile, index) => {
           const path = tile.to ?? PAGE_PATHS[tile.page];
           const series = tile.series;
           const measuredHistory =
             !!series && series.length >= 2 && series.some((value) => value !== null);
           // A figure with no history shows its context where the trace would be.
           const contextOnly = series === undefined;
-          return (
-            <a
-              className="overview-kpi"
-              key={tile.label}
-              href={path}
-              onClick={(e) => followLink(e, path)}
-              title={tile.title}
+          const history: History | undefined = (
+            { 1: "tokens", 2: "spend", 3: "inflight", 5: "ci", 7: "needs" } as Partial<
+              Record<number, History>
             >
-              <span className="lbl" title={tile.title}>
-                {tile.metric ? <MetricName id={tile.metric} /> : tile.label}
-              </span>
-              <span className="kpi-reading">
-                <span
-                  className="v num"
-                  data-metric={tile.metric}
-                  title={tile.metric ? tile.title : undefined}
+          )[index];
+          return (
+            <div className="overview-kpi" key={tile.label}>
+              <a
+                className="kpi-destination"
+                href={path}
+                onClick={(e) => followLink(e, path)}
+                title={tile.title}
+              >
+                <span className="lbl" title={tile.title}>
+                  {tile.metric ? <MetricName id={tile.metric} /> : tile.label}
+                </span>
+                <span className="kpi-reading">
+                  <span
+                    className="v num"
+                    data-metric={tile.metric}
+                    title={tile.metric ? tile.title : undefined}
+                  >
+                    {tile.pending ? (
+                      <span className="kpi-skeleton" aria-hidden="true" />
+                    ) : (
+                      tile.value
+                    )}
+                  </span>
+                </span>
+                {!contextOnly && measuredHistory ? (
+                  <span className="d num" title={tile.pending ? undefined : tile.delta}>
+                    {tile.pending ? null : tile.delta}
+                  </span>
+                ) : (
+                  <span
+                    className="kpi-secondary num"
+                    title={contextOnly ? tile.delta : "History unavailable"}
+                  >
+                    {tile.pending
+                      ? "Loading measure…"
+                      : contextOnly
+                        ? tile.delta === "—"
+                          ? "History not collected"
+                          : tile.delta
+                        : "History not collected"}
+                  </span>
+                )}
+              </a>
+              {onHistory && history && (
+                <button
+                  type="button"
+                  className="kpi-history-link"
+                  aria-label={`Inspect ${tile.label} history`}
+                  onClick={() => onHistory(history)}
                 >
-                  {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
-                </span>
-                {series && measuredHistory ? (
-                  <KpiTrace
-                    values={series}
-                    color={tile.color}
-                    label={`${tile.label} · ${tile.history}`}
-                    format={tile.fmt}
-                    live={summary !== undefined && error === null}
-                  />
-                ) : null}
-              </span>
-              {!contextOnly && measuredHistory ? (
-                <span className="d num" title={tile.pending ? undefined : tile.delta}>
-                  {tile.pending ? null : tile.delta}
-                </span>
-              ) : (
-                <span
-                  className="kpi-secondary num"
-                  title={contextOnly ? tile.delta : "History unavailable"}
-                >
-                  {tile.pending
-                    ? "Loading measure…"
-                    : contextOnly
-                      ? tile.delta === "—"
-                        ? "History not collected"
-                        : tile.delta
-                      : "History not collected"}
-                </span>
+                  History →
+                </button>
               )}
-            </a>
+            </div>
           );
         })}
       </section>

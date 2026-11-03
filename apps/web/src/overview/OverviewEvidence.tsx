@@ -19,15 +19,19 @@ export interface EvidenceReader {
  */
 export const OverviewEvidence = forwardRef<
   EvidenceReader,
-  { title: string; children: ReactNode; inlineQuery?: string; className?: string }
->(function OverviewEvidence({ title, children, inlineQuery, className = "" }, ref) {
+  { title: string; children: ReactNode; inlineQuery?: string; inline?: boolean; className?: string }
+>(function OverviewEvidence(
+  { title, children, inlineQuery, inline: controlledInline, className = "" },
+  ref,
+) {
   const id = useId(),
     dialog = useRef<HTMLDialogElement>(null),
     opener = useRef<HTMLElement | null>(null),
     isModal = useRef(false);
   const [modal, setModal] = useState(false),
-    [inline, setInline] = useState(false),
+    [queryInline, setInline] = useState(false),
     [visited, setVisited] = useState(false);
+  const inline = controlledInline ?? queryInline;
   const close = () => setModal(false);
   useOverlay(`overview-evidence-${id}`, modal, close);
   useEffect(() => {

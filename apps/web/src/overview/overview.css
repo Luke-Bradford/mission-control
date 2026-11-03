@@ -1701,15 +1701,15 @@
 /* Natural stacks: no measured offsets or absolutely positioned panels. */
 .overview-workspace {
   display: grid;
-  grid-template-columns: minmax(1052px, 1200px) minmax(500px, 788px);
+  grid-template-columns: minmax(1052px, 1200px) minmax(500px, 1fr);
   justify-content: center;
   align-items: start;
   gap: var(--sp-3);
 }
 .overview-primary,
 .overview-analytical,
-.overview-signals,
-.overview-resources {
+.overview-observations,
+.overview-provider-host {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -2056,7 +2056,7 @@ button.quota-details {
 
 /* Operational canvas: viewport width and height both buy useful information. */
 #page-overview {
-  max-width: 2880px;
+  max-width: none;
   margin-inline: auto;
   width: 100%;
 }
@@ -2117,45 +2117,45 @@ button.quota-details {
 #quotaSummaryP .quota-summary-row small {
   font-size: inherit;
 }
-.overview-signals > #timelineP {
+.overview-observations > #timelineP {
   min-height: 224px;
 }
-.overview-signals #timelineP .timeline-body {
+.overview-observations #timelineP .timeline-body {
   padding-block: 4px;
 }
-.overview-signals .overview-lane-scroll {
+.overview-observations .overview-lane-scroll {
   max-height: 90px;
 }
-.overview-signals .overview-timeline-evidence {
+.overview-observations .overview-timeline-evidence {
   margin-top: 0;
 }
-.overview-signals .overview-legend {
+.overview-observations .overview-legend {
   font-size: 11px;
   line-height: 16px;
 }
-.overview-signals .overview-next-compact {
+.overview-observations .overview-next-compact {
   padding-block: 4px;
 }
-.overview-signals > #overviewHistoryP {
+.overview-observations > #overviewHistoryP {
   min-height: 184px;
 }
-.overview-signals #overviewHistoryP > .ph {
+.overview-observations #overviewHistoryP > .ph {
   flex-wrap: nowrap;
 }
-.overview-signals #overviewHistoryP > .ph h2 {
+.overview-observations #overviewHistoryP > .ph h2 {
   display: none;
 }
-.overview-signals #overviewHistoryP > .ph .act {
+.overview-observations #overviewHistoryP > .ph .act {
   margin-left: 0;
   flex: 1;
 }
-.overview-signals #overviewHistoryP select {
+.overview-observations #overviewHistoryP select {
   width: 100%;
 }
-.overview-signals .measured-plot svg {
+.overview-observations .measured-plot svg {
   height: 60px;
 }
-.overview-signals .history-window {
+.overview-observations .history-window {
   margin: 4px 0 0;
 }
 /* Raw readings stay an explicit expansion: opening them grows the natural stack. */
@@ -2290,18 +2290,6 @@ button.quota-details {
 .evidence-inline .panel {
   border: 1px solid var(--line);
 }
-.overview-comparisons {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 788px));
-  gap: 12px;
-  justify-content: center;
-}
-.overview-comparisons .panel {
-  min-width: 0;
-}
-.overview-comparisons .measured-plot svg {
-  height: 128px;
-}
 @container overview (min-width: 1280px) {
   .overview-kpis {
     grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -2311,9 +2299,9 @@ button.quota-details {
     padding: 4px 12px;
   }
 }
-@container overview (min-width: 2076px) {
+@container overview-canvas (min-width: 2076px) {
   .overview-workspace {
-    grid-template-columns: minmax(1052px, 1.7fr) minmax(500px, 1fr) minmax(500px, 1fr);
+    grid-template-columns: minmax(1052px, 1280px) minmax(500px, 1fr) minmax(500px, 1fr);
   }
   .overview-primary {
     grid-column: 1;
@@ -2322,19 +2310,19 @@ button.quota-details {
   .overview-analytical {
     display: contents;
   }
-  .overview-signals {
-    grid-column: 2;
+  .overview-observations {
+    grid-column: 3;
     grid-row: 1;
   }
-  .overview-resources {
-    grid-column: 3;
+  .overview-provider-host {
+    grid-column: 2;
     grid-row: 1;
   }
   #contextSummaryP {
     display: block;
   }
 }
-@container overview (max-width: 1561px) {
+@container overview-canvas (max-width: 1561px) {
   .overview-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2350,7 +2338,7 @@ button.quota-details {
     flex-wrap: wrap;
   }
 }
-@container overview (max-width: 1049px) {
+@container overview-canvas (max-width: 1049px) {
   .overview-analytical {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2367,48 +2355,6 @@ button.quota-details {
     max-height: 262px;
   }
 }
-@media (min-width: 2200px) and (min-height: 1300px) {
-  .overview-signals .overview-lane-scroll {
-    max-height: 208px;
-  }
-  .overview-signals .measured-plot svg {
-    height: 128px;
-  }
-  .machine-summary-row {
-    min-height: 96px;
-  }
-  .machine-summary .machine-chart {
-    height: 64px;
-  }
-}
-@media (min-width: 2800px) and (min-height: 1600px) {
-  .overview-primary > #actP {
-    height: 368px;
-  }
-  .overview-signals .overview-lane-scroll {
-    max-height: 340px;
-  }
-  .machine-summary-row {
-    min-height: 184px;
-  }
-  .machine-summary .machine-history {
-    grid-template-columns: 48px minmax(0, 1fr);
-    gap: 0 8px;
-  }
-  .machine-summary .machine-history-y {
-    display: flex;
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .machine-summary .machine-chart {
-    height: 142px;
-    grid-column: 2;
-    grid-row: 2;
-  }
-  .machine-summary .machine-history-x {
-    grid-column: 2;
-  }
-}
 
 .overview-span.span-label-outside > span {
   visibility: hidden;
@@ -2419,7 +2365,7 @@ button.quota-details {
   white-space: normal;
   color: var(--fg-2);
 }
-.overview-signals .overview-legend {
+.overview-observations .overview-legend {
   font-size: 12px;
 }
 
@@ -2437,7 +2383,7 @@ button.quota-details {
   padding: 2px 12px;
   min-height: 36px;
 }
-.overview-signals > #timelineP {
+.overview-observations > #timelineP {
   align-self: stretch;
 }
 #quotaSummaryP .githubrate {
@@ -2452,13 +2398,13 @@ button.quota-details {
   line-height: 16px;
   margin: 0;
 }
-.overview-signals .overview-history {
+.overview-observations .overview-history {
   padding-block: 4px;
 }
-.overview-signals .measured-plot svg {
+.overview-observations .measured-plot svg {
   height: 48px;
 }
-.overview-signals .history-window {
+.overview-observations .history-window {
   line-height: 16px;
   margin-top: 0;
 }
@@ -2479,7 +2425,7 @@ button.quota-details {
   width: 100%;
 }
 
-.overview-signals #overviewHistoryP select {
+.overview-observations #overviewHistoryP select {
   flex: 1;
   min-width: 0;
   width: auto;
@@ -2561,21 +2507,11 @@ button.quota-details {
   max-width: var(--lane-label);
   font: 11px / 16px var(--mono);
 }
-@media (min-width: 2200px) and (min-height: 1300px) {
-  .overview-signals .measured-plot svg {
-    height: 128px;
-  }
-}
 
 /* A 1050px comparison table needs its two panel borders too. Do not reserve an invisible
    scrollbar gutter on the normal eleven-row roster; exceptional long lists scroll explicitly. */
 .overview-workspace #agentsList {
   scrollbar-gutter: auto;
-}
-@container overview (min-width: 2800px) {
-  .overview-workspace {
-    grid-template-columns: 1280px minmax(500px, 1fr) minmax(500px, 1fr);
-  }
 }
 
 .machine-history-x {
@@ -2596,4 +2532,246 @@ button.quota-details {
 }
 .machine-history-x > span:last-child {
   right: 0;
+}
+
+/* Corrected8ce composition: independent domains, actual named-canvas thresholds. */
+.overview-grid {
+  container: overview-canvas / inline-size;
+}
+.overview-provider-host,
+.overview-observations {
+  display: contents;
+}
+.overview-provider {
+  order: 1;
+  min-width: 0;
+}
+.overview-observations > #timelineP {
+  order: 2;
+}
+.overview-history-domain {
+  order: 3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.overview-provider-host > #machineSummaryP {
+  order: 4;
+}
+.overview-provider-host > #contextSummaryP {
+  order: 5;
+}
+.overview-history-domain > #overviewHistoryP {
+  min-height: 184px;
+}
+.overview-analytical {
+  grid-column: 2;
+  grid-row: 1;
+}
+.overview-primary {
+  grid-column: 1;
+  grid-row: 1;
+}
+.overview-provider .evidence-inline > .evidence-body {
+  overflow: visible;
+}
+.overview-provider .allowance-scroll {
+  max-height: 360px;
+}
+.overview-provider .evidence-inline #quotaP > .pb {
+  padding-block: 4px;
+}
+.overview-provider .evidence-inline .overview-allowance-table {
+  min-width: 850px;
+}
+.overview-provider .evidence-inline .overview-allowance-table :is(th, td) {
+  padding: 4px 8px;
+}
+.kpi-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.overview-kpi {
+  position: relative;
+}
+.kpi-history-link {
+  position: absolute;
+  top: 28px;
+  right: 8px;
+  min-height: 24px;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+.overview-kpi .kpi-reading {
+  padding-right: 56px;
+}
+.overview-kpi .d,
+.overview-kpi .kpi-secondary {
+  white-space: normal;
+}
+.overview-history-domain #overviewHistoryP > .ph h2 {
+  display: none;
+}
+.overview-history-domain #overviewHistoryP > .ph .act {
+  flex: 1;
+  margin-left: 0;
+}
+.overview-history-domain #overviewHistoryP select {
+  width: 100%;
+  min-width: 0;
+}
+.overview-history-domain .overview-history {
+  padding-block: 4px;
+}
+.overview-history-domain .history-window {
+  margin: 0;
+  line-height: 16px;
+}
+.overview-history-domain .measured-plot svg {
+  height: 48px;
+}
+.history-recent {
+  min-width: 0;
+  padding-left: 12px;
+}
+.history-recent h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.history-recent dl {
+  margin: 0;
+  font-size: 12px;
+}
+.history-recent dl > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  min-height: 20px;
+}
+.history-recent dt {
+  font: 11px / 20px var(--mono);
+}
+.history-recent dd {
+  margin: 0;
+  text-align: right;
+}
+.machine-investigation {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.machine-investigation h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+.machine-investigation table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.machine-investigation :is(th, td) {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.machine-investigation .num {
+  text-align: right;
+}
+.machine-transcript-summary {
+  margin-top: 8px;
+}
+.machine-transcript-summary p {
+  margin: 0 0 4px;
+}
+.machine-investigation .lock {
+  margin-top: 8px;
+}
+@container overview-canvas (min-width: 2076px) {
+  .overview-provider-host,
+  .overview-observations {
+    display: flex;
+  }
+  .overview-provider,
+  .overview-observations > #timelineP,
+  .overview-history-domain,
+  .overview-provider-host > #machineSummaryP,
+  .overview-provider-host > #contextSummaryP {
+    order: initial;
+  }
+}
+@container overview-canvas (min-width: 3164px) {
+  .overview-workspace {
+    grid-template-columns: 1280px minmax(960px, 1.126fr) minmax(900px, 1fr);
+  }
+}
+.overview-grid[data-wide-details="true"] .overview-primary > #actP {
+  height: 368px;
+}
+.overview-grid[data-wide-details="true"] .overview-observations .overview-lane-scroll {
+  max-height: 340px;
+}
+.overview-grid[data-wide-details="true"] .machine-summary-charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.overview-grid[data-wide-details="true"] .machine-summary-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 12px;
+  gap: 8px;
+  min-height: 208px;
+}
+.overview-grid[data-wide-details="true"] .machine-summary-row > .num {
+  text-align: left;
+}
+.overview-grid[data-wide-details="true"] .machine-summary .machine-history {
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 0 8px;
+}
+.overview-grid[data-wide-details="true"] .machine-summary .machine-history-y {
+  display: flex;
+  grid-column: 1;
+  grid-row: 2;
+}
+.overview-grid[data-wide-details="true"] .machine-summary .machine-chart {
+  height: 112px;
+  grid-column: 2;
+  grid-row: 2;
+}
+.overview-grid[data-wide-details="true"] .machine-summary .machine-history-x {
+  grid-column: 2;
+}
+.overview-grid[data-all-histories="true"] .overview-history-domain > .panel {
+  min-height: 220px;
+}
+.overview-grid[data-all-histories="true"] .overview-history-domain > .panel .ph {
+  flex-wrap: wrap;
+}
+.overview-grid[data-all-histories="true"] .overview-history-domain .measured-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 640px) minmax(180px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.overview-grid[data-all-histories="true"] .overview-history-domain .measured-plot svg {
+  height: 120px;
+}
+@container overview-canvas (max-width: 1561px) {
+  .overview-analytical {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .overview-provider {
+    grid-column: 1 / -1;
+  }
 }

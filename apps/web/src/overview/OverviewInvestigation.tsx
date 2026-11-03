@@ -5,7 +5,6 @@ import { kTokens, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
 import { contextCapacity } from "./ContextCapacity.tsx";
-import { type History, OverviewHistoryPanel } from "./OverviewHistoryPanel.tsx";
 
 /** This is a layout subscription only; resizing never refetches data or changes selected scope. */
 export function useOverviewMedia(query: string) {
@@ -64,16 +63,4 @@ export function ContextSummaryPanel() {
       </div>
     </Panel>
   );
-}
-
-const MEASURES: History[] = ["tokens", "spend", "inflight", "ci", "needs"];
-export function OverviewHistoryComparison() {
-  const visible = useOverviewMedia("(min-width: 2800px) and (min-height: 1600px)");
-  return visible ? (
-    <section className="overview-comparisons" aria-label="Measured history comparison">
-      {MEASURES.map((measure) => (
-        <OverviewHistoryPanel key={measure} measure={measure} />
-      ))}
-    </section>
-  ) : null;
 }

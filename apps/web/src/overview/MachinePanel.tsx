@@ -9,6 +9,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 import { HistoryDataTable } from "./OverviewHistoryPanel.tsx";
+import { useOverviewLayout } from "./OverviewLayout.tsx";
 
 const GIB = 2 ** 30;
 /** At or under this much free memory another agent does not fit. */
@@ -227,6 +228,7 @@ export function MachinePanel({
   compact?: boolean;
   onInspect?: () => void;
 } = {}) {
+  const { hostEvidence } = useOverviewLayout();
   const source = useResource<MachineView>(RESOURCES.machine);
   const view = source.data;
   const overview = useResource<OverviewSummary>(RESOURCES.overview());
@@ -277,60 +279,63 @@ export function MachinePanel({
           {!m && !source.error && (
             <p className="s muted">{source.loading ? "Loading machine sample…" : NO_SAMPLE}</p>
           )}
-          {[
-            {
-              label: "CPU %",
-              values: summary?.machine?.cpu,
-              max: 100,
-              color: "var(--accent)",
-              reading: u.cpu === null ? DASH : percent(u.cpu),
-              note: `${u.cores ?? DASH} logical threads`,
-            },
-            {
-              label: "RAM %",
-              values: summary?.machine?.mem,
-              max: 100,
-              color: "var(--think)",
-              reading: u.memUsed === null ? DASH : `${(u.memUsed / GIB).toFixed(1)} GiB`,
-              note: `of ${u.memTotal === null ? DASH : Math.round(u.memTotal / GIB)} GiB`,
-            },
-            {
-              label: "Disk free",
-              values: summary?.machine?.disk,
-              max: undefined,
-              color: "var(--fg-2)",
-              reading: u.diskFree === null ? DASH : `${Number((u.diskFree / GIB).toFixed(1))} GiB`,
-              note: "current free space",
-            },
-          ].map((metric) => (
-            <div className="machine-summary-row" key={metric.label}>
-              <b className="s">{metric.label}</b>
-              <div className="machine-summary-trace">
-                {summary && metric.values?.some((value) => value !== null) ? (
-                  <MachineAreaChart
-                    label={`${metric.label} history`}
-                    values={metric.values}
-                    max={metric.max}
-                    color={metric.color}
-                    live={live}
-                    at={summary.at}
-                    compact
-                  />
-                ) : (
-                  <p className="s muted">History not collected</p>
-                )}
+          <div className="machine-summary-charts">
+            {[
+              {
+                label: "CPU %",
+                values: summary?.machine?.cpu,
+                max: 100,
+                color: "var(--accent)",
+                reading: u.cpu === null ? DASH : percent(u.cpu),
+                note: `${u.cores ?? DASH} logical threads`,
+              },
+              {
+                label: "RAM %",
+                values: summary?.machine?.mem,
+                max: 100,
+                color: "var(--think)",
+                reading: u.memUsed === null ? DASH : `${(u.memUsed / GIB).toFixed(1)} GiB`,
+                note: `of ${u.memTotal === null ? DASH : Math.round(u.memTotal / GIB)} GiB`,
+              },
+              {
+                label: "Disk free",
+                values: summary?.machine?.disk,
+                max: undefined,
+                color: "var(--fg-2)",
+                reading:
+                  u.diskFree === null ? DASH : `${Number((u.diskFree / GIB).toFixed(1))} GiB`,
+                note: "current free space",
+              },
+            ].map((metric) => (
+              <div className="machine-summary-row" key={metric.label}>
+                <b className="s">{metric.label}</b>
+                <div className="machine-summary-trace">
+                  {summary && metric.values?.some((value) => value !== null) ? (
+                    <MachineAreaChart
+                      label={`${metric.label} history`}
+                      values={metric.values}
+                      max={metric.max}
+                      color={metric.color}
+                      live={live}
+                      at={summary.at}
+                      compact
+                    />
+                  ) : (
+                    <p className="s muted">History not collected</p>
+                  )}
+                </div>
+                <span className="num s">
+                  {metric.reading}
+                  <span className="muted">{metric.note}</span>
+                </span>
               </div>
-              <span className="num s">
-                {metric.reading}
-                <span className="muted">{metric.note}</span>
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
           {m?.agents && (
             <p className="machine-summary-processes s">
               {m.agents.count} agent processes ·{" "}
               {m.testRun ? `${m.testRun.count} test processes` : "test-process split not reported"}{" "}
-              · CPU/RAM breakdown in full details
+              {hostEvidence ? "" : " · CPU/RAM breakdown in full details"}
             </p>
           )}
           <div className="machine-summary-facts s">
@@ -347,6 +352,57 @@ export function MachinePanel({
             )}
             <MachineLockSummary onInspect={onInspect} />
           </div>
+          {hostEvidence && (
+            <div className="machine-investigation">
+              <h3>Processes · latest host sample</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th className="num">Count</th>
+                    <th className="num">CPU / host</th>
+                    <th className="num">RAM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Agent CLI</th>
+                    <td className="num">{m?.agents?.count ?? DASH}</td>
+                    <td className="num">
+                      {m?.agents && u.cores ? percent(m.agents.cpuPct / u.cores) : DASH}
+                    </td>
+                    <td className="num">{m?.agents ? binaryBytes(m.agents.rssBytes) : DASH}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Tests</th>
+                    <td className="num">{m?.testRun?.count ?? DASH}</td>
+                    <td className="num">
+                      {m?.testRun && u.cores ? percent(m.testRun.cpuPct / u.cores) : DASH}
+                    </td>
+                    <td className="num">{m?.testRun ? binaryBytes(m.testRun.rssBytes) : DASH}</td>
+                  </tr>
+                </tbody>
+              </table>
+              {view?.transcripts ? (
+                <div className="machine-transcript-summary">
+                  <h3>Transcript footprint</h3>
+                  <p className="s">
+                    {binaryBytes(view.transcripts.totalBytes)} ·{" "}
+                    {view.transcripts.seats.reduce((n, seat) => n + seat.files, 0)} files
+                    {view.transcripts.oldestAt !== null && (
+                      <TranscriptAge at={view.transcripts.oldestAt} />
+                    )}
+                  </p>
+                  <button type="button" className="sm" onClick={onInspect}>
+                    Per-seat files / complete host readings
+                  </button>
+                </div>
+              ) : (
+                <p className="s muted">Transcript footprint not reported.</p>
+              )}
+              <LockBox />
+            </div>
+          )}
           {view?.warning && (
             <p role="status" className="s warn-t">
               Holding new work · {view.warning}
