@@ -17,3 +17,5 @@
 @media(max-width:1699px){.analytical{grid-column:1;grid-row:2}}
 
 .machine-endpoints{margin-left:0}@media(min-height:1600px) and (min-width:2800px){.machine-endpoints{margin-left:56px}}
+/* Keep native links reachable without changing accepted row or column geometry. */
+.agent-name>a,.work>a,.app-header nav>a{display:inline-flex;align-items:center;min-height:24px;min-width:24px}.work>.title{display:block;line-height:24px}.lane>a,.activity-line>a{display:block;min-height:24px;line-height:24px}.activity-line{padding-top:0;padding-bottom:0}
