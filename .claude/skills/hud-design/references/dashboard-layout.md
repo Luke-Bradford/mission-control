@@ -24,6 +24,12 @@ At wider breakpoints, use additional useful columns, comparisons or rows. Avoid 
 
 Whitespace should group information and establish hierarchy. Check both wasted interior space and crowded content. Prefer fewer competing containers and captions over reducing every gap. Do not force all panels to the same dimensions when they answer different questions.
 
+Plan the relationship between columns as well as each panel. A short side stack should not wait for
+the tallest unrelated column before exposing its next useful content. Keep comparison regions aligned
+with the main grid. Showing a selected history and repeating it in another grid needs a concrete task
+reason; available height alone is insufficient. At true 4K, inspect both outside margins and holes
+between regions. More rows, larger charts and more cards are options, not evidence of useful adaptation.
+
 ## Separate monitoring from investigation
 
 An overview needs immediately legible status, exceptions, capacity and next actions. Full raw samples, extensive provenance and historical investigation need an obvious route, not automatic expansion into every card. Preserve real units, denominators, stale/unknown states and access to the underlying data.
@@ -38,7 +44,12 @@ Record panel bounds and initial visible content, plus an actual qualitative verd
 
 A dashboard that loses its declared primary operational information from the normal first screen fails the purpose check and should receive an Important finding. Do not call it a design pass solely because every item can eventually be scrolled to. Preserve genuine baseline strengths while proposing one reasoned design, rather than making the operator discover each composition problem.
 
-General references, used as design rationale rather than a substitute for app-specific judgment:
+Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry this budget into the plan,
+rendered review and saved report. A whole-page composition verdict must explain useful allocation,
+not merely confirm that panels fit.
+
+Primary references, checked 3 November 2026; these inform judgment rather than replace the local brief:
 
 - [Carbon: Dashboards](https://www.carbondesignsystem.com/building-blocks/data-visualization/dashboards)
 - [Microsoft: dashboard design](https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips)
+- [Grafana: dashboard best practices](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/best-practices/)
