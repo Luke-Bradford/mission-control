@@ -1,0 +1,43 @@
+{
+  "renderedSource": "8ce4d79ba77aafb71469d8025821c5806ef6bd44",
+  "workflowSource": "5385b09a43adc07e276f065c686842cb83519aa8",
+  "capture": {
+    "command": "node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/corrected/helpers/capture-current.ts \"$ROOT\" \"$OUTPUT\" \"$DEPS_ROOT\"",
+    "exitCode": 0,
+    "startedAt": "2026-11-03T14:42:20.144Z",
+    "completedAt": "2026-11-03T14:42:22.066Z",
+    "fullViews": 7,
+    "scopedCrops": 3,
+    "errors": [],
+    "requests": [],
+    "log": "logs/mc-overview-fit-proposal-curated-8ce.log",
+    "harnessSha256": "e00b76670773e2c0160c86a77bbd7b9c8889c6b066d28a62dbf66aa2e87f2b86"
+  },
+  "interactions": {
+    "command": "node --experimental-strip-types docs/evidence/overview-fit-proposal-2026-11-03/corrected/helpers/check-current-interactions.ts \"$ROOT\" \"$OUTPUT_INTERACTIONS\" \"$DEPS_ROOT\"",
+    "exitCode": 0,
+    "completedAt": "2026-11-03T14:42:23.848Z",
+    "scenarios": 1,
+    "filterChoices": 7,
+    "canonicalHistoryChoices": 5,
+    "errors": [],
+    "requests": [],
+    "log": "logs/mc-overview-fit-proposal-curated-8ce-interactions.log",
+    "harnessSha256": "b1600def937532438e5797e53526b51939724acd95cd687e0bc148f6f8fe8f97"
+  },
+  "otherChecks": [
+    {
+      "command": "node --check <each of the two current helper files>",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    {
+      "command": "Read-only Python artifact validation: rendered asset equivalence, selected PNG hashes/bytes, normalized record hashes, gallery/inventory links",
+      "exitCode": 0
+    }
+  ],
+  "scope": "These are bounded native-proposal browser checks and artifact verification, not full-App tests, a test-suite count, fresh CI or an automatic visual verdict. Actual dependency/output roots are private local inputs, represented by placeholders; no dependency install or network was performed."
+}

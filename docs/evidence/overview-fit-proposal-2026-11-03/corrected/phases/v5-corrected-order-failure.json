@@ -1,0 +1,1115 @@
+{
+  "phase": "V5 corrected initial composition, not approved",
+  "source": "2f3344604cba22825529d6520c607cbe55354811",
+  "dirty": "",
+  "base": "008b362dc7748279ef2eb3129f5eb4b826a3d842",
+  "startedAt": "2026-11-03T14:11:24.911Z",
+  "completedAt": "2026-11-03T14:11:26.145Z",
+  "fixtureClock": "2026-11-03T12:00:00Z",
+  "scope": "Standalone repo-native HTML/CSS; fictional source-shaped data. Not production App or API proof. Full screenshot is viewport at scroll0.",
+  "sourceFiles": [
+    {
+      "file": "design-contract.md",
+      "sha256": "32eef6f477040dd6b352e0b6756a560f503fbd22ed1f4f70818ad72517e9df07"
+    },
+    {
+      "file": "fonts.css",
+      "sha256": "62b64b2de77309caa110f3fd4870458e7c6925e491e9e9d90f719c7251430d5e"
+    },
+    {
+      "file": "index.html",
+      "sha256": "d4fa460e2cc4f1ea032d4aa77eb7befbcebe62bb0b66425ce5f67f487eaea1da"
+    },
+    {
+      "file": "inventory.md",
+      "sha256": "ce39e2e805439a9fa92b74bea914b1c7c5bda38e4564ca208ac1a7756afdbd67"
+    },
+    {
+      "file": "proposal.css",
+      "sha256": "f5200ff7433f39b61d46eb56d693b08cef12e9f493cd47af765bc9d3857adb24"
+    },
+    {
+      "file": "proposal.js",
+      "sha256": "d365255cadc039ace5b357bbe5403f35ee3d226c043927f51660c7a7e0aa479e"
+    }
+  ],
+  "harnessSha256": "b2e6220f26377b4ccf2a4a9c12040a1f09920c08940fbe2b9fac9b3f15782d77",
+  "receipts": [
+    {
+      "key": "1920x1080-dpr1-light-folded",
+      "source": "2f3344604cba22825529d6520c607cbe55354811",
+      "dirty": "",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "capturedAt": "2026-11-03T14:11:25.466Z",
+      "file": "1920x1080-dpr1-light-folded-full.png",
+      "bytes": 365249,
+      "sha256": "24af23ce86d82c52a2adbcfafedd155c4a223014ce7cd3943e6efd690c153376",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 950,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1023,
+          "left": 24
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 842,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1023,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "mainScroll": {
+          "clientHeight": 1001,
+          "scrollHeight": 1001,
+          "scrollTop": 0
+        },
+        "bodyWidth": 1920,
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "full-allowance": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 224,
+            "top": 337,
+            "right": 1824,
+            "bottom": 561,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 769,
+            "width": 588,
+            "height": 254,
+            "top": 769,
+            "right": 1824,
+            "bottom": 1023,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "history-hub": {
+            "x": 1236,
+            "y": 573,
+            "width": 588,
+            "height": 184,
+            "top": 573,
+            "right": 1824,
+            "bottom": 757,
+            "left": 1236
+          }
+        },
+        "histories": [
+          {
+            "measure": "tokens",
+            "visible": true,
+            "box": {
+              "x": 1236,
+              "y": 609,
+              "width": 588,
+              "height": 148,
+              "top": 609,
+              "right": 1824,
+              "bottom": 757,
+              "left": 1236
+            }
+          },
+          {
+            "measure": "spend",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "inflight",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "ci",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "needs",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ],
+        "crew": {
+          "rows": 11,
+          "rowHeight": 32,
+          "clientWidth": 1198,
+          "scrollWidth": 1198
+        },
+        "fonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "smallNonMono": [],
+        "machinePlots": [
+          {
+            "x": 1313,
+            "y": 810,
+            "width": 344,
+            "height": 26,
+            "top": 810,
+            "right": 1657,
+            "bottom": 836,
+            "left": 1313
+          },
+          {
+            "x": 1313,
+            "y": 858,
+            "width": 344,
+            "height": 26,
+            "top": 858,
+            "right": 1657,
+            "bottom": 884,
+            "left": 1313
+          },
+          {
+            "x": 1313,
+            "y": 906,
+            "width": 344,
+            "height": 26,
+            "top": 906,
+            "right": 1657,
+            "bottom": 932,
+            "left": 1313
+          }
+        ]
+      },
+      "errors": [],
+      "requests": []
+    },
+    {
+      "key": "1920x1080-dpr1-dark-folded",
+      "source": "2f3344604cba22825529d6520c607cbe55354811",
+      "dirty": "",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "capturedAt": "2026-11-03T14:11:25.632Z",
+      "file": "1920x1080-dpr1-dark-folded-full.png",
+      "bytes": 370272,
+      "sha256": "7fd53183e47338635c5525cea4094fc0afa1565b4465135c12494a019c68f7ec",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 950,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1023,
+          "left": 24
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 842,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1023,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "mainScroll": {
+          "clientHeight": 1001,
+          "scrollHeight": 1001,
+          "scrollTop": 0
+        },
+        "bodyWidth": 1920,
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "full-allowance": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 224,
+            "top": 337,
+            "right": 1824,
+            "bottom": 561,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 769,
+            "width": 588,
+            "height": 254,
+            "top": 769,
+            "right": 1824,
+            "bottom": 1023,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "history-hub": {
+            "x": 1236,
+            "y": 573,
+            "width": 588,
+            "height": 184,
+            "top": 573,
+            "right": 1824,
+            "bottom": 757,
+            "left": 1236
+          }
+        },
+        "histories": [
+          {
+            "measure": "tokens",
+            "visible": true,
+            "box": {
+              "x": 1236,
+              "y": 609,
+              "width": 588,
+              "height": 148,
+              "top": 609,
+              "right": 1824,
+              "bottom": 757,
+              "left": 1236
+            }
+          },
+          {
+            "measure": "spend",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "inflight",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "ci",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "measure": "needs",
+            "visible": false,
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ],
+        "crew": {
+          "rows": 11,
+          "rowHeight": 32,
+          "clientWidth": 1198,
+          "scrollWidth": 1198
+        },
+        "fonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "smallNonMono": [],
+        "machinePlots": [
+          {
+            "x": 1313,
+            "y": 810,
+            "width": 344,
+            "height": 26,
+            "top": 810,
+            "right": 1657,
+            "bottom": 836,
+            "left": 1313
+          },
+          {
+            "x": 1313,
+            "y": 858,
+            "width": 344,
+            "height": 26,
+            "top": 858,
+            "right": 1657,
+            "bottom": 884,
+            "left": 1313
+          },
+          {
+            "x": 1313,
+            "y": 906,
+            "width": 344,
+            "height": 26,
+            "top": 906,
+            "right": 1657,
+            "bottom": 932,
+            "left": 1313
+          }
+        ]
+      },
+      "errors": [],
+      "requests": []
+    },
+    {
+      "key": "3840x2160-dpr1-light-folded",
+      "source": "2f3344604cba22825529d6520c607cbe55354811",
+      "dirty": "",
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "capturedAt": "2026-11-03T14:11:25.799Z",
+      "file": "3840x2160-dpr1-light-folded-full.png",
+      "bytes": 686820,
+      "sha256": "b432206f854d7853b91f6273982e8319a327681006ca5155aa4be0c6afdec056",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3768,
+          "height": 2081,
+          "top": 49,
+          "right": 3768,
+          "bottom": 2130,
+          "left": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 3720,
+          "height": 1777.5,
+          "top": 73,
+          "right": 3744,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 3720,
+          "height": 1669.5,
+          "top": 181,
+          "right": 3744,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "columns": "1280px 1279.59px 1136.41px",
+        "mainScroll": {
+          "clientHeight": 2081,
+          "scrollHeight": 2081,
+          "scrollTop": 0
+        },
+        "bodyWidth": 3840,
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1304,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1280,
+            "height": 368,
+            "top": 653,
+            "right": 1304,
+            "bottom": 1021,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 1033,
+            "width": 1280,
+            "height": 112,
+            "top": 1033,
+            "right": 1304,
+            "bottom": 1145,
+            "left": 24
+          },
+          "allowance": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "full-allowance": {
+            "x": 1316,
+            "y": 895.5,
+            "width": 1279.59375,
+            "height": 316,
+            "top": 895.5,
+            "right": 2595.59375,
+            "bottom": 1211.5,
+            "left": 1316
+          },
+          "timeline": {
+            "x": 2607.59375,
+            "y": 181,
+            "width": 1136.40625,
+            "height": 413.5,
+            "top": 181,
+            "right": 3744,
+            "bottom": 594.5,
+            "left": 2607.59375
+          },
+          "machine": {
+            "x": 1316,
+            "y": 181,
+            "width": 1279.59375,
+            "height": 544.5,
+            "top": 181,
+            "right": 2595.59375,
+            "bottom": 725.5,
+            "left": 1316
+          },
+          "capacity": {
+            "x": 1316,
+            "y": 737.5,
+            "width": 1279.59375,
+            "height": 146,
+            "top": 737.5,
+            "right": 2595.59375,
+            "bottom": 883.5,
+            "left": 1316
+          },
+          "history-hub": {
+            "x": 2607.59375,
+            "y": 606.5,
+            "width": 1136.40625,
+            "height": 1244,
+            "top": 606.5,
+            "right": 3744,
+            "bottom": 1850.5,
+            "left": 2607.59375
+          }
+        },
+        "histories": [
+          {
+            "measure": "tokens",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 642.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 642.5,
+              "right": 3744,
+              "bottom": 874.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "spend",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 886.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 886.5,
+              "right": 3744,
+              "bottom": 1118.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "inflight",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1130.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1130.5,
+              "right": 3744,
+              "bottom": 1362.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "ci",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1374.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1374.5,
+              "right": 3744,
+              "bottom": 1606.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "needs",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1618.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1618.5,
+              "right": 3744,
+              "bottom": 1850.5,
+              "left": 2607.59375
+            }
+          }
+        ],
+        "crew": {
+          "rows": 11,
+          "rowHeight": 32,
+          "clientWidth": 1278,
+          "scrollWidth": 1278
+        },
+        "fonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "smallNonMono": [],
+        "machinePlots": [
+          {
+            "x": 1385,
+            "y": 252,
+            "width": 344.859375,
+            "height": 112,
+            "top": 252,
+            "right": 1729.859375,
+            "bottom": 364,
+            "left": 1385
+          },
+          {
+            "x": 1810.859375,
+            "y": 252,
+            "width": 344.859375,
+            "height": 112,
+            "top": 252,
+            "right": 2155.71875,
+            "bottom": 364,
+            "left": 1810.859375
+          },
+          {
+            "x": 2236.71875,
+            "y": 252,
+            "width": 345.875,
+            "height": 112,
+            "top": 252,
+            "right": 2582.59375,
+            "bottom": 364,
+            "left": 2236.71875
+          }
+        ]
+      },
+      "errors": [],
+      "requests": []
+    },
+    {
+      "key": "3840x2160-dpr1-dark-folded",
+      "source": "2f3344604cba22825529d6520c607cbe55354811",
+      "dirty": "",
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "capturedAt": "2026-11-03T14:11:26.016Z",
+      "file": "3840x2160-dpr1-dark-folded-full.png",
+      "bytes": 689671,
+      "sha256": "394934e9f54e587a6ca19116a011ffed4fca8cd703dc0c7e79deff5752342182",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3768,
+          "height": 2081,
+          "top": 49,
+          "right": 3768,
+          "bottom": 2130,
+          "left": 0
+        },
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 3720,
+          "height": 1777.5,
+          "top": 73,
+          "right": 3744,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 3720,
+          "height": 1669.5,
+          "top": 181,
+          "right": 3744,
+          "bottom": 1850.5,
+          "left": 24
+        },
+        "columns": "1280px 1279.59px 1136.41px",
+        "mainScroll": {
+          "clientHeight": 2081,
+          "scrollHeight": 2081,
+          "scrollTop": 0
+        },
+        "bodyWidth": 3840,
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1304,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1280,
+            "height": 368,
+            "top": 653,
+            "right": 1304,
+            "bottom": 1021,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 1033,
+            "width": 1280,
+            "height": 112,
+            "top": 1033,
+            "right": 1304,
+            "bottom": 1145,
+            "left": 24
+          },
+          "allowance": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "full-allowance": {
+            "x": 1316,
+            "y": 895.5,
+            "width": 1279.59375,
+            "height": 316,
+            "top": 895.5,
+            "right": 2595.59375,
+            "bottom": 1211.5,
+            "left": 1316
+          },
+          "timeline": {
+            "x": 2607.59375,
+            "y": 181,
+            "width": 1136.40625,
+            "height": 413.5,
+            "top": 181,
+            "right": 3744,
+            "bottom": 594.5,
+            "left": 2607.59375
+          },
+          "machine": {
+            "x": 1316,
+            "y": 181,
+            "width": 1279.59375,
+            "height": 544.5,
+            "top": 181,
+            "right": 2595.59375,
+            "bottom": 725.5,
+            "left": 1316
+          },
+          "capacity": {
+            "x": 1316,
+            "y": 737.5,
+            "width": 1279.59375,
+            "height": 146,
+            "top": 737.5,
+            "right": 2595.59375,
+            "bottom": 883.5,
+            "left": 1316
+          },
+          "history-hub": {
+            "x": 2607.59375,
+            "y": 606.5,
+            "width": 1136.40625,
+            "height": 1244,
+            "top": 606.5,
+            "right": 3744,
+            "bottom": 1850.5,
+            "left": 2607.59375
+          }
+        },
+        "histories": [
+          {
+            "measure": "tokens",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 642.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 642.5,
+              "right": 3744,
+              "bottom": 874.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "spend",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 886.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 886.5,
+              "right": 3744,
+              "bottom": 1118.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "inflight",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1130.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1130.5,
+              "right": 3744,
+              "bottom": 1362.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "ci",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1374.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1374.5,
+              "right": 3744,
+              "bottom": 1606.5,
+              "left": 2607.59375
+            }
+          },
+          {
+            "measure": "needs",
+            "visible": true,
+            "box": {
+              "x": 2607.59375,
+              "y": 1618.5,
+              "width": 1136.40625,
+              "height": 232,
+              "top": 1618.5,
+              "right": 3744,
+              "bottom": 1850.5,
+              "left": 2607.59375
+            }
+          }
+        ],
+        "crew": {
+          "rows": 11,
+          "rowHeight": 32,
+          "clientWidth": 1278,
+          "scrollWidth": 1278
+        },
+        "fonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "smallNonMono": [],
+        "machinePlots": [
+          {
+            "x": 1385,
+            "y": 252,
+            "width": 344.859375,
+            "height": 112,
+            "top": 252,
+            "right": 1729.859375,
+            "bottom": 364,
+            "left": 1385
+          },
+          {
+            "x": 1810.859375,
+            "y": 252,
+            "width": 344.859375,
+            "height": 112,
+            "top": 252,
+            "right": 2155.71875,
+            "bottom": 364,
+            "left": 1810.859375
+          },
+          {
+            "x": 2236.71875,
+            "y": 252,
+            "width": 345.875,
+            "height": 112,
+            "top": 252,
+            "right": 2582.59375,
+            "bottom": 364,
+            "left": 2236.71875
+          }
+        ]
+      },
+      "errors": [],
+      "requests": []
+    }
+  ]
+}
