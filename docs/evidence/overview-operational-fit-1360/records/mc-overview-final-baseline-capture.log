@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 $CONTROLLER/overview-operational-baseline-d192
+
+ ✓ |web| test/OverviewOperational.browser.test.ts (1 test) 15921ms
+   ✓ Operational Overview composition > fits useful natural stacks at CSS viewport sizes and retains keyboard modal state  14547ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  17:23:05
+   Duration  16.66s (transform 222ms, setup 349ms, collect 214ms, tests 15.92s, environment 0ms, prepare 33ms)
+

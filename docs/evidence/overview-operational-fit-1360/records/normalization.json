@@ -1,0 +1,428 @@
+[
+  {
+    "file": "records/baseline-render-checks.json",
+    "originalSha256": "06c9ad94fbefb933e1a62f4564a518b231db3b44e51d6a588d20e3c291d59ebc",
+    "sha256": "06c9ad94fbefb933e1a62f4564a518b231db3b44e51d6a588d20e3c291d59ebc",
+    "normalization": "none"
+  },
+  {
+    "file": "records/current-render-checks.json",
+    "originalSha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
+    "sha256": "209d8cd0a0c6c34d1a1030e859fede3b8285306d25a8d61794652ed4a627d0de",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-c371-receipt.json",
+    "originalSha256": "e4521700ce71574cc2aa6f84f9e4435d2fddc643eb00b107c1a7649fa76db1ac",
+    "sha256": "e4521700ce71574cc2aa6f84f9e4435d2fddc643eb00b107c1a7649fa76db1ac",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-c371-source-artifacts.json",
+    "originalSha256": "4d45cd59d954a54af0c1be91fcdb9e0d1c7398fdd5f556ef521584035a0091c9",
+    "sha256": "4d45cd59d954a54af0c1be91fcdb9e0d1c7398fdd5f556ef521584035a0091c9",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-c371-check.mjs",
+    "originalSha256": "0500461d19fbbb1cba9d93edbacaeef50430bb4e0a2174d935ea1c4820764e63",
+    "sha256": "47706168a6b3afda6ff9374ff49f2c3adf868f91af9112bad7b7adc250de6cdc",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/overview-independent-c371-run.log",
+    "originalSha256": "bec26cab90381b14e65ee6345dd8bd31193dd1c35a389d7c7ec8d6242612b0d6",
+    "sha256": "bec26cab90381b14e65ee6345dd8bd31193dd1c35a389d7c7ec8d6242612b0d6",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-b45-receipt.json",
+    "originalSha256": "ff0745ae20c048008f5e257100372e0b3a6c408bddf82eb4bb05003d73ce0f00",
+    "sha256": "ff0745ae20c048008f5e257100372e0b3a6c408bddf82eb4bb05003d73ce0f00",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-b45-source-artifacts.json",
+    "originalSha256": "b7129ecaf31aef0b9bd19de0152299b3e6dc9dd2ce3eacd48ba138f5f593086b",
+    "sha256": "b7129ecaf31aef0b9bd19de0152299b3e6dc9dd2ce3eacd48ba138f5f593086b",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-b45-check.mjs",
+    "originalSha256": "becfe937c6a1f25bbe1b68bd6c639461e3e3cbf9e76708a2c97637529cdcae1f",
+    "sha256": "ed8d526e9581d51a3189611eaabbca603986da430ead2204348621876c4cfb5f",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/overview-independent-b45-run.log",
+    "originalSha256": "bec26cab90381b14e65ee6345dd8bd31193dd1c35a389d7c7ec8d6242612b0d6",
+    "sha256": "bec26cab90381b14e65ee6345dd8bd31193dd1c35a389d7c7ec8d6242612b0d6",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-3a9-receipt.json",
+    "originalSha256": "d61351e8870e04f409502214cb1ea29b3950ac57eb47c45c7d9b773b260ffaa9",
+    "sha256": "d61351e8870e04f409502214cb1ea29b3950ac57eb47c45c7d9b773b260ffaa9",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-3a9-source-artifacts.json",
+    "originalSha256": "85e8a36a4d800510ee79611a866ae0d3c6737059f8cb88450c4dada0b760eac5",
+    "sha256": "85e8a36a4d800510ee79611a866ae0d3c6737059f8cb88450c4dada0b760eac5",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-independent-3a9-check.mjs",
+    "originalSha256": "c82f88e0dd45f5ac808e8f1ed387dbbbca967316434192181d50eadd3b55fe4b",
+    "sha256": "29e1f105a314150c3382d7383b8681bdb7c80b9acd3fb9c32105ae8052b09289",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/overview-independent-3a9-run.log",
+    "originalSha256": "3038cf320e65783c8ab5012cca75f1edc42ce30679243f8c9e5aaf097b1fa1a9",
+    "sha256": "3038cf320e65783c8ab5012cca75f1edc42ce30679243f8c9e5aaf097b1fa1a9",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-enlargement-baseline-receipt.json",
+    "originalSha256": "e33c26a3e5f7c4fac5cd34ae23ad74668bbcccf29923771d07a111d12dca89c4",
+    "sha256": "e33c26a3e5f7c4fac5cd34ae23ad74668bbcccf29923771d07a111d12dca89c4",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-enlargement-baseline-source-artifacts.json",
+    "originalSha256": "defb981d2e47fdaecd60ad45e79487cb57f0db4fe749ff88cb42278951402a04",
+    "sha256": "defb981d2e47fdaecd60ad45e79487cb57f0db4fe749ff88cb42278951402a04",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-enlargement-baseline-check.mjs",
+    "originalSha256": "52ae9208580d87a920bfff9bacc3e936e65c955050f2b227f3f7eaebd2a0fe2a",
+    "sha256": "a0d8840f8afcf55e551f257387d0b916a37710d34f7ace22d03962666bdd5cb6",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/overview-enlargement-baseline-run.log",
+    "originalSha256": "dd0f936229061826f8c7bf4c88831879bfeb0198ac4bef0530a317c19e2b62ef",
+    "sha256": "dd0f936229061826f8c7bf4c88831879bfeb0198ac4bef0530a317c19e2b62ef",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-c37197aa.md",
+    "originalSha256": "77c821d241b28850d2b1227e297aed2da5763eb1fae45398f0a3be845c9d3cc5",
+    "sha256": "77c821d241b28850d2b1227e297aed2da5763eb1fae45398f0a3be845c9d3cc5",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-b45f26dc.md",
+    "originalSha256": "28903d03bed420d9af543f13c3b244db52695e40fa6826ec46954c87efb47173",
+    "sha256": "28903d03bed420d9af543f13c3b244db52695e40fa6826ec46954c87efb47173",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-3a9e66c0.md",
+    "originalSha256": "a122819a9a332f48c28a344b2d70c90df61b2a0627be2adde071524fb3b060a4",
+    "sha256": "a122819a9a332f48c28a344b2d70c90df61b2a0627be2adde071524fb3b060a4",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-fc4a7d35.md",
+    "originalSha256": "de0dde893adbb43e175441535c2cc4ff68a61995e5b7277f3b2da0e3e8434691",
+    "sha256": "de0dde893adbb43e175441535c2cc4ff68a61995e5b7277f3b2da0e3e8434691",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-enlargement-disposition.md",
+    "originalSha256": "1d20e4e24410d763ba9bf7d79533f0c483cde02b11d73a9799075d6ee236c7f2",
+    "sha256": "1d20e4e24410d763ba9bf7d79533f0c483cde02b11d73a9799075d6ee236c7f2",
+    "normalization": "none"
+  },
+  {
+    "file": "records/crew-text-enlargement-followup.md",
+    "originalSha256": "7cfb049b3dbfb42e61485b283e0ce1f2d6eae0b674b7da20225d5b5503377ee0",
+    "sha256": "7cfb049b3dbfb42e61485b283e0ce1f2d6eae0b674b7da20225d5b5503377ee0",
+    "normalization": "none"
+  },
+  {
+    "file": "records/review-1360-f4906650.md",
+    "originalSha256": "b3c635d9e95d08f5150c59e2ba6d0f2230973bc39181a7c01d7a354ce88a036c",
+    "sha256": "b3c635d9e95d08f5150c59e2ba6d0f2230973bc39181a7c01d7a354ce88a036c",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-runtime-f490-public-summary.json",
+    "originalSha256": "a6edf62ccf366466593bafcd01dbdcbfb9a15c2af1711e8a97fc35d1b0de6dbd",
+    "sha256": "a6edf62ccf366466593bafcd01dbdcbfb9a15c2af1711e8a97fc35d1b0de6dbd",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-redesign-guard-units.log",
+    "originalSha256": "70de2b6214461f08d30b93cb034f8d0317cec5b7c2342af42485906106cb6de4",
+    "sha256": "85ed879a1e4bd72848ca5716a92a3086914496fae29146c7c7bedb6d68a9cbda",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-redesign-reflow-units.log",
+    "originalSha256": "ba6e8d2527a5bb3ac76686f10e86c4a61d67d7590f646e88ab2a7592900bd7c9",
+    "sha256": "a01c98858ce0953ca70398d918c3a4ab9864989a71fc89c15746b68e64381b48",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-b45-composition.log",
+    "originalSha256": "5c4788a49ff7484ff02c0abe986a568fa3d44fb7dffafc1d4824fc40f87929d1",
+    "sha256": "f96e9a07df388ecab5662d85a16a2639d0aacb891460628e843116e1d54bce80",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-provider-chrome-units.log",
+    "originalSha256": "1f02fecbc8ff67c058b0ad3fb3b6721e0e3fc25ee5996f08ab95f51b41675f83",
+    "sha256": "d199c6c35d85e15f60761ba4d2eb801c5f22cc7d828e87616dff255e99728181",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-c371-reader-red.log",
+    "originalSha256": "a0dbc919fb558acf4ce6387c50b283f00ebe889710a8abaee9cad9e74df68f22",
+    "sha256": "be4072d408a69a0b959d3bd403b5c03d925b3624bc59db2c252024539dbf6c04",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-b45-correction-browser.log",
+    "originalSha256": "8cf3629d36b30ed94a2d25ae564ea6317ed2607de02923c31d891f75a3bee84b",
+    "sha256": "f4012a306d16c87c2d62e1e25d13a174ada8f816954095a7835916f1ed838640",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-focus-intent-red.log",
+    "originalSha256": "ee099b1088e8fdcbf2f4ac2c221aed371ca86496e7705c70c7e821c2b911d5e1",
+    "sha256": "d33cb96cd1bb53c7265b8515637298013423c72449e689e80e892f4b9b287213",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-focus-intent-green.log",
+    "originalSha256": "8161b52d8300833f6f9a2cb1a2e00648b3e4d61569fb2343dfa74ba56094c605",
+    "sha256": "6298098ea9c2dc21c0af7ab878e0af996a3f7c9f13c18438df1ee28d0c335a9a",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-focus-final-green.log",
+    "originalSha256": "b5569ce9636004d53a9e054383a47e7539f803b566a5bd700aa8a83f15a4a365",
+    "sha256": "c3a4dd62e672262c5d35485651c40c171c30c1a737b96918a173500af0eaf260",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-legacy-browser.log",
+    "originalSha256": "6e7d3753d52160a4b068da3415726730097fe15ddfceb9d6e6ced8cfeb94b694",
+    "sha256": "591afd704c3928d7dbe7ad89b96e6a453dfa1023fdc3ddc068a5511b81576f2c",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-layout-recheck.log",
+    "originalSha256": "f908b2b03277fa4f996d59047b13dcb55b90fc7b41981e5c258972754fd0f5b6",
+    "sha256": "c520cd4f730b8accd62ad384b7bb9a9d6c3d65a984e9229c803e49eb74353609",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-states-browser.log",
+    "originalSha256": "d50bd464dd8e8ed2ea085c4e4498c66ffdc6eaa7576e64fe0626815f7da1f5b9",
+    "sha256": "5e04374023f4897ff8af1df8e354aaa194be940f260976b7d7a5feafb77b9928",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-subcent-keyboard.log",
+    "originalSha256": "2437d1ec65ff6342ca7da99bc0d335af25618e1672dbd89fcc6775ef9e98460b",
+    "sha256": "71860772f5ed73916656f82cbef84ddcd57c1401044db1b377181ccc34cd3115",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-subcent-recheck.log",
+    "originalSha256": "58e992125ffe5b1fd3b7272da65815ea830c2b6b26f25feef6ed89c557e1d144",
+    "sha256": "e0ef8ba83ea8b901a9f202e3d565136da9359770440ceca036cb1c549f3f62fc",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-subcent-sticky-proof.log",
+    "originalSha256": "e31d288d3808932643a9f244244c490b731abcf8e90edaddeca9927061ff3da1",
+    "sha256": "53ba5ade5752f05a3e4808ab2377339203d62212b62abdc943a41bff4e6f1e3a",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-keyboard-settled.log",
+    "originalSha256": "d2c1ce2694505c8f2da2a0c9c4b60695735abcb66c7b6f63b189f93142251291",
+    "sha256": "4310020749de6f4dab9f62d98dc7fd4c977bd02fba8d2cab7273a2d992019988",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-3a9-keyboard-paint-settled.log",
+    "originalSha256": "5883e5331bd5c9c0bf248535e185b258a02040208eb68d2ba0578cf6a86d5b44",
+    "sha256": "565e6c74a2f7159dd2865bff7bd6e9de0b29d814045713de5944bcaa111cbc04",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-types.log",
+    "originalSha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+    "sha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-final-lint2.log",
+    "originalSha256": "4d6a204f9fa9697da549c51b5b83780650b0ac11176dc6ebf7e52b66f364848d",
+    "sha256": "4d6a204f9fa9697da549c51b5b83780650b0ac11176dc6ebf7e52b66f364848d",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-final-build.log",
+    "originalSha256": "31fd28a0805b6357efd7ccd52634a0b5598235ab0af175838764ca9fa8dc7e44",
+    "sha256": "31fd28a0805b6357efd7ccd52634a0b5598235ab0af175838764ca9fa8dc7e44",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-final-current-capture.log",
+    "originalSha256": "a94987ffdf1421ef076a242612815c39bebaabdefd4799c31a675f05fd6b05b5",
+    "sha256": "db6b09f3460ac811dc883246a3b7cbb0ed51cf7c61fb0e344fc0a655028a7e05",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-baseline-capture.log",
+    "originalSha256": "48670338558a5ac34a41907ff4d8add78ce7fb23dcf32d16c67d44ad5cc7a01b",
+    "sha256": "34c49bf3f8e7f8fcec69166c3af6f986eb30b0eba59c7e0cc332815984452fc4",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-f490-normal.log",
+    "originalSha256": "8ded877b81013f3e96a3a2c41d121ddab2463326cc278d8d766bed3db427f6c4",
+    "sha256": "9c96b668bd89bcb8db63f59dc539938f2e90bb1752e224a3244e48ac4d6cd14a",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-f490-combined.log",
+    "originalSha256": "0d9ad52043c9daa72f880c9daf6a879a038bffd73e922c864998fb3d3c1ea7aa",
+    "sha256": "067a02647a7c611138f051371d4cee7ae4c0b3a07594d20528fd6e90215db526",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-notices-units.log",
+    "originalSha256": "453091a564601976ff81ddc6047b185334e8555fbf603a0a6e2b749fb8192ace",
+    "sha256": "eb0b914d06e9ad0f70a6f7223dc851253c5e09eb1f2e612f9e73d73a7e4fffcb",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-final-notices-lint.log",
+    "originalSha256": "ef3706cd5e77e9afc0dd49d8a4c3d09f99c783ca5d59379a9ba3f646a36ae10f",
+    "sha256": "ef3706cd5e77e9afc0dd49d8a4c3d09f99c783ca5d59379a9ba3f646a36ae10f",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-final-notices-build.log",
+    "originalSha256": "8bd52ea0c0e96936da2d9562cadbb7dc7bec33fea627c59abbdd1cfb085dc04b",
+    "sha256": "8bd52ea0c0e96936da2d9562cadbb7dc7bec33fea627c59abbdd1cfb085dc04b",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-stale-combined-types.log",
+    "originalSha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+    "sha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+    "normalization": "none"
+  },
+  {
+    "file": "records/mc-overview-constrained-red.log",
+    "originalSha256": "751cf27303284835976f225a1234c0b90a8a2a0ef6fa7a6e43906b2a318a1e8d",
+    "sha256": "aab609967bf20b1846ec2f251aadd42d03ee5be27090946b34626014637535b7",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/mc-overview-constrained-stale-red.log",
+    "originalSha256": "ffd6fce9b047bd7668d16f8c9af3338507cbc868dcc1f9b55588363f0c946da0",
+    "sha256": "4da1d4598fab612ec393766795ae885689007a6a9ff13d30edd84e52c2eb21b0",
+    "normalization": "controller-directory prefix replaced by $CONTROLLER"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-context-scroll-trace-light.json",
+    "originalSha256": "99d692e1fd824ea0324a1448bd5b764238c4ef29d9fd7daddbb98ab2472bb28f",
+    "sha256": "99d692e1fd824ea0324a1448bd5b764238c4ef29d9fd7daddbb98ab2472bb28f",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-context-scroll-trace-dark.json",
+    "originalSha256": "6584d4a91c283171fb29c69c9afd8b65a95cf75e1b1a549494cf111164f99ec2",
+    "sha256": "6584d4a91c283171fb29c69c9afd8b65a95cf75e1b1a549494cf111164f99ec2",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-sticky-precondition-light.json",
+    "originalSha256": "8935e0d5758f03ac95c2c84563b3dfb543ae42c1c82ba0e618e719d60d20a7f4",
+    "sha256": "8935e0d5758f03ac95c2c84563b3dfb543ae42c1c82ba0e618e719d60d20a7f4",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-sticky-precondition-dark.json",
+    "originalSha256": "8935e0d5758f03ac95c2c84563b3dfb543ae42c1c82ba0e618e719d60d20a7f4",
+    "sha256": "8935e0d5758f03ac95c2c84563b3dfb543ae42c1c82ba0e618e719d60d20a7f4",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-work-focus-after-pan-light.json",
+    "originalSha256": "3d99946da975c15ddbb048d1b05dc76f6084d7e10e71cde192fe052fefbe8923",
+    "sha256": "3d99946da975c15ddbb048d1b05dc76f6084d7e10e71cde192fe052fefbe8923",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-keyboard-paint-settled-work-focus-after-pan-dark.json",
+    "originalSha256": "3d99946da975c15ddbb048d1b05dc76f6084d7e10e71cde192fe052fefbe8923",
+    "sha256": "3d99946da975c15ddbb048d1b05dc76f6084d7e10e71cde192fe052fefbe8923",
+    "normalization": "none"
+  },
+  {
+    "file": "records/overview-operational-3a9-states-render-checks.json",
+    "originalSha256": "4654427e8e50da1235b9eeecd07fc7691cb95583099517985b3bc9aa760c08ee",
+    "sha256": "4654427e8e50da1235b9eeecd07fc7691cb95583099517985b3bc9aa760c08ee",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-fresh-mixed-dark.json",
+    "originalSha256": "9984a69a6cc3fe0851ca0326d693cd742c75ba2761ee26e79120b804d37a19dc",
+    "sha256": "9984a69a6cc3fe0851ca0326d693cd742c75ba2761ee26e79120b804d37a19dc",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-fresh-mixed-light.json",
+    "originalSha256": "21b84738ff048775fe8cace1e46cf6c9ae1d802018b813f798543da038f878fa",
+    "sha256": "21b84738ff048775fe8cace1e46cf6c9ae1d802018b813f798543da038f878fa",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-fresh-normal-loops-dark.json",
+    "originalSha256": "b5eda1ab80a69056029044603ee8af036a080903b7dbdc29fe56e9770ec9559c",
+    "sha256": "b5eda1ab80a69056029044603ee8af036a080903b7dbdc29fe56e9770ec9559c",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-fresh-normal-loops-light.json",
+    "originalSha256": "471d4878bc3f78fed7bcb03846f0806657e37dfc0ba07fdf33ea5c265aa0e1be",
+    "sha256": "471d4878bc3f78fed7bcb03846f0806657e37dfc0ba07fdf33ea5c265aa0e1be",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-stale-mixed-dark.json",
+    "originalSha256": "88a8c352e76c9be9a928878067ed075a18fa2db2c633409f3fd83a5f3166b49f",
+    "sha256": "88a8c352e76c9be9a928878067ed075a18fa2db2c633409f3fd83a5f3166b49f",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-stale-mixed-light.json",
+    "originalSha256": "59424c673baf4beb4358c8cfec30dae295f9cd2d688fec80e6bc0dc3d49dc3b9",
+    "sha256": "59424c673baf4beb4358c8cfec30dae295f9cd2d688fec80e6bc0dc3d49dc3b9",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-stale-normal-loops-dark.json",
+    "originalSha256": "9b961389775dfcbfb0be07e6d3dc17126614941831d706b328c43b9756a46048",
+    "sha256": "9b961389775dfcbfb0be07e6d3dc17126614941831d706b328c43b9756a46048",
+    "normalization": "none"
+  },
+  {
+    "file": "records/final-constrained-stale-normal-loops-light.json",
+    "originalSha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
+    "sha256": "cd8b9a4bde96f711f80f8fa42b61df47714cd646ea0b9cbd1cd554bb1644b207",
+    "normalization": "none"
+  }
+]

@@ -1,0 +1,85 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ❯ |web| test/OverviewReaderReflow.browser.test.ts (6 tests | 6 failed) 5791ms
+   × Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, light 1492ms
+     → [{"value":"41.2k","button":{"x":352.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":465.5,"bottom":142,"left":352.734375},"reading":{"x":261.75,"y":132,"width":91.640625,"height":56,"top":132,"right":353.390625,"bottom":188,"left":261.75},"overlap":true,"painted":true},{"value":"~$24.31","button":{"x":577.484375,"y":102,"width":112.765625,"height":40,"top":102,"right":690.25,"bottom":142,"left":577.484375},"reading":{"x":486.5,"y":100,"width":133.6875,"height":56,"top":100,"right":620.1875,"bottom":156,"left":486.5},"overlap":true,"painted":true},{"value":"5","button":{"x":802.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":915,"bottom":142,"left":802.234375},"reading":{"x":711.25,"y":132,"width":20.6875,"height":56,"top":132,"right":731.9375,"bottom":188,"left":711.25},"overlap":false,"painted":true},{"value":"92%","button":{"x":1251.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":1364.5,"bottom":142,"left":1251.734375},"reading":{"x":1160.75,"y":132,"width":73.84375,"height":56,"top":132,"right":1234.59375,"bottom":188,"left":1160.75},"overlap":false,"painted":true},{"value":"3","button":{"x":1701.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":1814,"bottom":142,"left":1701.234375},"reading":{"x":1610.25,"y":132,"width":20.6875,"height":56,"top":132,"right":1630.9375,"bottom":188,"left":1610.25},"overlap":false,"painted":true}]: expected false to be true // Object.is equality
+   × Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, light 544ms
+     → expected 48 to be 240 // Object.is equality
+   × Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, light 674ms
+     → expected 120 to be 240 // Object.is equality
+   × Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, dark 545ms
+     → [{"value":"41.2k","button":{"x":352.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":465.5,"bottom":142,"left":352.734375},"reading":{"x":261.75,"y":132,"width":91.640625,"height":56,"top":132,"right":353.390625,"bottom":188,"left":261.75},"overlap":true,"painted":true},{"value":"~$24.31","button":{"x":577.484375,"y":102,"width":112.765625,"height":40,"top":102,"right":690.25,"bottom":142,"left":577.484375},"reading":{"x":486.5,"y":100,"width":133.6875,"height":56,"top":100,"right":620.1875,"bottom":156,"left":486.5},"overlap":true,"painted":true},{"value":"5","button":{"x":802.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":915,"bottom":142,"left":802.234375},"reading":{"x":711.25,"y":132,"width":20.6875,"height":56,"top":132,"right":731.9375,"bottom":188,"left":711.25},"overlap":false,"painted":true},{"value":"92%","button":{"x":1251.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":1364.5,"bottom":142,"left":1251.734375},"reading":{"x":1160.75,"y":132,"width":73.84375,"height":56,"top":132,"right":1234.59375,"bottom":188,"left":1160.75},"overlap":false,"painted":true},{"value":"3","button":{"x":1701.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":1814,"bottom":142,"left":1701.234375},"reading":{"x":1610.25,"y":132,"width":20.6875,"height":56,"top":132,"right":1630.9375,"bottom":188,"left":1610.25},"overlap":false,"painted":true}]: expected false to be true // Object.is equality
+   × Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, dark 527ms
+     → expected 48 to be 240 // Object.is equality
+   × Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, dark 726ms
+     → expected 120 to be 240 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, light
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, dark
+AssertionError: [{"value":"41.2k","button":{"x":352.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":465.5,"bottom":142,"left":352.734375},"reading":{"x":261.75,"y":132,"width":91.640625,"height":56,"top":132,"right":353.390625,"bottom":188,"left":261.75},"overlap":true,"painted":true},{"value":"~$24.31","button":{"x":577.484375,"y":102,"width":112.765625,"height":40,"top":102,"right":690.25,"bottom":142,"left":577.484375},"reading":{"x":486.5,"y":100,"width":133.6875,"height":56,"top":100,"right":620.1875,"bottom":156,"left":486.5},"overlap":true,"painted":true},{"value":"5","button":{"x":802.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":915,"bottom":142,"left":802.234375},"reading":{"x":711.25,"y":132,"width":20.6875,"height":56,"top":132,"right":731.9375,"bottom":188,"left":711.25},"overlap":false,"painted":true},{"value":"92%","button":{"x":1251.734375,"y":102,"width":112.765625,"height":40,"top":102,"right":1364.5,"bottom":142,"left":1251.734375},"reading":{"x":1160.75,"y":132,"width":73.84375,"height":56,"top":132,"right":1234.59375,"bottom":188,"left":1160.75},"overlap":false,"painted":true},{"value":"3","button":{"x":1701.234375,"y":102,"width":112.765625,"height":40,"top":102,"right":1814,"bottom":142,"left":1701.234375},"reading":{"x":1610.25,"y":132,"width":20.6875,"height":56,"top":132,"right":1630.9375,"bottom":188,"left":1610.25},"overlap":false,"painted":true}]: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/OverviewReaderReflow.browser.test.ts:72:84
+     70|         await record(page, `kpi-200percent-${scheme}`, facts);
+     71|         expect(facts).toHaveLength(5);
+     72|         expect(facts.every((f) => !f.overlap && f.painted), JSON.strin…
+       |                                                                                    ^
+     73|         expect(page.errors()).toEqual([]);
+     74|       } finally { await page.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, light
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, dark
+AssertionError: expected 48 to be 240 // Object.is equality
+
+- Expected
++ Received
+
+- 240
++ 48
+
+ ❯ test/OverviewReaderReflow.browser.test.ts:93:30
+     91|         }, undefined);
+     92|         await record(page, `complete-history-${width}-${scheme}`, fact…
+     93|         expect(facts.height).toBe(240);
+       |                              ^
+     94|         expect(facts.modal && facts.focus).toBe(true);
+     95|         await page.click("#overviewHistoryDetailP .history-data summar…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, light
+ FAIL  |web| test/OverviewReaderReflow.browser.test.ts > Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, dark
+AssertionError: expected 120 to be 240 // Object.is equality
+
+- Expected
++ Received
+
+- 240
++ 120
+
+ ❯ test/OverviewReaderReflow.browser.test.ts:93:30
+     91|         }, undefined);
+     92|         await record(page, `complete-history-${width}-${scheme}`, fact…
+     93|         expect(facts.height).toBe(240);
+       |                              ^
+     94|         expect(facts.modal && facts.focus).toBe(true);
+     95|         await page.click("#overviewHistoryDetailP .history-data summar…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  16:34:09
+   Duration  6.51s (transform 211ms, setup 318ms, collect 218ms, tests 5.79s, environment 0ms, prepare 35ms)
+

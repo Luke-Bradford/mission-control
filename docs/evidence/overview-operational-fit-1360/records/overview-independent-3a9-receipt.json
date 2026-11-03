@@ -1,0 +1,395 @@
+{
+  "source": "3a9e66c0ddd3bd6e1afc44b50f67833ca44b6d1a",
+  "startedAt": "2026-11-03T16:52:41.322Z",
+  "cases": [
+    {
+      "name": "all-api-path-provider-reflow-1920-4K-1920",
+      "initial": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 953,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1200,
+          "height": 463,
+          "top": 183,
+          "right": 1224,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 886,
+          "width": 1200,
+          "height": 136,
+          "top": 886,
+          "right": 1224,
+          "bottom": 1022,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 781,
+          "width": 588,
+          "height": 244,
+          "top": 781,
+          "right": 1824,
+          "bottom": 1025,
+          "left": 1236
+        },
+        "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+      },
+      "before": {
+        "/api/activity": 1,
+        "/api/agents/flight-1/stream?limit=20": 1,
+        "/api/attention": 1,
+        "/api/away/digest": 1,
+        "/api/config": 1,
+        "/api/crew/status": 1,
+        "/api/crew?shape=summary": 1,
+        "/api/escalations": 1,
+        "/api/flight": 1,
+        "/api/flight/brief": 1,
+        "/api/flight/summary": 1,
+        "/api/health": 1,
+        "/api/limits": 1,
+        "/api/limits/github": 1,
+        "/api/machine": 1,
+        "/api/metrics": 1,
+        "/api/notifications": 1,
+        "/api/overview": 1,
+        "/api/overview/timeline": 1,
+        "/api/settings/away": 1,
+        "/api/settings/crew-pause": 1,
+        "/api/test-lock": 1
+      },
+      "wide": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 3368,
+          "height": 2033,
+          "scrollHeight": 2033,
+          "scrollTop": 0,
+          "hostEvidence": "true",
+          "wideDetails": "true",
+          "allHistories": "true"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1278,
+          "scroll": 1278
+        },
+        "histories": 5,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1280,
+          "height": 463,
+          "top": 183,
+          "right": 1304,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 1398,
+          "width": 1280,
+          "height": 136,
+          "top": 1398,
+          "right": 1304,
+          "bottom": 1534,
+          "left": 24
+        },
+        "machine": {
+          "x": 1316,
+          "y": 470.5,
+          "width": 1093.15625,
+          "height": 477.5,
+          "top": 470.5,
+          "right": 2409.15625,
+          "bottom": 948,
+          "left": 1316
+        },
+        "active": "<button type=\"button\" class=\"sm\" title=\"Hide FLIGHT (f)\">Hide</button>"
+      },
+      "afterWide": {
+        "/api/activity": 1,
+        "/api/agents/flight-1/stream?limit=20": 1,
+        "/api/attention": 1,
+        "/api/away/digest": 1,
+        "/api/config": 1,
+        "/api/crew/status": 1,
+        "/api/crew?shape=summary": 1,
+        "/api/escalations": 1,
+        "/api/flight": 1,
+        "/api/flight/brief": 1,
+        "/api/flight/summary": 1,
+        "/api/health": 1,
+        "/api/limits": 1,
+        "/api/limits/github": 1,
+        "/api/machine": 1,
+        "/api/metrics": 1,
+        "/api/notifications": 1,
+        "/api/overview": 1,
+        "/api/overview/timeline": 1,
+        "/api/settings/away": 1,
+        "/api/settings/crew-pause": 1,
+        "/api/test-lock": 1
+      },
+      "after": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 953,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1200,
+          "height": 463,
+          "top": 183,
+          "right": 1224,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 886,
+          "width": 1200,
+          "height": 136,
+          "top": 886,
+          "right": 1224,
+          "bottom": 1022,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 781,
+          "width": 588,
+          "height": 244,
+          "top": 781,
+          "right": 1824,
+          "bottom": 1025,
+          "left": 1236
+        },
+        "active": "<button type=\"button\" aria-label=\"Expand FLIGHT: 3 waiting on you\" aria-expanded=\"false\" aria-controls=\"dockBody\"><span class=\"dockrail-name\">FLIGHT</span><span class=\"warn-t\" aria-hidden=\"true\">◆ 3</span><span class=\"dockrail-caption\">waiting</span></button>"
+      },
+      "afterCompact": {
+        "/api/activity": 1,
+        "/api/agents/flight-1/stream?limit=20": 1,
+        "/api/attention": 1,
+        "/api/away/digest": 1,
+        "/api/config": 1,
+        "/api/crew/status": 1,
+        "/api/crew?shape=summary": 1,
+        "/api/escalations": 1,
+        "/api/flight": 1,
+        "/api/flight/brief": 1,
+        "/api/flight/summary": 1,
+        "/api/health": 1,
+        "/api/limits": 1,
+        "/api/limits/github": 1,
+        "/api/machine": 1,
+        "/api/metrics": 1,
+        "/api/notifications": 1,
+        "/api/overview": 1,
+        "/api/overview/timeline": 1,
+        "/api/settings/away": 1,
+        "/api/settings/crew-pause": 1,
+        "/api/test-lock": 1
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/config"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew?shape=summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/machine"
+        },
+        {
+          "method": "GET",
+          "path": "/api/test-lock"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/away"
+        },
+        {
+          "method": "GET",
+          "path": "/api/attention"
+        },
+        {
+          "method": "GET",
+          "path": "/api/away/digest"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight"
+        },
+        {
+          "method": "GET",
+          "path": "/api/escalations"
+        },
+        {
+          "method": "GET",
+          "path": "/api/notifications"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview"
+        },
+        {
+          "method": "GET",
+          "path": "/api/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew/status"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/crew-pause"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/brief"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits/github"
+        },
+        {
+          "method": "GET",
+          "path": "/api/health"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview/timeline"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/flight-1/stream?limit=20"
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "errors": [],
+  "limits": [
+    "Read-only fictional App fixture, no live verification",
+    "200% text-only enlargement is computed-font/line-height enlargement; no browser-zoom execution",
+    "Runtime3a9 and fixture/harness are separately source-bound; only Provider resource ownership differs from b45"
+  ],
+  "files": [
+    {
+      "path": "apps/web/test/overviewDensityFixtures.ts",
+      "sha256": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203"
+    },
+    {
+      "path": "apps/web/test/overviewDensityBrowser.tsx",
+      "sha256": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119"
+    },
+    {
+      "path": "apps/web/test/browserRunner.ts",
+      "sha256": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af"
+    },
+    {
+      "path": "apps/web/src/overview/overview.css",
+      "sha256": "26b3e25d4d9385c5094312a50b62bd6263e230a2e0bed0b485041e4e435cbbed"
+    },
+    {
+      "path": "apps/web/src/overview/KpiStrip.tsx",
+      "sha256": "6327c01d55678400fc1259f4ec384459b03e6f1d595da0cc81cab248cf2537f4"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewProvider.tsx",
+      "sha256": "ade6f68d9e9bd1fbaeabff2fc4f6280e80ac2ef0f500d6d39efc3f3f99b156ae"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewLayout.tsx",
+      "sha256": "c4f1f2a969260320fc9e871255928d3bfee863a6a905fa156709d0d6e59fee1d"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewEvidence.tsx",
+      "sha256": "5acff7a5ff0e75a9772fa5bb04b490b479c69886a2aaa8d1a9930c719955e28d"
+    },
+    {
+      "path": "apps/web/src/shell/Dock.tsx",
+      "sha256": "8d6d38cda8cc5642dc3956929318f1bb29a1d72087b3ecbf8079b512ffa1145e"
+    }
+  ],
+  "finishedAt": "2026-11-03T16:52:43.718Z",
+  "status": "completed"
+}

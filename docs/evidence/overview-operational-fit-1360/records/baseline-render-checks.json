@@ -1,0 +1,8582 @@
+[
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:08.146Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1280x900-dpr1-light-folded.png",
+      "sha256": "d240461872c469059f0d5bec9a347d0d0e2b1bec26a85aeee51c76e65a920af1"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 1970,
+        "top": 0,
+        "width": 1184
+      },
+      "crew": {
+        "x": 16,
+        "y": 187,
+        "width": 1184,
+        "height": 474,
+        "bottom": 661
+      },
+      "activity": {
+        "x": 16,
+        "y": 673,
+        "width": 626.875,
+        "height": 280,
+        "bottom": 953
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 1898,
+        "width": 1184,
+        "height": 137,
+        "bottom": 2035
+      },
+      "provider": {
+        "x": 654.875,
+        "y": 673,
+        "width": 545.125,
+        "height": 159,
+        "bottom": 832
+      },
+      "timeline": {
+        "x": 16,
+        "y": 965,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1311
+      },
+      "history": [],
+      "machine": {
+        "x": 654.875,
+        "y": 1119,
+        "width": 545.125,
+        "height": 767,
+        "bottom": 1886
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1184,
+        "height": 110,
+        "bottom": 175
+      },
+      "workspaceColumns": "626.875px 545.125px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 628,
+            "width": 116.65625,
+            "height": 24,
+            "top": 628,
+            "right": 193.40625,
+            "bottom": 652,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 628,
+            "width": 116.859375,
+            "height": 24,
+            "top": 628,
+            "right": 322.265625,
+            "bottom": 652,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1167,
+        "scroll": 1167
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:08.321Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1280x900-dpr1-light-open.png",
+      "sha256": "1cf5df43de389f70cf2ce75c1ac7bd26dc4807878149155070e0ec58c4a4ac31"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 2988,
+        "top": 0,
+        "width": 852
+      },
+      "crew": {
+        "x": 16,
+        "y": 271,
+        "width": 852,
+        "height": 499,
+        "bottom": 770
+      },
+      "activity": {
+        "x": 16,
+        "y": 782,
+        "width": 852,
+        "height": 280,
+        "bottom": 1062
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 2915.5,
+        "width": 852,
+        "height": 137,
+        "bottom": 3052.5
+      },
+      "provider": {
+        "x": 16,
+        "y": 1074,
+        "width": 852,
+        "height": 159,
+        "bottom": 1233
+      },
+      "timeline": {
+        "x": 16,
+        "y": 1500,
+        "width": 852,
+        "height": 346,
+        "bottom": 1846
+      },
+      "history": [],
+      "machine": {
+        "x": 16,
+        "y": 1858,
+        "width": 852,
+        "height": 751,
+        "bottom": 2609
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 852,
+        "height": 194,
+        "bottom": 259
+      },
+      "workspaceColumns": "minmax(1050px, 1200px) minmax(340px, 1fr)",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 737,
+            "width": 116.65625,
+            "height": 24,
+            "top": 737,
+            "right": 193.40625,
+            "bottom": 761,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 737,
+            "width": 116.859375,
+            "height": 24,
+            "top": 737,
+            "right": 322.265625,
+            "bottom": 761,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 835,
+        "scroll": 1050
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:08.839Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1280x900-dpr1-dark-folded.png",
+      "sha256": "10395e9ce64acc525acf495d9add2a8e94707c945e3700a2d7dd4fbec6a51692"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 1970,
+        "top": 0,
+        "width": 1184
+      },
+      "crew": {
+        "x": 16,
+        "y": 187,
+        "width": 1184,
+        "height": 474,
+        "bottom": 661
+      },
+      "activity": {
+        "x": 16,
+        "y": 673,
+        "width": 626.875,
+        "height": 280,
+        "bottom": 953
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 1898,
+        "width": 1184,
+        "height": 137,
+        "bottom": 2035
+      },
+      "provider": {
+        "x": 654.875,
+        "y": 673,
+        "width": 545.125,
+        "height": 159,
+        "bottom": 832
+      },
+      "timeline": {
+        "x": 16,
+        "y": 965,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1311
+      },
+      "history": [],
+      "machine": {
+        "x": 654.875,
+        "y": 1119,
+        "width": 545.125,
+        "height": 767,
+        "bottom": 1886
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1184,
+        "height": 110,
+        "bottom": 175
+      },
+      "workspaceColumns": "626.875px 545.125px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        },
+        {
+          "y": 66,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 628,
+            "width": 116.65625,
+            "height": 24,
+            "top": 628,
+            "right": 193.40625,
+            "bottom": 652,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 628,
+            "width": 116.859375,
+            "height": 24,
+            "top": 628,
+            "right": 322.265625,
+            "bottom": 652,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1167,
+        "scroll": 1167
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:09.024Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1280x900-dpr1-dark-open.png",
+      "sha256": "7874eb3ddeb4dac39f501e275853e41167ecc6ec1295692bfcaa31b1497e6d35"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 2988,
+        "top": 0,
+        "width": 852
+      },
+      "crew": {
+        "x": 16,
+        "y": 271,
+        "width": 852,
+        "height": 499,
+        "bottom": 770
+      },
+      "activity": {
+        "x": 16,
+        "y": 782,
+        "width": 852,
+        "height": 280,
+        "bottom": 1062
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 2915.5,
+        "width": 852,
+        "height": 137,
+        "bottom": 3052.5
+      },
+      "provider": {
+        "x": 16,
+        "y": 1074,
+        "width": 852,
+        "height": 159,
+        "bottom": 1233
+      },
+      "timeline": {
+        "x": 16,
+        "y": 1500,
+        "width": 852,
+        "height": 346,
+        "bottom": 1846
+      },
+      "history": [],
+      "machine": {
+        "x": 16,
+        "y": 1858,
+        "width": 852,
+        "height": 751,
+        "bottom": 2609
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 852,
+        "height": 194,
+        "bottom": 259
+      },
+      "workspaceColumns": "minmax(1050px, 1200px) minmax(340px, 1fr)",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 737,
+            "width": 116.65625,
+            "height": 24,
+            "top": 737,
+            "right": 193.40625,
+            "bottom": 761,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 737,
+            "width": 116.859375,
+            "height": 24,
+            "top": 737,
+            "right": 322.265625,
+            "bottom": 761,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 835,
+        "scroll": 1050
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:09.510Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1440x900-dpr1-light-folded.png",
+      "sha256": "e80c6449b8812ed0231d3cd0e51e5d5f82195ff98a7077d9330c63235be52600"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 1958,
+        "top": 0,
+        "width": 1344
+      },
+      "crew": {
+        "x": 16,
+        "y": 175,
+        "width": 1344,
+        "height": 474,
+        "bottom": 649
+      },
+      "activity": {
+        "x": 16,
+        "y": 661,
+        "width": 712.453125,
+        "height": 280,
+        "bottom": 941
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 1886,
+        "width": 1344,
+        "height": 137,
+        "bottom": 2023
+      },
+      "provider": {
+        "x": 740.453125,
+        "y": 661,
+        "width": 619.53125,
+        "height": 159,
+        "bottom": 820
+      },
+      "timeline": {
+        "x": 16,
+        "y": 953,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1299
+      },
+      "history": [],
+      "machine": {
+        "x": 740.453125,
+        "y": 1107,
+        "width": 619.53125,
+        "height": 767,
+        "bottom": 1874
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1344,
+        "height": 98,
+        "bottom": 163
+      },
+      "workspaceColumns": "712.453px 619.531px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 616,
+            "width": 116.65625,
+            "height": 24,
+            "top": 616,
+            "right": 193.40625,
+            "bottom": 640,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 616,
+            "width": 116.859375,
+            "height": 24,
+            "top": 616,
+            "right": 322.265625,
+            "bottom": 640,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1327,
+        "scroll": 1327
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:09.696Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1440x900-dpr1-light-open.png",
+      "sha256": "d965ad2a200b0735ce114cc4d6797327ed76ef4a41cdcf8359eb7a7eefd3d77f"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 2988,
+        "top": 0,
+        "width": 1012
+      },
+      "crew": {
+        "x": 16,
+        "y": 271,
+        "width": 1012,
+        "height": 499,
+        "bottom": 770
+      },
+      "activity": {
+        "x": 16,
+        "y": 782,
+        "width": 1012,
+        "height": 280,
+        "bottom": 1062
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 2915.5,
+        "width": 1012,
+        "height": 137,
+        "bottom": 3052.5
+      },
+      "provider": {
+        "x": 16,
+        "y": 1074,
+        "width": 1012,
+        "height": 159,
+        "bottom": 1233
+      },
+      "timeline": {
+        "x": 16,
+        "y": 1500,
+        "width": 1012,
+        "height": 346,
+        "bottom": 1846
+      },
+      "history": [],
+      "machine": {
+        "x": 16,
+        "y": 1858,
+        "width": 1012,
+        "height": 751,
+        "bottom": 2609
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1012,
+        "height": 194,
+        "bottom": 259
+      },
+      "workspaceColumns": "minmax(1050px, 1200px) minmax(340px, 1fr)",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 737,
+            "width": 116.65625,
+            "height": 24,
+            "top": 737,
+            "right": 193.40625,
+            "bottom": 761,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 737,
+            "width": 116.859375,
+            "height": 24,
+            "top": 737,
+            "right": 322.265625,
+            "bottom": 761,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 995,
+        "scroll": 1050
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:10.227Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1440x900-dpr1-dark-folded.png",
+      "sha256": "73dfe1dce9c1a617da3fea5dd3a717361f33ed1ae1d228d9e2687c0376a9e6ec"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 1958,
+        "top": 0,
+        "width": 1344
+      },
+      "crew": {
+        "x": 16,
+        "y": 175,
+        "width": 1344,
+        "height": 474,
+        "bottom": 649
+      },
+      "activity": {
+        "x": 16,
+        "y": 661,
+        "width": 712.453125,
+        "height": 280,
+        "bottom": 941
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 1886,
+        "width": 1344,
+        "height": 137,
+        "bottom": 2023
+      },
+      "provider": {
+        "x": 740.453125,
+        "y": 661,
+        "width": 619.53125,
+        "height": 159,
+        "bottom": 820
+      },
+      "timeline": {
+        "x": 16,
+        "y": 953,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1299
+      },
+      "history": [],
+      "machine": {
+        "x": 740.453125,
+        "y": 1107,
+        "width": 619.53125,
+        "height": 767,
+        "bottom": 1874
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1344,
+        "height": 98,
+        "bottom": 163
+      },
+      "workspaceColumns": "712.453px 619.531px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 616,
+            "width": 116.65625,
+            "height": 24,
+            "top": 616,
+            "right": 193.40625,
+            "bottom": 640,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 616,
+            "width": 116.859375,
+            "height": 24,
+            "top": 616,
+            "right": 322.265625,
+            "bottom": 640,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1327,
+        "scroll": 1327
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:10.395Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1440x900-dpr1-dark-open.png",
+      "sha256": "d428f58bb615983b21dc858e599af028ed3160f34fedd2348bc5a6b8bdaa7ed6"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 789,
+        "scroll": 2988,
+        "top": 0,
+        "width": 1012
+      },
+      "crew": {
+        "x": 16,
+        "y": 271,
+        "width": 1012,
+        "height": 499,
+        "bottom": 770
+      },
+      "activity": {
+        "x": 16,
+        "y": 782,
+        "width": 1012,
+        "height": 280,
+        "bottom": 1062
+      },
+      "pipeline": {
+        "x": 16,
+        "y": 2915.5,
+        "width": 1012,
+        "height": 137,
+        "bottom": 3052.5
+      },
+      "provider": {
+        "x": 16,
+        "y": 1074,
+        "width": 1012,
+        "height": 159,
+        "bottom": 1233
+      },
+      "timeline": {
+        "x": 16,
+        "y": 1500,
+        "width": 1012,
+        "height": 346,
+        "bottom": 1846
+      },
+      "history": [],
+      "machine": {
+        "x": 16,
+        "y": 1858,
+        "width": 1012,
+        "height": 751,
+        "bottom": 2609
+      },
+      "metrics": {
+        "x": 16,
+        "y": 65,
+        "width": 1012,
+        "height": 194,
+        "bottom": 259
+      },
+      "workspaceColumns": "minmax(1050px, 1200px) minmax(340px, 1fr)",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 66,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        },
+        {
+          "y": 162,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 76.75,
+            "y": 737,
+            "width": 116.65625,
+            "height": 24,
+            "top": 737,
+            "right": 193.40625,
+            "bottom": 761,
+            "left": 76.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 205.40625,
+            "y": 737,
+            "width": 116.859375,
+            "height": 24,
+            "top": 737,
+            "right": 322.265625,
+            "bottom": 761,
+            "left": 205.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 995,
+        "scroll": 1050
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:10.934Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1600x1000-dpr1-light-folded.png",
+      "sha256": "619e5f2b9e1cff0e62fbe7c91f8da1c39b144936b32bfc7071477e264bf9641b"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 1000,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 873,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1480
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1128,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1128,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1480,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1164,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1164,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1164,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1480,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1128px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1111,
+        "scroll": 1111
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:11.136Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1600x1000-dpr1-light-open.png",
+      "sha256": "ba8f84c5f2b4977cbda6e4eb18303393fe9efc27089c869fa3c89d0258e07d6b"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 1000,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 873,
+        "scroll": 1970,
+        "top": 0,
+        "width": 1148
+      },
+      "crew": {
+        "x": 24,
+        "y": 195,
+        "width": 1148,
+        "height": 474,
+        "bottom": 669
+      },
+      "activity": {
+        "x": 24,
+        "y": 681,
+        "width": 607.625,
+        "height": 280,
+        "bottom": 961
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1906,
+        "width": 1148,
+        "height": 137,
+        "bottom": 2043
+      },
+      "provider": {
+        "x": 643.625,
+        "y": 681,
+        "width": 528.359375,
+        "height": 159,
+        "bottom": 840
+      },
+      "timeline": {
+        "x": 24,
+        "y": 973,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1319
+      },
+      "history": [],
+      "machine": {
+        "x": 643.625,
+        "y": 1127,
+        "width": 528.359375,
+        "height": 767,
+        "bottom": 1894
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1148,
+        "height": 110,
+        "bottom": 183
+      },
+      "workspaceColumns": "607.625px 528.359px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 636,
+            "width": 116.65625,
+            "height": 24,
+            "top": 636,
+            "right": 201.40625,
+            "bottom": 660,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 636,
+            "width": 116.859375,
+            "height": 24,
+            "top": 636,
+            "right": 330.265625,
+            "bottom": 660,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1131,
+        "scroll": 1131
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:11.651Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1600x1000-dpr1-dark-folded.png",
+      "sha256": "f624b57824b1b92c3f7d27c3e7372030d1feb3252e590d8c2e2745d32beb841c"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 1000,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 873,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1480
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1128,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1128,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1480,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1164,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1164,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1164,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1480,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1128px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1111,
+        "scroll": 1111
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:11.871Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1600x1000-dpr1-dark-open.png",
+      "sha256": "092b8636ad6837b4633a3d3c46a96393b91cc72a0ce9f8a1dbdcc4468cb93447"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 1000,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 873,
+        "scroll": 1970,
+        "top": 0,
+        "width": 1148
+      },
+      "crew": {
+        "x": 24,
+        "y": 195,
+        "width": 1148,
+        "height": 474,
+        "bottom": 669
+      },
+      "activity": {
+        "x": 24,
+        "y": 681,
+        "width": 607.625,
+        "height": 280,
+        "bottom": 961
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1906,
+        "width": 1148,
+        "height": 137,
+        "bottom": 2043
+      },
+      "provider": {
+        "x": 643.625,
+        "y": 681,
+        "width": 528.359375,
+        "height": 159,
+        "bottom": 840
+      },
+      "timeline": {
+        "x": 24,
+        "y": 973,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1319
+      },
+      "history": [],
+      "machine": {
+        "x": 643.625,
+        "y": 1127,
+        "width": 528.359375,
+        "height": 767,
+        "bottom": 1894
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1148,
+        "height": 110,
+        "bottom": 183
+      },
+      "workspaceColumns": "607.625px 528.359px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 636,
+            "width": 116.65625,
+            "height": 24,
+            "top": 636,
+            "right": 201.40625,
+            "bottom": 660,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 636,
+            "width": 116.859375,
+            "height": 24,
+            "top": 636,
+            "right": 330.265625,
+            "bottom": 660,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1131,
+        "scroll": 1131
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:12.385Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr1-light-folded.png",
+      "sha256": "6f482003bfb3d3886b6ec7d9bde6bb2a3d268d21727b6ec69c8bbdd8eb8bac20"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1830,
+        "top": 0,
+        "width": 1800
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1200,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1766,
+        "width": 1800,
+        "height": 137,
+        "bottom": 1903
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 588,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 354,
+        "width": 588,
+        "height": 346,
+        "bottom": 700
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 987,
+        "width": 588,
+        "height": 767,
+        "bottom": 1754
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 588px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:12.606Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr1-light-open.png",
+      "sha256": "a9ea67e247bd02c1b1abe1b14b2028fd07afc4606891660c7231ecf36485c212"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1468
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1116,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1116,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1468,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1152,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1152,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1152,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1468,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1116px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1099,
+        "scroll": 1099
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:13.118Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr1-dark-folded.png",
+      "sha256": "0bb073e27149e0b6920b254d8e7898922687865ee2582bb5a3ac1cabfb79b71a"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1830,
+        "top": 0,
+        "width": 1800
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1200,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1766,
+        "width": 1800,
+        "height": 137,
+        "bottom": 1903
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 588,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 354,
+        "width": 588,
+        "height": 346,
+        "bottom": 700
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 987,
+        "width": 588,
+        "height": 767,
+        "bottom": 1754
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 588px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:13.341Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr1-dark-open.png",
+      "sha256": "2c4337abf2bdcbfee95e6d053f62a44ddec453204987f13367630bc35a46e6e9"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1468
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1116,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1116,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1468,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1152,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1152,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1152,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1468,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1116px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1099,
+        "scroll": 1099
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:13.905Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-2560x1440-dpr1-light-open.png",
+      "sha256": "c0c21bc4f410479a62ff32c9d80df72151b421b0078b62ace75648fd23a8b8fc"
+    },
+    "facts": {
+      "viewport": {
+        "width": 2560,
+        "height": 1440,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1313,
+        "scroll": 1826,
+        "top": 0,
+        "width": 2108
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 2108,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 896,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 896,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 896,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 2108,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 896px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:14.103Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-2560x1440-dpr1-light-folded.png",
+      "sha256": "146cbc9250b0eb9bc61e8ebfb38691da21b19b1a70f77eb3b1e89a0b56ca7504"
+    },
+    "facts": {
+      "viewport": {
+        "width": 2560,
+        "height": 1440,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1313,
+        "scroll": 1826,
+        "top": 0,
+        "width": 2440
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 2440,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 1228,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 1228,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 1228,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 2440,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 1228px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:14.692Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-2560x1440-dpr1-dark-open.png",
+      "sha256": "468b381a934d95c5f77304204409e04e506869006356ce5be948f8964c39eb62"
+    },
+    "facts": {
+      "viewport": {
+        "width": 2560,
+        "height": 1440,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1313,
+        "scroll": 1826,
+        "top": 0,
+        "width": 2108
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 2108,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 896,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 896,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 896,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 2108,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 896px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:14.922Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-2560x1440-dpr1-dark-folded.png",
+      "sha256": "6dc252d159c2de0b9ec5ca6c4e70687fe72744edd431bc05c07aad0ea21a7ce6"
+    },
+    "facts": {
+      "viewport": {
+        "width": 2560,
+        "height": 1440,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1313,
+        "scroll": 1826,
+        "top": 0,
+        "width": 2440
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 2440,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 1228,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 1228,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 1228,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 2440,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 1228px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:15.564Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-3840x2160-dpr1-light-open.png",
+      "sha256": "15f1e8711341831825067eaaaffda63af99559f5c0ef9304b9d594a427587361"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 2160,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 2033,
+        "scroll": 2033,
+        "top": 0,
+        "width": 3388
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3388,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2176,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2176,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2176,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3388,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2176px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:15.823Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-3840x2160-dpr1-light-folded.png",
+      "sha256": "94b59d60a50f5963ac9dbb827af404de608fb01ced526d854a5d346ebe1e1dbc"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 2160,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 2033,
+        "scroll": 2033,
+        "top": 0,
+        "width": 3720
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3720,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2508,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2508,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2508,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3720,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2508px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:16.465Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-3840x2160-dpr1-dark-open.png",
+      "sha256": "1f6a91e6ef4e04b1d6d7e87f96473231ebd29f253777a3db111e5e36fd1c082b"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 2160,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 2033,
+        "scroll": 2033,
+        "top": 0,
+        "width": 3388
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3388,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2176,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2176,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2176,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3388,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2176px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:16.727Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-3840x2160-dpr1-dark-folded.png",
+      "sha256": "039eeeb928e9a65db1a3242c255cc7ba4a7ac56fe0cbeb563f72a17e208c5e7d"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 2160,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 2033,
+        "scroll": 2033,
+        "top": 0,
+        "width": 3720
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3720,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2508,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2508,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2508,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3720,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2508px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:17.343Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-3840x1800-dpr1-light-open.png",
+      "sha256": "77bde4658d9c4f590f323716fc4a4f73c73f22c12edd5214a112d4555ecf50c0"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 1800,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1673,
+        "scroll": 1826,
+        "top": 0,
+        "width": 3388
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3388,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2176,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2176,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2176,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3388,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2176px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:17.625Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-3840x1800-dpr1-light-folded.png",
+      "sha256": "b1859e6aa7942a60b4b933bbd6886ba29c8e53839be35814433aae6f75d94cac"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 1800,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1673,
+        "scroll": 1826,
+        "top": 0,
+        "width": 3720
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3720,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2508,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2508,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2508,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3720,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2508px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:18.246Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-3840x1800-dpr1-dark-open.png",
+      "sha256": "45cbe0700a71f63535e45adf3047c528d537b197983dabd54eb0f7fd1037891b"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 1800,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1673,
+        "scroll": 1826,
+        "top": 0,
+        "width": 3388
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3388,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2176,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2176,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2176,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3388,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2176px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:18.526Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-3840x1800-dpr1-dark-folded.png",
+      "sha256": "05af177c19d2d08ef78f6a5c3072873da2731725ed1be9f6f053c0f794185cf0"
+    },
+    "facts": {
+      "viewport": {
+        "width": 3840,
+        "height": 1800,
+        "dpr": 1
+      },
+      "activeTag": "BUTTON",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 1673,
+        "scroll": 1826,
+        "top": 0,
+        "width": 3720
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 578,
+        "bottom": 761
+      },
+      "activity": {
+        "x": 24,
+        "y": 773,
+        "width": 1200,
+        "height": 280,
+        "bottom": 1053
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1754,
+        "width": 3720,
+        "height": 145,
+        "bottom": 1899
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 2508,
+        "height": 167,
+        "bottom": 350
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 362,
+        "width": 2508,
+        "height": 346,
+        "bottom": 708
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 983,
+        "width": 2508,
+        "height": 759,
+        "bottom": 1742
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 3720,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 2508px",
+      "rows": [
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 728,
+            "width": 116.65625,
+            "height": 24,
+            "top": 728,
+            "right": 201.40625,
+            "bottom": 752,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 728,
+            "width": 116.859375,
+            "height": 24,
+            "top": 728,
+            "right": 330.265625,
+            "bottom": 752,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:19.075Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1600x700-dpr1-light-folded.png",
+      "sha256": "8077b8c755a1e306bab4cd315350fb3f554bc3b12e8ea3991c11d2468dab78fa"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 700,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 573,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1480
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1128,
+        "height": 339,
+        "bottom": 522
+      },
+      "activity": {
+        "x": 24,
+        "y": 534,
+        "width": 1128,
+        "height": 280,
+        "bottom": 814
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1480,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1164,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1164,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1164,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1480,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1128px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 489,
+            "width": 116.65625,
+            "height": 24,
+            "top": 489,
+            "right": 201.40625,
+            "bottom": 513,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 489,
+            "width": 116.859375,
+            "height": 24,
+            "top": 489,
+            "right": 330.265625,
+            "bottom": 513,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1111,
+        "scroll": 1111
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:19.278Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1600x700-dpr1-light-open.png",
+      "sha256": "89add5daf13a37cb02c757eaaa38b387820a6d84417cbc1199bcf5b493309236"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 700,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 573,
+        "scroll": 1835,
+        "top": 0,
+        "width": 1148
+      },
+      "crew": {
+        "x": 24,
+        "y": 195,
+        "width": 1148,
+        "height": 339,
+        "bottom": 534
+      },
+      "activity": {
+        "x": 24,
+        "y": 546,
+        "width": 607.625,
+        "height": 280,
+        "bottom": 826
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1771,
+        "width": 1148,
+        "height": 137,
+        "bottom": 1908
+      },
+      "provider": {
+        "x": 643.625,
+        "y": 546,
+        "width": 528.359375,
+        "height": 159,
+        "bottom": 705
+      },
+      "timeline": {
+        "x": 24,
+        "y": 838,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1184
+      },
+      "history": [],
+      "machine": {
+        "x": 643.625,
+        "y": 992,
+        "width": 528.359375,
+        "height": 767,
+        "bottom": 1759
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1148,
+        "height": 110,
+        "bottom": 183
+      },
+      "workspaceColumns": "607.625px 528.359px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 501,
+            "width": 116.65625,
+            "height": 24,
+            "top": 501,
+            "right": 201.40625,
+            "bottom": 525,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 501,
+            "width": 116.859375,
+            "height": 24,
+            "top": 501,
+            "right": 330.265625,
+            "bottom": 525,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1131,
+        "scroll": 1131
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:19.772Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1600x700-dpr1-dark-folded.png",
+      "sha256": "8d09481443610dcfdb02690847f204d38a7b4fddddf89798852f11c74097733b"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 700,
+        "dpr": 1
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 573,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1480
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1128,
+        "height": 339,
+        "bottom": 522
+      },
+      "activity": {
+        "x": 24,
+        "y": 534,
+        "width": 1128,
+        "height": 280,
+        "bottom": 814
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1480,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1164,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1164,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1164,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1480,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1128px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 489,
+            "width": 116.65625,
+            "height": 24,
+            "top": 489,
+            "right": 201.40625,
+            "bottom": 513,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 489,
+            "width": 116.859375,
+            "height": 24,
+            "top": 489,
+            "right": 330.265625,
+            "bottom": 513,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1111,
+        "scroll": 1111
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:19.977Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1600x700-dpr1-dark-open.png",
+      "sha256": "fd0e7496888eadd3057eff500a3f3d8ee237c98b095978148477e652c26a34e9"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1600,
+        "height": 700,
+        "dpr": 1
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 573,
+        "scroll": 1835,
+        "top": 0,
+        "width": 1148
+      },
+      "crew": {
+        "x": 24,
+        "y": 195,
+        "width": 1148,
+        "height": 339,
+        "bottom": 534
+      },
+      "activity": {
+        "x": 24,
+        "y": 546,
+        "width": 607.625,
+        "height": 280,
+        "bottom": 826
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1771,
+        "width": 1148,
+        "height": 137,
+        "bottom": 1908
+      },
+      "provider": {
+        "x": 643.625,
+        "y": 546,
+        "width": 528.359375,
+        "height": 159,
+        "bottom": 705
+      },
+      "timeline": {
+        "x": 24,
+        "y": 838,
+        "width": 514.59375,
+        "height": 346,
+        "bottom": 1184
+      },
+      "history": [],
+      "machine": {
+        "x": 643.625,
+        "y": 992,
+        "width": 528.359375,
+        "height": 767,
+        "bottom": 1759
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1148,
+        "height": 110,
+        "bottom": 183
+      },
+      "workspaceColumns": "607.625px 528.359px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        },
+        {
+          "y": 74,
+          "height": 108
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 501,
+            "width": 116.65625,
+            "height": 24,
+            "top": 501,
+            "right": 201.40625,
+            "bottom": 525,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 501,
+            "width": 116.859375,
+            "height": 24,
+            "top": 501,
+            "right": 330.265625,
+            "bottom": 525,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1131,
+        "scroll": 1131
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:20.627Z",
+    "scheme": "light",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr2-light-folded.png",
+      "sha256": "12e221056af7a939ae7230cccaa0ecf73187f514f6b7b538d1504d54185654b9"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1830,
+        "top": 0,
+        "width": 1800
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1200,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1766,
+        "width": 1800,
+        "height": 137,
+        "bottom": 1903
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 588,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 354,
+        "width": 588,
+        "height": 346,
+        "bottom": 700
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 987,
+        "width": 588,
+        "height": 767,
+        "bottom": 1754
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 588px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:20.929Z",
+    "scheme": "light",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr2-light-open.png",
+      "sha256": "1aec6c1fcfc44fb8ba5bfbae6d1f38b8da5d90d9023bbe9b6895b3ddfb070512"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1468
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1116,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1116,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1468,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1152,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1152,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1152,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1468,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1116px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1099,
+        "scroll": 1099
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:21.591Z",
+    "scheme": "dark",
+    "state": "folded",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr2-dark-folded.png",
+      "sha256": "ff57a03e7d4a75a3788d7384b23eabd525023337c7e14d6d1ce8bd1ce4d2e296"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2
+      },
+      "activeTag": "BODY",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1830,
+        "top": 0,
+        "width": 1800
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1200,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1200,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1766,
+        "width": 1800,
+        "height": 137,
+        "bottom": 1903
+      },
+      "provider": {
+        "x": 1236,
+        "y": 183,
+        "width": 588,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1236,
+        "y": 354,
+        "width": 588,
+        "height": 346,
+        "bottom": 700
+      },
+      "history": [],
+      "machine": {
+        "x": 1236,
+        "y": 987,
+        "width": 588,
+        "height": 767,
+        "bottom": 1754
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1800,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1200px 588px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1183,
+        "scroll": 1183
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [],
+      "companions": []
+    }
+  },
+  {
+    "runtimeSource": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "mode": "delivered-baseline",
+    "fixtureClock": 1792238400000,
+    "bindings": {
+      "overviewDensityFixtures.ts": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "overviewDensityBrowser.tsx": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "browserRunner.ts": "1e3927452f5d673aa8f908cf9c4695dfe767ab6ec3b836501bb3a5cbbf6b64af",
+      "OverviewOperational.browser.test.ts": "3d692f5fba35aeb8fb251981415433181d84328dea5bd8c3fe94c5f163fe358c"
+    },
+    "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+    "capturedAt": "2026-11-03T17:23:21.911Z",
+    "scheme": "dark",
+    "state": "open",
+    "png": {
+      "file": "normal-loops-1920x1080-dpr2-dark-open.png",
+      "sha256": "f10b946b4e6c89291b779bd1987e72bcc11fe011d688594e85e3fd279f1e923c"
+    },
+    "facts": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2
+      },
+      "activeTag": "H2",
+      "closedReaders": [],
+      "timelineOverflow": true,
+      "grid": {
+        "client": 953,
+        "scroll": 1964,
+        "top": 0,
+        "width": 1468
+      },
+      "crew": {
+        "x": 24,
+        "y": 183,
+        "width": 1116,
+        "height": 474,
+        "bottom": 657
+      },
+      "activity": {
+        "x": 24,
+        "y": 669,
+        "width": 1116,
+        "height": 280,
+        "bottom": 949
+      },
+      "pipeline": {
+        "x": 24,
+        "y": 1900,
+        "width": 1468,
+        "height": 137,
+        "bottom": 2037
+      },
+      "provider": {
+        "x": 1152,
+        "y": 183,
+        "width": 340,
+        "height": 159,
+        "bottom": 342
+      },
+      "timeline": {
+        "x": 1152,
+        "y": 354,
+        "width": 340,
+        "height": 376,
+        "bottom": 730
+      },
+      "history": [],
+      "machine": {
+        "x": 1152,
+        "y": 1065,
+        "width": 340,
+        "height": 823,
+        "bottom": 1888
+      },
+      "metrics": {
+        "x": 24,
+        "y": 73,
+        "width": 1468,
+        "height": 98,
+        "bottom": 171
+      },
+      "workspaceColumns": "1116px 340px",
+      "rows": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "kpis": [
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        },
+        {
+          "y": 74,
+          "height": 96
+        }
+      ],
+      "loops": [
+        {
+          "text": "loop-alpha · Parked",
+          "box": {
+            "x": 84.75,
+            "y": 624,
+            "width": 116.65625,
+            "height": 24,
+            "top": 624,
+            "right": 201.40625,
+            "bottom": 648,
+            "left": 84.75
+          }
+        },
+        {
+          "text": "loop-beta · Blocked",
+          "box": {
+            "x": 213.40625,
+            "y": 624,
+            "width": 116.859375,
+            "height": 24,
+            "top": 624,
+            "right": 330.265625,
+            "bottom": 648,
+            "left": 213.40625
+          }
+        }
+      ],
+      "rosterWidth": {
+        "client": 1099,
+        "scroll": 1099
+      },
+      "horizontalOverflow": false,
+      "visibleLogRows": 7,
+      "criticalPaint": [
+        {
+          "text": "Pause crew",
+          "width": 81.1875,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Add agent",
+          "width": 73.9375,
+          "height": 30,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Answer",
+          "width": 50.40625,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "Interrupt",
+          "width": 59.09375,
+          "height": 24,
+          "painted": true
+        },
+        {
+          "text": "End",
+          "width": 30.78125,
+          "height": 24,
+          "painted": true
+        }
+      ],
+      "labelClips": [
+        "checks · 25m",
+        "checks · 25m",
+        "turn · 20m",
+        "turn · 20m",
+        "checks · 23m"
+      ],
+      "companions": []
+    }
+  }
+]

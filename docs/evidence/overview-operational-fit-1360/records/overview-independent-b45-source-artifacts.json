@@ -1,0 +1,126 @@
+{
+  "source": "b45f26dc36159f9b6227888509a02dbf909cedd5",
+  "earlierWholeReview": "c37197aa8bf739d9d63d14420beac0b02e4fb17b",
+  "sourceBindings": [
+    {
+      "path": "apps/web/test/overviewDensityFixtures.ts",
+      "sha256": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/test/overviewDensityBrowser.tsx",
+      "sha256": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/test/browserRunner.ts",
+      "sha256": "81fee31139e9b9438fb1db5e58ef22704e96fee0014de9888e934e51494e741b",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/overview/overview.css",
+      "sha256": "26b3e25d4d9385c5094312a50b62bd6263e230a2e0bed0b485041e4e435cbbed",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/overview/KpiStrip.tsx",
+      "sha256": "6327c01d55678400fc1259f4ec384459b03e6f1d595da0cc81cab248cf2537f4",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/overview/OverviewProvider.tsx",
+      "sha256": "031e66a3f9f2b22b4867e6cecc88c3a5761c4262e4fa7ead5cb1749860a9b52d",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/overview/OverviewLayout.tsx",
+      "sha256": "c4f1f2a969260320fc9e871255928d3bfee863a6a905fa156709d0d6e59fee1d",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/overview/OverviewEvidence.tsx",
+      "sha256": "5acff7a5ff0e75a9772fa5bb04b490b479c69886a2aaa8d1a9930c719955e28d",
+      "committedBytesMatchExecution": true
+    },
+    {
+      "path": "apps/web/src/shell/Dock.tsx",
+      "sha256": "8d6d38cda8cc5642dc3956929318f1bb29a1d72087b3ecbf8079b512ffa1145e",
+      "committedBytesMatchExecution": true
+    }
+  ],
+  "images": [
+    {
+      "path": "reader-history-end.png",
+      "sha256": "daa4cffd6438d2a2e78b02ba617a40567bc4fa80b35cfb15518fd35a73ece308",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 319218
+    },
+    {
+      "path": "reader-provider.png",
+      "sha256": "cf02f2c25fcfe51958d3e1d5425a92ddfedafdbbad77d56f3be81fed42f70b44",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 363893
+    },
+    {
+      "path": "reader-timeline.png",
+      "sha256": "a6d14782aa75798db4997df3bd6a2c5cf489e79777dd2736486d81f156c40268",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 297936
+    },
+    {
+      "path": "canvas-3164.png",
+      "sha256": "488f43200e10a9e64b5f8a7f82049d007b3b5a3d7eedf47208d3a7d15e062153",
+      "width": 3284,
+      "height": 2160,
+      "bytes": 724390
+    },
+    {
+      "path": "4K-reader-history-end.png",
+      "sha256": "9a8e24ae523522bc40812d54bc84c48d059ed5b303e4b276f6c3c55bf09fdd22",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 691326
+    },
+    {
+      "path": "text-enlargement-200percent.png",
+      "sha256": "cc8cfcc04e98c3cc6e759cae983484ab39d87ad640e064900ecb35af83caa242",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 414240
+    },
+    {
+      "path": "reader-machine.png",
+      "sha256": "3611361df5139458fcac787b8e51bfb5a340819d5e84a21e79ae870f1f6607b4",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 312264
+    },
+    {
+      "path": "canvas-3163.png",
+      "sha256": "2edb0cc29f2c37c79520633a09a028e9cb996699cf3025d9743145ce572e22d6",
+      "width": 3283,
+      "height": 2160,
+      "bytes": 490080
+    },
+    {
+      "path": "normal-1920-light-folded.png",
+      "sha256": "7de26f3321a8883d335b09e338e30b5fbc6d316beb24e7c8cb5874d4d260c480",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 396037
+    },
+    {
+      "path": "normal-3840-dark-folded.png",
+      "sha256": "1bf891b2769bbf938ed8dab77c029cc5f5175657e5f27b8318dea865a8f97485",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 733874
+    }
+  ],
+  "executedMetadataCorrection": "Inherited receipt limit string about an uncommitted additive normal-loops fixture belongs to c371 history. The b45 fixture/harness and production source bytes used here are committed at b45; committedBytesMatchExecution verifies each binding. The executed receipt/helper remain unedited.",
+  "thresholdFlags": "settled expected width/flags + two requestAnimationFrame callbacks before capture",
+  "browserZoom": "not executed; controlled computed-font enlargement only"
+}

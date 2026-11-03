@@ -1,0 +1,264 @@
+{
+  "source": "c37197aa8bf739d9d63d14420beac0b02e4fb17b",
+  "baseline": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+  "staticSnapshotFiles": [
+    {
+      "path": "apps/web/src/App.tsx",
+      "bytes": 11401,
+      "sha256": "770d2bfb6a529adb574c77dd1f16196aeecd63bc2ae575b38753b852e1b20f0e"
+    },
+    {
+      "path": "apps/web/src/hud.css",
+      "bytes": 21582,
+      "sha256": "d1aa2eb44f96d948e48db9238ab9d205b2106e94e3411dc7cdb84122a3af35c0"
+    },
+    {
+      "path": "apps/web/src/overview/KpiStrip.tsx",
+      "bytes": 8639,
+      "sha256": "6327c01d55678400fc1259f4ec384459b03e6f1d595da0cc81cab248cf2537f4"
+    },
+    {
+      "path": "apps/web/src/overview/MachinePanel.tsx",
+      "bytes": 24645,
+      "sha256": "f26c54637f226869b008a774a9df15025ba196286f1910182d7b29f541c84115"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewAnalyticalPanels.tsx",
+      "bytes": 2971,
+      "sha256": "ce1278a0c1c2cf90db3b646b112fe72ebe1ad7aa5be809895787ce3277d3401f"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewConstraints.tsx",
+      "bytes": 1934,
+      "sha256": "62b8c2d8e180e0cc714c356e392f8b6a2aa1b2a0f9d96e05f0566a0b0494fd10"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewEvidence.tsx",
+      "bytes": 3599,
+      "sha256": "5acff7a5ff0e75a9772fa5bb04b490b479c69886a2aaa8d1a9930c719955e28d"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewHistoryPanel.tsx",
+      "bytes": 10830,
+      "sha256": "2f8ff24986570ca8f11ef71f73e9e7b63ea0bbc464c338b178618c95ac72953c"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewInvestigation.tsx",
+      "bytes": 2520,
+      "sha256": "be5c48c675ed50926b1464c27b995fc40179852b9a594233e9388df84d2a600a"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewLayout.tsx",
+      "bytes": 2412,
+      "sha256": "c4f1f2a969260320fc9e871255928d3bfee863a6a905fa156709d0d6e59fee1d"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewOverflowNote.tsx",
+      "bytes": 1294,
+      "sha256": "8906d42780718a35bd59448fe851974b643e01e0d31b8afbe5d9e3ed5037e9ea"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewProvider.tsx",
+      "bytes": 1375,
+      "sha256": "031e66a3f9f2b22b4867e6cecc88c3a5761c4262e4fa7ead5cb1749860a9b52d"
+    },
+    {
+      "path": "apps/web/src/overview/QuotaSummaryPanel.tsx",
+      "bytes": 5702,
+      "sha256": "070951ed362762527729232ba4a673a314a8b5527d687f7fc0849f53f24aba53"
+    },
+    {
+      "path": "apps/web/src/overview/TimelinePanel.tsx",
+      "bytes": 12581,
+      "sha256": "cc1ae53bd52c8bee8b02efd8a45799e516b101f0f4c585779345a7d6431534f9"
+    },
+    {
+      "path": "apps/web/src/overview/overview.css",
+      "bytes": 53585,
+      "sha256": "017d54fe16a29b73ede8937317fd5044d407ac77060ba6699684f370982a1bc9"
+    },
+    {
+      "path": "apps/web/src/pages/Overview.tsx",
+      "bytes": 2379,
+      "sha256": "ee392d41ea3414758692e96759cd25d02c60d67e911d08a0b4f3f0c04542a80f"
+    },
+    {
+      "path": "apps/web/src/shell/Dock.tsx",
+      "bytes": 19677,
+      "sha256": "8d6d38cda8cc5642dc3956929318f1bb29a1d72087b3ecbf8079b512ffa1145e"
+    },
+    {
+      "path": "apps/web/src/shell/Footer.tsx",
+      "bytes": 1510,
+      "sha256": "aa1486f71270aa38a0aa36a7149cbe331fddadbecb256c6411f07019d3ddb8cf"
+    },
+    {
+      "path": "apps/web/src/shell/Header.tsx",
+      "bytes": 14016,
+      "sha256": "457ea6c0debf715aaab95e9909c627e6faa731a7fc9ad087e42f133c2eb9502c"
+    },
+    {
+      "path": "apps/web/test/Overview.test.tsx",
+      "bytes": 113357,
+      "sha256": "fd35eb232a3f3043506c41aa1649c3e9b1f5f38f7d36fbbf08be188b215046c1"
+    },
+    {
+      "path": "apps/web/test/OverviewComposition.test.tsx",
+      "bytes": 4547,
+      "sha256": "00f383686b5eea407243b29e97d511ed701b3ac20e465674d3c8b335f8989707"
+    },
+    {
+      "path": "apps/web/test/OverviewCompositionSmoke.browser.test.ts",
+      "bytes": 6084,
+      "sha256": "cee28c5dd705146927bc6f4bd6f5dcae605f303f22321f96adeed462a0c251dd"
+    },
+    {
+      "path": "apps/web/test/OverviewHistory.test.tsx",
+      "bytes": 5434,
+      "sha256": "a6d8e87f6272f8096a68c9d60754d224bd391e26528e954ecd20f48c1ede3937"
+    },
+    {
+      "path": "apps/web/test/OverviewLayoutCss.test.ts",
+      "bytes": 9357,
+      "sha256": "bf70de5e170fe9e8375b6d4f0aef4c26521525f51f21ff823e98d2340d13d41a"
+    },
+    {
+      "path": "apps/web/test/OverviewMeasuredHistory.test.tsx",
+      "bytes": 6923,
+      "sha256": "29b68728df5d92652293c96bacd89bdd5efe2cfccf2d84a8e87e8512736768e2"
+    },
+    {
+      "path": "apps/web/test/OverviewOperational.browser.test.ts",
+      "bytes": 8365,
+      "sha256": "39d1925230414f17a5cfb72c08f06151c2d0e89e4703da35ced5d17d3d5642b3"
+    },
+    {
+      "path": "apps/web/test/OverviewOperational.test.tsx",
+      "bytes": 6167,
+      "sha256": "e2deefdc7aa45b8ba4f6ef5623bcaf99987bdbc441bfd7d4ebc609c16fc3fbd4"
+    },
+    {
+      "path": "apps/web/test/OverviewTimeline.test.tsx",
+      "bytes": 8039,
+      "sha256": "c92b91d6b73ba5c4f23952a24d786d4cd923eedb70dad14409ad6414f9abb0f6"
+    },
+    {
+      "path": "apps/web/test/browserRunner.ts",
+      "bytes": 14569,
+      "sha256": "81fee31139e9b9438fb1db5e58ef22704e96fee0014de9888e934e51494e741b"
+    },
+    {
+      "path": "apps/web/test/nativeDialog.ts",
+      "bytes": 892,
+      "sha256": "4d385e01752a95e8578879dd03766fcc2a8b8dba6d5d59a2f9500a083e164a2e"
+    },
+    {
+      "path": "docs/research/2026-11-03-overview-operational-implementation.md",
+      "bytes": 11122,
+      "sha256": "31b26266c0b4b1686f63f57419b1fd8c530af8ff9a720325d44e8519d8baf816"
+    }
+  ],
+  "executedBindings": [
+    {
+      "path": "apps/web/test/overviewDensityFixtures.ts",
+      "sha256": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203",
+      "currentBytesStillMatchExecutedHash": true
+    },
+    {
+      "path": "apps/web/test/overviewDensityBrowser.tsx",
+      "sha256": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119",
+      "currentBytesStillMatchExecutedHash": true
+    },
+    {
+      "path": "apps/web/test/browserRunner.ts",
+      "sha256": "81fee31139e9b9438fb1db5e58ef22704e96fee0014de9888e934e51494e741b",
+      "currentBytesStillMatchExecutedHash": true
+    },
+    {
+      "path": "apps/web/src/overview/OverviewLayout.tsx",
+      "sha256": "c4f1f2a969260320fc9e871255928d3bfee863a6a905fa156709d0d6e59fee1d",
+      "currentBytesStillMatchExecutedHash": true
+    },
+    {
+      "path": "apps/web/src/overview/OverviewEvidence.tsx",
+      "sha256": "5acff7a5ff0e75a9772fa5bb04b490b479c69886a2aaa8d1a9930c719955e28d",
+      "currentBytesStillMatchExecutedHash": true
+    },
+    {
+      "path": "apps/web/src/shell/Dock.tsx",
+      "sha256": "8d6d38cda8cc5642dc3956929318f1bb29a1d72087b3ecbf8079b512ffa1145e",
+      "currentBytesStillMatchExecutedHash": true
+    }
+  ],
+  "images": [
+    {
+      "path": "reader-history-end.png",
+      "bytes": 330788,
+      "sha256": "336fef081c3aa79fc30856d009de0d96cfcf035d7aefa2294c01fbec7f02615c",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "reader-provider.png",
+      "bytes": 363658,
+      "sha256": "20bac57b33218298d7a35099420beedaff7fcde0638080f4821905115625ced2",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "reader-timeline.png",
+      "bytes": 297703,
+      "sha256": "b612a157f3123e35d2e482a5590723e4a3bbbc64825561e4df38dc188e76ccc4",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "canvas-3164.png",
+      "bytes": 724129,
+      "sha256": "cadf6734b016198e840949ed2faa8e7db1521131a2af01b3496fe7d7958039cc",
+      "width": 3284,
+      "height": 2160
+    },
+    {
+      "path": "text-enlargement-200percent.png",
+      "bytes": 425968,
+      "sha256": "60f38e515c596ff8d2b1c0de6d032fc05b7cac1f2eb00c590fe0bec814b5f4c9",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "reader-machine.png",
+      "bytes": 315828,
+      "sha256": "16fb3a08ba4a8b631f2bfd5ad28745562c2600bfaeadc82d6a38f6f811277b13",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "canvas-3163.png",
+      "bytes": 723752,
+      "sha256": "7f8edd21669b63bdd5571288bdf83ae015d5a4e7da5a11bc29d12dca2db8f17a",
+      "width": 3283,
+      "height": 2160
+    },
+    {
+      "path": "normal-1920-light-folded.png",
+      "bytes": 395755,
+      "sha256": "6a46a09a725c86e16da901e368535bfc0ff1fc17acc90b50c076cebcf10d13b6",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "path": "normal-3840-dark-folded.png",
+      "bytes": 733724,
+      "sha256": "adb8a73821e311675e6526b2ca9b740e6e901bf4e73ffbc4d287dff08f10288f",
+      "width": 3840,
+      "height": 2160
+    }
+  ],
+  "reviewArtifactLimits": [
+    "Finalrun threshold flags not settled; geometry assertions only",
+    "Computed-font200% enlargement, no actual browserzoom execution",
+    "Author48 normal contexts are supplied evidence, not independent reruns",
+    "No live actions or current whole-site shell/state matrix executed by reviewer"
+  ]
+}

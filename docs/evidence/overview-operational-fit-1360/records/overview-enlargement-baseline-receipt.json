@@ -1,0 +1,730 @@
+{
+  "baseline": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+  "candidate": "b45f26dc36159f9b6227888509a02dbf909cedd5",
+  "harnessAndFixture": "committed b45 test sources, same normal11crew+2loops payload for both",
+  "fixtureSha256": "475ae73bfeccabdb9824121828ee0fb999ad29461fe739587e9333fee9556aaa",
+  "startedAt": "2026-11-03T16:44:52.073Z",
+  "cases": [
+    {
+      "phase": "d192",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "rowFont": "26px",
+        "rows": [
+          {
+            "id": "FLIGHT",
+            "state": null,
+            "text": "Watching",
+            "context": "84.0k / 200k · 116k left · 42%",
+            "stateRect": {
+              "x": 169,
+              "y": 414.5,
+              "width": 80,
+              "height": 40,
+              "top": 414.5,
+              "right": 249,
+              "bottom": 454.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-1",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "86.0k / 400k · 314k left · 22%",
+            "stateRect": {
+              "x": 169,
+              "y": 482.5,
+              "width": 80,
+              "height": 40,
+              "top": 482.5,
+              "right": 249,
+              "bottom": 522.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-2",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "88.0k / 400k · 312k left · 22%",
+            "stateRect": {
+              "x": 169,
+              "y": 550.5,
+              "width": 80,
+              "height": 40,
+              "top": 550.5,
+              "right": 249,
+              "bottom": 590.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-3",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "90.0k / 200k · 110k left · 45%",
+            "stateRect": {
+              "x": 169,
+              "y": 618.5,
+              "width": 80,
+              "height": 40,
+              "top": 618.5,
+              "right": 249,
+              "bottom": 658.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-5",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "94.0k / 400k · 306k left · 24%",
+            "stateRect": {
+              "x": 169,
+              "y": 686.5,
+              "width": 80,
+              "height": 40,
+              "top": 686.5,
+              "right": 249,
+              "bottom": 726.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-6",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "96.0k / 200k · 104k left · 48%",
+            "stateRect": {
+              "x": 169,
+              "y": 754.5,
+              "width": 80,
+              "height": 40,
+              "top": 754.5,
+              "right": 249,
+              "bottom": 794.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-7",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "98.0k / — · limit unknown",
+            "stateRect": {
+              "x": 169,
+              "y": 822.5,
+              "width": 80,
+              "height": 40,
+              "top": 822.5,
+              "right": 249,
+              "bottom": 862.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-10",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "104k / 400k · 296k left · 26%",
+            "stateRect": {
+              "x": 169,
+              "y": 890.5,
+              "width": 80,
+              "height": 40,
+              "top": 890.5,
+              "right": 249,
+              "bottom": 930.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-4",
+            "state": "Blocked · Protected path clearance is required before proceeding.",
+            "text": "Blocked",
+            "context": "92.0k / 400k · 308k left · 23%",
+            "stateRect": {
+              "x": 169,
+              "y": 958.5,
+              "width": 80,
+              "height": 40,
+              "top": 958.5,
+              "right": 249,
+              "bottom": 998.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-8",
+            "state": "Idle · Idle",
+            "text": "Idle",
+            "context": "100k / 400k · 300k left · 25%",
+            "stateRect": {
+              "x": 169,
+              "y": 1026.5,
+              "width": 80,
+              "height": 40,
+              "top": 1026.5,
+              "right": 249,
+              "bottom": 1066.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-9",
+            "state": "Queued · Account paused; this current-head review is queued.",
+            "text": "Queued",
+            "context": "102k / 200k · 98.0k left · 51%",
+            "stateRect": {
+              "x": 169,
+              "y": 1094.5,
+              "width": 80,
+              "height": 40,
+              "top": 1094.5,
+              "right": 249,
+              "bottom": 1134.5,
+              "left": 169
+            }
+          }
+        ],
+        "headers": [
+          {
+            "text": "Agent",
+            "width": 128,
+            "scroll": 128,
+            "client": 128
+          },
+          {
+            "text": "State",
+            "width": 80,
+            "scroll": 80,
+            "client": 80
+          },
+          {
+            "text": "Work",
+            "width": 521,
+            "scroll": 521,
+            "client": 521
+          },
+          {
+            "text": "Tokens/min · 30m avg",
+            "width": 96,
+            "scroll": 126,
+            "client": 96
+          },
+          {
+            "text": "Cost",
+            "width": 64,
+            "scroll": 64,
+            "client": 64
+          },
+          {
+            "text": "Context · used / limit · left · used%",
+            "width": 178,
+            "scroll": 178,
+            "client": 178
+          },
+          {
+            "text": "In state",
+            "width": 52,
+            "scroll": 54,
+            "client": 52
+          }
+        ],
+        "region": {
+          "width": 1183,
+          "scroll": 1183
+        },
+        "outerOverflow": true,
+        "keyboardLink": {
+          "title": "DEV-1",
+          "href": "/agent/dev-1",
+          "focused": true,
+          "painted": true
+        },
+        "fullDetail": {
+          "path": "/agent/dev-1",
+          "text": "Agents\nflight-1\nIdle\ndev-1\nRunning\ndev-2\nRunning\ndev-3\nRunning\ndev-4\nBlocked\ndev-5\nRunning\ndev-6\nRunning\ndev-7\nRunning\ndev-8\nIdle\ndev-9\nStopped\ndev-10\nRunning\nloop-alpha\nParked\nloop-beta\nBlocked\nDEV-1\nRunning\nInterrupt\nStop\nMore\nshop-app#101\nRecorded fixture work 1\nfeature/3349-quote-cache\nState changed 8m 00s ago\n\nGUIDO · writer · s/demo · claude-main · claude-opus-4-1 · area: apps/**\n\nAsk → result → next\nOPEN TICKET\nOriginal ask\nRecorded fixture work 1\n\nAcceptance checks were not recorded for this run.\n\nReported result\n\nNo result reported yet.\n\nDeliverables\n0 saved links\nNo PR, screenshot or file links are recorded yet.\nActivity\nmessages, thinking, tool calls and checks\nAll\nMessages\nThinking\nTools\nGuard\n\nNo activity yet.\n\nSend\nInterrupt and send\nReaches DEV-1 mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters.\nWhat is happening now?\nRunning\nRUN HEALTH\n\nRunning\n\nReview verdict not recorded\nCurrent PR head\nTOOLS THIS RUN\n\n0\n\n0 failed calls\nNo tool calls recorded\nTOKENS THIS RUN\n\n15.4k\n\n12.0k in · 3.4k out\nReported usage\nCOST THIS RUN\n\n~$2.47\n\nMean — per reported turn\nAPI equivalent · 0 turns\nCONTEXT NOW\n\n—\n\nof 400k tokens\n86.0k tokens used · latest saved reading\nBuild loop\nOPEN RUN TRACE\n\nNo build loop is recorded for this run.\n\nInstructions · dev-1\nPlan 0/0\nQueue\nFiles\nContext\n\nNo task list yet.\n\nAttempts and previous runs"
+        }
+      },
+      "errors": [],
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/config"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew?shape=summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/machine"
+        },
+        {
+          "method": "GET",
+          "path": "/api/test-lock"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/away"
+        },
+        {
+          "method": "GET",
+          "path": "/api/attention"
+        },
+        {
+          "method": "GET",
+          "path": "/api/away/digest"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight"
+        },
+        {
+          "method": "GET",
+          "path": "/api/escalations"
+        },
+        {
+          "method": "GET",
+          "path": "/api/notifications"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview"
+        },
+        {
+          "method": "GET",
+          "path": "/api/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew/status"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/crew-pause"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/brief"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview/timeline"
+        },
+        {
+          "method": "GET",
+          "path": "/api/health"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits/github"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/flight-1/stream?limit=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/dev-1"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/dev-1/stream?limit=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/guard/hits?days=7"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/fixture-run-1/handoff"
+        }
+      ]
+    },
+    {
+      "phase": "b45",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "rowFont": "26px",
+        "rows": [
+          {
+            "id": "FLIGHT",
+            "state": null,
+            "text": "Watching",
+            "context": "84.0k / 200k · 116k left · 42%",
+            "stateRect": {
+              "x": 169,
+              "y": 434.5,
+              "width": 80,
+              "height": 40,
+              "top": 434.5,
+              "right": 249,
+              "bottom": 474.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-1",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "86.0k / 400k · 314k left · 22%",
+            "stateRect": {
+              "x": 169,
+              "y": 502.5,
+              "width": 80,
+              "height": 40,
+              "top": 502.5,
+              "right": 249,
+              "bottom": 542.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-2",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "88.0k / 400k · 312k left · 22%",
+            "stateRect": {
+              "x": 169,
+              "y": 570.5,
+              "width": 80,
+              "height": 40,
+              "top": 570.5,
+              "right": 249,
+              "bottom": 610.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-3",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "90.0k / 200k · 110k left · 45%",
+            "stateRect": {
+              "x": 169,
+              "y": 638.5,
+              "width": 80,
+              "height": 40,
+              "top": 638.5,
+              "right": 249,
+              "bottom": 678.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-5",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "94.0k / 400k · 306k left · 24%",
+            "stateRect": {
+              "x": 169,
+              "y": 706.5,
+              "width": 80,
+              "height": 40,
+              "top": 706.5,
+              "right": 249,
+              "bottom": 746.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-6",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "96.0k / 200k · 104k left · 48%",
+            "stateRect": {
+              "x": 169,
+              "y": 774.5,
+              "width": 80,
+              "height": 40,
+              "top": 774.5,
+              "right": 249,
+              "bottom": 814.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-7",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "98.0k / — · limit unknown",
+            "stateRect": {
+              "x": 169,
+              "y": 842.5,
+              "width": 80,
+              "height": 40,
+              "top": 842.5,
+              "right": 249,
+              "bottom": 882.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-10",
+            "state": "Running · Running",
+            "text": "Running",
+            "context": "104k / 400k · 296k left · 26%",
+            "stateRect": {
+              "x": 169,
+              "y": 910.5,
+              "width": 80,
+              "height": 40,
+              "top": 910.5,
+              "right": 249,
+              "bottom": 950.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-4",
+            "state": "Blocked · Protected path clearance is required before proceeding.",
+            "text": "Blocked",
+            "context": "92.0k / 400k · 308k left · 23%",
+            "stateRect": {
+              "x": 169,
+              "y": 978.5,
+              "width": 80,
+              "height": 40,
+              "top": 978.5,
+              "right": 249,
+              "bottom": 1018.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-8",
+            "state": "Idle · Idle",
+            "text": "Idle",
+            "context": "100k / 400k · 300k left · 25%",
+            "stateRect": {
+              "x": 169,
+              "y": 1046.5,
+              "width": 80,
+              "height": 40,
+              "top": 1046.5,
+              "right": 249,
+              "bottom": 1086.5,
+              "left": 169
+            }
+          },
+          {
+            "id": "DEV-9",
+            "state": "Queued · Account paused; this current-head review is queued.",
+            "text": "Queued",
+            "context": "102k / 200k · 98.0k left · 51%",
+            "stateRect": {
+              "x": 169,
+              "y": 1114.5,
+              "width": 80,
+              "height": 40,
+              "top": 1114.5,
+              "right": 249,
+              "bottom": 1154.5,
+              "left": 169
+            }
+          }
+        ],
+        "headers": [
+          {
+            "text": "Agent",
+            "width": 128,
+            "scroll": 128,
+            "client": 128
+          },
+          {
+            "text": "State",
+            "width": 80,
+            "scroll": 80,
+            "client": 80
+          },
+          {
+            "text": "Work",
+            "width": 536,
+            "scroll": 536,
+            "client": 536
+          },
+          {
+            "text": "Tokens/min · 30m avg",
+            "width": 96,
+            "scroll": 126,
+            "client": 96
+          },
+          {
+            "text": "Cost",
+            "width": 64,
+            "scroll": 64,
+            "client": 64
+          },
+          {
+            "text": "Context · used / limit · left · used%",
+            "width": 178,
+            "scroll": 178,
+            "client": 178
+          },
+          {
+            "text": "In state",
+            "width": 52,
+            "scroll": 54,
+            "client": 52
+          }
+        ],
+        "region": {
+          "width": 1198,
+          "scroll": 1198
+        },
+        "outerOverflow": true,
+        "keyboardLink": {
+          "title": "DEV-1",
+          "href": "/agent/dev-1",
+          "focused": true,
+          "painted": true
+        },
+        "fullDetail": {
+          "path": "/agent/dev-1",
+          "text": "Agents\nflight-1\nIdle\ndev-1\nRunning\ndev-2\nRunning\ndev-3\nRunning\ndev-4\nBlocked\ndev-5\nRunning\ndev-6\nRunning\ndev-7\nRunning\ndev-8\nIdle\ndev-9\nStopped\ndev-10\nRunning\nloop-alpha\nParked\nloop-beta\nBlocked\nDEV-1\nRunning\nInterrupt\nStop\nMore\nshop-app#101\nRecorded fixture work 1\nfeature/3349-quote-cache\nState changed 8m 00s ago\n\nGUIDO · writer · s/demo · claude-main · claude-opus-4-1 · area: apps/**\n\nAsk → result → next\nOPEN TICKET\nOriginal ask\nRecorded fixture work 1\n\nAcceptance checks were not recorded for this run.\n\nReported result\n\nNo result reported yet.\n\nDeliverables\n0 saved links\nNo PR, screenshot or file links are recorded yet.\nActivity\nmessages, thinking, tool calls and checks\nAll\nMessages\nThinking\nTools\nGuard\n\nNo activity yet.\n\nSend\nInterrupt and send\nReaches DEV-1 mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters.\nWhat is happening now?\nRunning\nRUN HEALTH\n\nRunning\n\nReview verdict not recorded\nCurrent PR head\nTOOLS THIS RUN\n\n0\n\n0 failed calls\nNo tool calls recorded\nTOKENS THIS RUN\n\n15.4k\n\n12.0k in · 3.4k out\nReported usage\nCOST THIS RUN\n\n~$2.47\n\nMean — per reported turn\nAPI equivalent · 0 turns\nCONTEXT NOW\n\n—\n\nof 400k tokens\n86.0k tokens used · latest saved reading\nBuild loop\nOPEN RUN TRACE\n\nNo build loop is recorded for this run.\n\nInstructions · dev-1\nPlan 0/0\nQueue\nFiles\nContext\n\nNo task list yet.\n\nAttempts and previous runs"
+        }
+      },
+      "errors": [],
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/config"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew?shape=summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/machine"
+        },
+        {
+          "method": "GET",
+          "path": "/api/test-lock"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/away"
+        },
+        {
+          "method": "GET",
+          "path": "/api/attention"
+        },
+        {
+          "method": "GET",
+          "path": "/api/away/digest"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight"
+        },
+        {
+          "method": "GET",
+          "path": "/api/escalations"
+        },
+        {
+          "method": "GET",
+          "path": "/api/notifications"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview"
+        },
+        {
+          "method": "GET",
+          "path": "/api/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew/status"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/crew-pause"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/brief"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits/github"
+        },
+        {
+          "method": "GET",
+          "path": "/api/health"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview/timeline"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/flight-1/stream?limit=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/dev-1"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/dev-1/stream?limit=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/guard/hits?days=7"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/fixture-run-1/handoff"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "status": "completed",
+  "finishedAt": "2026-11-03T16:44:56.156Z"
+}

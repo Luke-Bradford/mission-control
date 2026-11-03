@@ -1,0 +1,43 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ❯ |web| test/OverviewOperational.test.tsx (6 tests | 1 failed | 5 skipped) 22ms
+   ↓ summarizes the binding recorded allowance without presenting unknown windows as spare capacity
+   ↓ counts measured and unknown seat context independently of provider allowance
+   ↓ leaves complete evidence unmounted until requested and preserves it after closing
+   × preserves a new focus choice after reader close while restoring genuinely lost focus 21ms
+     → expected <button type="button"></button> to be <button type="button"></button> // Object.is equality
+   ↓ keeps compact machine histories honest and exposes complete transcript details
+   ↓ keeps an unreported machine slot capacity unknown rather than a blank or zero count
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewOperational.test.tsx > preserves a new focus choice after reader close while restoring genuinely lost focus
+AssertionError: expected <button type="button"></button> to be <button type="button"></button> // Object.is equality
+
+- Expected
++ Received
+
+  <button
+    type="button"
+  >
+-   Next legitimate control
++   Inspect focus evidence
+  </button>
+
+ ❯ test/OverviewOperational.test.tsx:117:36
+    115|     next.focus(); // User intent arrives after native close but before…
+    116|     flush();
+    117|     expect(document.activeElement).toBe(next);
+       |                                    ^
+    118|     opener.focus();
+    119|     fireEvent.click(opener);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  17:16:29
+   Duration  901ms (transform 241ms, setup 283ms, collect 84ms, tests 22ms, environment 358ms, prepare 29ms)
+

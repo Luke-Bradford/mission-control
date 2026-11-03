@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ❯ |web| test/OverviewDensity.browser.test.ts (7 tests | 1 failed | 6 skipped) 3666ms
+   ↓ Approved Overview hierarchy > settles known context, full allowance and recorded timeline sources in the delivered App
+   × Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize 2368ms
+     → expected 0 to be greater than 0
+   ↓ Approved Overview hierarchy > preserves nine configured seats and two observed loops through the real session filter
+   ↓ Approved Overview hierarchy > keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open
+   ↓ Approved Overview hierarchy > opens complete shortened content with the keyboard using actual read-only detail routes
+   ↓ Approved Overview hierarchy > keeps the settled full-App hierarchy and all row controls reachable at every required viewport
+   ↓ Approved Overview hierarchy > keeps empty, one, fifty, long and collection states honest without losing keyboard routes
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewDensity.browser.test.ts > Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize
+AssertionError: expected 0 to be greater than 0
+ ❯ test/OverviewDensity.browser.test.ts:489:35
+    487|           expect(retained.sameRow).toBe(true);
+    488|           expect(retained.history).toBe("ci");
+    489|           expect(retained.scroll).toBeGreaterThan(0);
+       |                                   ^
+    490|           expect(retained.finalColumnVisible).toBe(true);
+    491|           expect(retained.sticky).toBe("sticky");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  17:07:44
+   Duration  4.31s (transform 199ms, setup 277ms, collect 185ms, tests 3.67s, environment 0ms, prepare 29ms)
+

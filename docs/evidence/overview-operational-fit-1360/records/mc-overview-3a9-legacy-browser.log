@@ -1,0 +1,85 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewClipping.browser.test.ts (6 tests) 4550ms
+   ✓ Overview panels keep headers readable and content reachable > at 1280x1000, light  966ms
+   ✓ Overview panels keep headers readable and content reachable > at 1280x1000, dark  405ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x1000, light  424ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x1000, dark  417ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x700, light, the page scrolls and every Board link is reachable  543ms
+   ✓ Overview panels keep headers readable and content reachable > at 1600x700, dark, the page scrolls and every Board link is reachable  499ms
+ ❯ |web| test/OverviewLayout.browser.test.ts (6 tests | 6 failed) 64808ms
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, light 761ms
+     → expected 235 to be less than 235
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, light 436ms
+     → expected 295.796875 to be less than 295.796875
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, light 30712ms
+     → TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#machP .transcript-footprint') to be visible[22m
+
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, dark 497ms
+     → expected 235 to be less than 235
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, dark 439ms
+     → expected 295.796875 to be less than 295.796875
+   × Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, dark 30662ms
+     → TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#machP .transcript-footprint') to be visible[22m
+
+ ✓ |web| test/Overview.browser.test.ts (3 tests) 2925ms
+   ✓ Overview transcript footprint in a browser > fits at 1366 wide and records a screenshot  750ms
+   ✓ Overview transcript footprint in a browser > fits at 1600 wide and records a screenshot  420ms
+   ✓ Overview transcript footprint in a browser > fits at 1920 wide and records a screenshot  436ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, light
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, dark
+AssertionError: expected 235 to be less than 235
+ ❯ test/OverviewLayout.browser.test.ts:136:29
+    134|         const empty = await page.box("#pipelineP .pipeline-stage.empty…
+    135|         const full = await page.box("#pipelineP .pipeline-stage.progre…
+    136|         expect(empty.width).toBeLessThan(full.width);
+       |                             ^
+    137| 
+    138|         // Pipeline follows live Activity; analytical panels size thei…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, light
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, dark
+AssertionError: expected 295.796875 to be less than 295.796875
+ ❯ test/OverviewLayout.browser.test.ts:136:29
+    134|         const empty = await page.box("#pipelineP .pipeline-stage.empty…
+    135|         const full = await page.box("#pipelineP .pipeline-stage.progre…
+    136|         expect(empty.width).toBeLessThan(full.width);
+       |                             ^
+    137| 
+    138|         // Pipeline follows live Activity; analytical panels size thei…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, light
+ FAIL  |web| test/OverviewLayout.browser.test.ts > Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, dark
+Error: TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#machP .transcript-footprint') to be visible[22m
+
+ ❯ Object.boxes test/browserRunner.ts:267:17
+    265|           await page.waitForSelector(selector);
+    266|         } catch (error) {
+    267|           throw new Error(errors.length ? errors.join("; ") : String(e…
+       |                 ^
+    268|         }
+    269|         return measure(selector);
+ ❯ test/OverviewLayout.browser.test.ts:187:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  6 failed | 9 passed (15)
+   Start at  16:55:16
+   Duration  74.89s (transform 209ms, setup 505ms, collect 563ms, tests 72.28s, environment 0ms, prepare 98ms)
+

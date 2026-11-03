@@ -1,0 +1,48 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ❯ |web| test/OverviewComposition.test.tsx (3 tests | 1 failed) 125ms
+   ✓ uses actual canvas width and post-KPI height, without rebuilding stable roster children per resize 15ms
+   × keeps existing allowance resource visits alive when its own column changes from summary to full table 31ms
+     → expected [ '/api/limits/github', …(11) ] to deeply equal [ '/api/limits/github', …(3) ]
+   ✓ reflows one selected history into five unique measured histories and back without another collection 79ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewComposition.test.tsx > keeps existing allowance resource visits alive when its own column changes from summary to full table
+AssertionError: expected [ '/api/limits/github', …(11) ] to deeply equal [ '/api/limits/github', …(3) ]
+
+- Expected
++ Received
+
+  [
+    "/api/limits/github",
+    "/api/health",
+    "/api/config",
+    "/api/limits",
++   "/api/health",
++   "/api/config",
++   "/api/limits/github",
++   "/api/limits",
++   "/api/config",
++   "/api/limits/github",
++   "/api/health",
++   "/api/limits",
+  ]
+
+ ❯ test/OverviewComposition.test.tsx:105:58
+    103|   resize(1800, 843, 588);
+    104|   await screen.findByText("37% left");
+    105|   expect(fetch.mock.calls.map(([path]) => String(path))).toEqual(befor…
+       |                                                          ^
+    106|   } finally { HTMLDialogElement.prototype.close = originalClose; }
+    107| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  16:36:11
+   Duration  966ms (transform 236ms, setup 284ms, collect 78ms, tests 125ms, environment 325ms, prepare 28ms)
+

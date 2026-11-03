@@ -1,0 +1,810 @@
+{
+  "source": "b45f26dc36159f9b6227888509a02dbf909cedd5",
+  "startedAt": "2026-11-03T16:39:04.982Z",
+  "cases": [
+    {
+      "name": "normal-11crew-2loops-1920-light",
+      "initial": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 953,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1200,
+          "height": 463,
+          "top": 183,
+          "right": 1224,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 886,
+          "width": 1200,
+          "height": 136,
+          "top": 886,
+          "right": 1224,
+          "bottom": 1022,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 781,
+          "width": 588,
+          "height": 244,
+          "top": 781,
+          "right": 1824,
+          "bottom": 1025,
+          "left": 1236
+        },
+        "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+      },
+      "readers": [
+        {
+          "name": "provider",
+          "end": {
+            "text": "codex-main · 7d7d 12%88% leftSun 18 Oct 18:00103% projected at reset · not filling at this rateapp-server · read 5 min ago",
+            "rect": {
+              "x": 413,
+              "y": 581.75,
+              "width": 1079,
+              "height": 41,
+              "top": 581.75,
+              "right": 1492,
+              "bottom": 622.75,
+              "left": 413
+            },
+            "painted": true
+          },
+          "modal": true,
+          "returned": true
+        },
+        {
+          "name": "timeline",
+          "end": {
+            "text": "loop-betaNo recorded intervals or tool starts in this window.",
+            "rect": {
+              "x": 413,
+              "y": 761.5,
+              "width": 1079,
+              "height": 24,
+              "top": 761.5,
+              "right": 1492,
+              "bottom": 785.5,
+              "left": 413
+            },
+            "painted": true
+          },
+          "modal": true,
+          "returned": true
+        },
+        {
+          "name": "machine",
+          "end": {
+            "text": "History: 30 complete minutes ending 12:00 · missing minutes remain gaps · CPU and memory 0–100% · disk 0–420 GiB free.",
+            "rect": {
+              "x": 413,
+              "y": 910.5,
+              "width": 1094,
+              "height": 16,
+              "top": 910.5,
+              "right": 1507,
+              "bottom": 926.5,
+              "left": 413
+            },
+            "painted": true
+          },
+          "modal": true,
+          "returned": true
+        }
+      ],
+      "historyPlotHeight": 240,
+      "historyEnd": {
+        "text": "11:5933",
+        "rect": {
+          "x": 413,
+          "y": 791.5,
+          "width": 1079,
+          "height": 32,
+          "top": 791.5,
+          "right": 1492,
+          "bottom": 823.5,
+          "left": 413
+        },
+        "painted": true
+      },
+      "overlay": {
+        "mainInert": true,
+        "modal": "true"
+      },
+      "afterReflow": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 953,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1200,
+          "height": 463,
+          "top": 183,
+          "right": 1224,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 886,
+          "width": 1200,
+          "height": 136,
+          "top": 886,
+          "right": 1224,
+          "bottom": 1022,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 781,
+          "width": 588,
+          "height": 244,
+          "top": 781,
+          "right": 1824,
+          "bottom": 1025,
+          "left": 1236
+        },
+        "active": "<button type=\"button\" aria-label=\"Expand FLIGHT: 3 waiting on you\" aria-expanded=\"false\" aria-controls=\"dockBody\"><span class=\"dockrail-name\">FLIGHT</span><span class=\"warn-t\" aria-hidden=\"true\">◆ 3</span><span class=\"dockrail-caption\">waiting</span></button>"
+      },
+      "draft": "Retained independent review draft",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/config"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew?shape=summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/machine"
+        },
+        {
+          "method": "GET",
+          "path": "/api/test-lock"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/away"
+        },
+        {
+          "method": "GET",
+          "path": "/api/attention"
+        },
+        {
+          "method": "GET",
+          "path": "/api/away/digest"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight"
+        },
+        {
+          "method": "GET",
+          "path": "/api/escalations"
+        },
+        {
+          "method": "GET",
+          "path": "/api/notifications"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview"
+        },
+        {
+          "method": "GET",
+          "path": "/api/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/api/crew/status"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings/crew-pause"
+        },
+        {
+          "method": "GET",
+          "path": "/api/flight/brief"
+        },
+        {
+          "method": "GET",
+          "path": "/api/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/api/limits/github"
+        },
+        {
+          "method": "GET",
+          "path": "/api/health"
+        },
+        {
+          "method": "GET",
+          "path": "/api/overview/timeline"
+        },
+        {
+          "method": "GET",
+          "path": "/api/agents/flight-1/stream?limit=20"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "normal-11crew-2loops-3840-dark",
+      "initial": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 3720,
+          "height": 2033,
+          "scrollHeight": 2033,
+          "scrollTop": 0,
+          "hostEvidence": "true",
+          "wideDetails": "true",
+          "allHistories": "true"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1278,
+          "scroll": 1278
+        },
+        "histories": 5,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1280,
+          "height": 463,
+          "top": 183,
+          "right": 1304,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 1398,
+          "width": 1280,
+          "height": 136,
+          "top": 1398,
+          "right": 1304,
+          "bottom": 1534,
+          "left": 24
+        },
+        "machine": {
+          "x": 1316,
+          "y": 470.5,
+          "width": 1279.59375,
+          "height": 477.5,
+          "top": 470.5,
+          "right": 2595.59375,
+          "bottom": 948,
+          "left": 1316
+        },
+        "active": "<button type=\"button\" aria-label=\"Expand FLIGHT: 3 waiting on you\" aria-expanded=\"false\" aria-controls=\"dockBody\"><span class=\"dockrail-name\">FLIGHT</span><span class=\"warn-t\" aria-hidden=\"true\">◆ 3</span><span class=\"dockrail-caption\">waiting</span></button>"
+      },
+      "historyPlotHeight": 240,
+      "historyEnd": {
+        "text": "11:5933",
+        "rect": {
+          "x": 1373,
+          "y": 1331.5,
+          "width": 1079,
+          "height": 32,
+          "top": 1331.5,
+          "right": 2452,
+          "bottom": 1363.5,
+          "left": 1373
+        },
+        "painted": true
+      },
+      "historyFocusReturned": true,
+      "overviewReads": {
+        "before": 1,
+        "after": 1
+      },
+      "thresholds": [
+        {
+          "viewport": {
+            "width": 3283,
+            "height": 2160,
+            "dpr": 1
+          },
+          "grid": {
+            "width": 3163,
+            "height": 2033,
+            "scrollHeight": 2033,
+            "scrollTop": 0,
+            "hostEvidence": "true",
+            "wideDetails": "false",
+            "allHistories": "false"
+          },
+          "crewRows": 11,
+          "loops": [
+            "loop-alpha · Parked",
+            "loop-beta · Blocked"
+          ],
+          "lanes": 13,
+          "roster": {
+            "client": 1278,
+            "scroll": 1278
+          },
+          "histories": 1,
+          "outerOverflow": false,
+          "crew": {
+            "x": 24,
+            "y": 183,
+            "width": 1280,
+            "height": 463,
+            "top": 183,
+            "right": 1304,
+            "bottom": 646,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 886,
+            "width": 1280,
+            "height": 136,
+            "top": 886,
+            "right": 1304,
+            "bottom": 1022,
+            "left": 24
+          },
+          "machine": {
+            "x": 1316,
+            "y": 470.5,
+            "width": 929.5,
+            "height": 401.5,
+            "top": 470.5,
+            "right": 2245.5,
+            "bottom": 872,
+            "left": 1316
+          },
+          "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+        },
+        {
+          "viewport": {
+            "width": 3284,
+            "height": 2160,
+            "dpr": 1
+          },
+          "grid": {
+            "width": 3164,
+            "height": 2033,
+            "scrollHeight": 2033,
+            "scrollTop": 0,
+            "hostEvidence": "true",
+            "wideDetails": "true",
+            "allHistories": "true"
+          },
+          "crewRows": 11,
+          "loops": [
+            "loop-alpha · Parked",
+            "loop-beta · Blocked"
+          ],
+          "lanes": 13,
+          "roster": {
+            "client": 1278,
+            "scroll": 1278
+          },
+          "histories": 5,
+          "outerOverflow": false,
+          "crew": {
+            "x": 24,
+            "y": 183,
+            "width": 1280,
+            "height": 463,
+            "top": 183,
+            "right": 1304,
+            "bottom": 646,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 1398,
+            "width": 1280,
+            "height": 136,
+            "top": 1398,
+            "right": 1304,
+            "bottom": 1534,
+            "left": 24
+          },
+          "machine": {
+            "x": 1316,
+            "y": 470.5,
+            "width": 960,
+            "height": 491.5,
+            "top": 470.5,
+            "right": 2276,
+            "bottom": 962,
+            "left": 1316
+          },
+          "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "200percent-text-enlargement-1920-light",
+      "before": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 953,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": false,
+        "crew": {
+          "x": 24,
+          "y": 183,
+          "width": 1200,
+          "height": 463,
+          "top": 183,
+          "right": 1224,
+          "bottom": 646,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 886,
+          "width": 1200,
+          "height": 136,
+          "top": 886,
+          "right": 1224,
+          "bottom": 1022,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 781,
+          "width": 588,
+          "height": 244,
+          "top": 781,
+          "right": 1824,
+          "bottom": 1025,
+          "left": 1236
+        },
+        "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+      },
+      "enlarged": {
+        "method": "actual computed font sizes and numeric line heights doubled on Overview and Dock descendants",
+        "beforeSample": null,
+        "renderedStateFont": "26px"
+      },
+      "after": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "grid": {
+          "width": 1800,
+          "height": 953,
+          "scrollHeight": 1745,
+          "scrollTop": 0,
+          "hostEvidence": "false",
+          "wideDetails": "false",
+          "allHistories": "false"
+        },
+        "crewRows": 11,
+        "loops": [
+          "loop-alpha · Parked",
+          "loop-beta · Blocked"
+        ],
+        "lanes": 13,
+        "roster": {
+          "client": 1198,
+          "scroll": 1198
+        },
+        "histories": 1,
+        "outerOverflow": true,
+        "crew": {
+          "x": 24,
+          "y": 291,
+          "width": 1200,
+          "height": 545,
+          "top": 291,
+          "right": 1224,
+          "bottom": 836,
+          "left": 24
+        },
+        "pipeline": {
+          "x": 24,
+          "y": 1076,
+          "width": 1200,
+          "height": 235,
+          "top": 1076,
+          "right": 1224,
+          "bottom": 1311,
+          "left": 24
+        },
+        "machine": {
+          "x": 1236,
+          "y": 1263,
+          "width": 588,
+          "height": 555,
+          "top": 1263,
+          "right": 1824,
+          "bottom": 1818,
+          "left": 1236
+        },
+        "active": "<body><div id=\"root\"><div class=\"app overview-shell dock-collapsed\"><header class=\"top\"><span class=\"brand\">MISSION CONTROL</span><nav class=\"tabs\" aria-label=\"Pages\"><a href=\"/\" class=\"on\" aria-current=\"page\">Overview</a><a href=\"/flight\">Flight</a><a href=\"/board\">Board</a><a href=\"/agent\">Agents<"
+      },
+      "kpis": [
+        {
+          "value": "41.2k",
+          "position": "static",
+          "valueRect": {
+            "x": 261.75,
+            "y": 150,
+            "width": 91.640625,
+            "height": 48,
+            "top": 150,
+            "right": 353.390625,
+            "bottom": 198,
+            "left": 261.75
+          },
+          "buttonRect": {
+            "x": 261.75,
+            "y": 242,
+            "width": 112.765625,
+            "height": 32,
+            "top": 242,
+            "right": 374.515625,
+            "bottom": 274,
+            "left": 261.75
+          },
+          "overlap": false,
+          "valuePainted": true,
+          "buttonPainted": true
+        },
+        {
+          "value": "~$24.31",
+          "position": "static",
+          "valueRect": {
+            "x": 486.5,
+            "y": 125.984375,
+            "width": 133.6875,
+            "height": 48,
+            "top": 125.984375,
+            "right": 620.1875,
+            "bottom": 173.984375,
+            "left": 486.5
+          },
+          "buttonRect": {
+            "x": 486.5,
+            "y": 234,
+            "width": 112.765625,
+            "height": 32,
+            "top": 234,
+            "right": 599.265625,
+            "bottom": 266,
+            "left": 486.5
+          },
+          "overlap": false,
+          "valuePainted": true,
+          "buttonPainted": true
+        },
+        {
+          "value": "5",
+          "position": "static",
+          "valueRect": {
+            "x": 711.25,
+            "y": 150,
+            "width": 20.6875,
+            "height": 48,
+            "top": 150,
+            "right": 731.9375,
+            "bottom": 198,
+            "left": 711.25
+          },
+          "buttonRect": {
+            "x": 711.25,
+            "y": 242,
+            "width": 112.765625,
+            "height": 32,
+            "top": 242,
+            "right": 824.015625,
+            "bottom": 274,
+            "left": 711.25
+          },
+          "overlap": false,
+          "valuePainted": true,
+          "buttonPainted": true
+        },
+        {
+          "value": "92%",
+          "position": "static",
+          "valueRect": {
+            "x": 1160.75,
+            "y": 150,
+            "width": 73.84375,
+            "height": 48,
+            "top": 150,
+            "right": 1234.59375,
+            "bottom": 198,
+            "left": 1160.75
+          },
+          "buttonRect": {
+            "x": 1160.75,
+            "y": 242,
+            "width": 112.765625,
+            "height": 32,
+            "top": 242,
+            "right": 1273.515625,
+            "bottom": 274,
+            "left": 1160.75
+          },
+          "overlap": false,
+          "valuePainted": true,
+          "buttonPainted": true
+        },
+        {
+          "value": "3",
+          "position": "static",
+          "valueRect": {
+            "x": 1610.25,
+            "y": 150,
+            "width": 20.6875,
+            "height": 48,
+            "top": 150,
+            "right": 1630.9375,
+            "bottom": 198,
+            "left": 1610.25
+          },
+          "buttonRect": {
+            "x": 1610.25,
+            "y": 242,
+            "width": 112.765625,
+            "height": 32,
+            "top": 242,
+            "right": 1723.015625,
+            "bottom": 274,
+            "left": 1610.25
+          },
+          "overlap": false,
+          "valuePainted": true,
+          "buttonPainted": true
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "errors": [],
+  "limits": [
+    "Read-only fictional App fixture, no live verification",
+    "200% text-only enlargement is computed-font/line-height enlargement; no browser-zoom execution",
+    "Candidate test fixtures/helpers include uncommitted additive normal-loops fixture; production remains frozen"
+  ],
+  "files": [
+    {
+      "path": "apps/web/test/overviewDensityFixtures.ts",
+      "sha256": "e279bd5e6dc36dd925bb243d1b24ecc6878233d66b22d8fb473801dcb758c203"
+    },
+    {
+      "path": "apps/web/test/overviewDensityBrowser.tsx",
+      "sha256": "480ca5c62224356901dfcdb902124715adf6489399e8b3144f24cae9f75b8119"
+    },
+    {
+      "path": "apps/web/test/browserRunner.ts",
+      "sha256": "81fee31139e9b9438fb1db5e58ef22704e96fee0014de9888e934e51494e741b"
+    },
+    {
+      "path": "apps/web/src/overview/overview.css",
+      "sha256": "26b3e25d4d9385c5094312a50b62bd6263e230a2e0bed0b485041e4e435cbbed"
+    },
+    {
+      "path": "apps/web/src/overview/KpiStrip.tsx",
+      "sha256": "6327c01d55678400fc1259f4ec384459b03e6f1d595da0cc81cab248cf2537f4"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewProvider.tsx",
+      "sha256": "031e66a3f9f2b22b4867e6cecc88c3a5761c4262e4fa7ead5cb1749860a9b52d"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewLayout.tsx",
+      "sha256": "c4f1f2a969260320fc9e871255928d3bfee863a6a905fa156709d0d6e59fee1d"
+    },
+    {
+      "path": "apps/web/src/overview/OverviewEvidence.tsx",
+      "sha256": "5acff7a5ff0e75a9772fa5bb04b490b479c69886a2aaa8d1a9930c719955e28d"
+    },
+    {
+      "path": "apps/web/src/shell/Dock.tsx",
+      "sha256": "8d6d38cda8cc5642dc3956929318f1bb29a1d72087b3ecbf8079b512ffa1145e"
+    }
+  ],
+  "finishedAt": "2026-11-03T16:39:09.251Z",
+  "status": "completed"
+}

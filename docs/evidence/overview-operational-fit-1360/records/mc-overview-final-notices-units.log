@@ -1,0 +1,30 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/pageRenderCounts.test.tsx (18 tests) 822ms
+ ✓ |web| test/OverviewMeasuredHistory.test.tsx (14 tests) 179ms
+ ✓ |web| test/OverviewBudget.test.tsx (2 tests) 177ms
+stderr | test/App.test.tsx > App > / renders its page and marks its tab
+Not implemented: navigation to another Document
+
+(node:61781) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ |web| test/App.test.tsx (42 tests) 3536ms
+   ✓ App > / has one page heading and the shell landmarks  363ms
+   ✓ App > /flight has one page heading and the shell landmarks  315ms
+   ✓ App > /board has one page heading and the shell landmarks  315ms
+   ✓ App > /agent has one page heading and the shell landmarks  311ms
+   ✓ App > /map/sample has one page heading and the shell landmarks  311ms
+   ✓ App > /comms has one page heading and the shell landmarks  317ms
+   ✓ App > /telemetry has one page heading and the shell landmarks  319ms
+   ✓ App > /audit has one page heading and the shell landmarks  310ms
+   ✓ App > /setup/loops has one page heading and the shell landmarks  332ms
+ ✓ |web| test/Overview.test.tsx (129 tests) 3485ms
+ ✓ |web| test/OverviewHistory.test.tsx (5 tests) 141ms
+ ✓ |web| test/OverviewOperational.test.tsx (6 tests) 101ms
+
+ Test Files  7 passed (7)
+      Tests  216 passed (216)
+   Start at  17:53:37
+   Duration  5.88s (transform 995ms, setup 1.37s, collect 1.50s, tests 8.44s, environment 2.18s, prepare 243ms)
+

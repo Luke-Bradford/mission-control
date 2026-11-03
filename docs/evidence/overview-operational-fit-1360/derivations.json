@@ -1,0 +1,178 @@
+[
+  {
+    "file": "focus/normal-loops-1920x1080-dpr1-light-folded-crew-after.png",
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "sourcePng": {
+      "file": "normal-loops-1920x1080-dpr1-light-folded.png",
+      "sha256": "49435e0cfecede2d5403d60c153bc105212ca5a8b7b2d67a2c15153113716a0a"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 463,
+      "bottom": 646
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 463
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-1920x1080-dpr1-light-folded-crew-before.png",
+    "source": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "sourcePng": {
+      "file": "normal-loops-1920x1080-dpr1-light-folded.png",
+      "sha256": "6f482003bfb3d3886b6ec7d9bde6bb2a3d268d21727b6ec69c8bbdd8eb8bac20"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 474,
+      "bottom": 657
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 474
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-1920x1080-dpr1-light-folded-metrics-after.png",
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "sourcePng": {
+      "file": "normal-loops-1920x1080-dpr1-light-folded.png",
+      "sha256": "49435e0cfecede2d5403d60c153bc105212ca5a8b7b2d67a2c15153113716a0a"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 73,
+      "width": 1800,
+      "height": 98,
+      "bottom": 171
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 73,
+      "width": 1800,
+      "height": 98
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-1920x1080-dpr1-light-folded-metrics-before.png",
+    "source": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "sourcePng": {
+      "file": "normal-loops-1920x1080-dpr1-light-folded.png",
+      "sha256": "6f482003bfb3d3886b6ec7d9bde6bb2a3d268d21727b6ec69c8bbdd8eb8bac20"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 73,
+      "width": 1800,
+      "height": 98,
+      "bottom": 171
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 73,
+      "width": 1800,
+      "height": 98
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-3840x2160-dpr1-dark-open-crew-after.png",
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "sourcePng": {
+      "file": "normal-loops-3840x2160-dpr1-dark-open.png",
+      "sha256": "1206ea26c3a22a6ca91f29ed73a66211c4b0d68ec12027e940ae1c5a2e254fd5"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 183,
+      "width": 1280,
+      "height": 463,
+      "bottom": 646
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 183,
+      "width": 1280,
+      "height": 463
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-3840x2160-dpr1-dark-open-crew-before.png",
+    "source": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "sourcePng": {
+      "file": "normal-loops-3840x2160-dpr1-dark-open.png",
+      "sha256": "1f6a91e6ef4e04b1d6d7e87f96473231ebd29f253777a3db111e5e36fd1c082b"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 578,
+      "bottom": 761
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 183,
+      "width": 1200,
+      "height": 578
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-3840x2160-dpr1-dark-open-metrics-after.png",
+    "source": "f49066503d42a1588096e9b71a17b3ed0688db7c",
+    "sourcePng": {
+      "file": "normal-loops-3840x2160-dpr1-dark-open.png",
+      "sha256": "1206ea26c3a22a6ca91f29ed73a66211c4b0d68ec12027e940ae1c5a2e254fd5"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 73,
+      "width": 3368,
+      "height": 98,
+      "bottom": 171
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 73,
+      "width": 3368,
+      "height": 98
+    },
+    "method": "direct viewport intersection; no rerender"
+  },
+  {
+    "file": "focus/normal-loops-3840x2160-dpr1-dark-open-metrics-before.png",
+    "source": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+    "sourcePng": {
+      "file": "normal-loops-3840x2160-dpr1-dark-open.png",
+      "sha256": "1f6a91e6ef4e04b1d6d7e87f96473231ebd29f253777a3db111e5e36fd1c082b"
+    },
+    "cropCss": {
+      "x": 24,
+      "y": 73,
+      "width": 3388,
+      "height": 98,
+      "bottom": 171
+    },
+    "pixelRect": {
+      "x": 24,
+      "y": 73,
+      "width": 3388,
+      "height": 98
+    },
+    "method": "direct viewport intersection; no rerender"
+  }
+]

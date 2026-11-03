@@ -1,0 +1,18 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewConstraintBudget.browser.test.ts (8 tests) 6927ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, fresh, mixed, light  968ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, fresh, mixed, dark  686ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, fresh, normal-loops, light  648ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, fresh, normal-loops, dark  683ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, stale, mixed, light  699ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, stale, mixed, dark  664ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, stale, normal-loops, light  635ms
+   ✓ Overview constrained monitoring budget > retains the forecast, zero readings and wrapped next action at1920, stale, normal-loops, dark  654ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  17:56:08
+   Duration  7.63s (transform 199ms, setup 305ms, collect 218ms, tests 6.93s, environment 0ms, prepare 35ms)
+

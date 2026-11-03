@@ -1,0 +1,16 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewDensity.browser.test.ts (7 tests | 4 skipped) 16370ms
+   ✓ Approved Overview hierarchy > preserves nine configured seats and two observed loops through the real session filter  1841ms
+   ✓ Approved Overview hierarchy > keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open  4797ms
+   ✓ Approved Overview hierarchy > keeps empty, one, fifty, long and collection states honest without losing keyboard routes  8417ms
+ ✓ |web| test/OverviewReaderReflow.browser.test.ts (8 tests | 6 skipped) 2866ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > retains the same loaded allowance feeds across column reflow, light  907ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > retains the same loaded allowance feeds across column reflow, dark  639ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed | 10 skipped (15)
+   Start at  16:47:23
+   Duration  20.35s (transform 207ms, setup 387ms, collect 388ms, tests 19.24s, environment 0ms, prepare 60ms)
+

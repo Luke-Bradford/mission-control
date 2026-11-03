@@ -1,0 +1,7564 @@
+{
+  "/api/config": {
+    "githubLogin": null,
+    "operator": {
+      "id": "operator",
+      "timezone": "UTC"
+    },
+    "accounts": [
+      {
+        "id": "claude-main",
+        "vendor": "claude",
+        "alertAt": 85,
+        "stopAt": 95
+      },
+      {
+        "id": "codex-main",
+        "vendor": "codex",
+        "alertAt": 70,
+        "stopAt": 80
+      }
+    ],
+    "repos": [
+      {
+        "id": "shop-app",
+        "github": "octo-org/shop-app",
+        "project": 2,
+        "statusMap": {
+          "Todo": "planned",
+          "In Progress": "in progress",
+          "Done": "done"
+        },
+        "needsYouLabels": [
+          "needs-design"
+        ],
+        "fullSuite": [
+          "pnpm test",
+          "pnpm -s test"
+        ]
+      },
+      {
+        "id": "site-builder",
+        "github": "octo-org/site-builder",
+        "project": 3,
+        "statusMap": {
+          "Backlog": "planned"
+        },
+        "needsYouLabels": null,
+        "fullSuite": []
+      }
+    ],
+    "loops": [
+      {
+        "id": "loop-alpha",
+        "repoId": "site-builder",
+        "kind": "ta-loop",
+        "accountId": "claude-main",
+        "stateDir": "/fixture/observed/state",
+        "logsDir": null,
+        "worktree": "/fixture/observed",
+        "launchdLabel": "fixture.observed.loop-alpha"
+      },
+      {
+        "id": "loop-beta",
+        "repoId": "site-builder",
+        "kind": "ta-loop",
+        "accountId": "claude-main",
+        "stateDir": "/fixture/observed/state",
+        "logsDir": null,
+        "worktree": "/fixture/observed",
+        "launchdLabel": "fixture.observed.loop-beta"
+      }
+    ],
+    "poll": {
+      "usageMinutes": 30,
+      "githubSeconds": 60
+    },
+    "crew": {
+      "worktrees": "/mc/crew",
+      "roles": [
+        {
+          "name": "GUIDO",
+          "prompt": "g",
+          "model": "sonnet",
+          "mode": "writer",
+          "loop": "build",
+          "tools": [],
+          "here": ""
+        },
+        {
+          "name": "INCO",
+          "prompt": "i",
+          "model": "sonnet",
+          "mode": "writer",
+          "loop": "build",
+          "tools": [],
+          "here": ""
+        },
+        {
+          "name": "RETRO",
+          "prompt": "r",
+          "model": "opus",
+          "mode": "read-only",
+          "loop": "none",
+          "tools": [],
+          "here": ""
+        }
+      ],
+      "sessions": [
+        {
+          "id": "demo",
+          "repoId": "shop-app",
+          "checkout": "/fixture/shop-app",
+          "seats": [
+            {
+              "id": "flight-1",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "watch"
+            },
+            {
+              "id": "dev-1",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-2",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-3",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-4",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-5",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-6",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-7",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-8",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-9",
+              "role": "RETRO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "read-only",
+              "area": [],
+              "loop": "build"
+            },
+            {
+              "id": "dev-10",
+              "role": "GUIDO",
+              "accountId": "claude-main",
+              "model": "fixture-model",
+              "mode": "writer",
+              "area": [],
+              "loop": "build"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "/api/repos": [
+    {
+      "id": "shop-app",
+      "github": "octo-org/shop-app",
+      "project": 2
+    },
+    {
+      "id": "site-builder",
+      "github": "octo-org/site-builder",
+      "project": 3
+    }
+  ],
+  "/api/metrics": {
+    "at": 1792238400000,
+    "inProgress": {
+      "count": 5,
+      "oldestAt": 1792237200000
+    },
+    "merged": {
+      "count": 6,
+      "loops": 2
+    },
+    "cycleTime": {
+      "p50Ms": 4320000,
+      "p85Ms": 109440000,
+      "n": 8,
+      "excluded": 1
+    },
+    "cost": {
+      "usd": 24.31
+    }
+  },
+  "/api/crew?shape=summary": {
+    "rows": [
+      {
+        "id": "flight-1",
+        "repoId": "shop-app",
+        "index": 0,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": null,
+        "ticketTitle": "Recorded fixture work 0",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-0",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 84000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1100
+            ],
+            [
+              1792236660000,
+              1280
+            ],
+            [
+              1792236720000,
+              1640
+            ],
+            [
+              1792236780000,
+              1460
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2280
+            ],
+            [
+              1792236960000,
+              2640
+            ],
+            [
+              1792237020000,
+              3100
+            ],
+            [
+              1792237080000,
+              2820
+            ],
+            [
+              1792237140000,
+              2550
+            ],
+            [
+              1792237200000,
+              2730
+            ],
+            [
+              1792237260000,
+              2910
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3100
+            ],
+            [
+              1792237440000,
+              3100
+            ],
+            [
+              1792237500000,
+              3460
+            ],
+            [
+              1792237560000,
+              3280
+            ],
+            [
+              1792237620000,
+              3820
+            ],
+            [
+              1792237680000,
+              3550
+            ],
+            [
+              1792237740000,
+              4100
+            ],
+            [
+              1792237800000,
+              3910
+            ],
+            [
+              1792237860000,
+              4190
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4420
+            ],
+            [
+              1792238040000,
+              4190
+            ],
+            [
+              1792238100000,
+              3910
+            ],
+            [
+              1792238160000,
+              3640
+            ],
+            [
+              1792238220000,
+              3820
+            ],
+            [
+              1792238280000,
+              3710
+            ],
+            [
+              1792238340000,
+              3750
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-1",
+        "repoId": "shop-app",
+        "index": 1,
+        "hudState": "running",
+        "stateSince": 1792237920000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#101",
+        "ticketTitle": "Recorded fixture work 1",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-1",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 86000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-2",
+        "repoId": "shop-app",
+        "index": 2,
+        "hudState": "running",
+        "stateSince": 1792238100000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#102",
+        "ticketTitle": "Recorded fixture work 2",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-2",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 88000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-3",
+        "repoId": "shop-app",
+        "index": 3,
+        "hudState": "running",
+        "stateSince": 1792237680000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#103",
+        "ticketTitle": "Recorded fixture work 3",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-3",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 90000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-4",
+        "repoId": "shop-app",
+        "index": 4,
+        "hudState": "blocked",
+        "stateSince": 1792236360000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": "Protected path clearance is required before proceeding.",
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#104",
+        "ticketTitle": "Recorded fixture work 4",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-4",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 92000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-5",
+        "repoId": "shop-app",
+        "index": 5,
+        "hudState": "running",
+        "stateSince": 1792237440000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#105",
+        "ticketTitle": "Recorded fixture work 5",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-5",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 94000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-6",
+        "repoId": "shop-app",
+        "index": 6,
+        "hudState": "running",
+        "stateSince": 1792238280000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#106",
+        "ticketTitle": "Recorded fixture work 6",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-6",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 96000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-7",
+        "repoId": "shop-app",
+        "index": 7,
+        "hudState": "running",
+        "stateSince": 1792237980000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#107",
+        "ticketTitle": "Recorded fixture work 7",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-7",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 98000,
+          "contextWindow": null,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-8",
+        "repoId": "shop-app",
+        "index": 8,
+        "hudState": "idle",
+        "stateSince": 1792235940000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#108",
+        "ticketTitle": "Recorded fixture work 8",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-8",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 100000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "dev-9",
+        "repoId": "shop-app",
+        "index": 9,
+        "hudState": "stopped",
+        "stateSince": 1792237320000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "RETRO",
+        "mode": "read-only",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": true,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#109",
+        "ticketTitle": "Recorded fixture work 9",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 102000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null,
+        "queuedReview": {
+          "repoId": "shop-app",
+          "prNumber": 208,
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ref": "shop-app#108",
+          "position": 1,
+          "reason": "Account paused; this current-head review is queued."
+        }
+      },
+      {
+        "id": "dev-10",
+        "repoId": "shop-app",
+        "index": 10,
+        "hudState": "running",
+        "stateSince": 1792237740000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "demo",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#110",
+        "ticketTitle": "Recorded fixture work 10",
+        "loop": null,
+        "run": {
+          "id": "fixture-run-10",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 104000,
+          "contextWindow": 400000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [
+            [
+              1792236600000,
+              1090
+            ],
+            [
+              1792236660000,
+              1272
+            ],
+            [
+              1792236720000,
+              1636
+            ],
+            [
+              1792236780000,
+              1454
+            ],
+            [
+              1792236840000,
+              2000
+            ],
+            [
+              1792236900000,
+              2272
+            ],
+            [
+              1792236960000,
+              2636
+            ],
+            [
+              1792237020000,
+              3090
+            ],
+            [
+              1792237080000,
+              2818
+            ],
+            [
+              1792237140000,
+              2545
+            ],
+            [
+              1792237200000,
+              2727
+            ],
+            [
+              1792237260000,
+              2909
+            ],
+            [
+              1792237320000,
+              3000
+            ],
+            [
+              1792237380000,
+              3090
+            ],
+            [
+              1792237440000,
+              3090
+            ],
+            [
+              1792237500000,
+              3454
+            ],
+            [
+              1792237560000,
+              3272
+            ],
+            [
+              1792237620000,
+              3818
+            ],
+            [
+              1792237680000,
+              3545
+            ],
+            [
+              1792237740000,
+              4090
+            ],
+            [
+              1792237800000,
+              3909
+            ],
+            [
+              1792237860000,
+              4181
+            ],
+            [
+              1792237920000,
+              4000
+            ],
+            [
+              1792237980000,
+              4418
+            ],
+            [
+              1792238040000,
+              4181
+            ],
+            [
+              1792238100000,
+              3909
+            ],
+            [
+              1792238160000,
+              3636
+            ],
+            [
+              1792238220000,
+              3818
+            ],
+            [
+              1792238280000,
+              3709
+            ],
+            [
+              1792238340000,
+              3745
+            ]
+          ],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 400000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "loop-alpha",
+        "repoId": "site-builder",
+        "index": 11,
+        "hudState": "parked",
+        "stateSince": 1792237680000,
+        "accountId": "claude-main",
+        "kind": "loop",
+        "role": null,
+        "mode": null,
+        "area": [],
+        "model": null,
+        "sessionId": null,
+        "loopKind": "ta-loop",
+        "paused": false,
+        "note": "Waiting for a recorded check result.",
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 76000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "loop-beta",
+        "repoId": "site-builder",
+        "index": 12,
+        "hudState": "blocked",
+        "stateSince": 1792237440000,
+        "accountId": "claude-main",
+        "kind": "loop",
+        "role": null,
+        "mode": null,
+        "area": [],
+        "model": null,
+        "sessionId": null,
+        "loopKind": "ta-loop",
+        "paused": false,
+        "note": "Driver stopped: recorded usage limit.",
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": {
+          "toolCalls": 0,
+          "turns": 0,
+          "lastEventAt": 1792238340000,
+          "model": "fixture-model",
+          "contextTokens": 80000,
+          "contextWindow": 200000,
+          "liveTool": null,
+          "tools": {},
+          "subagents": [],
+          "minuteTokens": [],
+          "turnUsage": [],
+          "background": [],
+          "compactions": 0
+        },
+        "contextWindow": 200000,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      }
+    ],
+    "firstRunToday": 1792234800000
+  },
+  "/api/agents/guido-1": {
+    "row": {
+      "id": "guido-1",
+      "repoId": "shop-app",
+      "index": 0,
+      "hudState": "idle",
+      "stateSince": 1792236900000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [],
+      "model": null,
+      "sessionId": "s1",
+      "loopKind": "ta-loop",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#3349",
+      "ticketTitle": "Quote cache",
+      "loop": {
+        "phase": "parked",
+        "text": "Review findings remain",
+        "prNumber": 77,
+        "parked": "One keyboard check remains",
+        "profile": "feature"
+      },
+      "run": {
+        "id": "r-12",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": null,
+      "contextWindow": null,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Parked",
+      "reason": "Review round 2 of 3: one keyboard check remains",
+      "since": 1792236900000
+    },
+    "health": {
+      "label": "Review findings",
+      "blocking": 1,
+      "failedTools": 1
+    },
+    "tools": {
+      "total": 37,
+      "failed": 1,
+      "byTool": [
+        {
+          "name": "Read",
+          "calls": 20,
+          "failed": 0
+        },
+        {
+          "name": "Bash",
+          "calls": 12,
+          "failed": 1
+        },
+        {
+          "name": "Edit",
+          "calls": 5,
+          "failed": 0
+        }
+      ]
+    },
+    "cost": {
+      "totalUsd": 2.4,
+      "meanPerReportedTurnUsd": 0.12,
+      "turns": 20,
+      "estimated": true
+    },
+    "context": {
+      "tokens": 104000,
+      "window": 200000,
+      "percent": 52,
+      "compactions": 2,
+      "prompt": null
+    },
+    "story": {
+      "title": "Quote cache",
+      "ticketHref": "/tickets/shop-app/3349",
+      "original": [
+        {
+          "line": 1,
+          "text": "Make the Agent page answer what it awaits and what happens next."
+        }
+      ],
+      "report": "The new page is implemented. The keyboard check remains.",
+      "reportedAt": 1792236900000,
+      "doneWhen": [
+        {
+          "line": 1,
+          "text": "Keyboard navigation",
+          "status": "not_met",
+          "evidence": "Check the More menu after review."
+        }
+      ],
+      "left": [
+        "Check the More menu after review."
+      ]
+    },
+    "nextMove": {
+      "owner": "controller",
+      "text": "Complete the keyboard check and request a fresh whole-branch review.",
+      "recommendation": "Run the focused browser check first.",
+      "label": "Open conversation",
+      "href": "/comms/crew"
+    },
+    "deliverables": [
+      {
+        "id": "pr:77",
+        "kind": "pr",
+        "label": "PR #77 · Agent page v2",
+        "href": "https://github.com/o/repo/pull/77"
+      },
+      {
+        "id": "shot:77",
+        "kind": "screenshot",
+        "label": "Agent · dark · after",
+        "href": "/api/prs/77/evidence/head/agent-dark-after.png"
+      },
+      {
+        "id": "file:77",
+        "kind": "file",
+        "label": "apps/web/src/pages/Agent.tsx",
+        "href": "https://github.com/o/repo/blob/head/apps/web/src/pages/Agent.tsx"
+      }
+    ],
+    "related": [
+      {
+        "id": "review:1",
+        "kind": "review",
+        "title": "RETRO-1 · round 2",
+        "status": "reported",
+        "href": null,
+        "detail": "1 blocking · 0 minor"
+      },
+      {
+        "id": "sub:1",
+        "kind": "subagent",
+        "title": "Explore · locate the keyboard handlers",
+        "status": "completed",
+        "href": null,
+        "detail": "12 tool calls"
+      }
+    ],
+    "steps": [
+      {
+        "id": "plan",
+        "label": "plan",
+        "state": "done",
+        "tries": null,
+        "failures": null,
+        "limit": null,
+        "durationMs": 60000,
+        "since": null,
+        "reason": null
+      },
+      {
+        "id": "go/no-go",
+        "label": "go/no-go",
+        "state": "done",
+        "tries": null,
+        "failures": null,
+        "limit": null,
+        "durationMs": 60000,
+        "since": null,
+        "reason": null
+      },
+      {
+        "id": "build",
+        "label": "build",
+        "state": "done",
+        "tries": null,
+        "failures": null,
+        "limit": null,
+        "durationMs": 60000,
+        "since": null,
+        "reason": null
+      },
+      {
+        "id": "checks",
+        "label": "checks",
+        "state": "done",
+        "tries": null,
+        "failures": 1,
+        "limit": 3,
+        "durationMs": 60000,
+        "since": null,
+        "reason": null
+      },
+      {
+        "id": "review",
+        "label": "review",
+        "state": "held",
+        "tries": 2,
+        "failures": null,
+        "limit": 3,
+        "durationMs": null,
+        "since": null,
+        "reason": "Keyboard check remains"
+      },
+      {
+        "id": "draft PR",
+        "label": "draft PR",
+        "state": "unknown",
+        "tries": null,
+        "failures": null,
+        "limit": null,
+        "durationMs": null,
+        "since": null,
+        "reason": null
+      }
+    ]
+  },
+  "/api/crew/guido-1": {
+    "id": "guido-1",
+    "repoId": "shop-app",
+    "index": 0,
+    "hudState": "idle",
+    "stateSince": 1792236900000,
+    "accountId": "claude-main",
+    "kind": "crew",
+    "role": "GUIDO",
+    "mode": "writer",
+    "area": [],
+    "model": null,
+    "sessionId": "s1",
+    "loopKind": "ta-loop",
+    "paused": false,
+    "note": null,
+    "stop": null,
+    "sourceError": null,
+    "ticket": "shop-app#3349",
+    "ticketTitle": "Quote cache",
+    "loop": {
+      "phase": "parked",
+      "text": "Review findings remain",
+      "prNumber": 77,
+      "parked": "One keyboard check remains",
+      "profile": "feature"
+    },
+    "run": {
+      "id": "r-12",
+      "seq": 12,
+      "startedAt": 1792236900000,
+      "endedAt": null,
+      "status": "running",
+      "model": "claude-opus-4-1",
+      "branch": "feature/3349-quote-cache",
+      "tokens": {
+        "input": 12000,
+        "output": 3400,
+        "cacheRead": 1200000,
+        "cacheCreate": 40000
+      },
+      "costUsd": 2.4712
+    },
+    "prs": [],
+    "summary": null,
+    "digest": null,
+    "contextWindow": null,
+    "lastOutputAt": 1792238340000,
+    "cli": {
+      "version": null,
+      "effort": null
+    },
+    "review": null
+  },
+  "/api/attention": [
+    {
+      "key": "overview:0",
+      "kind": "decision",
+      "agentId": "dev-1",
+      "repoId": "shop-app",
+      "text": "Confirm the rollback boundary for the current head.",
+      "tool": null,
+      "at": 1792227600000,
+      "url": "https://github.com/octo-org/shop-app/issues/4001",
+      "escalationId": "shop-app#4001",
+      "ticket": "shop-app#101",
+      "acked": false,
+      "owner": "operator"
+    },
+    {
+      "key": "overview:1",
+      "kind": "question",
+      "agentId": "dev-2",
+      "repoId": "shop-app",
+      "text": "Clarify the import scope before continuing.",
+      "tool": null,
+      "at": 1792227600000,
+      "url": "https://github.com/octo-org/shop-app/issues/4001",
+      "escalationId": "shop-app#4001",
+      "ticket": "shop-app#102",
+      "acked": false,
+      "owner": "operator"
+    },
+    {
+      "key": "overview:2",
+      "kind": "question",
+      "agentId": "dev-3",
+      "repoId": "shop-app",
+      "text": "Choose the recorded recovery policy.",
+      "tool": null,
+      "at": 1792227600000,
+      "url": "https://github.com/octo-org/shop-app/issues/4001",
+      "escalationId": "shop-app#4001",
+      "ticket": "shop-app#103",
+      "acked": false,
+      "owner": "operator"
+    }
+  ],
+  "/api/escalations": [],
+  "/api/overview": {
+    "at": 1792238400000,
+    "kpis": {
+      "tokensPerMin": {
+        "now": 41200,
+        "series": [
+          12000,
+          14000,
+          18000,
+          16000,
+          22000,
+          25000,
+          29000,
+          34000,
+          31000,
+          28000,
+          30000,
+          32000,
+          33000,
+          34000,
+          34000,
+          38000,
+          36000,
+          42000,
+          39000,
+          45000,
+          43000,
+          46000,
+          44000,
+          48600,
+          46000,
+          43000,
+          40000,
+          42000,
+          40800,
+          41200
+        ]
+      },
+      "spendToday": {
+        "usd": 24.31,
+        "perHour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          24.31,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "series": [
+          0.08,
+          0.11,
+          0.12,
+          0.09,
+          0.13,
+          0.16,
+          0.18,
+          0.21,
+          0.18,
+          0.15,
+          0.14,
+          0.12,
+          0,
+          0,
+          0.11,
+          0.14,
+          0.16,
+          0.18,
+          0.2,
+          0.21,
+          0.19,
+          0.18,
+          0.16,
+          0.15,
+          0.13,
+          0.12,
+          0.11,
+          0.1,
+          0.09,
+          0.08
+        ]
+      },
+      "inFlight": {
+        "count": 5,
+        "oldestAt": 1792237200000,
+        "series": [
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5
+        ]
+      },
+      "ciPassRate24h": {
+        "pct": 92,
+        "runs": 25,
+        "redNow": 2,
+        "series": [
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          null,
+          null,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92
+        ]
+      },
+      "needsYou": {
+        "count": 3,
+        "overHour": 0,
+        "series": [
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    "pipeline": [
+      {
+        "stage": "ready",
+        "count": 2,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 201,
+            "title": "Recorded ticket 201",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 202,
+            "title": "Recorded ticket 202",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          }
+        ]
+      },
+      {
+        "stage": "building",
+        "count": 3,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 211,
+            "title": "Recorded ticket 211",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 212,
+            "title": "Recorded ticket 212",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 213,
+            "title": "Recorded ticket 213",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-3"
+          }
+        ]
+      },
+      {
+        "stage": "checks",
+        "count": 1,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 221,
+            "title": "Recorded ticket 221",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          }
+        ]
+      },
+      {
+        "stage": "review",
+        "count": 1,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 231,
+            "title": "Recorded ticket 231",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          }
+        ]
+      },
+      {
+        "stage": "merging",
+        "count": 0,
+        "oldestAt": null,
+        "cards": []
+      },
+      {
+        "stage": "merged",
+        "count": 4,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 251,
+            "title": "Recorded ticket 251",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 252,
+            "title": "Recorded ticket 252",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 253,
+            "title": "Recorded ticket 253",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-3"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 254,
+            "title": "Recorded ticket 254",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-4"
+          }
+        ]
+      }
+    ],
+    "machine": {
+      "cpu": [
+        20,
+        21,
+        22,
+        24,
+        26,
+        28,
+        30,
+        28,
+        26,
+        25,
+        27,
+        29,
+        null,
+        null,
+        28,
+        30,
+        32,
+        34,
+        36,
+        37,
+        39,
+        41,
+        38,
+        37,
+        36,
+        35,
+        34,
+        35,
+        36,
+        37
+      ],
+      "mem": [
+        25,
+        25,
+        26,
+        26,
+        26,
+        27,
+        27,
+        28,
+        28,
+        29,
+        29,
+        30,
+        null,
+        null,
+        30,
+        30,
+        31,
+        31,
+        31,
+        32,
+        32,
+        32,
+        33,
+        33,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "diskFreeGb": 412,
+      "disk": [
+        420,
+        420,
+        419,
+        419,
+        419,
+        418,
+        418,
+        418,
+        417,
+        417,
+        417,
+        416,
+        null,
+        null,
+        416,
+        416,
+        415,
+        415,
+        415,
+        414,
+        414,
+        414,
+        414,
+        414,
+        413,
+        413,
+        413,
+        413,
+        412,
+        412
+      ]
+    }
+  },
+  "/api/overview/timeline": {
+    "from": 1792234800000,
+    "to": 1792238400000,
+    "lanes": [
+      {
+        "agentId": "flight-1",
+        "spans": [],
+        "ticks": []
+      },
+      {
+        "agentId": "dev-1",
+        "spans": [
+          {
+            "kind": "turn",
+            "from": 1792235760000,
+            "to": 1792237260000
+          }
+        ],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "dev-2",
+        "spans": [
+          {
+            "kind": "checks",
+            "from": 1792235820000,
+            "to": 1792237320000
+          }
+        ],
+        "ticks": []
+      },
+      {
+        "agentId": "dev-3",
+        "spans": [],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "dev-4",
+        "spans": [
+          {
+            "kind": "checks",
+            "from": 1792235940000,
+            "to": 1792237440000
+          }
+        ],
+        "ticks": []
+      },
+      {
+        "agentId": "dev-5",
+        "spans": [
+          {
+            "kind": "turn",
+            "from": 1792236000000,
+            "to": 1792237200000
+          }
+        ],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "dev-6",
+        "spans": [],
+        "ticks": []
+      },
+      {
+        "agentId": "dev-7",
+        "spans": [
+          {
+            "kind": "turn",
+            "from": 1792236120000,
+            "to": 1792237320000
+          }
+        ],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "dev-8",
+        "spans": [
+          {
+            "kind": "checks",
+            "from": 1792235700000,
+            "to": 1792237380000
+          }
+        ],
+        "ticks": []
+      },
+      {
+        "agentId": "dev-9",
+        "spans": [],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "dev-10",
+        "spans": [
+          {
+            "kind": "checks",
+            "from": 1792235820000,
+            "to": 1792237200000
+          }
+        ],
+        "ticks": []
+      },
+      {
+        "agentId": "loop-alpha",
+        "spans": [
+          {
+            "kind": "turn",
+            "from": 1792235880000,
+            "to": 1792237260000
+          }
+        ],
+        "ticks": [
+          1792236900000,
+          1792237500000
+        ]
+      },
+      {
+        "agentId": "loop-beta",
+        "spans": [],
+        "ticks": []
+      }
+    ]
+  },
+  "/api/flight": {
+    "seat": {
+      "id": "flight-1",
+      "call": "FLIGHT",
+      "model": "fixture-model",
+      "state": "idle",
+      "live": true
+    },
+    "decisions": []
+  },
+  "/api/flight/summary": {
+    "session": "s1",
+    "headlineAgeMin": 2,
+    "headline": "Two decisions need your attention. The crew is checking the current work.",
+    "now": [],
+    "watching": {
+      "counts": {
+        "active": 3,
+        "blocked": 1,
+        "waiting": 2,
+        "done": 4,
+        "dropped": 1
+      },
+      "top": []
+    },
+    "next": [],
+    "done": [],
+    "incoming": 0,
+    "metrics": {
+      "since": 1792195200000,
+      "opened": 8,
+      "inReview": 4,
+      "inCi": 2,
+      "ciFailures": 3,
+      "reruns": 1,
+      "parks": {
+        "day": 2,
+        "live": []
+      },
+      "seats": [
+        {
+          "seat": "flight-1",
+          "tokens": 1000,
+          "costUsd": 1.25
+        },
+        {
+          "seat": "guido-1",
+          "tokens": 2000,
+          "costUsd": 2.5
+        }
+      ],
+      "flight": {
+        "wakes": 10,
+        "costUsd": 1.25
+      },
+      "forTheController": 0
+    }
+  },
+  "/api/agents/flight-1/stream?limit=20": {
+    "runId": "fixture-run-0",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/activity": [
+    {
+      "at": 1792238400000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 1",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238340000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 2",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238280000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 3",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238220000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 4",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238160000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 5",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238100000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 6",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792238040000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 7",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237980000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 8",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237920000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 9",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237860000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 10",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237800000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 11",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237740000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 12",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237680000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 13",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237620000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 14",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237560000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 15",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237500000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 16",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237440000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 17",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237380000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 18",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237320000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 19",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237260000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 20",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237200000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 21",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237140000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 22",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237080000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 23",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792237020000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 24",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236960000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 25",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236900000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 26",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236840000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 27",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236780000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 28",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236720000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 29",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236660000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 30",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236600000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 31",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236540000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 32",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236480000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 33",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236420000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 34",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236360000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 35",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236300000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 36",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236240000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 37",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236180000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 38",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236120000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 39",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236060000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 40",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792236000000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 41",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235940000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 42",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235880000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 43",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235820000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 44",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235760000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 45",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235700000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 46",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235640000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 47",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235580000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 48",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235520000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 49",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    },
+    {
+      "at": 1792235460000,
+      "kind": "run-start",
+      "who": "dev-1",
+      "text": "Recorded fixture event 50",
+      "ref": null,
+      "url": null,
+      "prs": [],
+      "status": null,
+      "summary": null
+    }
+  ],
+  "/api/health": [],
+  "/api/limits": [
+    {
+      "accountId": "claude-main",
+      "window": "5h",
+      "used": 41,
+      "projected": null,
+      "stopForecast": null,
+      "fullAt": null,
+      "resetAt": 1792245600000,
+      "alertAt": 85,
+      "stopAt": 95,
+      "stale": false,
+      "source": "oauth",
+      "sampledAt": 1792238100000
+    },
+    {
+      "accountId": "claude-main",
+      "window": "7d",
+      "used": 63,
+      "projected": 103,
+      "stopForecast": null,
+      "fullAt": null,
+      "resetAt": 1792346400000,
+      "alertAt": 70,
+      "stopAt": 80,
+      "stale": false,
+      "source": "app-server",
+      "sampledAt": 1792238100000
+    },
+    {
+      "accountId": "codex-main",
+      "window": "7d",
+      "used": 12,
+      "projected": 103,
+      "stopForecast": null,
+      "fullAt": null,
+      "resetAt": 1792346400000,
+      "alertAt": 70,
+      "stopAt": 80,
+      "stale": false,
+      "source": "app-server",
+      "sampledAt": 1792238100000
+    }
+  ],
+  "/api/limits/github": {
+    "queries": {},
+    "pollCost": null
+  },
+  "/api/machine": {
+    "latest": {
+      "at": 1792238400000,
+      "cpuPct": 37.4,
+      "cores": 16,
+      "memUsedBytes": 22011707392,
+      "memTotalBytes": 68719476736,
+      "swapUsedBytes": 0,
+      "diskFreeBytes": 442381631488,
+      "diskTotalBytes": 1073741824000,
+      "agents": {
+        "count": 3,
+        "rssBytes": 2147483648,
+        "cpuPct": 80
+      }
+    },
+    "warning": null,
+    "maxSeats": 12,
+    "seats": 11,
+    "perSessionMax": 12
+  },
+  "/api/test-lock": {
+    "holder": null,
+    "waiting": []
+  },
+  "/api/crew/status": {
+    "enabled": true,
+    "note": null
+  },
+  "/api/settings/away": {
+    "on": false,
+    "until": "",
+    "may": {}
+  },
+  "/api/settings/crew-pause": null,
+  "/api/boards/shop-app": [
+    {
+      "repoId": "shop-app",
+      "issueNumber": 3349,
+      "title": "Quote cache",
+      "status": "In Progress",
+      "state": "in progress",
+      "labels": [
+        "perf"
+      ],
+      "priority": "P1",
+      "updatedAt": 1792231200000,
+      "url": "https://github.com/octo-org/shop-app/issues/3349",
+      "stage": null,
+      "owner": null,
+      "parent": null,
+      "subIssues": null,
+      "blockedBy": [],
+      "milestone": null,
+      "size": null,
+      "closed": false,
+      "prioritySource": "field",
+      "createdAt": 1791979200000,
+      "itemId": null,
+      "projectId": null
+    }
+  ],
+  "/api/boards/site-builder": [],
+  "/api/repos/shop-app/prs?linked=1&shape=summary": [
+    {
+      "repoId": "shop-app",
+      "number": 77,
+      "title": "Cache quotes",
+      "url": "https://github.com/octo-org/shop-app/pull/77",
+      "branch": "feature/77-cache",
+      "ticket": "shop-app#77",
+      "state": "open",
+      "isDraft": false,
+      "review": null,
+      "ci": null,
+      "createdAt": 1792238400000,
+      "updatedAt": 1792238400000,
+      "mergedAt": null,
+      "headSha": null,
+      "mergeable": null
+    }
+  ],
+  "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+  "/api/qa/queue": {
+    "prs": [],
+    "flightId": "flight-1"
+  },
+  "/api/notifications": {
+    "open": [],
+    "handledToday": []
+  },
+  "/api/settings/notifications": {},
+  "/api/crew/changes": {
+    "pending": [],
+    "error": null,
+    "restartNeeded": []
+  },
+  "/api/crew/sessions": [],
+  "/api/settings/teams": {
+    "sources": []
+  },
+  "/api/agents/flight-1": {
+    "row": {
+      "id": "flight-1",
+      "repoId": "shop-app",
+      "index": 0,
+      "hudState": "idle",
+      "stateSince": 1792236900000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": null,
+      "ticketTitle": "Recorded fixture work 0",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-0",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 84000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1100
+          ],
+          [
+            1792236660000,
+            1280
+          ],
+          [
+            1792236720000,
+            1640
+          ],
+          [
+            1792236780000,
+            1460
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2280
+          ],
+          [
+            1792236960000,
+            2640
+          ],
+          [
+            1792237020000,
+            3100
+          ],
+          [
+            1792237080000,
+            2820
+          ],
+          [
+            1792237140000,
+            2550
+          ],
+          [
+            1792237200000,
+            2730
+          ],
+          [
+            1792237260000,
+            2910
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3100
+          ],
+          [
+            1792237440000,
+            3100
+          ],
+          [
+            1792237500000,
+            3460
+          ],
+          [
+            1792237560000,
+            3280
+          ],
+          [
+            1792237620000,
+            3820
+          ],
+          [
+            1792237680000,
+            3550
+          ],
+          [
+            1792237740000,
+            4100
+          ],
+          [
+            1792237800000,
+            3910
+          ],
+          [
+            1792237860000,
+            4190
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4420
+          ],
+          [
+            1792238040000,
+            4190
+          ],
+          [
+            1792238100000,
+            3910
+          ],
+          [
+            1792238160000,
+            3640
+          ],
+          [
+            1792238220000,
+            3820
+          ],
+          [
+            1792238280000,
+            3710
+          ],
+          [
+            1792238340000,
+            3750
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Idle",
+      "reason": null,
+      "since": 1792236900000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 84000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 0",
+      "ticketHref": null,
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-1": {
+    "row": {
+      "id": "dev-1",
+      "repoId": "shop-app",
+      "index": 1,
+      "hudState": "running",
+      "stateSince": 1792237920000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#101",
+      "ticketTitle": "Recorded fixture work 1",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-1",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 86000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792237920000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 86000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 1",
+      "ticketHref": "/tickets/shop-app/101",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-1/stream?limit=20": {
+    "runId": "fixture-run-1",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-2": {
+    "row": {
+      "id": "dev-2",
+      "repoId": "shop-app",
+      "index": 2,
+      "hudState": "running",
+      "stateSince": 1792238100000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#102",
+      "ticketTitle": "Recorded fixture work 2",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-2",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 88000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792238100000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 88000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 2",
+      "ticketHref": "/tickets/shop-app/102",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-2/stream?limit=20": {
+    "runId": "fixture-run-2",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-3": {
+    "row": {
+      "id": "dev-3",
+      "repoId": "shop-app",
+      "index": 3,
+      "hudState": "running",
+      "stateSince": 1792237680000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#103",
+      "ticketTitle": "Recorded fixture work 3",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-3",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 90000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792237680000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 90000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 3",
+      "ticketHref": "/tickets/shop-app/103",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-3/stream?limit=20": {
+    "runId": "fixture-run-3",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-4": {
+    "row": {
+      "id": "dev-4",
+      "repoId": "shop-app",
+      "index": 4,
+      "hudState": "blocked",
+      "stateSince": 1792236360000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": "Protected path clearance is required before proceeding.",
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#104",
+      "ticketTitle": "Recorded fixture work 4",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-4",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 92000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Blocked",
+      "reason": "Protected path clearance is required before proceeding.",
+      "since": 1792236360000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 92000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 4",
+      "ticketHref": "/tickets/shop-app/104",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-4/stream?limit=20": {
+    "runId": "fixture-run-4",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-5": {
+    "row": {
+      "id": "dev-5",
+      "repoId": "shop-app",
+      "index": 5,
+      "hudState": "running",
+      "stateSince": 1792237440000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#105",
+      "ticketTitle": "Recorded fixture work 5",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-5",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 94000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792237440000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 94000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 5",
+      "ticketHref": "/tickets/shop-app/105",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-5/stream?limit=20": {
+    "runId": "fixture-run-5",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-6": {
+    "row": {
+      "id": "dev-6",
+      "repoId": "shop-app",
+      "index": 6,
+      "hudState": "running",
+      "stateSince": 1792238280000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#106",
+      "ticketTitle": "Recorded fixture work 6",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-6",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 96000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792238280000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 96000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 6",
+      "ticketHref": "/tickets/shop-app/106",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-6/stream?limit=20": {
+    "runId": "fixture-run-6",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-7": {
+    "row": {
+      "id": "dev-7",
+      "repoId": "shop-app",
+      "index": 7,
+      "hudState": "running",
+      "stateSince": 1792237980000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#107",
+      "ticketTitle": "Recorded fixture work 7",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-7",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 98000,
+        "contextWindow": null,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": null,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792237980000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 98000,
+      "window": null,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 7",
+      "ticketHref": "/tickets/shop-app/107",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-7/stream?limit=20": {
+    "runId": "fixture-run-7",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-8": {
+    "row": {
+      "id": "dev-8",
+      "repoId": "shop-app",
+      "index": 8,
+      "hudState": "idle",
+      "stateSince": 1792235940000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#108",
+      "ticketTitle": "Recorded fixture work 8",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-8",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 100000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Idle",
+      "reason": null,
+      "since": 1792235940000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 100000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 8",
+      "ticketHref": "/tickets/shop-app/108",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-8/stream?limit=20": {
+    "runId": "fixture-run-8",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-9": {
+    "row": {
+      "id": "dev-9",
+      "repoId": "shop-app",
+      "index": 9,
+      "hudState": "stopped",
+      "stateSince": 1792237320000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "RETRO",
+      "mode": "read-only",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": true,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#109",
+      "ticketTitle": "Recorded fixture work 9",
+      "loop": null,
+      "run": null,
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 102000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null,
+      "queuedReview": {
+        "repoId": "shop-app",
+        "prNumber": 208,
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ref": "shop-app#108",
+        "position": 1,
+        "reason": "Account paused; this current-head review is queued."
+      }
+    },
+    "awaiting": {
+      "label": "Stopped",
+      "reason": null,
+      "since": 1792237320000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": null,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 102000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 9",
+      "ticketHref": "/tickets/shop-app/109",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-9/stream?limit=20": {
+    "runId": null,
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/dev-10": {
+    "row": {
+      "id": "dev-10",
+      "repoId": "shop-app",
+      "index": 10,
+      "hudState": "running",
+      "stateSince": 1792237740000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [
+        "apps/**"
+      ],
+      "model": "sonnet",
+      "sessionId": "demo",
+      "loopKind": "crew",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#110",
+      "ticketTitle": "Recorded fixture work 10",
+      "loop": null,
+      "run": {
+        "id": "fixture-run-10",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 104000,
+        "contextWindow": 400000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [
+          [
+            1792236600000,
+            1090
+          ],
+          [
+            1792236660000,
+            1272
+          ],
+          [
+            1792236720000,
+            1636
+          ],
+          [
+            1792236780000,
+            1454
+          ],
+          [
+            1792236840000,
+            2000
+          ],
+          [
+            1792236900000,
+            2272
+          ],
+          [
+            1792236960000,
+            2636
+          ],
+          [
+            1792237020000,
+            3090
+          ],
+          [
+            1792237080000,
+            2818
+          ],
+          [
+            1792237140000,
+            2545
+          ],
+          [
+            1792237200000,
+            2727
+          ],
+          [
+            1792237260000,
+            2909
+          ],
+          [
+            1792237320000,
+            3000
+          ],
+          [
+            1792237380000,
+            3090
+          ],
+          [
+            1792237440000,
+            3090
+          ],
+          [
+            1792237500000,
+            3454
+          ],
+          [
+            1792237560000,
+            3272
+          ],
+          [
+            1792237620000,
+            3818
+          ],
+          [
+            1792237680000,
+            3545
+          ],
+          [
+            1792237740000,
+            4090
+          ],
+          [
+            1792237800000,
+            3909
+          ],
+          [
+            1792237860000,
+            4181
+          ],
+          [
+            1792237920000,
+            4000
+          ],
+          [
+            1792237980000,
+            4418
+          ],
+          [
+            1792238040000,
+            4181
+          ],
+          [
+            1792238100000,
+            3909
+          ],
+          [
+            1792238160000,
+            3636
+          ],
+          [
+            1792238220000,
+            3818
+          ],
+          [
+            1792238280000,
+            3709
+          ],
+          [
+            1792238340000,
+            3745
+          ]
+        ],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 400000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Running",
+      "reason": null,
+      "since": 1792237740000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": 2.4712,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 104000,
+      "window": 400000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Recorded fixture work 10",
+      "ticketHref": "/tickets/shop-app/110",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/dev-10/stream?limit=20": {
+    "runId": "fixture-run-10",
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/loop-alpha": {
+    "row": {
+      "id": "loop-alpha",
+      "repoId": "site-builder",
+      "index": 11,
+      "hudState": "parked",
+      "stateSince": 1792237680000,
+      "accountId": "claude-main",
+      "kind": "loop",
+      "role": null,
+      "mode": null,
+      "area": [],
+      "model": null,
+      "sessionId": null,
+      "loopKind": "ta-loop",
+      "paused": false,
+      "note": "Waiting for a recorded check result.",
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#3349",
+      "ticketTitle": "Quote cache",
+      "loop": null,
+      "run": null,
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 76000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Parked",
+      "reason": "Waiting for a recorded check result.",
+      "since": 1792237680000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": null,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 76000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Quote cache",
+      "ticketHref": "/tickets/site-builder/3349",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/loop-alpha/stream?limit=20": {
+    "runId": null,
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/agents/loop-beta": {
+    "row": {
+      "id": "loop-beta",
+      "repoId": "site-builder",
+      "index": 12,
+      "hudState": "blocked",
+      "stateSince": 1792237440000,
+      "accountId": "claude-main",
+      "kind": "loop",
+      "role": null,
+      "mode": null,
+      "area": [],
+      "model": null,
+      "sessionId": null,
+      "loopKind": "ta-loop",
+      "paused": false,
+      "note": "Driver stopped: recorded usage limit.",
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#3349",
+      "ticketTitle": "Quote cache",
+      "loop": null,
+      "run": null,
+      "prs": [],
+      "summary": null,
+      "digest": {
+        "toolCalls": 0,
+        "turns": 0,
+        "lastEventAt": 1792238340000,
+        "model": "fixture-model",
+        "contextTokens": 80000,
+        "contextWindow": 200000,
+        "liveTool": null,
+        "tools": {},
+        "subagents": [],
+        "minuteTokens": [],
+        "turnUsage": [],
+        "background": [],
+        "compactions": 0
+      },
+      "contextWindow": 200000,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "awaiting": {
+      "label": "Blocked",
+      "reason": "Driver stopped: recorded usage limit.",
+      "since": 1792237440000
+    },
+    "health": {
+      "label": "Running",
+      "blocking": null,
+      "failedTools": 0
+    },
+    "tools": {
+      "total": 0,
+      "failed": 0,
+      "byTool": []
+    },
+    "cost": {
+      "totalUsd": null,
+      "meanPerReportedTurnUsd": null,
+      "turns": 0,
+      "estimated": false
+    },
+    "context": {
+      "tokens": 80000,
+      "window": 200000,
+      "percent": null,
+      "compactions": 0,
+      "prompt": null
+    },
+    "story": {
+      "title": "Quote cache",
+      "ticketHref": "/tickets/site-builder/3349",
+      "original": [],
+      "report": null,
+      "reportedAt": null,
+      "doneWhen": [],
+      "left": []
+    },
+    "nextMove": null,
+    "deliverables": [],
+    "related": [],
+    "steps": []
+  },
+  "/api/agents/loop-beta/stream?limit=20": {
+    "runId": null,
+    "events": [],
+    "tasks": [],
+    "more": false,
+    "truncated": false
+  },
+  "/api/tickets/shop-app/201": {
+    "repoId": "shop-app",
+    "number": 201,
+    "url": "https://github.com/octo-org/shop-app/issues/201",
+    "title": "Recorded ticket 201",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 201",
+    "doneWhen": [],
+    "body": "Recorded ticket 201",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/202": {
+    "repoId": "shop-app",
+    "number": 202,
+    "url": "https://github.com/octo-org/shop-app/issues/202",
+    "title": "Recorded ticket 202",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 202",
+    "doneWhen": [],
+    "body": "Recorded ticket 202",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/211": {
+    "repoId": "shop-app",
+    "number": 211,
+    "url": "https://github.com/octo-org/shop-app/issues/211",
+    "title": "Recorded ticket 211",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 211",
+    "doneWhen": [],
+    "body": "Recorded ticket 211",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/212": {
+    "repoId": "shop-app",
+    "number": 212,
+    "url": "https://github.com/octo-org/shop-app/issues/212",
+    "title": "Recorded ticket 212",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 212",
+    "doneWhen": [],
+    "body": "Recorded ticket 212",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/213": {
+    "repoId": "shop-app",
+    "number": 213,
+    "url": "https://github.com/octo-org/shop-app/issues/213",
+    "title": "Recorded ticket 213",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 213",
+    "doneWhen": [],
+    "body": "Recorded ticket 213",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/221": {
+    "repoId": "shop-app",
+    "number": 221,
+    "url": "https://github.com/octo-org/shop-app/issues/221",
+    "title": "Recorded ticket 221",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 221",
+    "doneWhen": [],
+    "body": "Recorded ticket 221",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/231": {
+    "repoId": "shop-app",
+    "number": 231,
+    "url": "https://github.com/octo-org/shop-app/issues/231",
+    "title": "Recorded ticket 231",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 231",
+    "doneWhen": [],
+    "body": "Recorded ticket 231",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/251": {
+    "repoId": "shop-app",
+    "number": 251,
+    "url": "https://github.com/octo-org/shop-app/issues/251",
+    "title": "Recorded ticket 251",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 251",
+    "doneWhen": [],
+    "body": "Recorded ticket 251",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/252": {
+    "repoId": "shop-app",
+    "number": 252,
+    "url": "https://github.com/octo-org/shop-app/issues/252",
+    "title": "Recorded ticket 252",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 252",
+    "doneWhen": [],
+    "body": "Recorded ticket 252",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/253": {
+    "repoId": "shop-app",
+    "number": 253,
+    "url": "https://github.com/octo-org/shop-app/issues/253",
+    "title": "Recorded ticket 253",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 253",
+    "doneWhen": [],
+    "body": "Recorded ticket 253",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/tickets/shop-app/254": {
+    "repoId": "shop-app",
+    "number": 254,
+    "url": "https://github.com/octo-org/shop-app/issues/254",
+    "title": "Recorded ticket 254",
+    "state": "open",
+    "status": "In progress",
+    "priority": "P1",
+    "size": "M",
+    "labels": [],
+    "outcome": "Recorded ticket 254",
+    "doneWhen": [],
+    "body": "Recorded ticket 254",
+    "bodyTruncated": false,
+    "githubError": null,
+    "runs": [],
+    "prs": [],
+    "timeline": [],
+    "nextBefore": null
+  },
+  "/api/attention/overview%3A0/discussion": {
+    "id": "discussion:overview:0",
+    "itemKey": "overview:0",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/attention/overview%3A0/discussion?id=discussion%3Aoverview%3A0": {
+    "id": "discussion:overview:0",
+    "itemKey": "overview:0",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/attention/overview%3A1/discussion": {
+    "id": "discussion:overview:1",
+    "itemKey": "overview:1",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/attention/overview%3A1/discussion?id=discussion%3Aoverview%3A1": {
+    "id": "discussion:overview:1",
+    "itemKey": "overview:1",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/attention/overview%3A2/discussion": {
+    "id": "discussion:overview:2",
+    "itemKey": "overview:2",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/attention/overview%3A2/discussion?id=discussion%3Aoverview%3A2": {
+    "id": "discussion:overview:2",
+    "itemKey": "overview:2",
+    "version": "fixture-v1",
+    "messages": []
+  },
+  "/api/overview?session=demo": {
+    "at": 1792238400000,
+    "kpis": {
+      "tokensPerMin": {
+        "now": 41200,
+        "series": [
+          12000,
+          14000,
+          18000,
+          16000,
+          22000,
+          25000,
+          29000,
+          34000,
+          31000,
+          28000,
+          30000,
+          32000,
+          33000,
+          34000,
+          34000,
+          38000,
+          36000,
+          42000,
+          39000,
+          45000,
+          43000,
+          46000,
+          44000,
+          48600,
+          46000,
+          43000,
+          40000,
+          42000,
+          40800,
+          41200
+        ]
+      },
+      "spendToday": {
+        "usd": 24.31,
+        "perHour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          24.31,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "series": [
+          0.08,
+          0.11,
+          0.12,
+          0.09,
+          0.13,
+          0.16,
+          0.18,
+          0.21,
+          0.18,
+          0.15,
+          0.14,
+          0.12,
+          0,
+          0,
+          0.11,
+          0.14,
+          0.16,
+          0.18,
+          0.2,
+          0.21,
+          0.19,
+          0.18,
+          0.16,
+          0.15,
+          0.13,
+          0.12,
+          0.11,
+          0.1,
+          0.09,
+          0.08
+        ]
+      },
+      "inFlight": {
+        "count": 5,
+        "oldestAt": 1792237200000,
+        "series": [
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5,
+          3,
+          4,
+          5
+        ]
+      },
+      "ciPassRate24h": {
+        "pct": 92,
+        "runs": 25,
+        "redNow": 2,
+        "series": [
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          null,
+          null,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92,
+          80,
+          88,
+          92
+        ]
+      },
+      "needsYou": {
+        "count": 3,
+        "overHour": 0,
+        "series": [
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    "pipeline": [
+      {
+        "stage": "ready",
+        "count": 2,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 201,
+            "title": "Recorded ticket 201",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 202,
+            "title": "Recorded ticket 202",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          }
+        ]
+      },
+      {
+        "stage": "building",
+        "count": 3,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 211,
+            "title": "Recorded ticket 211",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 212,
+            "title": "Recorded ticket 212",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 213,
+            "title": "Recorded ticket 213",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-3"
+          }
+        ]
+      },
+      {
+        "stage": "checks",
+        "count": 1,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 221,
+            "title": "Recorded ticket 221",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          }
+        ]
+      },
+      {
+        "stage": "review",
+        "count": 1,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 231,
+            "title": "Recorded ticket 231",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          }
+        ]
+      },
+      {
+        "stage": "merging",
+        "count": 0,
+        "oldestAt": null,
+        "cards": []
+      },
+      {
+        "stage": "merged",
+        "count": 4,
+        "oldestAt": 1792237200000,
+        "cards": [
+          {
+            "repoId": "shop-app",
+            "ticket": 251,
+            "title": "Recorded ticket 251",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-1"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 252,
+            "title": "Recorded ticket 252",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-2"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 253,
+            "title": "Recorded ticket 253",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-3"
+          },
+          {
+            "repoId": "shop-app",
+            "ticket": 254,
+            "title": "Recorded ticket 254",
+            "pr": null,
+            "ci": [],
+            "since": 1792237200000,
+            "who": "dev-4"
+          }
+        ]
+      }
+    ],
+    "machine": {
+      "cpu": [
+        20,
+        21,
+        22,
+        24,
+        26,
+        28,
+        30,
+        28,
+        26,
+        25,
+        27,
+        29,
+        null,
+        null,
+        28,
+        30,
+        32,
+        34,
+        36,
+        37,
+        39,
+        41,
+        38,
+        37,
+        36,
+        35,
+        34,
+        35,
+        36,
+        37
+      ],
+      "mem": [
+        25,
+        25,
+        26,
+        26,
+        26,
+        27,
+        27,
+        28,
+        28,
+        29,
+        29,
+        30,
+        null,
+        null,
+        30,
+        30,
+        31,
+        31,
+        31,
+        32,
+        32,
+        32,
+        33,
+        33,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32
+      ],
+      "diskFreeGb": 412,
+      "disk": [
+        420,
+        420,
+        419,
+        419,
+        419,
+        418,
+        418,
+        418,
+        417,
+        417,
+        417,
+        416,
+        null,
+        null,
+        416,
+        416,
+        415,
+        415,
+        415,
+        414,
+        414,
+        414,
+        414,
+        414,
+        413,
+        413,
+        413,
+        413,
+        412,
+        412
+      ]
+    }
+  },
+  "/api/metrics?session=demo": {
+    "at": 1792238400000,
+    "inProgress": {
+      "count": 5,
+      "oldestAt": 1792237200000
+    },
+    "merged": {
+      "count": 6,
+      "loops": 0
+    },
+    "cycleTime": {
+      "p50Ms": 4320000,
+      "p85Ms": 109440000,
+      "n": 8,
+      "excluded": 1
+    },
+    "cost": {
+      "usd": 24.31
+    }
+  },
+  "/api/flight/brief": {
+    "session": "demo",
+    "sections": [],
+    "watch": []
+  }
+}

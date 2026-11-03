@@ -1,0 +1,64 @@
+{
+  "runtimeSources": [
+    {
+      "source": "d192dd83",
+      "path": "apps/web/src/overview/AgentsPanel.tsx",
+      "sha256": "4a8b7fcfb0300aa7ccddd24a75ed0cfaeb709c2fd1f0e6e3a59bf0f14fe0491f"
+    },
+    {
+      "source": "d192dd83",
+      "path": "apps/web/src/overview/ContextCapacity.tsx",
+      "sha256": "222897af274221e7168265aea97932fc6c6594f9ff3f07923f6db4366ba97442"
+    },
+    {
+      "source": "d192dd83",
+      "path": "apps/web/src/overview/overview.css",
+      "sha256": "1578ea5890009f6e0c81df7368d3173e7000605d79c6a1f28326ec7b8f6ab419"
+    },
+    {
+      "source": "b45f26dc",
+      "path": "apps/web/src/overview/AgentsPanel.tsx",
+      "sha256": "4a8b7fcfb0300aa7ccddd24a75ed0cfaeb709c2fd1f0e6e3a59bf0f14fe0491f"
+    },
+    {
+      "source": "b45f26dc",
+      "path": "apps/web/src/overview/ContextCapacity.tsx",
+      "sha256": "222897af274221e7168265aea97932fc6c6594f9ff3f07923f6db4366ba97442"
+    },
+    {
+      "source": "b45f26dc",
+      "path": "apps/web/src/overview/overview.css",
+      "sha256": "26b3e25d4d9385c5094312a50b62bd6263e230a2e0bed0b485041e4e435cbbed"
+    }
+  ],
+  "images": [
+    {
+      "path": "b45-text200-full.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "821a593d0d16fefde32eccea7cfad0a6f634a849368253c528b4d0df78bae78d"
+    },
+    {
+      "path": "d192-text200-full.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "2e64700a16f522ab95611a44be05e726583fb11434956a7ec1e77af53aec5c6d"
+    },
+    {
+      "path": "b45-keyboard-agent-detail.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "3803f0d4dcb4958928aa8f296a2cace642ec203ebc65ebbd5b1e4c6893649563"
+    },
+    {
+      "path": "d192-keyboard-agent-detail.png",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "00e4ae8dd70c980d93613b1ed35385cd2275ea7051a55f1f35d0292a30e07637"
+    }
+  ],
+  "baselineRuntime": "isolated d192 apps/web/src and packages/core/src snapshot",
+  "testSource": "b45 apps/web/test snapshot, identical 13-agent payload",
+  "candidateRuntime": "retained exact b45 compiled build from independent correction run",
+  "scope": "Overview/Dock computed text-only enlargement; Agent route is newly mounted at normal text size, so route proof is not an Agent200percent conformance claim"
+}

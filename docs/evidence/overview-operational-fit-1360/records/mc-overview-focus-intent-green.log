@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewOperational.test.tsx (6 tests) 100ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  17:16:45
+   Duration  894ms (transform 273ms, setup 332ms, collect 83ms, tests 100ms, environment 221ms, prepare 29ms)
+

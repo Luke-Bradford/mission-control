@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ❯ |web| test/OverviewDensity.browser.test.ts (7 tests | 1 failed | 6 skipped) 2852ms
+   ↓ Approved Overview hierarchy > settles known context, full allowance and recorded timeline sources in the delivered App
+   × Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize 1534ms
+     → {"focus":false,"active":"<button type=\"button\" class=\"quota-details\">Used, forecasts and freshness →</button>","mainInert":false,"nativeModals":[],"left":0,"width":926,"scrollWidth":1050}: expected false to be true // Object.is equality
+   ↓ Approved Overview hierarchy > preserves nine configured seats and two observed loops through the real session filter
+   ↓ Approved Overview hierarchy > keeps realistic long rows usable at narrow, medium and wide widths with FLIGHT folded or open
+   ↓ Approved Overview hierarchy > opens complete shortened content with the keyboard using actual read-only detail routes
+   ↓ Approved Overview hierarchy > keeps the settled full-App hierarchy and all row controls reachable at every required viewport
+   ↓ Approved Overview hierarchy > keeps empty, one, fifty, long and collection states honest without losing keyboard routes
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |web| test/OverviewDensity.browser.test.ts > Approved Overview hierarchy > keeps sub-cent rates, missing observations and full allowance evidence keyboard accessible without new reads on resize
+AssertionError: {"focus":false,"active":"<button type=\"button\" class=\"quota-details\">Used, forecasts and freshness →</button>","mainInert":false,"nativeModals":[],"left":0,"width":926,"scrollWidth":1050}: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/OverviewDensity.browser.test.ts:454:76
+    452|             );
+    453|           await capture(page, `horizontal-focus-before-${scheme}`);
+    454|           expect(horizontalBefore.focus, JSON.stringify(horizontalBefo…
+       |                                                                            ^
+    455|           expect(
+    456|             (horizontalBefore.scrollWidth ?? 0) - (horizontalBefore.wi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  17:13:05
+   Duration  3.58s (transform 211ms, setup 311ms, collect 226ms, tests 2.85s, environment 0ms, prepare 37ms)
+

@@ -1,0 +1,18 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewReaderReflow.browser.test.ts (6 tests) 7179ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, light  1149ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, light  1262ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, light  1067ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > reflows KPI history actions beside enlarged values, dark  570ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at1920, dark  845ms
+   ✓ Overview review corrections retain readable monitoring and complete evidence > shows the larger history plot and final exact reading at3840, dark  997ms
+ ✓ |web| test/OverviewOperational.browser.test.ts (1 test) 4891ms
+   ✓ Operational Overview composition > fits useful natural stacks at CSS viewport sizes and retains keyboard modal state  3588ms
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  16:36:13
+   Duration  13.09s (transform 199ms, setup 352ms, collect 344ms, tests 12.07s, environment 0ms, prepare 58ms)
+

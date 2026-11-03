@@ -1,0 +1,16 @@
+
+ RUN  v3.2.7 $CONTROLLER/codex-overview-operational-fit-1360
+
+ ✓ |web| test/OverviewLayout.browser.test.ts (6 tests) 5841ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, light  1133ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, light  692ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, light  734ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1280 wide, dark  632ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1600 wide, dark  684ms
+   ✓ Overview v2 layout in a browser > retains compact monitoring and complete readers at 1920 wide, dark  632ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  16:59:59
+   Duration  6.53s (transform 194ms, setup 313ms, collect 203ms, tests 5.84s, environment 0ms, prepare 35ms)
+
