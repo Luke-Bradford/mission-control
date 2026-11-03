@@ -82,15 +82,14 @@ requirement for a guidance-only wake, route inventory and authentication, and th
 ## Limits and review state
 
 No full local suite or broad `test:related` run was performed under the controller's bounded-check instruction.
-Normal CI and a fresh independent whole-branch review remain pending. No QA approval is claimed here.
+The pre-review checks above did not establish a CI or independent-review pass. Subsequent failed review, correction and CI results are retained below. No final QA approval is claimed here.
 No actual model compliance, provider result, UI implementation, screenshot acceptance, merge or deployment is claimed.
 Visual evidence is not applicable: this child changes server/core/runtime and role guidance, with no apps/web source changes.
 The build validates compatibility of the existing application; web standing-order controls remain #1378.
 Instructions guide planning and preserve existing selector behavior; they do not build a natural-language scheduler
 or replace repository safety floors. Full same-user FLIGHT access retains the accepted #1214 workflow boundary.
 
-No paid provider, live crew action, observed-loop mutation, live breaker, production database operation,
-source push or PR creation occurred. Fixture process tests use only the repository's fake CLI and temporary
+The implementation agent performed no paid-provider, live crew, observed-loop, live breaker or production-database action, and made no source push or PR. The controller owns PR 1381 and its remote revisions. Fixture process tests use only the repository's fake CLI and temporary
 Git repositories. Shared heavy-job slots were released between bounded runs.
 
 ## Integration scope
@@ -144,6 +143,91 @@ Correction validation:
   The test run preceded the source commit with identical source/test content. Raw correction lint/build
   receipts are retained by the controller in its temporary check artifacts; no full local suite was run.
 
-Same-reviewer narrow verification of the complete correction delta and unchanged original scratch repro
-is pending. The failed QA/status stays retained. No corrected push, new QA approval, merge, deployment,
-UI acceptance or actual-provider compliance is claimed by this evidence update.
+That same-reviewer narrow verification completed clean at 00:17:55 UTC on 3 November. The unchanged
+original scratch repro passed 1/1 against source 3f50fc55; selected queue/recovered-warning checks passed
+5 with 120 filtered. The controller then pushed docs successor 7b7bb20e (identical application/test sources)
+for fresh CI. This was a scoped correction result, not final approval: the later pause finding and actual
+CI failures below remain part of the rework record.
+
+
+## Second failed review, pause correction and actual CI rework — 3 November 2026
+
+Published head: `7b7bb20e491ab79d63d6ab7c55abab251ef19283`. A subsequent independent probe found an
+Important pause-boundary issue: the notice flush called raw supervisor.message. Saving a seat instruction
+and importing initial legacy focus each started a second fake-provider turn despite the operator pause
+remaining set. Both independent probes failed (2/2); their unchanged scratch file and original red log are
+retained. No actual paid provider or live crew was used.
+
+Second saved failed QA: `96012616e06b90f95548a62a0e5e9c1a71fc70d0168f429ff24635e417a6ce17`.
+Reader: `/qa?repo=mission-control&pr=1381&report=96012616e06b90f95548a62a0e5e9c1a71fc70d0168f429ff24635e417a6ce17`.
+[Public pause rework record](https://github.com/Luke-Bradford/mission-control/pull/1381#issuecomment-6600649167).
+
+Source correction `c4e7c1ecf1338f782f3400cf4a719c97ff15acd7` routes notices through the existing
+messageUnpausedSeat boundary. Stored notices remain unread and durable during pause, then are delivered
+on an explicitly authorized ordinary turn. It preserves the existing run-bound pause exception and queued
+recheck. Five permanent fake-process cases cover saved guidance, initial import, pause after admission,
+matching run exception and a foreign-run exception. The bounded store/API/process run passed 34/34
+(8 store, 9 API/notice, 17 process), 14.19 seconds. Core/server sequential types passed.
+
+[Actual fresh CI run 41551990597](https://github.com/Luke-Bradford/mission-control/actions/runs/41551990597)
+failed on 7b. This differs from the earlier intentionally canceled run:
+
+- server (1): 2 failed, 2,838 passed, 10 skipped. HUD memo repeated a batched read; new routes lacked reader declarations.
+- server (2): printed 9 failed, 3,689 passed, 16 skipped before its job was canceled by fail-fast. Seven log_decision fixtures selected tools[0], plus literal tool-list and flight_state snapshots needed their new contract fields.
+- server-process (1): 1 failed, 256 passed. The old-keeper test expected a raw QUIET line rather than its complete guidance envelope.
+- web-core: 1 failed, 5,472 passed. The strict core MCP-name map lacked the two new seat instruction tool names.
+- Other shards canceled by fail-fast do not count as passes. The full failed-run log and normalized failure list are retained by the controller.
+
+Final correction source: `0086af6fcef9d48bebce2d82e614d17e1dc41e51`. The actual HUD bug is corrected by
+importing current configured focus before memo readVersion is captured; row projection only reads the
+resolved value. Existing ten-seat/fifty-run batching and clock checks remain intact. A new regression
+proves warm reads do not write bookkeeping and a changed explicit null imports once without breaking
+memo reuse. Route-reader inventory now includes the extracted router, with planned #1378 readers labeled
+as planned and existing Queue readers named. The orphan-route guard still rejects undocumented routes.
+Tool/field snapshots remain exact; log_decision fixtures choose the named tool. Old-keeper replay retains
+its exact original QUIET payload, no premature completion, full envelope echo, idle and same-run assertions.
+
+All commands below completed with exit 0 on application/test content frozen as 0086af6f. Filtered counts
+are explicit; these are bounded affected checks, not a full local suite:
+
+```sh
+pnpm exec vitest run --project server apps/server/test/hud-memo.test.ts apps/server/test/routes.test.ts --maxWorkers=3 > /tmp/mc-1377-ci-hud-routes.log 2>&1
+pnpm exec vitest run --project server apps/server/test/flight-tools.test.ts --maxWorkers=3 -t 'log_decision|tool list|answers the crew now' > /tmp/mc-1377-ci-flight-tools.log 2>&1
+pnpm exec vitest run --project core packages/core/test/runtime.test.ts --maxWorkers=3 -t 'names the mc tools as the CLI shows them' > /tmp/mc-1377-ci-core-map.log 2>&1
+pnpm exec vitest run --project server-process apps/server/test/supervisor-restart.test.ts --maxWorkers=1 -t 'an old keeper.s open turn: a line' > /tmp/mc-1377-ci-keeper-replay.log 2>&1
+pnpm -s typecheck > /tmp/mc-1377-final-pause-ci-types.log 2>&1
+pnpm -s lint > /tmp/mc-1377-final-pause-ci-lint.log 2>&1
+pnpm -s build > /tmp/mc-1377-final-pause-ci-build.log 2>&1
+pnpm exec vitest run --project server apps/server/test/hud.test.ts apps/server/test/views.test.ts apps/server/test/hud-memo.test.ts --maxWorkers=3 > /tmp/mc-1377-final-hud-projection.log 2>&1
+```
+
+Results in command order: 22/22 (1.98s); 10 passed/674 filtered (1.99s); 1 passed/210 filtered (284ms);
+1 passed/92 filtered (1.81s); all workspace types passed; lint passed with 51 warnings, 7 infos, no errors,
+60 core modules/no cycles; existing web compatibility build passed (968ms); 180/180 HUD/views/memo (7.93s).
+Heavy slots were released immediately after each bounded pack. No automatic full-suite retry occurred.
+
+### Retained raw receipt hashes
+
+Paths are controller-local `/tmp` artifacts, not product routes. Earlier 421/28/170 run receipts remain in
+the controller tool history; no standalone raw-log hash is invented for those runs.
+
+| Artifact basename | SHA-256 |
+| --- | --- |
+| mc-1377-independent-pause-red-7b7bb20e.log | ad4013f8c9662babca8442239c9b1a787c42f407d1a7ea7ad3db965e430549da |
+| unchanged supervisor-review1377-pause.test.ts | 3ea27d47a9cd2a9e0f08973d80ad6b4c801d22994fd78600a2dccca1be444b74 |
+| mc-1377-pause-types.log | 7fc3112653bbe3068c43cebe1a512b2969f3333b9f1d374ef846b631460fd46d |
+| mc-1377-pause-focused.log | 0cc978e3e76d0f65a341455427f61a10ee932769970facad17606663bf0b9ab9 |
+| mc-1377-ci-hud-routes.log | 2723a39ac66e3eac6697ec37c748d49f8cc5a24814e700f36eb8059eaace4ad2 |
+| mc-1377-ci-flight-tools.log | 6f9ab8fe205f2ea161f7653947ee64a1f63b30130e82e8c9f3a101d4246cf9b8 |
+| mc-1377-ci-core-map.log | c3393ac52e84af0818fd5dfb26218db55511aae28bed03c62746f621d17ca138 |
+| mc-1377-ci-keeper-replay.log | ed4668111ae432dce4ec8a17ab98b9c1e2a2abd1c663630313a67cb74f0f720b |
+| mc-1377-final-pause-ci-types.log | 89914be67d23db9df61fb73ee636003068912275cdfb88337786c08eb9fd206e |
+| mc-1377-final-pause-ci-lint.log | f9bf767900cc612921a33c2be3cb4f6c9a48b0dd357a027d670c9a34c7ff0f13 |
+| mc-1377-final-pause-ci-build.log | f214bc05b10329d40ae7ffb83f4d836121401e81b2231d77f47d0d191aa91195 |
+| mc-1377-final-hud-projection.log | 6025b638aa557b3ea0fea39c48f2e57f672dca280c4fe08fb98b689b50f5a2a7 |
+
+Current handoff: corrected source is frozen locally for the same reviewer's narrow verification, including
+the original unchanged two-case pause repro. The controller owns corrected remote composition, new exact-head
+CI, QA disposition, merge and Update. This record claims neither a final review/CI pass nor merge/deployment.
+Server-only visual N/A reflects no apps/web source or user-visible control implementation in this child;
+#1378 remains responsible for that UI. No actual-provider compliance or live paid-crew outcome is claimed.
