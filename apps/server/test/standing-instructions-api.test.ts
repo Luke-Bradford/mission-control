@@ -311,3 +311,43 @@ it("reports each concurrent mutation's own recipient delivery while draining a s
   expect(store.commsInbox(extra.id)).toHaveLength(1);
   expect(store.instructions.notices()).toEqual([]);
 });
+
+it("clears only the focus-import warning when a real capacity failure is resolved", async () => {
+  const { importInstructionFocus } = await import("../src/instruction-notices.ts");
+  const cfg = structuredClone(config);
+  cfg.crew!.sessions[0].seats.find((s) => s.id === "builder")!.focus = "label:catalog";
+  let firstId = 0;
+  for (let i = 0; i < 64; i++) {
+    const entry = store.instructions.create(
+      "builder",
+      { kind: "text", text: `Retained rule ${i}` },
+      "operator",
+      NOW,
+    ).entry;
+    if (i === 0) firstId = entry.id;
+  }
+  store.raiseNote({
+    key: "unrelated-warning",
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "Leave this warning alone",
+    at: NOW,
+  });
+  const events: string[] = [];
+  bus.subscribe((topic) => events.push(topic));
+  const logs: string[] = [];
+  const deps = { config: cfg, store, bus, now: () => NOW, log: (text: string) => logs.push(text) };
+  importInstructionFocus(deps);
+  expect(store.notes().map((n) => n.key)).toContain("instruction-focus:builder");
+  expect(logs).toHaveLength(1);
+  store.instructions.revoke(firstId, "builder", "operator", NOW + 1);
+  importInstructionFocus(deps);
+  expect(store.instructions.focus("builder").effectiveFocus).toBe("label:catalog");
+  expect(store.notes().map((n) => n.key)).not.toContain("instruction-focus:builder");
+  expect(store.notes().map((n) => n.key)).toContain("unrelated-warning");
+  expect(events.filter((topic) => topic === "attention")).toHaveLength(2);
+  importInstructionFocus(deps);
+  expect(events.filter((topic) => topic === "attention")).toHaveLength(2);
+});

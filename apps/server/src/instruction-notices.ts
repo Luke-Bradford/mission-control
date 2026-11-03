@@ -92,3 +92,38 @@ export async function announceInstruction(
     deps.store.instructions.noticeDelivery(result.entry.id, action);
   return { ...result, delivery };
 }
+
+/** Config-import warnings describe an active failure, so a successful retry clears only its own note. */
+export function importInstructionFocus(
+  deps: Pick<NoticeDeps, "config" | "store" | "bus" | "now"> & { log?: (text: string) => void },
+): void {
+  const now = deps.now ?? Date.now;
+  const open = new Set(deps.store.notes().map((note) => note.key));
+  let attentionChanged = false;
+  for (const session of deps.config.crew?.sessions ?? [])
+    for (const seat of session.seats) {
+      const key = `instruction-focus:${seat.id}`;
+      try {
+        deps.store.instructions.syncFocus(seat, now());
+        if (open.has(key)) {
+          deps.store.clearNote(key, now());
+          attentionChanged = true;
+        }
+      } catch (error) {
+        deps.log?.(
+          `Could not import focus for ${seat.id}: ${error instanceof Error ? error.message : "instruction store unavailable"}`,
+        );
+        deps.store.raiseNote({
+          key,
+          kind: "blocked",
+          runId: null,
+          seatId: seat.id,
+          repoId: session.repoId,
+          text: "Configured focus could not be imported. Check instruction capacity and the saved focus before starting more work.",
+          at: now(),
+        });
+        attentionChanged = true;
+      }
+    }
+  if (attentionChanged) deps.bus.emit("attention");
+}

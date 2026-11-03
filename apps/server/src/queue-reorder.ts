@@ -20,7 +20,7 @@ import { type CcConfig, type CrewSeatConfig, seatInput, seatUnavailable } from "
 import { waitReader } from "./dependencies.ts";
 import { refillQueues } from "./engine/queue.ts";
 import { RepoRulesError } from "./engine/rules.ts";
-import { matchesFocus } from "./focus.ts";
+import { matchesConfiguredFocus } from "./focus.ts";
 import type { MoveResult } from "./github-board.ts";
 import { chooseRunProfile, type ProfilesError } from "./profiles.ts";
 import type { Store } from "./store.ts";
@@ -111,7 +111,7 @@ async function validate(
       card.priority === null ||
       !/^P[0-9]+$/.test(card.priority) ||
       hudColumnOf(card) !== "Ready" ||
-      !matchesFocus(deps.store.instructions.syncFocus(seat), card) ||
+      !matchesConfiguredFocus(deps.config, deps.store, seatId, card) ||
       deps.store.activeTickets().has(ref) ||
       deps.store.queue(seatId).some((q) => q.issue === card.issueNumber && q.takenAt !== null)
     )

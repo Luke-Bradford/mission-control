@@ -1348,9 +1348,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function writeLine(l: Live, text: string): DeliveryEnvelope {
+    // Reload applies focus by replacing seat objects. Never import the launch-time copy again.
+    const current = findSeat(l.info.seat.id);
+    if (!current)
+      throw new SupervisorError(
+        409,
+        "Seat was removed before delivery. Restore its configuration before messaging this run.",
+      );
     const envelope = instructionEnvelope(
       store,
-      l.info.seat,
+      current.seat,
       l.run.id,
       seatDef(l.info.seat).loop === "watch",
       text,

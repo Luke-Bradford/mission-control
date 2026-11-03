@@ -1782,3 +1782,33 @@ it("checks the current seat focus if reload replaces the seat during a fresh rea
   await takeNext(deps, SERVER);
   expect(started).toEqual([]);
 });
+
+it.each(["mc#2", null, undefined, "removed"])(
+  "uses current focus %s if reload replaces or removes a captured queue seat during a fetch",
+  async (focus) => {
+    const session = config.crew!.sessions[0];
+    const index = session.seats.findIndex((s) => s.id === SERVER);
+    const original = session.seats[index];
+    original.focus = "mc#1";
+    store.instructions.syncFocus(original, NOW - 1);
+    store.replaceBoard(REPO, [card(1), card(2)]);
+    let changed = false;
+    let expected = store.instructions.focus(SERVER);
+    await refill(undefined, async (_repo, n) => {
+      if (!changed) {
+        changed = true;
+        if (focus === "removed") session.seats.splice(index, 1);
+        else {
+          const { focus: _old, ...base } = original;
+          const current = focus === undefined ? base : { ...base, focus };
+          session.seats.splice(index, 1, current);
+          store.instructions.syncFocus(current, NOW);
+          expected = store.instructions.focus(SERVER);
+        }
+      }
+      return ticketWith(n, bodyOf(n) ?? "");
+    });
+    expect(issues(SERVER)).toEqual(focus === "removed" ? [] : focus === "mc#2" ? [2] : [1, 2]);
+    expect(store.instructions.focus(SERVER)).toEqual(expected);
+  },
+);

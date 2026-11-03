@@ -255,3 +255,75 @@ it("reports an actionable direction failure before launching a fake provider", a
   expect(userLines()).toEqual([]);
   expect(prep.sessions).toEqual([]);
 });
+
+// Permanent coverage of the independent a4fb1f78 review repro; its scratch/log remain unchanged.
+it.each(["label:new", null, undefined])(
+  "keeps current reloaded focus %s on the existing live run's next delivery",
+  async (focus) => {
+    const { sup, cfg } = make();
+    const session = cfg.crew!.sessions[0];
+    const index = session.seats.findIndex((s) => s.id === "guido-1");
+    const original = session.seats[index];
+    original.focus = "label:old";
+    store.instructions.syncFocus(original, 1);
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const { focus: _old, ...base } = original;
+    const reloaded = focus === undefined ? base : { ...base, focus };
+    session.seats.splice(index, 1, reloaded);
+    store.instructions.syncFocus(reloaded, 2);
+    const imported = store.instructions.focus("guido-1");
+    await sup.message("guido-1", "Next turn after config reload", {
+      interrupt: false,
+      questions: "none",
+    });
+    await until(() => expect(userLines()).toHaveLength(2));
+    expect(store.instructions.focus("guido-1")).toEqual(imported);
+    expect(imported.effectiveFocus).toBe(focus ?? null);
+    expect(userLines()[1]).toContain(`"focus":${JSON.stringify(focus ?? null)}`);
+    expect(userLines()[1]).not.toContain('"focus":"label:old"');
+  },
+);
+
+it("refuses a seat removed while its delivery waits without reimporting captured focus", async () => {
+  const { sup, cfg } = make();
+  const configured = cfg.crew!.sessions[0];
+  const index = configured.seats.findIndex((s) => s.id === "guido-1");
+  configured.seats[index].focus = "label:old";
+  store.instructions.syncFocus(configured.seats[index], 1);
+  sup.start();
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  await sup.message("guido-1", "SLOW fixture work", { interrupt: false, questions: "none" });
+  await until(() => expect(userLines()).toHaveLength(2));
+  const before = store.instructions.seat("guido-1");
+  const session = prep.sessions.at(-1);
+  if (!session) throw new Error("Fixture session missing");
+  const originalControl = session.control.bind(session);
+  let entered = () => {};
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  session.control = async (...args) => {
+    entered();
+    await gate;
+    return originalControl(...args);
+  };
+  const delivery = sup.message("guido-1", "Must not reach a removed seat", {
+    interrupt: true,
+    questions: "none",
+  });
+  const refused = expect(delivery).rejects.toThrow(/removed before delivery/);
+  await started;
+  configured.seats.splice(index, 1);
+  release();
+  await refused;
+  session.control = originalControl;
+  expect(userLines()).toHaveLength(2);
+  expect(store.instructions.seat("guido-1")).toEqual(before);
+});

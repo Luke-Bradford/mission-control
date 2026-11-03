@@ -1,4 +1,7 @@
-import { flushInstructionNotices } from "./instruction-notices.ts";
+import {
+  flushInstructionNotices,
+  importInstructionFocus as importConfiguredInstructionFocus,
+} from "./instruction-notices.ts";
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
  * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
@@ -861,28 +864,8 @@ export async function main(): Promise<void> {
     log: (line) => log(`crew: ${line}`),
   });
 
-  const importInstructionFocus = () => {
-    for (const session of config.crew?.sessions ?? [])
-      for (const seat of session.seats) {
-        try {
-          store.instructions.syncFocus(seat);
-        } catch (error) {
-          log(
-            `Could not import focus for ${seat.id}: ${error instanceof Error ? error.message : "instruction store unavailable"}`,
-          );
-          store.raiseNote({
-            key: `instruction-focus:${seat.id}`,
-            kind: "blocked",
-            runId: null,
-            seatId: seat.id,
-            repoId: session.repoId,
-            text: "Configured focus could not be imported. Check instruction capacity and the saved focus before starting more work.",
-            at: Date.now(),
-          });
-          bus.emit("attention");
-        }
-      }
-  };
+  const importInstructionFocus = () =>
+    importConfiguredInstructionFocus({ config, store, bus, log });
   importInstructionFocus();
   const offInstructionNotices = bus.subscribe((topic) => {
     if (topic === "config") importInstructionFocus();
