@@ -1,0 +1,3790 @@
+{
+  "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+  "base": "99e8404ea2e78e442dee828092f6b997582ddbe7",
+  "completedAt": "2026-11-03T11:15:16.869Z",
+  "sourceFiles": [
+    {
+      "file": "fonts.css",
+      "sha256": "62b64b2de77309caa110f3fd4870458e7c6925e491e9e9d90f719c7251430d5e"
+    },
+    {
+      "file": "index.html",
+      "sha256": "8ab58ff799e882607a301549ccef563adadb4ee7c3a931e92a56a17174117c23"
+    },
+    {
+      "file": "inventory.md",
+      "sha256": "baff22eac4e904620e16d283ede771e9912c3f513f91f175849151e5bd1af3b3"
+    },
+    {
+      "file": "proposal.css",
+      "sha256": "000fa672b50a83299f99020808c141d1f617d49f63ff2b6f2e4d17944b9b47e7"
+    },
+    {
+      "file": "proposal.js",
+      "sha256": "78522a0167e913ff53d3b59979a45c0c8b5b08c33bbca0ebb3c3b8652b85dd05"
+    }
+  ],
+  "receipts": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "1920x1080-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1848,
+          "y": 73,
+          "width": 48,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1848
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:09.997Z",
+          "bytes": 355809,
+          "sha256": "bf307432f99621e578bbe30253a0a9670534e3029424111bd3fc2162dfa8c7c2"
+        },
+        {
+          "file": "1920x1080-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:10.049Z",
+          "bytes": 127860,
+          "sha256": "23852e4dc06e592b539cacd4f598149d3710f2da10554343d8df75d869306116"
+        },
+        {
+          "file": "1920x1080-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:10.124Z",
+          "bytes": 64550,
+          "sha256": "a7d2660df9b808369a136effa6aee5308d5ba49f1edf9386d7ba58a737e6eac1"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "open",
+      "key": "1920x1080-dpr1-light-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1496,
+          "y": 73,
+          "width": 400,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1496
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr1-light-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:10.312Z",
+          "bytes": 369766,
+          "sha256": "031402eb978cb40e773b8dd0c96571703c5f6873c42f3bde79023ab9c6807aa5"
+        },
+        {
+          "file": "1920x1080-dpr1-light-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:10.365Z",
+          "bytes": 127860,
+          "sha256": "23852e4dc06e592b539cacd4f598149d3710f2da10554343d8df75d869306116"
+        },
+        {
+          "file": "1920x1080-dpr1-light-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:10.458Z",
+          "bytes": 66689,
+          "sha256": "c3987cfa2258b72cc73ff22c17d43ef013285aa60de791adc1e46c8e63fa0441"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "key": "1920x1080-dpr1-dark-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1848,
+          "y": 73,
+          "width": 48,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1848
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr1-dark-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:10.662Z",
+          "bytes": 360699,
+          "sha256": "e1382f85777f4319d3a72b9f6d4d27301b5f06ea1526a73469a7816869591722"
+        },
+        {
+          "file": "1920x1080-dpr1-dark-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:10.714Z",
+          "bytes": 129884,
+          "sha256": "2a78b6c53ec217d2c3d0f29f72a4d3e21c734d547eca9258cbec9d8c49adacd2"
+        },
+        {
+          "file": "1920x1080-dpr1-dark-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:10.791Z",
+          "bytes": 65777,
+          "sha256": "5ac8bb8d3357df4e913128f432ef04f56905d051fb375b7a5b85a2764182b013"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "open",
+      "key": "1920x1080-dpr1-dark-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1496,
+          "y": 73,
+          "width": 400,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1496
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr1-dark-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:10.979Z",
+          "bytes": 370633,
+          "sha256": "6f542d658ced50b12e86d8d9b64fd3604da50cf9342f8342c640cf0add06d259"
+        },
+        {
+          "file": "1920x1080-dpr1-dark-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:11.032Z",
+          "bytes": 129884,
+          "sha256": "2a78b6c53ec217d2c3d0f29f72a4d3e21c734d547eca9258cbec9d8c49adacd2"
+        },
+        {
+          "file": "1920x1080-dpr1-dark-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:11.126Z",
+          "bytes": 66860,
+          "sha256": "8e59f43a7f9ec2bcfdaec83757b06a652427e55aaed43b9e98ad2aa1e12dff26"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "2560x1440-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 2560,
+          "height": 1440,
+          "dpr": 1
+        },
+        "bodyWidth": 2560,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2488,
+          "height": 1361,
+          "top": 49,
+          "right": 2488,
+          "bottom": 1410,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2440,
+          "height": 812,
+          "top": 181,
+          "right": 2464,
+          "bottom": 993,
+          "left": 24
+        },
+        "columns": "1110.05px 652.969px 652.984px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2440,
+          "height": 920,
+          "top": 73,
+          "right": 2464,
+          "bottom": 993,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1110.046875,
+            "height": 460,
+            "top": 181,
+            "right": 1134.046875,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1110.046875,
+            "height": 216,
+            "top": 653,
+            "right": 1134.046875,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1110.046875,
+            "height": 112,
+            "top": 881,
+            "right": 1134.046875,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1146.046875,
+            "y": 181,
+            "width": 652.96875,
+            "height": 144,
+            "top": 181,
+            "right": 1799.015625,
+            "bottom": 325,
+            "left": 1146.046875
+          },
+          "timeline": {
+            "x": 1146.046875,
+            "y": 337,
+            "width": 652.96875,
+            "height": 232,
+            "top": 337,
+            "right": 1799.015625,
+            "bottom": 569,
+            "left": 1146.046875
+          },
+          "throughput": {
+            "x": 1146.046875,
+            "y": 581,
+            "width": 652.96875,
+            "height": 192,
+            "top": 581,
+            "right": 1799.015625,
+            "bottom": 773,
+            "left": 1146.046875
+          },
+          "machine": {
+            "x": 1811.015625,
+            "y": 181,
+            "width": 652.984375,
+            "height": 236,
+            "top": 181,
+            "right": 2464,
+            "bottom": 417,
+            "left": 1811.015625
+          },
+          "capacity": {
+            "x": 1811.015625,
+            "y": 429,
+            "width": 652.984375,
+            "height": 183.5,
+            "top": 429,
+            "right": 2464,
+            "bottom": 612.5,
+            "left": 1811.015625
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 2488,
+          "y": 73,
+          "width": 48,
+          "height": 1313,
+          "top": 73,
+          "right": 2536,
+          "bottom": 1386,
+          "left": 2488
+        },
+        "constraint": {
+          "x": 2160.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 2395,
+          "bottom": 36.75,
+          "left": 2160.140625
+        }
+      },
+      "images": [
+        {
+          "file": "2560x1440-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:11.295Z",
+          "bytes": 407394,
+          "sha256": "8b6592f03c364698ab2cef61c9f051bf7700f7fe2c82ace8fd86233cd5f72c8f"
+        },
+        {
+          "file": "2560x1440-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:11.356Z",
+          "bytes": 126812,
+          "sha256": "dfb61cae45efdd725c71473da8003e2a980ebd31abcb54928e2c1a87a0216aa1"
+        },
+        {
+          "file": "2560x1440-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:11.442Z",
+          "bytes": 65763,
+          "sha256": "0b95b40c8d6e3b381601ef74e59090e72539127711ba846286006af065076346"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "open",
+      "key": "2560x1440-dpr1-light-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 2560,
+          "height": 1440,
+          "dpr": 1
+        },
+        "bodyWidth": 2560,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2136,
+          "height": 1361,
+          "top": 49,
+          "right": 2136,
+          "bottom": 1410,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2088,
+          "height": 840,
+          "top": 181,
+          "right": 2112,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 876px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2088,
+          "height": 948,
+          "top": 73,
+          "right": 2112,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 876,
+            "height": 144,
+            "top": 181,
+            "right": 2112,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 876,
+            "height": 232,
+            "top": 337,
+            "right": 2112,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 876,
+            "height": 192,
+            "top": 581,
+            "right": 2112,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 876,
+            "height": 236,
+            "top": 785,
+            "right": 2112,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 2136,
+          "y": 73,
+          "width": 400,
+          "height": 1313,
+          "top": 73,
+          "right": 2536,
+          "bottom": 1386,
+          "left": 2136
+        },
+        "constraint": {
+          "x": 2160.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 2395,
+          "bottom": 36.75,
+          "left": 2160.140625
+        }
+      },
+      "images": [
+        {
+          "file": "2560x1440-dpr1-light-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:11.629Z",
+          "bytes": 406514,
+          "sha256": "0928ed98fc200c58aa86f96cc9850999847362f7fe2e2f0924f7c3873ac3f536"
+        },
+        {
+          "file": "2560x1440-dpr1-light-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:11.692Z",
+          "bytes": 127860,
+          "sha256": "23852e4dc06e592b539cacd4f598149d3710f2da10554343d8df75d869306116"
+        },
+        {
+          "file": "2560x1440-dpr1-light-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:11.774Z",
+          "bytes": 67929,
+          "sha256": "4e9f91e8a7164334281fe7ff3323e6eb79cdf8e2cb0e75c4b6ac035588e096de"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "key": "2560x1440-dpr1-dark-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 2560,
+          "height": 1440,
+          "dpr": 1
+        },
+        "bodyWidth": 2560,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2488,
+          "height": 1361,
+          "top": 49,
+          "right": 2488,
+          "bottom": 1410,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2440,
+          "height": 812,
+          "top": 181,
+          "right": 2464,
+          "bottom": 993,
+          "left": 24
+        },
+        "columns": "1110.05px 652.969px 652.984px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2440,
+          "height": 920,
+          "top": 73,
+          "right": 2464,
+          "bottom": 993,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1110.046875,
+            "height": 460,
+            "top": 181,
+            "right": 1134.046875,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1110.046875,
+            "height": 216,
+            "top": 653,
+            "right": 1134.046875,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1110.046875,
+            "height": 112,
+            "top": 881,
+            "right": 1134.046875,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1146.046875,
+            "y": 181,
+            "width": 652.96875,
+            "height": 144,
+            "top": 181,
+            "right": 1799.015625,
+            "bottom": 325,
+            "left": 1146.046875
+          },
+          "timeline": {
+            "x": 1146.046875,
+            "y": 337,
+            "width": 652.96875,
+            "height": 232,
+            "top": 337,
+            "right": 1799.015625,
+            "bottom": 569,
+            "left": 1146.046875
+          },
+          "throughput": {
+            "x": 1146.046875,
+            "y": 581,
+            "width": 652.96875,
+            "height": 192,
+            "top": 581,
+            "right": 1799.015625,
+            "bottom": 773,
+            "left": 1146.046875
+          },
+          "machine": {
+            "x": 1811.015625,
+            "y": 181,
+            "width": 652.984375,
+            "height": 236,
+            "top": 181,
+            "right": 2464,
+            "bottom": 417,
+            "left": 1811.015625
+          },
+          "capacity": {
+            "x": 1811.015625,
+            "y": 429,
+            "width": 652.984375,
+            "height": 183.5,
+            "top": 429,
+            "right": 2464,
+            "bottom": 612.5,
+            "left": 1811.015625
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 2488,
+          "y": 73,
+          "width": 48,
+          "height": 1313,
+          "top": 73,
+          "right": 2536,
+          "bottom": 1386,
+          "left": 2488
+        },
+        "constraint": {
+          "x": 2160.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 2395,
+          "bottom": 36.75,
+          "left": 2160.140625
+        }
+      },
+      "images": [
+        {
+          "file": "2560x1440-dpr1-dark-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:11.962Z",
+          "bytes": 412725,
+          "sha256": "abd461549318e8f13463901321e96b446ccf865138ee36a7bb1e57a062866882"
+        },
+        {
+          "file": "2560x1440-dpr1-dark-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:12.024Z",
+          "bytes": 128914,
+          "sha256": "5b308dc7d848ece48608a25f67485a258bf043bd50474d3a52ad0cdbf6f2754f"
+        },
+        {
+          "file": "2560x1440-dpr1-dark-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:12.110Z",
+          "bytes": 66878,
+          "sha256": "dc19e721e686b7c873c6786318d3c07f39aa162d0002d10c7d89d71d499b02a2"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "open",
+      "key": "2560x1440-dpr1-dark-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 2560,
+          "height": 1440,
+          "dpr": 1
+        },
+        "bodyWidth": 2560,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 2136,
+          "height": 1361,
+          "top": 49,
+          "right": 2136,
+          "bottom": 1410,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 2088,
+          "height": 840,
+          "top": 181,
+          "right": 2112,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 876px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 2088,
+          "height": 948,
+          "top": 73,
+          "right": 2112,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 876,
+            "height": 144,
+            "top": 181,
+            "right": 2112,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 876,
+            "height": 232,
+            "top": 337,
+            "right": 2112,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 876,
+            "height": 192,
+            "top": 581,
+            "right": 2112,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 876,
+            "height": 236,
+            "top": 785,
+            "right": 2112,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 2136,
+          "y": 73,
+          "width": 400,
+          "height": 1313,
+          "top": 73,
+          "right": 2536,
+          "bottom": 1386,
+          "left": 2136
+        },
+        "constraint": {
+          "x": 2160.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 2395,
+          "bottom": 36.75,
+          "left": 2160.140625
+        }
+      },
+      "images": [
+        {
+          "file": "2560x1440-dpr1-dark-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:12.312Z",
+          "bytes": 411741,
+          "sha256": "9ade91f8b9c7de3b140b4c25900a2777b7795ad2f4ef9836f40d0c64ce8146eb"
+        },
+        {
+          "file": "2560x1440-dpr1-dark-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:12.376Z",
+          "bytes": 129884,
+          "sha256": "2a78b6c53ec217d2c3d0f29f72a4d3e21c734d547eca9258cbec9d8c49adacd2"
+        },
+        {
+          "file": "2560x1440-dpr1-dark-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:12.457Z",
+          "bytes": 69117,
+          "sha256": "53b0c1a91d221e63eb3d4e3975072eaa08e4fa75e3c95e59f870fd4cccbb9969"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "3840x2160-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "bodyWidth": 3840,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3768,
+          "height": 2081,
+          "top": 49,
+          "right": 3768,
+          "bottom": 2130,
+          "left": 0
+        },
+        "workspace": {
+          "x": 444,
+          "y": 181,
+          "width": 2880,
+          "height": 812,
+          "top": 181,
+          "right": 3324,
+          "bottom": 993,
+          "left": 444
+        },
+        "columns": "1280px 788px 788px",
+        "canvas": {
+          "x": 444,
+          "y": 73,
+          "width": 2880,
+          "height": 920,
+          "top": 73,
+          "right": 3324,
+          "bottom": 993,
+          "left": 444
+        },
+        "panels": {
+          "crew": {
+            "x": 444,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1724,
+            "bottom": 641,
+            "left": 444
+          },
+          "activity": {
+            "x": 444,
+            "y": 653,
+            "width": 1280,
+            "height": 216,
+            "top": 653,
+            "right": 1724,
+            "bottom": 869,
+            "left": 444
+          },
+          "pipeline": {
+            "x": 444,
+            "y": 881,
+            "width": 1280,
+            "height": 112,
+            "top": 881,
+            "right": 1724,
+            "bottom": 993,
+            "left": 444
+          },
+          "allowance": {
+            "x": 1736,
+            "y": 181,
+            "width": 788,
+            "height": 144,
+            "top": 181,
+            "right": 2524,
+            "bottom": 325,
+            "left": 1736
+          },
+          "timeline": {
+            "x": 1736,
+            "y": 337,
+            "width": 788,
+            "height": 232,
+            "top": 337,
+            "right": 2524,
+            "bottom": 569,
+            "left": 1736
+          },
+          "throughput": {
+            "x": 1736,
+            "y": 581,
+            "width": 788,
+            "height": 192,
+            "top": 581,
+            "right": 2524,
+            "bottom": 773,
+            "left": 1736
+          },
+          "machine": {
+            "x": 2536,
+            "y": 181,
+            "width": 788,
+            "height": 236,
+            "top": 181,
+            "right": 3324,
+            "bottom": 417,
+            "left": 2536
+          },
+          "capacity": {
+            "x": 2536,
+            "y": 429,
+            "width": 788,
+            "height": 164,
+            "top": 429,
+            "right": 3324,
+            "bottom": 593,
+            "left": 2536
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 3768,
+          "y": 73,
+          "width": 48,
+          "height": 2033,
+          "top": 73,
+          "right": 3816,
+          "bottom": 2106,
+          "left": 3768
+        },
+        "constraint": {
+          "x": 3440.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 3675,
+          "bottom": 36.75,
+          "left": 3440.140625
+        }
+      },
+      "images": [
+        {
+          "file": "3840x2160-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:12.630Z",
+          "bytes": 438417,
+          "sha256": "409beacefdb35918079a299d102fea880362516d88405d738aab14351371d446"
+        },
+        {
+          "file": "3840x2160-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:12.717Z",
+          "bytes": 128834,
+          "sha256": "5a342014c16bb8e3872d149816279ac68969741fbb9ea0816e78661ff565bd5e"
+        },
+        {
+          "file": "3840x2160-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:12.790Z",
+          "bytes": 67070,
+          "sha256": "25c2351ee3970484e1afc5f502c252c31099702a0180d260fdcf240bb0b5288a"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "open",
+      "key": "3840x2160-dpr1-light-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "bodyWidth": 3840,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3416,
+          "height": 2081,
+          "top": 49,
+          "right": 3416,
+          "bottom": 2130,
+          "left": 0
+        },
+        "workspace": {
+          "x": 268,
+          "y": 181,
+          "width": 2880,
+          "height": 812,
+          "top": 181,
+          "right": 3148,
+          "bottom": 993,
+          "left": 268
+        },
+        "columns": "1280px 788px 788px",
+        "canvas": {
+          "x": 268,
+          "y": 73,
+          "width": 2880,
+          "height": 920,
+          "top": 73,
+          "right": 3148,
+          "bottom": 993,
+          "left": 268
+        },
+        "panels": {
+          "crew": {
+            "x": 268,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1548,
+            "bottom": 641,
+            "left": 268
+          },
+          "activity": {
+            "x": 268,
+            "y": 653,
+            "width": 1280,
+            "height": 216,
+            "top": 653,
+            "right": 1548,
+            "bottom": 869,
+            "left": 268
+          },
+          "pipeline": {
+            "x": 268,
+            "y": 881,
+            "width": 1280,
+            "height": 112,
+            "top": 881,
+            "right": 1548,
+            "bottom": 993,
+            "left": 268
+          },
+          "allowance": {
+            "x": 1560,
+            "y": 181,
+            "width": 788,
+            "height": 144,
+            "top": 181,
+            "right": 2348,
+            "bottom": 325,
+            "left": 1560
+          },
+          "timeline": {
+            "x": 1560,
+            "y": 337,
+            "width": 788,
+            "height": 232,
+            "top": 337,
+            "right": 2348,
+            "bottom": 569,
+            "left": 1560
+          },
+          "throughput": {
+            "x": 1560,
+            "y": 581,
+            "width": 788,
+            "height": 192,
+            "top": 581,
+            "right": 2348,
+            "bottom": 773,
+            "left": 1560
+          },
+          "machine": {
+            "x": 2360,
+            "y": 181,
+            "width": 788,
+            "height": 236,
+            "top": 181,
+            "right": 3148,
+            "bottom": 417,
+            "left": 2360
+          },
+          "capacity": {
+            "x": 2360,
+            "y": 429,
+            "width": 788,
+            "height": 164,
+            "top": 429,
+            "right": 3148,
+            "bottom": 593,
+            "left": 2360
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 3416,
+          "y": 73,
+          "width": 400,
+          "height": 2033,
+          "top": 73,
+          "right": 3816,
+          "bottom": 2106,
+          "left": 3416
+        },
+        "constraint": {
+          "x": 3440.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 3675,
+          "bottom": 36.75,
+          "left": 3440.140625
+        }
+      },
+      "images": [
+        {
+          "file": "3840x2160-dpr1-light-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:12.978Z",
+          "bytes": 477228,
+          "sha256": "bd72742a20e806de0f8224d04d16904ad0ff6a41a04de283bc196c6f4100bb21"
+        },
+        {
+          "file": "3840x2160-dpr1-light-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:13.071Z",
+          "bytes": 128834,
+          "sha256": "5a342014c16bb8e3872d149816279ac68969741fbb9ea0816e78661ff565bd5e"
+        },
+        {
+          "file": "3840x2160-dpr1-light-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:13.157Z",
+          "bytes": 67051,
+          "sha256": "4176226bf78fdd34c4517915f75ab10db8e2aa3610be6c772bba3a8703fc6e3d"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "key": "3840x2160-dpr1-dark-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "bodyWidth": 3840,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3768,
+          "height": 2081,
+          "top": 49,
+          "right": 3768,
+          "bottom": 2130,
+          "left": 0
+        },
+        "workspace": {
+          "x": 444,
+          "y": 181,
+          "width": 2880,
+          "height": 812,
+          "top": 181,
+          "right": 3324,
+          "bottom": 993,
+          "left": 444
+        },
+        "columns": "1280px 788px 788px",
+        "canvas": {
+          "x": 444,
+          "y": 73,
+          "width": 2880,
+          "height": 920,
+          "top": 73,
+          "right": 3324,
+          "bottom": 993,
+          "left": 444
+        },
+        "panels": {
+          "crew": {
+            "x": 444,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1724,
+            "bottom": 641,
+            "left": 444
+          },
+          "activity": {
+            "x": 444,
+            "y": 653,
+            "width": 1280,
+            "height": 216,
+            "top": 653,
+            "right": 1724,
+            "bottom": 869,
+            "left": 444
+          },
+          "pipeline": {
+            "x": 444,
+            "y": 881,
+            "width": 1280,
+            "height": 112,
+            "top": 881,
+            "right": 1724,
+            "bottom": 993,
+            "left": 444
+          },
+          "allowance": {
+            "x": 1736,
+            "y": 181,
+            "width": 788,
+            "height": 144,
+            "top": 181,
+            "right": 2524,
+            "bottom": 325,
+            "left": 1736
+          },
+          "timeline": {
+            "x": 1736,
+            "y": 337,
+            "width": 788,
+            "height": 232,
+            "top": 337,
+            "right": 2524,
+            "bottom": 569,
+            "left": 1736
+          },
+          "throughput": {
+            "x": 1736,
+            "y": 581,
+            "width": 788,
+            "height": 192,
+            "top": 581,
+            "right": 2524,
+            "bottom": 773,
+            "left": 1736
+          },
+          "machine": {
+            "x": 2536,
+            "y": 181,
+            "width": 788,
+            "height": 236,
+            "top": 181,
+            "right": 3324,
+            "bottom": 417,
+            "left": 2536
+          },
+          "capacity": {
+            "x": 2536,
+            "y": 429,
+            "width": 788,
+            "height": 164,
+            "top": 429,
+            "right": 3324,
+            "bottom": 593,
+            "left": 2536
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 3768,
+          "y": 73,
+          "width": 48,
+          "height": 2033,
+          "top": 73,
+          "right": 3816,
+          "bottom": 2106,
+          "left": 3768
+        },
+        "constraint": {
+          "x": 3440.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 3675,
+          "bottom": 36.75,
+          "left": 3440.140625
+        }
+      },
+      "images": [
+        {
+          "file": "3840x2160-dpr1-dark-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:13.332Z",
+          "bytes": 441447,
+          "sha256": "244f8e3a0f10781e699f586ac569a7b1654f96b9ba69724c3bf5ba6aab89cebb"
+        },
+        {
+          "file": "3840x2160-dpr1-dark-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:13.416Z",
+          "bytes": 130753,
+          "sha256": "545b2f2d56618b173fe01088f01d15832aa2e0a630c849cfbd56ffe1cef58be5"
+        },
+        {
+          "file": "3840x2160-dpr1-dark-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:13.490Z",
+          "bytes": 68231,
+          "sha256": "578faabb5ced1407fe2d06ca7dac2029f9c939f7945ae40e9482142c34b3d698"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "open",
+      "key": "3840x2160-dpr1-dark-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 3840,
+          "height": 2160,
+          "dpr": 1
+        },
+        "bodyWidth": 3840,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 3416,
+          "height": 2081,
+          "top": 49,
+          "right": 3416,
+          "bottom": 2130,
+          "left": 0
+        },
+        "workspace": {
+          "x": 268,
+          "y": 181,
+          "width": 2880,
+          "height": 812,
+          "top": 181,
+          "right": 3148,
+          "bottom": 993,
+          "left": 268
+        },
+        "columns": "1280px 788px 788px",
+        "canvas": {
+          "x": 268,
+          "y": 73,
+          "width": 2880,
+          "height": 920,
+          "top": 73,
+          "right": 3148,
+          "bottom": 993,
+          "left": 268
+        },
+        "panels": {
+          "crew": {
+            "x": 268,
+            "y": 181,
+            "width": 1280,
+            "height": 460,
+            "top": 181,
+            "right": 1548,
+            "bottom": 641,
+            "left": 268
+          },
+          "activity": {
+            "x": 268,
+            "y": 653,
+            "width": 1280,
+            "height": 216,
+            "top": 653,
+            "right": 1548,
+            "bottom": 869,
+            "left": 268
+          },
+          "pipeline": {
+            "x": 268,
+            "y": 881,
+            "width": 1280,
+            "height": 112,
+            "top": 881,
+            "right": 1548,
+            "bottom": 993,
+            "left": 268
+          },
+          "allowance": {
+            "x": 1560,
+            "y": 181,
+            "width": 788,
+            "height": 144,
+            "top": 181,
+            "right": 2348,
+            "bottom": 325,
+            "left": 1560
+          },
+          "timeline": {
+            "x": 1560,
+            "y": 337,
+            "width": 788,
+            "height": 232,
+            "top": 337,
+            "right": 2348,
+            "bottom": 569,
+            "left": 1560
+          },
+          "throughput": {
+            "x": 1560,
+            "y": 581,
+            "width": 788,
+            "height": 192,
+            "top": 581,
+            "right": 2348,
+            "bottom": 773,
+            "left": 1560
+          },
+          "machine": {
+            "x": 2360,
+            "y": 181,
+            "width": 788,
+            "height": 236,
+            "top": 181,
+            "right": 3148,
+            "bottom": 417,
+            "left": 2360
+          },
+          "capacity": {
+            "x": 2360,
+            "y": 429,
+            "width": 788,
+            "height": 164,
+            "top": 429,
+            "right": 3148,
+            "bottom": 593,
+            "left": 2360
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 3416,
+          "y": 73,
+          "width": 400,
+          "height": 2033,
+          "top": 73,
+          "right": 3816,
+          "bottom": 2106,
+          "left": 3416
+        },
+        "constraint": {
+          "x": 3440.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 3675,
+          "bottom": 36.75,
+          "left": 3440.140625
+        }
+      },
+      "images": [
+        {
+          "file": "3840x2160-dpr1-dark-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:13.662Z",
+          "bytes": 480550,
+          "sha256": "fb844d038c8a6216dfeddbedda1a53eee6ad6a1e2c167e228ed7f84a54df505a"
+        },
+        {
+          "file": "3840x2160-dpr1-dark-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:13.754Z",
+          "bytes": 130753,
+          "sha256": "545b2f2d56618b173fe01088f01d15832aa2e0a630c849cfbd56ffe1cef58be5"
+        },
+        {
+          "file": "3840x2160-dpr1-dark-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:13.841Z",
+          "bytes": 68225,
+          "sha256": "8147b7423ad9b7de1cdf21844ca2382da8f9cf9fc4a3e97e0da341888a1af83f"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 2,
+      "theme": "light",
+      "flight": "folded",
+      "key": "1920x1080-dpr2-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 2
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1848,
+          "y": 73,
+          "width": 48,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1848
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr2-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:14.029Z",
+          "bytes": 845088,
+          "sha256": "1bfdc3aff5de5cff52bc1af9820c4ab02a654bd1e02f5464f86da8af770709b1"
+        },
+        {
+          "file": "1920x1080-dpr2-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:14.175Z",
+          "bytes": 314177,
+          "sha256": "422c86101f8ca3c83829626fc1d2bf8dd2d584363d36b198273b0fd9cc50291e"
+        },
+        {
+          "file": "1920x1080-dpr2-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:14.284Z",
+          "bytes": 148964,
+          "sha256": "b78ef161dd29452cea29b71912a4acb5cc33b79a299b5f8604af6460afcb0f5a"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 2,
+      "theme": "light",
+      "flight": "open",
+      "key": "1920x1080-dpr2-light-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 2
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1496,
+          "y": 73,
+          "width": 400,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1496
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr2-light-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:14.428Z",
+          "bytes": 875658,
+          "sha256": "5e622e777d7ae726e3c6df2fccf6cc8fd54d3a4cebb033aa998bcfbbe5e70efa"
+        },
+        {
+          "file": "1920x1080-dpr2-light-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:14.576Z",
+          "bytes": 314177,
+          "sha256": "422c86101f8ca3c83829626fc1d2bf8dd2d584363d36b198273b0fd9cc50291e"
+        },
+        {
+          "file": "1920x1080-dpr2-light-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:14.683Z",
+          "bytes": 153095,
+          "sha256": "b66216c08a4cceb63e8af75bfef070d07cc04bfb69417b3c091827d4cd73ff26"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 2,
+      "theme": "dark",
+      "flight": "folded",
+      "key": "1920x1080-dpr2-dark-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 2
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1848,
+          "y": 73,
+          "width": 48,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1848
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr2-dark-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:14.862Z",
+          "bytes": 853931,
+          "sha256": "52d1d7cbaf9205d94b356a0c127a53243bc728873fb6efbd3e9ab080f417ce1a"
+        },
+        {
+          "file": "1920x1080-dpr2-dark-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:15.008Z",
+          "bytes": 318973,
+          "sha256": "98bc69d8f44b0b060e2f3986d4627485358f60f5812fab76e9ab765c04e2cf36"
+        },
+        {
+          "file": "1920x1080-dpr2-dark-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:15.118Z",
+          "bytes": 151411,
+          "sha256": "22680589f26b28d3dcfc184a2b53ee17d4c59f66dcc08061a32377d358d877e2"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "dpr": 2,
+      "theme": "dark",
+      "flight": "open",
+      "key": "1920x1080-dpr2-dark-open",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 2
+        },
+        "bodyWidth": 1920,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1848,
+          "height": 1001,
+          "top": 49,
+          "right": 1848,
+          "bottom": 1050,
+          "left": 0
+        },
+        "workspace": {
+          "x": 24,
+          "y": 181,
+          "width": 1800,
+          "height": 840,
+          "top": 181,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "columns": "1200px 588px",
+        "canvas": {
+          "x": 24,
+          "y": 73,
+          "width": 1800,
+          "height": 948,
+          "top": 73,
+          "right": 1824,
+          "bottom": 1021,
+          "left": 24
+        },
+        "panels": {
+          "crew": {
+            "x": 24,
+            "y": 181,
+            "width": 1200,
+            "height": 460,
+            "top": 181,
+            "right": 1224,
+            "bottom": 641,
+            "left": 24
+          },
+          "activity": {
+            "x": 24,
+            "y": 653,
+            "width": 1200,
+            "height": 216,
+            "top": 653,
+            "right": 1224,
+            "bottom": 869,
+            "left": 24
+          },
+          "pipeline": {
+            "x": 24,
+            "y": 881,
+            "width": 1200,
+            "height": 112,
+            "top": 881,
+            "right": 1224,
+            "bottom": 993,
+            "left": 24
+          },
+          "allowance": {
+            "x": 1236,
+            "y": 181,
+            "width": 588,
+            "height": 144,
+            "top": 181,
+            "right": 1824,
+            "bottom": 325,
+            "left": 1236
+          },
+          "timeline": {
+            "x": 1236,
+            "y": 337,
+            "width": 588,
+            "height": 232,
+            "top": 337,
+            "right": 1824,
+            "bottom": 569,
+            "left": 1236
+          },
+          "throughput": {
+            "x": 1236,
+            "y": 581,
+            "width": 588,
+            "height": 192,
+            "top": 581,
+            "right": 1824,
+            "bottom": 773,
+            "left": 1236
+          },
+          "machine": {
+            "x": 1236,
+            "y": 785,
+            "width": 588,
+            "height": 236,
+            "top": 785,
+            "right": 1824,
+            "bottom": 1021,
+            "left": 1236
+          },
+          "capacity": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1496,
+          "y": 73,
+          "width": 400,
+          "height": 953,
+          "top": 73,
+          "right": 1896,
+          "bottom": 1026,
+          "left": 1496
+        },
+        "constraint": {
+          "x": 1520.140625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 1755,
+          "bottom": 36.75,
+          "left": 1520.140625
+        }
+      },
+      "images": [
+        {
+          "file": "1920x1080-dpr2-dark-open-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:15.279Z",
+          "bytes": 875033,
+          "sha256": "78571ef1418d3f9ab81ba0b0c358c9cbeafcccef743f2255e682d6831c2ea46a"
+        },
+        {
+          "file": "1920x1080-dpr2-dark-open-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:15.425Z",
+          "bytes": 318973,
+          "sha256": "98bc69d8f44b0b060e2f3986d4627485358f60f5812fab76e9ab765c04e2cf36"
+        },
+        {
+          "file": "1920x1080-dpr2-dark-open-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:15.533Z",
+          "bytes": 154747,
+          "sha256": "78c31525596b0f04a2008dc081792665e32d125fe2f26054ac97f89dc445e931"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "1280x900-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1280,
+          "height": 900,
+          "dpr": 1
+        },
+        "bodyWidth": 1280,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1208,
+          "height": 821,
+          "top": 49,
+          "right": 1208,
+          "bottom": 870,
+          "left": 0
+        },
+        "workspace": {
+          "x": 16,
+          "y": 235,
+          "width": 1176,
+          "height": 1460,
+          "top": 235,
+          "right": 1192,
+          "bottom": 1695,
+          "left": 16
+        },
+        "columns": "1176px",
+        "canvas": {
+          "x": 16,
+          "y": 65,
+          "width": 1176,
+          "height": 1630,
+          "top": 65,
+          "right": 1192,
+          "bottom": 1695,
+          "left": 16
+        },
+        "panels": {
+          "crew": {
+            "x": 16,
+            "y": 235,
+            "width": 1176,
+            "height": 460,
+            "top": 235,
+            "right": 1192,
+            "bottom": 695,
+            "left": 16
+          },
+          "activity": {
+            "x": 16,
+            "y": 707,
+            "width": 1176,
+            "height": 216,
+            "top": 707,
+            "right": 1192,
+            "bottom": 923,
+            "left": 16
+          },
+          "pipeline": {
+            "x": 16,
+            "y": 935,
+            "width": 1176,
+            "height": 112,
+            "top": 935,
+            "right": 1192,
+            "bottom": 1047,
+            "left": 16
+          },
+          "allowance": {
+            "x": 16,
+            "y": 1059,
+            "width": 1176,
+            "height": 144,
+            "top": 1059,
+            "right": 1192,
+            "bottom": 1203,
+            "left": 16
+          },
+          "timeline": {
+            "x": 16,
+            "y": 1215,
+            "width": 582,
+            "height": 232,
+            "top": 1215,
+            "right": 598,
+            "bottom": 1447,
+            "left": 16
+          },
+          "throughput": {
+            "x": 610,
+            "y": 1215,
+            "width": 582,
+            "height": 192,
+            "top": 1215,
+            "right": 1192,
+            "bottom": 1407,
+            "left": 610
+          },
+          "machine": {
+            "x": 16,
+            "y": 1459,
+            "width": 582,
+            "height": 236,
+            "top": 1459,
+            "right": 598,
+            "bottom": 1695,
+            "left": 16
+          },
+          "capacity": {
+            "x": 610,
+            "y": 1459,
+            "width": 582,
+            "height": 236,
+            "top": 1459,
+            "right": 1192,
+            "bottom": 1695,
+            "left": 610
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1208,
+          "y": 73,
+          "width": 48,
+          "height": 773,
+          "top": 73,
+          "right": 1256,
+          "bottom": 846,
+          "left": 1208
+        },
+        "constraint": {
+          "x": 488.15625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 723.015625,
+          "bottom": 36.75,
+          "left": 488.15625
+        }
+      },
+      "images": [
+        {
+          "file": "1280x900-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:15.712Z",
+          "bytes": 216321,
+          "sha256": "3eca47187e6141c1101b9eff17482fde731dd586aec3d7dfcce6123a0869b5b3"
+        },
+        {
+          "file": "1280x900-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:15.748Z",
+          "bytes": 127587,
+          "sha256": "ddb846f767588668d38ca20ea412c88f62da550df98b34d2fad3dcb40178db49"
+        },
+        {
+          "file": "1280x900-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:15.841Z",
+          "bytes": 65423,
+          "sha256": "16fdcc3024d6d879265ef1f58d60ce2a2201e1f1db5753927348b45f73167c7b"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "1440x900-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1440,
+          "height": 900,
+          "dpr": 1
+        },
+        "bodyWidth": 1440,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1368,
+          "height": 821,
+          "top": 49,
+          "right": 1368,
+          "bottom": 870,
+          "left": 0
+        },
+        "workspace": {
+          "x": 16,
+          "y": 235,
+          "width": 1336,
+          "height": 1460,
+          "top": 235,
+          "right": 1352,
+          "bottom": 1695,
+          "left": 16
+        },
+        "columns": "1336px",
+        "canvas": {
+          "x": 16,
+          "y": 65,
+          "width": 1336,
+          "height": 1630,
+          "top": 65,
+          "right": 1352,
+          "bottom": 1695,
+          "left": 16
+        },
+        "panels": {
+          "crew": {
+            "x": 16,
+            "y": 235,
+            "width": 1336,
+            "height": 460,
+            "top": 235,
+            "right": 1352,
+            "bottom": 695,
+            "left": 16
+          },
+          "activity": {
+            "x": 16,
+            "y": 707,
+            "width": 1336,
+            "height": 216,
+            "top": 707,
+            "right": 1352,
+            "bottom": 923,
+            "left": 16
+          },
+          "pipeline": {
+            "x": 16,
+            "y": 935,
+            "width": 1336,
+            "height": 112,
+            "top": 935,
+            "right": 1352,
+            "bottom": 1047,
+            "left": 16
+          },
+          "allowance": {
+            "x": 16,
+            "y": 1059,
+            "width": 1336,
+            "height": 144,
+            "top": 1059,
+            "right": 1352,
+            "bottom": 1203,
+            "left": 16
+          },
+          "timeline": {
+            "x": 16,
+            "y": 1215,
+            "width": 662,
+            "height": 232,
+            "top": 1215,
+            "right": 678,
+            "bottom": 1447,
+            "left": 16
+          },
+          "throughput": {
+            "x": 690,
+            "y": 1215,
+            "width": 662,
+            "height": 192,
+            "top": 1215,
+            "right": 1352,
+            "bottom": 1407,
+            "left": 690
+          },
+          "machine": {
+            "x": 16,
+            "y": 1459,
+            "width": 662,
+            "height": 236,
+            "top": 1459,
+            "right": 678,
+            "bottom": 1695,
+            "left": 16
+          },
+          "capacity": {
+            "x": 690,
+            "y": 1459,
+            "width": 662,
+            "height": 236,
+            "top": 1459,
+            "right": 1352,
+            "bottom": 1695,
+            "left": 690
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 390,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1368,
+          "y": 73,
+          "width": 48,
+          "height": 773,
+          "top": 73,
+          "right": 1416,
+          "bottom": 846,
+          "left": 1368
+        },
+        "constraint": {
+          "x": 488.15625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 723.015625,
+          "bottom": 36.75,
+          "left": 488.15625
+        }
+      },
+      "images": [
+        {
+          "file": "1440x900-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:16.029Z",
+          "bytes": 220279,
+          "sha256": "e439c3b8adcb92cc8d8b1566016d3e1e71d619bd8ab0fe46b9e0605b0453d314"
+        },
+        {
+          "file": "1440x900-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:16.068Z",
+          "bytes": 129374,
+          "sha256": "a246a3a59d8dc7ac20c721001218169aea6735a1251fde1fed3ba8a6cc2dfe23"
+        },
+        {
+          "file": "1440x900-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:16.156Z",
+          "bytes": 66368,
+          "sha256": "2418cedc46daa4678f8eea6c5879e8df7be8777aeb9e9af1e38964c2031aeaf7"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1600,
+      "height": 700,
+      "dpr": 1,
+      "theme": "light",
+      "flight": "folded",
+      "key": "1600x700-dpr1-light-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1600,
+          "height": 700,
+          "dpr": 1
+        },
+        "bodyWidth": 1600,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1528,
+          "height": 621,
+          "top": 49,
+          "right": 1528,
+          "bottom": 670,
+          "left": 0
+        },
+        "workspace": {
+          "x": 16,
+          "y": 235,
+          "width": 1496,
+          "height": 1326,
+          "top": 235,
+          "right": 1512,
+          "bottom": 1561,
+          "left": 16
+        },
+        "columns": "1496px",
+        "canvas": {
+          "x": 16,
+          "y": 65,
+          "width": 1496,
+          "height": 1496,
+          "top": 65,
+          "right": 1512,
+          "bottom": 1561,
+          "left": 16
+        },
+        "panels": {
+          "crew": {
+            "x": 16,
+            "y": 235,
+            "width": 1496,
+            "height": 326,
+            "top": 235,
+            "right": 1512,
+            "bottom": 561,
+            "left": 16
+          },
+          "activity": {
+            "x": 16,
+            "y": 573,
+            "width": 1496,
+            "height": 216,
+            "top": 573,
+            "right": 1512,
+            "bottom": 789,
+            "left": 16
+          },
+          "pipeline": {
+            "x": 16,
+            "y": 801,
+            "width": 1496,
+            "height": 112,
+            "top": 801,
+            "right": 1512,
+            "bottom": 913,
+            "left": 16
+          },
+          "allowance": {
+            "x": 16,
+            "y": 925,
+            "width": 1496,
+            "height": 144,
+            "top": 925,
+            "right": 1512,
+            "bottom": 1069,
+            "left": 16
+          },
+          "timeline": {
+            "x": 16,
+            "y": 1081,
+            "width": 742,
+            "height": 232,
+            "top": 1081,
+            "right": 758,
+            "bottom": 1313,
+            "left": 16
+          },
+          "throughput": {
+            "x": 770,
+            "y": 1081,
+            "width": 742,
+            "height": 192,
+            "top": 1081,
+            "right": 1512,
+            "bottom": 1273,
+            "left": 770
+          },
+          "machine": {
+            "x": 16,
+            "y": 1325,
+            "width": 742,
+            "height": 236,
+            "top": 1325,
+            "right": 758,
+            "bottom": 1561,
+            "left": 16
+          },
+          "capacity": {
+            "x": 770,
+            "y": 1325,
+            "width": 742,
+            "height": 236,
+            "top": 1325,
+            "right": 1512,
+            "bottom": 1561,
+            "left": 770
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 230,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1528,
+          "y": 73,
+          "width": 48,
+          "height": 573,
+          "top": 73,
+          "right": 1576,
+          "bottom": 646,
+          "left": 1528
+        },
+        "constraint": {
+          "x": 488.15625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 723.015625,
+          "bottom": 36.75,
+          "left": 488.15625
+        }
+      },
+      "images": [
+        {
+          "file": "1600x700-dpr1-light-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:16.346Z",
+          "bytes": 162040,
+          "sha256": "18352b1829a2e5419e69597b4e71712264c409e638f91a2116c83b429ea7d441"
+        },
+        {
+          "file": "1600x700-dpr1-light-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:16.380Z",
+          "bytes": 89107,
+          "sha256": "83d82fceb79b06851b44988fe301a0fbbb41f5dc3e1a61e418710da2c2abb174"
+        },
+        {
+          "file": "1600x700-dpr1-light-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:16.472Z",
+          "bytes": 67784,
+          "sha256": "5840069ff569a7f811539e0fe4c5bf6c5d5f21d34dfc79c6d67a25e898e14fa9"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    },
+    {
+      "width": 1600,
+      "height": 700,
+      "dpr": 1,
+      "theme": "dark",
+      "flight": "folded",
+      "key": "1600x700-dpr1-dark-folded",
+      "source": "c8b5e1658719a5a8bf2d22ae1ad71424f1be0ba0",
+      "facts": {
+        "viewport": {
+          "width": 1600,
+          "height": 700,
+          "dpr": 1
+        },
+        "bodyWidth": 1600,
+        "main": {
+          "x": 0,
+          "y": 49,
+          "width": 1528,
+          "height": 621,
+          "top": 49,
+          "right": 1528,
+          "bottom": 670,
+          "left": 0
+        },
+        "workspace": {
+          "x": 16,
+          "y": 235,
+          "width": 1496,
+          "height": 1326,
+          "top": 235,
+          "right": 1512,
+          "bottom": 1561,
+          "left": 16
+        },
+        "columns": "1496px",
+        "canvas": {
+          "x": 16,
+          "y": 65,
+          "width": 1496,
+          "height": 1496,
+          "top": 65,
+          "right": 1512,
+          "bottom": 1561,
+          "left": 16
+        },
+        "panels": {
+          "crew": {
+            "x": 16,
+            "y": 235,
+            "width": 1496,
+            "height": 326,
+            "top": 235,
+            "right": 1512,
+            "bottom": 561,
+            "left": 16
+          },
+          "activity": {
+            "x": 16,
+            "y": 573,
+            "width": 1496,
+            "height": 216,
+            "top": 573,
+            "right": 1512,
+            "bottom": 789,
+            "left": 16
+          },
+          "pipeline": {
+            "x": 16,
+            "y": 801,
+            "width": 1496,
+            "height": 112,
+            "top": 801,
+            "right": 1512,
+            "bottom": 913,
+            "left": 16
+          },
+          "allowance": {
+            "x": 16,
+            "y": 925,
+            "width": 1496,
+            "height": 144,
+            "top": 925,
+            "right": 1512,
+            "bottom": 1069,
+            "left": 16
+          },
+          "timeline": {
+            "x": 16,
+            "y": 1081,
+            "width": 742,
+            "height": 232,
+            "top": 1081,
+            "right": 758,
+            "bottom": 1313,
+            "left": 16
+          },
+          "throughput": {
+            "x": 770,
+            "y": 1081,
+            "width": 742,
+            "height": 192,
+            "top": 1081,
+            "right": 1512,
+            "bottom": 1273,
+            "left": 770
+          },
+          "machine": {
+            "x": 16,
+            "y": 1325,
+            "width": 742,
+            "height": 236,
+            "top": 1325,
+            "right": 758,
+            "bottom": 1561,
+            "left": 16
+          },
+          "capacity": {
+            "x": 770,
+            "y": 1325,
+            "width": 742,
+            "height": 236,
+            "top": 1325,
+            "right": 1512,
+            "bottom": 1561,
+            "left": 770
+          }
+        },
+        "crewRows": 11,
+        "rowHeight": 32,
+        "crewScroll": {
+          "height": 230,
+          "scrollHeight": 390
+        },
+        "loadedFonts": [
+          "IBM Plex Sans",
+          "IBM Plex Sans",
+          "IBM Plex Mono",
+          "Barlow Semi Condensed"
+        ],
+        "flight": {
+          "x": 1528,
+          "y": 73,
+          "width": 48,
+          "height": 573,
+          "top": 73,
+          "right": 1576,
+          "bottom": 646,
+          "left": 1528
+        },
+        "constraint": {
+          "x": 488.15625,
+          "y": 11.25,
+          "width": 234.859375,
+          "height": 25.5,
+          "top": 11.25,
+          "right": 723.015625,
+          "bottom": 36.75,
+          "left": 488.15625
+        }
+      },
+      "images": [
+        {
+          "file": "1600x700-dpr1-dark-folded-full.png",
+          "region": "full",
+          "capturedAt": "2026-11-03T11:15:16.643Z",
+          "bytes": 166222,
+          "sha256": "fcbac0ec8e4d5743befd8ad06a8f1f4cc8159b826a7f9f47ae575d6e240e478a"
+        },
+        {
+          "file": "1600x700-dpr1-dark-folded-crew.png",
+          "region": "crew",
+          "capturedAt": "2026-11-03T11:15:16.680Z",
+          "bytes": 91999,
+          "sha256": "9291d120dd2f5ba4ddacdd7af0937f2d9146a68856e676664b8c390d57732a27"
+        },
+        {
+          "file": "1600x700-dpr1-dark-folded-signals.png",
+          "region": "signals",
+          "capturedAt": "2026-11-03T11:15:16.756Z",
+          "bytes": 68543,
+          "sha256": "c1e0e322f97ed122539952b518de50789ac720e0f4bc43a551c924b158cf0744"
+        }
+      ],
+      "errors": [],
+      "requests": [],
+      "scope": "Standalone native HTML/CSS proposal; fictional source-shaped values. Not production App, not live API data. Full image is initial viewport; crops are natural panel screenshots."
+    }
+  ],
+  "scope": "Design proposal only; no production code changes. Actual CSS viewport and device scale are separate. Source/hash-bound fictional snapshot, not copied live data."
+}
