@@ -29,6 +29,18 @@ export interface SeatInstructionList extends StandingInstructionList {
   effectiveFocus: string | null;
   focusInstructionId: number | null;
 }
+/** The page-shaped active instruction index; detailed history is read for one selected seat. */
+export interface SeatInstructionIndex {
+  seats: Array<
+    Pick<SeatInstructionList, "active" | "effectiveFocus" | "focusInstructionId"> & {
+      seatId: string;
+    }
+  >;
+}
+export type FocusInstructionView = Pick<
+  SeatInstructionList,
+  "effectiveFocus" | "focusInstructionId"
+> & { focus: string | null };
 export interface InstructionMutation {
   entry: StandingInstruction;
   changed: boolean;

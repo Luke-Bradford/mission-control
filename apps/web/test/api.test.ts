@@ -167,8 +167,12 @@ describe("api", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     await loadOperatorToken();
+    const { revokeInstruction, ...stringActions } = ACTIONS;
     const paths = [
-      ...Object.values(ACTIONS).map((action) =>
+      revokeInstruction("id", 1),
+      revokeInstruction(null, 1),
+      ACTIONS.saveInstruction(null),
+      ...Object.values(stringActions).map((action) =>
         typeof action === "string" ? action : action("id", "topic"),
       ),
       RESOURCES.discussion("key").path,

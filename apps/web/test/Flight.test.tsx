@@ -38,6 +38,8 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/prs/flow": { generatedAt: 0, repos: [] },
     "/api/flight/memory?repo=shop-app": { notes: [] },
     "/api/flight/memory?repo=site-builder": { notes: [] },
+    "/api/flight/orders?limit=1": { active: [], history: [], nextCursor: null },
+    "/api/flight/instructions": { seats: [] },
     "/api/drafts": [],
     "/api/drafts/history": [],
     "/api/flight/incoming": { entries: [] },
@@ -1481,12 +1483,12 @@ describe("FLIGHT's brief", () => {
     ).toBeNull();
   });
 
-  it("What FLIGHT knows says standing orders and seat instructions are not available yet", async () => {
+  it("What FLIGHT knows shows the saved-order empty state and seat index", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
-    expect(screen.getByText(/^Standing orders: not available yet/)).toBeTruthy();
-    expect(screen.getByText(/^Per-seat instructions: not available yet/)).toBeTruthy();
+    expect(await screen.findByText("No active orders.")).toBeTruthy();
+    expect(await screen.findByText("No seats configured.")).toBeTruthy();
   });
 
   it("What FLIGHT knows opens repo memory on the session's repo", async () => {

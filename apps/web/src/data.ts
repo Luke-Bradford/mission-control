@@ -53,6 +53,8 @@ const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attent
 const AGENT_DETAIL_TOPICS: readonly Topic[] = ["agents", "attention", "boards"];
 const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
+const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
+const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 type PageDocument = {
@@ -111,6 +113,21 @@ export const RESOURCES = {
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
+  // Active sets are always complete. The strip requests only the smallest included history page.
+  flightOrders: { path: "/api/flight/orders?limit=1", topic: ORDER_TOPICS },
+  instructionHistory: (seatId: string | null, before?: number): ResourceRef => ({
+    path: `${seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`}?limit=50${before === undefined ? "" : `&before=${before}`}`,
+    topic: INSTRUCTION_TOPICS,
+  }),
+  seatInstructions: (seatId: string): ResourceRef => ({
+    path: `/api/seats/${enc(seatId)}/instructions?limit=1`,
+    topic: INSTRUCTION_TOPICS,
+  }),
+  instructionIndex: { path: "/api/flight/instructions", topic: INSTRUCTION_TOPICS },
+  retainedOrder: (id: number): ResourceRef => ({
+    path: `/api/flight/orders/${id}`,
+    topic: ORDER_TOPICS,
+  }),
   drafts: { path: "/api/drafts", topic: "flight" },
   draftHistory: { path: "/api/drafts/history", topic: "flight" },
   flightSchedule: { path: "/api/flight/schedule", topic: "flight" },
@@ -272,12 +289,19 @@ export const RESOURCES = {
   string,
   | ResourceRef
   | ((id: string) => ResourceRef)
+  | ((id: number) => ResourceRef)
   | ((id: string, n: number) => ResourceRef)
   | ((id: string, s: string) => ResourceRef)
 >;
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  saveInstruction: (seatId: string | null) =>
+    seatId === null ? "/api/flight/orders" : `/api/seats/${enc(seatId)}/instructions`,
+  revokeInstruction: (seatId: string | null, id: number) =>
+    seatId === null
+      ? `/api/flight/orders/${id}/revoke`
+      : `/api/seats/${enc(seatId)}/instructions/${id}/revoke`,
   codeHealthDecision: (repo: string, id: string) =>
     `/api/code-health/recommendations/${enc(id)}?repo=${enc(repo)}`,
   /** Body `{ pr }`; starts a branch preview and returns its URL. */

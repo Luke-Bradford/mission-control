@@ -20,6 +20,7 @@ import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
+import { SeatInstructionsDisclosure } from "../instructions/Instructions.tsx";
 import { useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
@@ -130,6 +131,9 @@ export function Agent({ id }: { id: string | null }) {
                     )}
                     <AgentRelated view={detail.data as AgentDetailView} />
                     <AgentContext view={detail.data as AgentDetailView} />
+                    {row.kind === "crew" && (
+                      <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />
+                    )}
                     <SideTabs key={`t:${row.id}`} row={row} />
                   </div>
                 </div>

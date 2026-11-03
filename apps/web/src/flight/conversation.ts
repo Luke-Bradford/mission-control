@@ -17,6 +17,8 @@ export const FLIGHT_KIND_LABEL: Readonly<Record<string, string>> = {
   message: "Messaged",
   unpark: "Un-parked",
   note: "Noted",
+  "re-plan": "Re-planned",
+  instruction: "Seat instruction",
   brief: "Brief",
   pause: "Pause / resume",
 };
