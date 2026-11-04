@@ -8,9 +8,17 @@ import type {
   ReviewCheckState,
   RunLoopView,
 } from "@mc/core";
-import { type CSSProperties, useRef, useState } from "react";
-import { apiPost } from "../api.ts";
+import { type CSSProperties, useId, useRef, useState } from "react";
+import { ApiError, apiPost } from "../api.ts";
 import { useSecond, useTz } from "../clock.ts";
+import {
+  ErrorSummary,
+  FieldError,
+  fieldProps,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "../components/formSupport.tsx";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -212,6 +220,11 @@ function SwitchAccount({ row }: { row: CrewRow }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
+  const guard = useSubmitGuard();
+  const fieldId = useId();
   const button = useRef<HTMLButtonElement>(null);
   const config = useResource<ConfigView>(RESOURCES.config);
   const statuses = useResource<CliAccountStatus[]>(open ? RESOURCES.accountStatus : null);
@@ -231,6 +244,12 @@ function SwitchAccount({ row }: { row: CrewRow }) {
     !loading &&
     !checking &&
     !checkFailed;
+  const chooseError =
+    !attempted || available
+      ? undefined
+      : accountId === ""
+        ? "Choose an account to transfer to."
+        : "That account is not ready to take the session yet: see the note below.";
   const close = () => {
     setOpen(false);
     button.current?.focus();
@@ -252,9 +271,17 @@ function SwitchAccount({ row }: { row: CrewRow }) {
     }
   };
   const transfer = async () => {
-    if (busy || !available) return;
+    if (!guard.take()) return;
+    // Say why nothing was sent: no choice, a login that is not ready, or a read still out.
+    if (!available) {
+      guard.release();
+      setAttempted(true);
+      setFocusKey((key) => key + 1);
+      return;
+    }
     setBusy(true);
     setError(null);
+    setUncertain(false);
     setResult("");
     try {
       const response = await apiPost<{ outcome: "resumed" | "fresh" | "refused"; reason?: string }>(
@@ -270,10 +297,13 @@ function SwitchAccount({ row }: { row: CrewRow }) {
       else setError("Transfer returned an unexpected response. Refresh and try again.");
     } catch (e) {
       setError(seatError(e));
+      setUncertain(isUncertain(e instanceof ApiError ? e.status : undefined));
+      setFocusKey((key) => key + 1);
     } finally {
       hub.refetch(RESOURCES.accountStatus.path);
       hub.refetch(RESOURCES.config.path);
       hub.refetchCrew(row.id);
+      guard.release();
       setBusy(false);
     }
   };
@@ -290,6 +320,8 @@ function SwitchAccount({ row }: { row: CrewRow }) {
           setAccountId("");
           setResult("");
           setError(null);
+          setUncertain(false);
+          setAttempted(false);
           setOpen(true);
           hub.refetch(RESOURCES.accountStatus.path);
           toast(
@@ -313,7 +345,8 @@ function SwitchAccount({ row }: { row: CrewRow }) {
       )}
       {open && (
         <form
-          className="account-chooser"
+          className="account-chooser fform fform-480"
+          noValidate
           aria-label="Switch account"
           onSubmit={(e) => {
             e.preventDefault();
@@ -327,72 +360,91 @@ function SwitchAccount({ row }: { row: CrewRow }) {
             }
           }}
         >
-          <label>
-            Account
-            <select
-              // biome-ignore lint/a11y/noAutofocus: focus the chooser opened by the Switch account button
-              autoFocus
-              value={accountId}
-              disabled={busy || checking || !!loadError}
-              onChange={(e) => {
-                setAccountId(e.target.value);
-                setError(null);
-                setResult("");
-              }}
-            >
-              <option value="">Choose account</option>
-              {accounts.map((a) => {
-                const status = statuses.data?.find((s) => s.accountId === a.id)?.status;
-                return (
-                  <option key={a.id} value={a.id}>
-                    {a.id} ·{" "}
-                    {status === "logged-in"
-                      ? "Available"
-                      : status === "not-logged-in"
-                        ? "Not signed in"
-                        : "Availability unknown"}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-          <button type="submit" className="sm" disabled={busy || !available}>
-            Transfer account
-          </button>
-          <button type="button" className="sm ghost" disabled={busy || checking} onClick={close}>
-            Cancel
-          </button>
-          {checking && <span className="s muted">Checking accounts…</span>}
-          {loading && <span className="s muted">Loading accounts…</span>}
-          {!loading && !loadError && accounts.length === 0 && (
-            <span className="s muted">No other compatible accounts configured.</span>
-          )}
-          {accountId && !loading && !loadError && !available && (
-            <span className="s muted">
-              {reading?.detail} Sign in with the {provider} CLI on this machine, then retry the
-              availability check.
-            </span>
-          )}
-          {!busy && (
-            <button
-              type="button"
-              className="sm ghost"
-              disabled={checking}
-              onClick={() => void retry()}
-            >
-              Retry
-            </button>
-          )}
-          {(error || loadError) && (
-            <span role="alert" className="crit-t s">
-              {error ?? loadError?.message}
-            </span>
-          )}
+          <fieldset className="fgroup">
+            <legend>Switch account</legend>
+            <p className="s">
+              Current account: <b className="mono">{row.accountId}</b>
+            </p>
+            <div className="ffield">
+              <label htmlFor={fieldId}>Account</label>
+              <select
+                {...fieldProps(fieldId, chooseError, `${fieldId}-hint`)}
+                // biome-ignore lint/a11y/noAutofocus: focus the chooser opened by the Switch account button
+                autoFocus
+                value={accountId}
+                disabled={busy || checking || !!loadError}
+                onChange={(e) => {
+                  setAccountId(e.target.value);
+                  setError(null);
+                  setUncertain(false);
+                  setResult("");
+                }}
+              >
+                <option value="">Choose account</option>
+                {accounts.map((a) => {
+                  const status = statuses.data?.find((s) => s.accountId === a.id)?.status;
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.id} ·{" "}
+                      {status === "logged-in"
+                        ? "Available"
+                        : status === "not-logged-in"
+                          ? "Not signed in"
+                          : "Availability unknown"}
+                    </option>
+                  );
+                })}
+              </select>
+              <span id={`${fieldId}-hint`} className="fhint muted xs">
+                Mission Control moves the session there and resumes it, or starts fresh with a
+                handoff brief if the resume fails.
+              </span>
+              <FieldError id={fieldId} error={chooseError} />
+            </div>
+            {checking && <p className="s muted">Checking accounts…</p>}
+            {loading && <p className="s muted">Loading accounts…</p>}
+            {!loading && !loadError && accounts.length === 0 && (
+              <p className="s muted">No other compatible accounts configured.</p>
+            )}
+            {accountId && !loading && !loadError && !available && (
+              <p className="s muted">
+                {reading?.detail} Sign in with the {provider} CLI on this machine, then retry the
+                availability check.
+              </p>
+            )}
+          </fieldset>
+          <ErrorSummary
+            title={
+              chooseError
+                ? "Fix before transferring"
+                : uncertain
+                  ? "Result unknown"
+                  : "Not transferred"
+            }
+            issues={chooseError ? [{ id: fieldId, message: chooseError }] : []}
+            message={error ?? loadError?.message ?? null}
+            focusKey={focusKey}
+          >
+            {uncertain && <p className="s">{UNCERTAIN_TEXT}</p>}
+          </ErrorSummary>
           {(busy || result) && (
-            <span role="status" className="s">
+            <p role="status" className="fstatus s">
               {busy ? "Transferring account…" : result}
-            </span>
+            </p>
           )}
+          <div className="fact">
+            <button type="submit" className="primary" disabled={busy || !available}>
+              Transfer account
+            </button>
+            <button type="button" disabled={busy || checking} onClick={close}>
+              Cancel
+            </button>
+            {!busy && (
+              <button type="button" disabled={checking} onClick={() => void retry()}>
+                Retry
+              </button>
+            )}
+          </div>
         </form>
       )}
     </>

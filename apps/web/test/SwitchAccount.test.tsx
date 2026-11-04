@@ -243,3 +243,61 @@ it.each([true, false])("forces fresh CLI readings on retry (success: %s)", async
     ),
   ).toBe(false);
 });
+
+it("shows the current account above the choice, and a submit with no choice says why", async () => {
+  const fetch = await setup();
+  const form = await screen.findByRole("form", { name: "Switch account" });
+  expect(form.textContent).toContain("Current account: orbit");
+  fireEvent.submit(form);
+  const summary = await screen.findByRole("region", { name: "Fix before transferring" });
+  expect(summary.textContent).toContain("Choose an account to transfer to.");
+  expect(document.activeElement).toBe(summary);
+  expect(fetch.mock.calls.some(([path]) => path === "/api/seats/guido-1/transfer")).toBe(false);
+});
+
+it("a lost connection says the result is unknown and keeps the choice", async () => {
+  const fetch = await setup();
+  const original = fetch.getMockImplementation();
+  if (!original) throw new Error("Missing fetch stub");
+  fetch.mockImplementation((path, init) =>
+    init?.method === "POST"
+      ? Promise.reject(new TypeError("Failed to fetch"))
+      : original(path, init),
+  );
+  const select = (await screen.findByRole("combobox", { name: "Account" })) as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: "nova" } });
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.submit(screen.getByRole("form", { name: "Switch account" }));
+  const summary = await screen.findByRole("region", { name: "Result unknown" });
+  expect(summary.textContent).toContain("The result is unknown");
+  expect(select.value).toBe("nova");
+});
+
+it("a double submit sends one transfer", async () => {
+  const fetch = await setup();
+  const original = fetch.getMockImplementation();
+  if (!original) throw new Error("Missing fetch stub");
+  fetch.mockImplementation((path, init) =>
+    init?.method === "POST" ? new Promise(() => {}) : original(path, init),
+  );
+  fireEvent.change(await screen.findByRole("combobox", { name: "Account" }), {
+    target: { value: "nova" },
+  });
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  const form = screen.getByRole("form", { name: "Switch account" });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(
+    fetch.mock.calls.filter(
+      ([path, init]) => path === "/api/seats/guido-1/transfer" && init?.method === "POST",
+    ),
+  ).toHaveLength(1);
+});
