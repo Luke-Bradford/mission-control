@@ -190,6 +190,19 @@ it("caps cards at eight without capping totals; merged cards are newest first", 
   expect(result.pipeline[5]?.oldestAt).toBe(NOW - 8 * MIN);
 });
 
+it("the Done lane covers 24 hours, including merges before local midnight", () => {
+  const midnight = Date.parse("2026-10-16T23:00:00Z");
+  store.replacePullRequests(
+    "repo",
+    [
+      pr(20, { state: "merged", mergedAt: Math.max(NOW - 23 * HOUR, midnight - HOUR) }),
+      pr(21, { state: "merged", mergedAt: NOW - 25 * HOUR }),
+    ],
+    NOW,
+  );
+  expect(summary().pipeline[5]?.cards.map((c) => c.ticket)).toEqual([20]);
+});
+
 it("sums fleet token buckets and falls back to wall-time spend without attempt usage", () => {
   const midnight = Date.parse("2026-10-16T23:00:00Z");
   store.upsertRun(run(1, { startedAt: midnight - HOUR, endedAt: midnight + HOUR, costUsd: 4 }));
