@@ -199,6 +199,31 @@ describe("renderHudWithPlaywright", () => {
       expect(fake.page.screenshot).toHaveBeenCalledOnce();
     }
   });
+  it("opens the Audit workflow-history disclosure first when the QA view control is behind it", async () => {
+    for (const [tab, label] of [
+      ["readiness", "PR readiness"],
+      ["hotspots", "Hotspots"],
+    ]) {
+      const url = `http://127.0.0.1:7420/audit?evidence-tab=${tab}`;
+      const fake = fakePlaywright({ pageUrl: url });
+      let open = false;
+      fake.page.click.mockImplementation(async (selector: string) => {
+        fake.order.push(`click:${selector}`);
+        if (selector.includes("Workflow history")) open = true;
+        else if (!open) throw new Error("clicked a control that is not on the page");
+      });
+      Object.assign(fake.page, {
+        locator: vi.fn(() => ({ count: async () => (open ? 1 : 0) })),
+      });
+      await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+      const clicks = fake.order.filter((step) => step.startsWith("click:"));
+      expect(clicks).toEqual([
+        'click:button:text-is("Workflow history and earlier proposals")',
+        `click:[aria-label="QA view"] button:text-is("${label}")`,
+      ]);
+      expect(fake.page.screenshot).toHaveBeenCalledOnce();
+    }
+  });
   it("opens the page in the colour scheme it is asked for, and in none when it is not", async () => {
     const dark = fakePlaywright();
     await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
