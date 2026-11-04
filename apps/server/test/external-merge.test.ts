@@ -110,7 +110,7 @@ function harness() {
       ...DEFAULT_REPO_RULES,
       hardRules: [] as string[],
       hardRulesSet: true,
-      hardRulesBy: "controller" as const,
+      hardRulesBy: "controller" as "controller" | "operator",
       uat: { labels: [] as string[], paths: [] as string[] },
     },
     clock: 100,
