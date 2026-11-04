@@ -11,7 +11,7 @@ Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-q
 ## Plan
 
 - [ ] One question per page; one purpose per panel (§1).
-- [ ] Dashboards: apply [composition](references/dashboard-layout.md); declare CSS viewport/zoom/rail, first-screen fields, normal rows and panel budgets.
+- [ ] Dashboards: rank panels and allocate space per [composition](references/dashboard-layout.md); declare real CSS viewport/zoom/rail, first-screen fields, normal rows and panel budgets.
 - [ ] Stats: label, value, definition, window, unit (§5–7).
 - [ ] Page-shaped APIs; tabs fetch on opening (§8–9).
 - [ ] Mockups precede new pages/big visual changes (direction principle 6).
@@ -38,7 +38,7 @@ Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-q
 ## Review
 
 - [ ] Build items hold in diff and rendered page.
-- [ ] **[I]** First screen answers the declared question (§1): useful hierarchy, content-sized panels and coherent allocation at reference viewports. Dashboard fit or eventual scroll reachability alone cannot pass.
+- [ ] **[I]** First screen answers the declared question (§1): useful hierarchy, content-sized panels and coherent allocation at real viewports with busy data. Dashboard fit or eventual scroll reachability alone cannot pass.
 - [ ] No empty panels/lone-number tiles (§5–7).
 - [ ] Record observations, images, findings and limits; geometry alone is insufficient.
 
