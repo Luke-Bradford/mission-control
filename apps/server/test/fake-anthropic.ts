@@ -4,8 +4,8 @@ import type { AddressInfo } from "node:net";
 /**
  * A local stand-in for the Anthropic Messages API, so a real `claude` process can run a seat's
  * Bash call with no network and no login. It answers the first model turn with one Bash call
- * (`command`) and every turn after a tool result with a plain "done", keeping the text of each
- * tool result it is sent.
+ * (`command`, with the Bash `timeout` when one is given) and every turn after a tool result with a
+ * plain "done", keeping the text of each tool result it is sent.
  */
 export interface FakeAnthropic {
   url: string;
@@ -13,10 +13,17 @@ export interface FakeAnthropic {
   bashCalls: () => number;
   /** The text of every tool result the CLI sent back, in order: what the Bash command printed. */
   toolResults: () => string[];
+  /** How the CLI described the Bash `timeout` to the model, which names its limit. */
+  timeoutHelp: () => string | null;
   close: () => Promise<void>;
 }
 
-export async function startFakeAnthropic(command: string): Promise<FakeAnthropic> {
+export async function startFakeAnthropic(
+  command: string,
+  timeout?: number,
+): Promise<FakeAnthropic> {
+  const input = timeout === undefined ? { command } : { command, timeout };
+  let timeoutHelp: string | null = null;
   let bashCalls = 0;
   const toolResults: string[] = [];
   const message = (content: unknown[], stop: string | null) => ({
@@ -40,7 +47,14 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
         res.end("{}");
         return;
       }
-      let body: { stream?: boolean; messages?: unknown; tools?: { name: string }[] } = {};
+      let body: {
+        stream?: boolean;
+        messages?: unknown;
+        tools?: {
+          name: string;
+          input_schema?: { properties?: { timeout?: { description?: string } } };
+        }[];
+      } = {};
       try {
         body = JSON.parse(raw);
       } catch {
@@ -49,11 +63,13 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
       const hasResult = JSON.stringify(body.messages ?? []).includes('"tool_result"');
       // the newest turn's results only: every later request repeats the earlier ones
       if (hasResult) toolResults.push(...resultTexts(body.messages));
-      const canBash = (body.tools ?? []).some((t) => t.name === "Bash");
+      const bash = (body.tools ?? []).find((t) => t.name === "Bash");
+      timeoutHelp = bash?.input_schema?.properties?.timeout?.description ?? timeoutHelp;
+      const canBash = bash !== undefined;
       const call = canBash && !hasResult;
       if (call) bashCalls++;
       const block = call
-        ? { type: "tool_use", id: "toolu_fake", name: "Bash", input: { command } }
+        ? { type: "tool_use", id: "toolu_fake", name: "Bash", input }
         : { type: "text", text: "done" };
       const stop = call ? "tool_use" : "end_turn";
       if (!body.stream) {
@@ -72,7 +88,7 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
           {
             index: 0,
             delta: call
-              ? { type: "input_json_delta", partial_json: JSON.stringify({ command }) }
+              ? { type: "input_json_delta", partial_json: JSON.stringify(input) }
               : { type: "text_delta", text: "done" },
           },
         ],
@@ -94,6 +110,7 @@ export async function startFakeAnthropic(command: string): Promise<FakeAnthropic
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     bashCalls: () => bashCalls,
     toolResults: () => [...toolResults],
+    timeoutHelp: () => timeoutHelp,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

@@ -229,7 +229,7 @@ export const TEST_LOCK_UNAVAILABLE_TEXT = `The test lock is not available on thi
 
 /** A full suite that waited `LOCK_WAIT_MS` behind `call`'s `command`. */
 export function lockBusyText(call: string, command: string): string {
-  return `The test lock is busy: ${call} is running ${command}. Run ${FREE_SUITE_HINT}, or the full suite later.`;
+  return `The test lock is busy: ${call} is running ${command}. Run ${FREE_SUITE_HINT}, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.`;
 }
 
 /** `GET /api/test-lock`. */

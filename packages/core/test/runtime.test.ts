@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   GUARD_HOOK_EVENTS,
@@ -6,6 +7,9 @@ import {
   MC_WRITER_TOOLS,
 } from "../src/guard.ts";
 import {
+  CHECK_BASH_TIMEOUT_MS,
+  CHECK_NO_START_TEXT,
+  checkDropText,
   crewMcpConfig,
   MC_MCP_SERVER,
   MC_MCP_TIMEOUT_MS,
@@ -383,6 +387,7 @@ describe("the allowlist in phase 2b", () => {
 
   it("turns background Bash off, so a timed-out suite is killed rather than kept running", () => {
     expect(CREW_CLI_ENV).toEqual({
+      BASH_MAX_TIMEOUT_MS: "2700000",
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
@@ -399,6 +404,24 @@ describe("the allowlist in phase 2b", () => {
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
+  });
+});
+
+describe("the Bash limit a check gets", () => {
+  it("gives the CLI the same limit seats are told to use", () => {
+    expect(CHECK_BASH_TIMEOUT_MS).toBe(45 * 60_000);
+    expect(CREW_CLI_ENV.BASH_MAX_TIMEOUT_MS).toBe(String(CHECK_BASH_TIMEOUT_MS));
+  });
+
+  it("names that limit in the refusals and the role prompts", () => {
+    const limit = String(CHECK_BASH_TIMEOUT_MS);
+    const drop = { command: "c", head: "a".repeat(40), invoked: "c", at: 0 };
+    expect(checkDropText({ ...drop, reason: "timeout" })).toContain(`set to ${limit}`);
+    expect(CHECK_NO_START_TEXT).toContain(`set to ${limit}`);
+    for (const role of ["GUIDO", "INCO"]) {
+      const text = readFileSync(new URL(`../../../roles/${role}.md`, import.meta.url), "utf8");
+      expect(text).toContain(`Bash \`timeout\` to ${limit}`);
+    }
   });
 });
 
