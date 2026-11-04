@@ -454,7 +454,11 @@ export function ActivityPanel() {
               {e.ref || e.prs.length > 0 ? (
                 <span className="arefs">
                   {e.ref && !split && (
-                    <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
+                    <TicketRef
+                      ticket={e.ref}
+                      url={e.kind === "escalation" ? e.url : null}
+                      bare={parseTicket(e.ref)?.repoId === config?.crew?.sessions[0]?.repoId}
+                    />
                   )}
                   {e.prs.map((pr) => (
                     <PrChip key={`${pr.repoId}#${pr.number}`} pr={pr} />

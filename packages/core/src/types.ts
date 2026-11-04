@@ -802,10 +802,18 @@ interface LimitRowBase {
  * little history", not "not filling"). Optional because older hubs omit it; the web treats a
  * missing value as ready.
  */
+/** One allowance reading: used percent at a time, oldest first. */
+export interface LimitPoint {
+  at: number;
+  pct: number;
+}
+
 export type LimitRow =
   | (LimitRowBase & {
       window: "7d";
       projected: number | null;
+      /** This window's readings, at most one an hour, for a burn-up. */
+      history?: LimitPoint[];
       stopForecast: number | null;
       fullAt: number | null;
     })
@@ -1473,6 +1481,9 @@ export interface PipelineCard {
   ci: ("pass" | "fail" | "pending")[];
   since: number;
   who: string | null;
+  /** The board item's Priority and Size, when the ticket has them. */
+  priority?: string | null;
+  size?: string | null;
 }
 
 export type AttentionHoldCondition =

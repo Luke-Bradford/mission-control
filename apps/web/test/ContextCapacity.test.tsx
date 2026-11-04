@@ -18,9 +18,15 @@ it("distinguishes reported context capacity from rate and allowance, including z
     pct: 42,
   });
   const view = render(<ContextCapacity row={row} />);
-  expect(view.container.textContent).toContain("84.0k / 200k");
-  expect(view.container.textContent).toContain("116k left");
-  expect(view.container.textContent).toContain("42%");
+  // used, limit and percent are three cells; what is left is in each one's hover
+  expect([...view.container.children].map((cell) => cell.textContent)).toEqual([
+    "84.0k",
+    "200k",
+    "42%",
+  ]);
+  expect(view.container.children[0]?.getAttribute("title")).toBe(
+    "Last reported context: 84.0k used of 200k · 116k left",
+  );
   expect(contextCapacity({ ...row, digest: observedContextDigest(0, 200000) }).remaining).toBe(
     200000,
   );
@@ -37,9 +43,11 @@ it("retains known numerator or denominator without manufacturing the missing cap
     pct: null,
   });
   const v = render(<ContextCapacity row={row} />);
-  expect(v.container.textContent).toContain("limit unknown");
+  expect([...v.container.children].map((cell) => cell.textContent)).toEqual(["84.0k", "—", "—"]);
+  expect(v.container.children[0]?.getAttribute("title")).toContain("limit unknown");
   v.rerender(<ContextCapacity row={{ ...row, digest: null, contextWindow: 200000 }} />);
-  expect(v.container.textContent).toContain("remaining unknown");
+  expect([...v.container.children].map((cell) => cell.textContent)).toEqual(["—", "200k", "—"]);
+  expect(v.container.children[0]?.getAttribute("title")).toContain("remaining unknown");
 });
 it("names an over-window report rather than displaying negative tokens remaining", () => {
   const row = seatRow({
@@ -47,5 +55,7 @@ it("names an over-window report rather than displaying negative tokens remaining
     contextWindow: 200000,
   });
   expect(contextCapacity(row)).toMatchObject({ remaining: 0, over: 20000, pct: 110 });
-  expect(render(<ContextCapacity row={row} />).container.textContent).toContain("over");
+  const view = render(<ContextCapacity row={row} />);
+  expect(view.container.children[0]?.getAttribute("title")).toContain("20.0k over");
+  expect(view.container.textContent).not.toContain("-");
 });

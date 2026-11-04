@@ -33,7 +33,7 @@ export function metricsView(store: Store, now: number, scope: MetricsScope): Met
     runs,
     prs,
     pipelineRepos: new Set(scope.pipelineRepoIds),
-    midnight,
+    doneSince: midnight,
   });
 
   // Merged counts the crew sessions' repos; the observed loops' own repos are a separate figure.

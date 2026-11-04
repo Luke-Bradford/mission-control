@@ -13,7 +13,7 @@ import { createRoot } from "react-dom/client";
 import { AgentNavRow } from "../src/comms/CommsNav.tsx";
 import { AgentTag } from "../src/hud/AgentTag.tsx";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { AgentActivity } from "../src/overview/AgentActivity.tsx";
+import { CrewLane } from "../src/overview/CrewLane.tsx";
 import { crewRow } from "./fixtures.ts";
 
 const root = document.getElementById("root");
@@ -33,7 +33,7 @@ createRoot(root).render(
         <div style={{ display: "grid", gap: 8, alignContent: "start", overflow: "auto" }}>
           <section className="panel" data-surface="overview">
             <h2>Overview</h2>
-            <AgentActivity row={row} now={Date.now()} max={10} />
+            <CrewLane row={row} name={row.id} lane={undefined} now={Date.now()} max={10} />
           </section>
           <section className="panel" data-surface="agent">
             <h2>Agent</h2>

@@ -10,7 +10,7 @@
 }
 .qa-hotspots-panels .map-lens {
   flex: none;
-  max-height: 70vh;
+  max-height: calc(70 * var(--vh));
 }
 @media (max-width: 1100px) {
   .qa-hotspots-panels {

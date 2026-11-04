@@ -25,7 +25,9 @@ import { App } from "../src/App.tsx";
 import { startClient } from "../src/bootstrap.ts";
 import { hub, RESOURCES } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
+import { MachinePanel } from "../src/overview/MachinePanel.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
+import { QuotaPanel } from "../src/overview/QuotaPanel.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { SESSION_ALL, setSession } from "../src/shell/session.ts";
@@ -50,6 +52,7 @@ import {
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
+import { observedContextDigest } from "./overviewDensityFixtures.ts";
 
 const GIB = 2 ** 30;
 
@@ -139,6 +142,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The Board's head figures: in flight, merged in 24h and cycle time. */
+const headFigures = (c: HTMLElement) =>
+  [...c.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent);
+
 const agentRows = (c: HTMLElement) => [
   ...c.querySelectorAll<HTMLElement>(".trow:not(.head):not(.flight)"),
 ];
@@ -176,22 +183,15 @@ describe("Overview panels", () => {
     expect(constructed).toHaveBeenCalledWith("/api/stream");
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     await act(async () => release());
-    // Needs you is the header's count from the attention list (empty here), not the KPI's.
-    await waitFor(() =>
-      expect(
-        [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
-    );
-    expect(container.querySelector("#timelineP")?.textContent).toContain(
-      "No activity in the last hour.",
-    );
-    expect(container.querySelectorAll(".pipeline-stage:not(.empty)")).toHaveLength(0);
+    // The Board's head figures come from the metrics registry, not from the page's own sums.
+    await waitFor(() => expect(headFigures(container)).toEqual(["4", "6", "1.2 h"]));
+    expect(container.querySelectorAll(".board-card")).toHaveLength(0);
     expect(await screen.findByText("No events yet.")).toBeTruthy();
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     stop();
   });
 
-  it("renders initial overview values and timeline through the resource layer in StrictMode", async () => {
+  it("renders initial overview values through the resource layer in StrictMode", async () => {
     setSession(SESSION_ALL);
     stub();
     const { container } = render(
@@ -199,42 +199,59 @@ describe("Overview panels", () => {
         <Overview />
       </StrictMode>,
     );
-    // Needs you is the header's count from the attention list (empty here), not the KPI's.
-    await waitFor(() =>
-      expect(
-        [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
-    );
-    expect(
-      await within(container.querySelector("#timelineP") as HTMLElement).findByText(
-        "No activity in the last hour.",
-      ),
-    ).toBeTruthy();
+    await waitFor(() => expect(headFigures(container)).toEqual(["4", "6", "1.2 h"]));
+    // Spend today sits on the Tokens panel, and the Board carries the CI pass rate.
+    expect(container.querySelector("#tokensP .token-spend")?.textContent).toBe("~$24.31 today");
+    expect(container.querySelector("#pipelineP .ph")?.textContent).toContain("CI 92% of 10 runs");
+    expect(await screen.findByText("No events yet.")).toBeTruthy();
   });
 
   it("every panel carries its mockup id", async () => {
     stub();
     const { container } = render(<Overview />);
     expect(container.querySelector(".overview-primary > #agentsP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #timelineP")).toBeTruthy();
-    expect(container.querySelector(".overview-grid > #pipelineP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #actP")).toBeTruthy();
-    expect(container.querySelector(".overview-secondary > #machP")).toBeTruthy();
-    expect(container.querySelector(".overview-primary > #quotaP")).toBeTruthy();
-    const grid = container.querySelector(".overview-grid")!;
-    expect([...grid.children].map((child) => child.id || child.className)).toEqual([
-      "overview-metrics",
-      "overview-workspace",
-      "pipelineP",
+    expect(container.querySelector(".overview-primary > #pipelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #overviewNextP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #macP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #tokensP")).toBeTruthy();
+    expect(container.querySelector(".overview-secondary > #actP")).toBeTruthy();
+    const grid = container.querySelector(".overview-grid") as HTMLElement;
+    expect([...grid.children].map((child) => child.className)).toEqual([
+      "overview-primary",
+      "overview-secondary",
     ]);
-    for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
-      expect(container.querySelector(`#${id}`), id).toBeTruthy();
-    }
+    expect(
+      [...(container.querySelector(".overview-primary")?.children ?? [])].map((c) => c.id),
+    ).toEqual(["agentsP", "pipelineP"]);
+    expect(
+      [...(container.querySelector(".overview-secondary")?.children ?? [])].map((c) => c.id),
+    ).toEqual(["overviewNextP", "macP", "tokensP", "actP"]);
     await screen.findByText("No events yet.");
     expect(container.querySelector("#nbanner")).toBeNull();
   });
 
-  it("keeps the activity map on its own page: no map panel, a link from the Timeline", () => {
+  it("no longer carries the KPI strip, the Timeline, the quota summary, the history or the Loops strip", async () => {
+    stub({ rows: [crewRow({ kind: "loop", id: "observed-loop" })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("observed-loop");
+    for (const gone of [
+      ".overview-kpi",
+      "#overview-metrics",
+      "#timelineP",
+      "#quotaP",
+      "#machP",
+      "#overview-history",
+      ".loops-strip",
+    ])
+      expect(container.querySelector(gone), gone).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Loops" })).toBeNull();
+    // the observed loop is an ordinary row of the Crew table, after the seats
+    expect(
+      within(container.querySelector("#agentsList") as HTMLElement).getByText("observed-loop"),
+    ).toBeTruthy();
+  });
+
+  it("keeps the activity map on its own page: no map panel on Overview", () => {
     stub();
     const { container } = render(<Overview />);
     expect(container.querySelector("#mapP")).toBeNull();
@@ -243,15 +260,11 @@ describe("Overview panels", () => {
     expect(
       container.querySelector("#page-overview > .overview-grid")?.nextElementSibling,
     ).toBeNull();
-    const link = within(container.querySelector("#timelineP") as HTMLElement).getByRole("link", {
-      name: "Activity map →",
-    });
-    expect(link.getAttribute("href")).toBe("/map");
   });
 });
 
 describe("Agents panel", () => {
-  it("keeps quota in Systems and exposes the seven Crew columns", async () => {
+  it("keeps quota in Tokens and exposes the eleven Crew columns", async () => {
     stub({
       rows: [crewRow({ accountId: "codex-main" })],
       limits: [limit7d({ accountId: "codex-main", used: 69 })],
@@ -260,19 +273,23 @@ describe("Agents panel", () => {
     await waitFor(() => expect(agentRows(container).length).toBe(1));
     const text = agentRows(container)[0]?.textContent ?? "";
     expect(text).not.toContain("69%");
-    expect(container.querySelector("#quotaP")?.textContent).toContain("69%");
+    expect(container.querySelector("#tokensP")?.textContent).toContain("69%");
     expect(
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
         (cell) => cell.textContent,
       ),
     ).toEqual([
-      "Agent",
       "State",
+      "Seat",
       "Work",
-      "Tokens/min · 30m avg",
+      "Step",
+      "−60m−30mnow",
+      "Tok 1h",
+      "Used",
+      "Limit",
+      "Ctx",
       "Cost",
-      "Context · used / limit · left · used%",
-      "In state",
+      "Out",
     ]);
   });
 
@@ -363,7 +380,7 @@ describe("Agents panel", () => {
     },
   });
 
-  it("keeps FLIGHT's session turns in the In state tooltip", async () => {
+  it("keeps FLIGHT's session turns in the time-in-state tooltip", async () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [crewRow({ id: "flight-1", hudState: "error" })],
@@ -383,10 +400,8 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     const flight = container.querySelector(".trow.flight") as HTMLElement;
-    await waitFor(() =>
-      expect(flight.lastElementChild?.getAttribute("title")).toBe("Turns this session: 4"),
-    );
-    expect(flight.lastElementChild?.getAttribute("title")).toBe("Turns this session: 4");
+    const inState = () => flight.querySelector(".state-cell .num");
+    await waitFor(() => expect(inState()?.getAttribute("title")).toBe("Turns this session: 4"));
     expect(within(flight).getByText("Error", { selector: ".pill > span" })).toBeTruthy();
   });
 
@@ -426,10 +441,11 @@ describe("Agents panel", () => {
     );
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
-    expect(within(flight).getByText("head agent")).toBeTruthy();
-    expect(within(flight).getByText("Error")).toBeTruthy();
+    expect(within(flight).getByText(/^head agent/)).toBeTruthy();
+    expect(within(flight).getAllByText("Error").length).toBeGreaterThan(0);
     expect(flight.title).toBe("Run failed");
-    expect(flight.querySelector(".context-capacity")?.textContent).toContain("limit unknown");
+    // no context reading: used and limit are dashes, and the cell says the limit is unknown
+    expect(flight.querySelector(".crew-wide")?.getAttribute("title")).toContain("limit unknown");
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
@@ -499,12 +515,17 @@ describe("Agents panel", () => {
     prNumber,
     parked: phase === "parked" ? text : null,
   });
-  it("the roster has no Loop column: a seat's loop reads in its Work and State cells", async () => {
+  it("a seat's loop reads in its Step cell: the step and its bar, and a dash when it has none", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);
     stub({ rows: [crewRow({ loop }), crewRow({ id: "other", index: 1, loop: null })] });
     const { container } = render(<Overview />);
     await screen.findByText("other");
-    expect(container.querySelector("#agentsList .loopstep, #agentsList .stepbar")).toBeNull();
+    const [withLoop, without] = agentRows(container);
+    expect(withLoop?.querySelectorAll(".step-cell .stepbar")).toHaveLength(1);
+    expect(withLoop?.querySelector(".step-cell b")?.textContent).toBeTruthy();
+    expect(without?.querySelector(".stepbar")).toBeNull();
+    expect(without?.querySelector(".step-cell")?.textContent).toBe("—");
+    expect(container.querySelector("#agentsList .loopstep")).toBeNull();
     expect(
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map((h) => h.textContent),
     ).not.toContain("Loop");
@@ -597,9 +618,12 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findAllByRole("button", { name: "Answer" });
-    // An observed loop has no row here (it is in the Loops strip), so no Interrupt or End the run for it.
-    const [seat] = agentRows(container) as [HTMLElement];
-    expect(agentRows(container)).toHaveLength(1);
+    // An observed loop is a row too, with Answer, but no Interrupt or End the run: they are not its to stop.
+    const [seat, loop] = agentRows(container) as [HTMLElement, HTMLElement];
+    expect(agentRows(container)).toHaveLength(2);
+    expect(within(loop).getByRole("button", { name: "Answer" })).toBeTruthy();
+    expect(within(loop).queryByRole("button", { name: "Interrupt" })).toBeNull();
+    expect(within(loop).queryByRole("button", { name: "End the run" })).toBeNull();
     expect(within(seat).getByRole("button", { name: "Interrupt" })).toBeTruthy();
     expect(within(seat).getByRole("button", { name: "End the run" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Interrupt" })).toHaveLength(1);
@@ -695,7 +719,7 @@ describe("Agents panel", () => {
     };
     stub({ rows: [crewRow({ hudState: "stopped", stop, run: null, ticket: null })] });
     const { container } = render(<Overview />);
-    await screen.findByText("Stopped");
+    await screen.findAllByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
     const line = "Stopped at the 7-day quota (88% of 80%) · resumes after Mon 13:00";
     expect(row.title).toBe(line);
@@ -705,7 +729,7 @@ describe("Agents panel", () => {
   it("a stopped seat whose run merged says so, and keeps its ticket in Work", async () => {
     stub({ rows: [stoppedSeat({ merged: true })] });
     const { container } = render(<Overview />);
-    await screen.findByText("Stopped");
+    await screen.findAllByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.title).toBe("Run ended · PR #75 merged");
     expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toContain("#74");
@@ -716,7 +740,7 @@ describe("Agents panel", () => {
   it("a seat stopped by you says so", async () => {
     stub({ rows: [stoppedSeat()] });
     const { container } = render(<Overview />);
-    await screen.findByText("Stopped");
+    await screen.findAllByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.title).toBe("Run ended by you");
     expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toContain("#74");
@@ -727,7 +751,7 @@ describe("Agents panel", () => {
       rows: [stoppedSeat({ hudState: "error", sourceError: "CLI never started" })],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("Error");
+    await screen.findAllByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".need")?.textContent).toContain("CLI never started");
     expect(row.querySelector(".doing")).toBeNull();
@@ -738,7 +762,7 @@ describe("Agents panel", () => {
   it("a loop in error keeps its last ticket without the title", async () => {
     stub({ rows: [crewRow({ hudState: "error", sourceError: "state dir gone" })] });
     const { container } = render(<Overview />);
-    await screen.findByText("Error");
+    await screen.findAllByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".need")?.textContent).toContain("state dir gone");
     expect(row.querySelector(".doing")).toBeNull();
@@ -751,7 +775,7 @@ describe("Agents panel", () => {
   it("a seat in error with no reason says only Run failed", async () => {
     stub({ rows: [stoppedSeat({ hudState: "error", sourceError: null })] });
     const { container } = render(<Overview />);
-    await screen.findByText("Error");
+    await screen.findAllByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.title).toBe("Run failed");
   });
@@ -765,10 +789,13 @@ describe("Agents panel", () => {
     }));
     stub({ rows: [seatRow()] });
     const { container } = render(<Overview />);
-    await screen.findByText("backend");
+    await screen.findByText("backend dev · sonnet");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".ag")?.textContent).toBe("guido-1");
     expect(row.querySelector(".ag")?.getAttribute("title")).toBe("Backend developer");
+    expect(row.querySelector(".agent-identity .muted")?.getAttribute("title")).toBe(
+      "Backend developer · sonnet · writer",
+    );
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(flight.querySelector(".ag")?.textContent).toBe("FLIGHT");
   });
@@ -854,12 +881,12 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const lines = agentRows(container).map((r) => r.getAttribute("title"));
-    expect(lines[0]).toMatch(/^Idle since/);
-    expect(lines).toHaveLength(1);
-    const strip = container.querySelector(".loops-strip") as HTMLElement;
-    expect(strip.textContent).toContain("Idle");
-    expect(strip.textContent).not.toContain("review");
+    const [seat, loop] = agentRows(container) as [HTMLElement, HTMLElement];
+    expect(seat.getAttribute("title")).toMatch(/^Idle since/);
+    expect(agentRows(container)).toHaveLength(2);
+    // the observed loop is the second row; its open review does not make it read as "in review"
+    expect(loop.querySelector(".state-cell .pill")?.textContent).toBe("Idle");
+    expect(loop.textContent).not.toContain("review");
   });
 
   it("the doing line shows its text before the timezone has loaded", async () => {
@@ -889,11 +916,15 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".tok")?.textContent).toContain("0/min");
-    expect(row.querySelector(".context-capacity")?.textContent).toBe("— / — · limit unknown");
-    expect(row.querySelector(".context-track i")).toBeNull();
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[5]?.textContent).toBe("0");
+    expect(cells.slice(6, 9).map((cell) => cell.textContent)).toEqual(["—", "—", "—"]);
+    expect(cells[6]?.title).toBe("Last reported context: — used of — · limit unknown");
+    expect(row.querySelector(".context-pct")?.className).toBe("num xs context-pct");
     expect(row.title).toBe("Free for work");
-    expect(row.querySelector(".spark")).toBeTruthy();
+    expect(row.querySelector(".crew-lane")).toBeTruthy();
+    expect(row.querySelector(".crew-lane-bar")).toBeNull();
+    expect(cells[10]?.textContent).toBe("1m");
   });
 
   it("a running seat keeps live tool detail in the row tooltip, not on a line of its own", async () => {
@@ -1145,17 +1176,38 @@ describe("Agents panel", () => {
     expect(row.textContent).toContain("#3349");
     expect(row.title).toContain("Bash");
     expect(row.querySelector(".process-line")).toBeNull();
-    expect(row.querySelector(".tok span[title]")?.getAttribute("title")).toContain(
-      "Input 12.0k · Output 3.4k",
-    );
-    expect(row.textContent).toContain("133/min");
+    // Tok 1h: the hour's input and output, here the three recorded minutes.
+    expect(within(row).getAllByRole("cell")[5]?.textContent).toBe("4.0k");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.querySelector(".context-capacity")?.textContent).toBe(
-      "483k / 1.00M · 517k left · 48%",
+    expect(
+      within(row)
+        .getAllByRole("cell")
+        .slice(6, 9)
+        .map((cell) => cell.textContent),
+    ).toEqual(["483k", "1.00M", "48%"]);
+    expect(within(row).getAllByRole("cell")[6]?.title).toBe(
+      "Last reported context: 483k used of 1.00M · 517k left",
     );
-    expect(container.querySelector("#quotaP")?.textContent).toContain("82%");
-    expect(row.querySelector(".spark")).toBeTruthy();
-    expect(container.querySelector("#quotaP .meter.hi")).toBeTruthy(); // 82 % is amber
+    expect(container.querySelector("#tokensP")?.textContent).toContain("5h 82%");
+    expect(row.querySelector(".crew-lane-bar")).toBeTruthy();
+  });
+
+  it("keeps the input and output split of the hour's tokens on the Tok 1h cell's hover", async () => {
+    const base = crewRow().run as NonNullable<CrewRow["run"]>;
+    stub({
+      rows: [
+        crewRow({
+          run: { ...base, tokens: { input: 12_000, output: 3_400, cacheRead: 0, cacheCreate: 0 } },
+          digest: observedContextDigest(483_137, 1_000_000, [[Math.floor(NOW / MIN) * MIN, 100]]),
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const cell = within(agentRows(container)[0] as HTMLElement).getAllByRole("cell")[5];
+    expect(cell?.title ?? cell?.querySelector("[title]")?.getAttribute("title")).toContain(
+      "input 12.0k · output 3.4k",
+    );
   });
 
   it("a running row's cost is the live estimate", async () => {
@@ -1220,7 +1272,12 @@ describe("Agents panel", () => {
       </>,
     );
     await screen.findByText("Parked: Needs a rebase decision");
-    expect(within(agentRows(container)[0] as HTMLElement).getByText("Blocked")).toBeTruthy();
+    const state = agentRows(container)[0]?.querySelector(".state-cell") as HTMLElement;
+    expect(within(state).getByText("Blocked")).toBeTruthy();
+    // a blocked seat's reason shows on its row: the parked item
+    expect(agentRows(container)[0]?.querySelector(".need")?.textContent).toContain(
+      "Needs a rebase decision",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Answer" }));
     expect(screen.getByTestId("item").textContent).toBe("esc:shop-app#4001");
     expect(window.location.pathname).toBe("/"); // the row click did not also navigate
@@ -1288,7 +1345,11 @@ describe("Agents panel", () => {
     );
     expect(window.location.pathname).toBe("/agent/studio");
     act(() => window.history.pushState(null, "", "/"));
-    fireEvent.click(within(agentRows(container)[0] as HTMLElement).getByText("Running"));
+    fireEvent.click(
+      within(agentRows(container)[0]?.querySelector(".state-cell") as HTMLElement).getByText(
+        "Running",
+      ),
+    );
     expect(window.location.pathname).toBe("/agent/shop-app-ta");
     act(() => setSession("shop-app-session"));
     expect(agentRows(container).map((r) => r.querySelector(".ag")?.textContent)).toEqual([
@@ -1394,7 +1455,7 @@ describe("Needs banner, acknowledged items", () => {
 
 describe("Machine panel: the test lock box", () => {
   const box = async () => {
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     return waitFor(() => {
       const box = container.querySelector("#machP .lock");
       expect(box).toBeTruthy();
@@ -1404,7 +1465,7 @@ describe("Machine panel: the test lock box", () => {
 
   it("hides the test lock box when free with nobody waiting", async () => {
     const fetch = stub();
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     await settled(fetch, "/api/test-lock");
     expect(container.querySelector("#machP .lock")).toBeNull();
   });
@@ -1480,7 +1541,7 @@ describe("Machine panel", () => {
         seats: [{ seatId: "fao-1", bytes: 8 * 2 ** 20, files: 3 }],
       },
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await within(mach).findByText("Transcripts");
     expect(row.parentElement?.textContent).toContain("12.3 MiB");
@@ -1490,7 +1551,7 @@ describe("Machine panel", () => {
 
   it("leaves out the transcript footprint when the server has none", async () => {
     stub({ transcripts: null });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
     expect(within(mach).queryByText("Transcripts")).toBeNull();
@@ -1498,7 +1559,7 @@ describe("Machine panel", () => {
 
   it("labels CPU, memory and disk, keeping the legend on hover", async () => {
     stub();
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
     expect(mach.textContent).toContain("Host sample at");
@@ -1519,7 +1580,7 @@ describe("Machine panel", () => {
 
   it("the agents row: 6 of 8 seats, up to 3 per session, room for 2 more", async () => {
     stub({ seats: { maxSeats: 8, seats: 6, perSessionMax: 3 } });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     const row = await waitFor(() => {
       const r = mach.querySelector<HTMLElement>(".agentslots");
@@ -1536,7 +1597,7 @@ describe("Machine panel", () => {
 
   it("No room for another agent when every seat is used or 2 GB is free", async () => {
     stub({ seats: { maxSeats: 8, seats: 8, perSessionMax: 4 } });
-    const first = render(<Overview />);
+    const first = render(<MachinePanel />);
     const mach = first.container.querySelector("#machP") as HTMLElement;
     const msg = await within(mach).findByTitle(/No room for another agent/);
     expect(msg.className).toContain("warn-t");
@@ -1548,7 +1609,7 @@ describe("Machine panel", () => {
       seats: { maxSeats: 8, seats: 6, perSessionMax: 3 },
       machine: sample({ memUsedBytes: 62 * GIB }),
     });
-    const second = render(<Overview />);
+    const second = render(<MachinePanel />);
     const mach2 = second.container.querySelector("#machP") as HTMLElement;
     await within(mach2).findByTitle(/No room for another agent/);
     expect(mach2.textContent).not.toContain("Room for");
@@ -1556,7 +1617,7 @@ describe("Machine panel", () => {
 
   it("shows dashes and empty bars before the first sample", async () => {
     stub({ machine: null });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
@@ -1570,7 +1631,7 @@ describe("Machine panel", () => {
     stub({
       machine: sample({ swapUsedBytes: 3.5 * GIB, swapTotalBytes: 8 * GIB }),
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
@@ -1583,7 +1644,7 @@ describe("Machine panel", () => {
 
   it("a swap that was not measured is a dash", async () => {
     stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
@@ -1592,7 +1653,7 @@ describe("Machine panel", () => {
 
   it("names the reason while the hub is holding new work", async () => {
     stub({ warning: "swap 21.5 of 22.5 GB used" });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     const warn = await waitFor(() => {
       const w = mach.querySelector<HTMLElement>(".capwarn");
@@ -1609,7 +1670,7 @@ describe("Machine panel", () => {
 
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
     stub({ machine: sample({ cpuPct: null, cores: 0, agents: null, memUsedBytes: null }) });
-    const { container } = render(<Overview />);
+    const { container } = render(<MachinePanel />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await waitFor(() => expect(mach.textContent).toContain("412 GiB free"));
     const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
@@ -1628,7 +1689,7 @@ describe("Account quota panel", () => {
         limit7d({ accountId: "codex-main", sampledAt: NOW - 30_000 }),
       ],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByTitle(/read 4 min ago/);
     const rows = quota.querySelectorAll(".quotarow");
@@ -1654,7 +1715,7 @@ describe("Account quota panel", () => {
         },
       ],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("7d 86%");
     const staleWindow = within(quota).getByRole("row", { name: /claude-main · 7d/ });
@@ -1674,7 +1735,7 @@ describe("Account quota panel", () => {
 
   it("one row per account, hover titles, warnings and the rewritten note", async () => {
     stub({ limits });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("claude-main 5h at its limit until 15:00");
     expect(within(quota).getByText("claude-main 5h at its limit until 15:00").className).toContain(
@@ -1706,7 +1767,7 @@ describe("Account quota panel", () => {
         limit7d({ accountId: "codex-main", used: 9, resetAt: Date.UTC(2026, 9, 29, 16, 22) }),
       ],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await waitFor(() => expect(quota.querySelectorAll(".quotarow").length).toBe(2));
     const rows = quota.querySelectorAll(".quotarow");
@@ -1740,7 +1801,7 @@ describe("Account quota panel", () => {
         limit5h({ accountId: "claude-second", used: 40, paceReady: true, fullAt: NOW + 2 * HOUR }),
       ],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await waitFor(() =>
       expect(
@@ -1752,7 +1813,7 @@ describe("Account quota panel", () => {
 
   it("the GitHub row: what is left, the poll cost and the reset", async () => {
     stub({ limits, githubRate: GITHUB_RATE });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText(GITHUB_RATE_LINE)).toBeTruthy();
     expect(quota.textContent).not.toContain("slowed");
@@ -1760,7 +1821,7 @@ describe("Account quota panel", () => {
 
   it("the GitHub row is — before any reading", async () => {
     stub({ limits });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText("GitHub API · —")).toBeTruthy();
   });
@@ -1772,7 +1833,7 @@ describe("Account quota panel", () => {
       githubRate: GITHUB_RATE,
       health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     const shown = await within(quota).findByText(note);
     expect(shown.getAttribute("role")).toBe("status");
@@ -1784,7 +1845,7 @@ describe("Account quota panel", () => {
       limits,
       health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(await within(quota).findByText(note)).toBeTruthy();
     expect(within(quota).getByText("GitHub API · —")).toBeTruthy();
@@ -1798,7 +1859,7 @@ describe("Account quota panel", () => {
       queries: { escalations: { ...q, resetAt: NOW - MIN } },
     };
     stub({ limits, githubRate: expired });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(
       await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets —"),
@@ -1813,7 +1874,7 @@ describe("Account quota panel", () => {
       "/api/health": [],
       "/api/config": () => ({ status: 503, body: { error: "loading" } }),
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const { githubRate } = RESOURCES;
     await waitFor(() => expect(hub.snapshot(githubRate.path, githubRate.topic).data).toBeTruthy());
     // Re-query: the panel may have re-rendered since the reading landed.
@@ -1828,7 +1889,7 @@ describe("Account quota panel", () => {
       githubRate: GITHUB_RATE,
       config: { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } },
     });
-    const { container } = render(<Overview />);
+    const { container } = render(<QuotaPanel />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
     expect(
       await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets 23:00"),
@@ -2698,7 +2759,8 @@ describe("Overview: what a seat is doing", () => {
     // the lock box says "Free" too, so look in the seat's row
     const row = await waitFor(() => {
       const el = agentRows(container)[0] as HTMLElement;
-      expect(within(el).getByText("Free")).toBeTruthy();
+      // the seat's State pill; its Step cell names the same state, as it has no run to show
+      expect(within(el.querySelector(".state-cell") as HTMLElement).getByText("Free")).toBeTruthy();
       return el;
     });
     expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toBe(
@@ -2715,13 +2777,13 @@ describe("Overview: what a seat is doing", () => {
     await screen.findByText("Watching");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".pill")?.textContent).toBe("Watching");
-    expect(row.lastElementChild?.textContent).toContain("25m");
+    expect(row.querySelector(".state-cell")?.textContent).toContain("25m");
     expect(row.title).toBe("CI on 08a7cfc");
     expect(row.textContent).toContain("Quote cache");
   });
 });
 
-it("holds the configured roster, Timeline lanes and five Pipeline lanes while data is pending", async () => {
+it("holds the configured roster and five Board stages while data is pending", async () => {
   const session = CREW_CONFIG.crew?.sessions[0];
   const seat = session?.seats[0];
   if (!session || !seat) throw new Error("missing crew fixture");
@@ -2758,13 +2820,19 @@ it("holds the configured roster, Timeline lanes and five Pipeline lanes while da
   await settled(fetch, RESOURCES.config.path);
   expect(container.querySelectorAll("#agentsList .trow:not(.head)")).toHaveLength(8);
   expect(container.querySelectorAll(".crew-skeleton")).toHaveLength(7);
-  expect(container.querySelectorAll(".overview-lane")).toHaveLength(8);
-  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
-  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(5);
+  expect(container.querySelectorAll(".board-stage")).toHaveLength(5);
+  expect(container.querySelector(".board-stages")?.getAttribute("aria-busy")).toBe("true");
+  expect([...container.querySelectorAll(".board-stage h3 .num")].map((n) => n.textContent)).toEqual(
+    ["—", "—", "—", "—", "—"],
+  );
+  expect(container.querySelectorAll(".board-card")).toHaveLength(0);
   expect(container.querySelector("#agentsList")?.getAttribute("aria-busy")).toBe("true");
   await act(async () => {
     for (const finish of release) finish();
   });
   await waitFor(() => expect(container.querySelectorAll(".crew-skeleton")).toHaveLength(0));
-  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(0);
+  expect(container.querySelector(".board-stages")?.getAttribute("aria-busy")).toBe("false");
+  expect([...container.querySelectorAll(".board-stage h3 .num")].map((n) => n.textContent)).toEqual(
+    ["0", "0", "0", "0", "0"],
+  );
 });

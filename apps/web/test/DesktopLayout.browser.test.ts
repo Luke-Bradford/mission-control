@@ -95,13 +95,13 @@ describeRendered("Approved compact desktop shell", () => {
             await ready(page, "#page-overview");
             const initial = await shellMetrics(page);
             expect(initial.docWidth).toBeLessThanOrEqual(width);
-            expect(initial.gutter).toBe(width < 1600 ? 16 : 24);
+            expect(initial.gutter).toBe(12);
             expect(initial.gap).toBe(initial.gutter);
             expect(initial.collapsed).toBe(width < 2200);
             expect(initial.dockWidth).toBe(width < 2200 ? 48 : 380);
             expect(initial.panelHead).toBe("14px");
             expect(initial.panelPadding).toEqual([width < 2200 ? "8px" : "12px", "16px"]);
-            expect(initial.rows.every((height) => height === (width < 2200 ? 32 : 40))).toBe(true);
+            expect(initial.rows.every((height) => height >= 40)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
             await page.boxes(".dock-summary-item");
@@ -407,7 +407,7 @@ describeRendered("Approved compact desktop shell", () => {
           try {
             await ready(page, "main h1");
             expect((await shellMetrics(page)).docWidth, name).toBeLessThanOrEqual(1600);
-            expect((await shellMetrics(page)).gutter).toBe(24);
+            expect((await shellMetrics(page)).gutter).toBe(12);
             expect(page.errors(), name).toEqual([]);
             if (name === "Comms") {
               expect(

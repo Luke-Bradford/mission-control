@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
+import { NextActionsPanel } from "../src/overview/NextActionsPanel.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
@@ -155,7 +155,7 @@ describe("one Needs-you count", () => {
       <>
         <Header page="board" />
         <NeedsBanner />
-        <KpiStrip />
+        <NextActionsPanel />
         <Dock />
         <Comms item={null} view={{ kind: "flight" }} />
         <BoardPage repoId={null} ticket={null} />
@@ -180,7 +180,12 @@ describe("one Needs-you count", () => {
         0,
       );
       const banner = container.querySelector("#nbanner .num")?.textContent;
-      const kpi = container.querySelector('.overview-kpi[href="/flight#askP"] .v')?.textContent;
+      // the Overview's Needs you panel: its figure, and the rows it lists plus the ones behind "more"
+      const panel = container.querySelector("#overviewNextP");
+      const waiting = panel?.querySelector(".ph")?.textContent;
+      const listed =
+        (panel?.querySelectorAll(".needs-row").length ?? 0) +
+        Number(panel?.querySelector(".needs-more")?.textContent?.replace(/\D/g, "") || 0);
       const pulse = screen
         .getByRole("button", { name: /^Needs you: \d+$/ })
         .querySelector("b")?.textContent;
@@ -191,7 +196,8 @@ describe("one Needs-you count", () => {
         dock,
         comms,
         banner,
-        kpi,
+        waiting,
+        listed,
         onCards,
         pulse,
         asks: asks.length,
@@ -203,7 +209,8 @@ describe("one Needs-you count", () => {
       dock: `Waiting on you · ${N}`,
       comms: `Needs you ${N}`,
       banner: String(N),
-      kpi: String(N),
+      waiting: expect.stringContaining(`${N} waiting on you`),
+      listed: N,
       onCards: N,
       pulse: String(N),
       asks: N,

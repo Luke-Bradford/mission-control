@@ -1,10 +1,13 @@
-import type { Crew, OverviewSummary, PipelineStage } from "@mc/core";
+import type { Crew, OverviewSummary, PipelineCard, PipelineStage } from "@mc/core";
 import type { CSSProperties } from "react";
+import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { elapsed, percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { followLink, ticketPath } from "../router.ts";
+import { metricTitle, useMetrics } from "../metrics.ts";
+import { followLink, PAGE_PATHS, ticketPath } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 /**
@@ -16,7 +19,7 @@ export const PIPELINE_STAGES = {
   progress: "Building · checks",
   review: "In review",
   merging: "Merging",
-  merged: "Done today",
+  merged: "Done · 24h",
 } as const;
 
 export type PipelineLane = keyof typeof PIPELINE_STAGES;
@@ -29,8 +32,7 @@ export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["
   merged: ["merged"],
 };
 
-/** A compact summary keeps one measured example; its heading opens the complete Board lane. */
-const COLLAPSED_CARDS = 1;
+const DASH = "—";
 
 /** Where a pipeline card leads: the ticket's panel on the Board. One place to change it. */
 /**
@@ -64,94 +66,130 @@ export function PipelinePanel() {
   const [session] = useSession();
   const { data, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const hasWork = data?.pipeline?.some((stage) => stage.count > 0) ?? false;
+  const metrics = useMetrics();
+  const now = useNow();
+  const r = metrics.readings;
+  const ci = data?.kpis?.ciPassRate24h;
   return (
     <Panel
       id="pipelineP"
-      title="Pipeline"
-      sub="Current ticket lanes · open Board for the complete lane"
+      title={
+        <a href={PAGE_PATHS.board} onClick={(e) => followLink(e, PAGE_PATHS.board)}>
+          Board
+        </a>
+      }
+      sub={
+        <>
+          <b data-metric="inProgress" title={metricTitle(metrics, "inProgress")}>
+            {r.inProgress?.value ?? DASH}
+          </b>{" "}
+          in flight ·{" "}
+          <b data-metric="merged" title={metricTitle(metrics, "merged")}>
+            {r.merged?.value ?? DASH}
+          </b>{" "}
+          merged in 24h · cycle{" "}
+          <b data-metric="cycleTime" title={metricTitle(metrics, "cycleTime")}>
+            {r.cycleTime?.value ?? DASH}
+          </b>{" "}
+          · CI <b>{percent(ci?.pct)}</b>
+          {ci?.runs ? ` of ${ci.runs} runs` : ""}
+          {ci?.redNow ? <span className="crit-t"> · {ci.redNow} red now</span> : null}
+        </>
+      }
     >
       {error && (
         <p role="status" className="pb crit-t">
           {data
-            ? "Pipeline refresh failed. Showing the last received lanes."
-            : "Pipeline could not load."}
+            ? "Board refresh failed. Showing the last received cards."
+            : "Board could not load."}
         </p>
       )}
-
-      <div className="pipeline-grid pb scroll" aria-busy={!data && !error}>
+      <div className="board-stages" aria-busy={!data && !error}>
         {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
           const lane = key as PipelineLane;
-          const stages = PIPELINE_LANE_STAGES[lane];
-          const stageCards = stages.flatMap(
-            (stage) => data?.pipeline?.find((candidate) => candidate.stage === stage)?.cards ?? [],
+          const stages = (data?.pipeline ?? []).filter((stage) =>
+            PIPELINE_LANE_STAGES[lane].includes(stage.stage),
           );
-          const count = stages.reduce(
-            (total, stage) =>
-              total + (data?.pipeline?.find((candidate) => candidate.stage === stage)?.count ?? 0),
-            0,
+          const cards = stages.flatMap((stage) => stage.cards ?? []);
+          const count = stages.reduce((total, stage) => total + stage.count, 0);
+          const oldest = Math.min(
+            ...stages.flatMap((stage) => (stage.oldestAt === null ? [] : [stage.oldestAt])),
           );
-          const cards = stageCards.slice(0, COLLAPSED_CARDS);
-          // Everything not drawn is counted, hidden loaded cards included.
-          const more = count - cards.length;
-          const stageHref = `/board?stage=${key}`;
-          // A lane with nothing in it collapses to its header instead of holding a column's width.
-          const collapsed = data !== undefined && count === 0;
+          const stageHref = `${PAGE_PATHS.board}?stage=${key}`;
           return (
-            <section
-              key={key}
-              className={`pipeline-stage ${key}${collapsed ? " empty" : ""}`}
-              aria-label={label}
-            >
+            <section key={key} className={`board-stage ${key}`} aria-label={label}>
               <h3>
                 <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
                   {label}
                 </a>
+                <b className="num">{data ? count : DASH}</b>
+                {key !== "merged" && Number.isFinite(oldest) && (
+                  <span className="board-oldest">oldest {elapsed(now - oldest)}</span>
+                )}
               </h3>
-              <p className="pipeline-counts s num">
-                {data
-                  ? `${count} total${more > 0 ? ` · ${more} not shown` : collapsed && !hasWork ? " · empty" : ""}`
-                  : "Total not received"}
-              </p>
-              {collapsed && hasWork && <p className="pipeline-empty s muted">Observed empty</p>}
-              {!data &&
-                !error &&
-                Array.from({ length: COLLAPSED_CARDS }, (_, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: identical loading placeholders
-                  <div className="pipeline-chip pipeline-skeleton" key={i} aria-hidden="true">
-                    <span className="kpi-skeleton" />
-                  </div>
-                ))}
-              {cards.map((card) => {
-                const owner = assignee(card.who, crew);
-                const href = pipelineCardPath(card);
-                return (
-                  <a
-                    key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
-                    className="pipeline-chip"
-                    href={href}
-                    onClick={(e) => followLink(e, href)}
-                  >
-                    <span className="pipeline-ticket num">#{card.ticket}</span>
-                    <span className="pipeline-title" title={card.title}>
-                      {cardTitle(card)}
-                    </span>
-                    {owner && (
-                      <span className="pipeline-assignee" title={owner.name}>
-                        <i
-                          style={{ "--c": agentColor(owner.index) } as CSSProperties}
-                          aria-hidden="true"
-                        />
-                        <span className="ellip">{owner.name}</span>
+              <div className="board-cards scroll">
+                {data && count === 0 && <p className="s muted board-empty">No tickets here.</p>}
+                {cards.map((card) => {
+                  const owner = assignee(card.who, crew);
+                  const href = pipelineCardPath(card);
+                  return (
+                    <a
+                      key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
+                      className="board-card"
+                      href={href}
+                      onClick={(e) => followLink(e, href)}
+                    >
+                      <span className="board-title" title={card.title}>
+                        <span className="board-ticket num">#{card.ticket}</span> {cardTitle(card)}
                       </span>
-                    )}
+                      <span className="board-meta">
+                        {owner && (
+                          <span className="pipeline-assignee" title={owner.name}>
+                            <i
+                              style={{ "--c": agentColor(owner.index) } as CSSProperties}
+                              aria-hidden="true"
+                            />
+                            <span>{owner.name}</span>
+                          </span>
+                        )}
+                        {card.priority && <b className="board-tag">{card.priority}</b>}
+                        {card.size && <span className="board-tag">{card.size}</span>}
+                        {card.pr !== null && <span className="num">PR {card.pr}</span>}
+                        {card.ci.length > 0 && <CiMarks ci={card.ci} />}
+                        <span className="board-age num">{elapsed(now - card.since)}</span>
+                      </span>
+                    </a>
+                  );
+                })}
+                {count > cards.length && (
+                  <a
+                    className="board-more s"
+                    href={stageHref}
+                    onClick={(e) => followLink(e, stageHref)}
+                  >
+                    {count - cards.length} more on the Board
                   </a>
-                );
-              })}
+                )}
+              </div>
             </section>
           );
         })}
       </div>
     </Panel>
+  );
+}
+
+/** A PR's checks as marks: shape as well as colour, with the count in words for a reader. */
+function CiMarks({ ci }: { ci: PipelineCard["ci"] }) {
+  const passed = ci.filter((check) => check === "pass").length;
+  const failed = ci.filter((check) => check === "fail").length;
+  const label = `CI: ${passed} of ${ci.length} passed${failed ? `, ${failed} failed` : ""}`;
+  return (
+    <span className="ci-marks" role="img" aria-label={label} title={label}>
+      {ci.map((check, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: checks have no identity here, only their result
+        <i key={i} className={`ci-${check}`} />
+      ))}
+    </span>
   );
 }
