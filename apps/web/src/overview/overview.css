@@ -2843,3 +2843,14 @@ button.quota-details {
     left: calc(var(--sp-3) + var(--crew-state-w) + var(--sp-2));
   }
 }
+/* Headings and loading bars are plain blocks: centre the stretched held cells' content so it sits
+   where the other columns' does. */
+#agentsList .trow.head > :first-child,
+#agentsList .trow.head > :nth-child(2),
+#agentsList .crew-skeleton > :first-child,
+#agentsList .crew-skeleton > :nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+}

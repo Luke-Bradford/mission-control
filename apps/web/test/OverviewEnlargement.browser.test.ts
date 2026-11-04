@@ -80,6 +80,13 @@ const measure = (page: RenderedPage) =>
       texts: body.map((row) => row.textContent ?? ""),
       stateTitles: stateCells.map((cell) => cell.title),
       stateWords: stateCells.map((cell) => cell.querySelector(".pill > span")?.textContent ?? ""),
+      // Where each heading's words sit, as a centre line: held headings must not ride higher.
+      headCentres: headCells.map((cell) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const box = range.getBoundingClientRect();
+        return box.top + box.height / 2;
+      }),
       headTexts: headCells.map((cell) => cell.textContent ?? ""),
       tracks: headCells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
       cuts: {
@@ -414,6 +421,8 @@ describeRendered("Overview Crew at normal text keeps its accepted widths", () =>
       expect(m.cuts).toEqual({ head: 0, state: 0, pill: 0, numbers: 0 });
       // The accepted Overview row is its 40px --table-row plus a 1px border; 32px is the compact
       // token this page does not use. The FLIGHT row, two lines tall, is the tallest at 49px.
+      // All headings share one centre line, State and Seat included.
+      expect(Math.max(...m.headCentres) - Math.min(...m.headCentres)).toBeLessThanOrEqual(1 * zoom);
       expect(m.tableRow).toBe(40);
       expect(m.minHeights.every((h) => h === m.tableRow)).toBe(true);
       expect(m.tallest / zoom).toBeLessThanOrEqual(49.5);

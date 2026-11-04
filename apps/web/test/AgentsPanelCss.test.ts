@@ -129,3 +129,9 @@ it("keeps the accepted scrollbar gutter, holds cells over their whole row, and k
   );
   expect(block).toMatch(/#agentsList \.trow\.needs::before,[^{]*\{\s*z-index: 2/);
 });
+
+it("centres the held headings and loading bars like the other columns", () => {
+  expect(css).toMatch(
+    /#agentsList \.trow\.head > :first-child,\s*#agentsList \.trow\.head > :nth-child\(2\),\s*#agentsList \.crew-skeleton > :first-child,\s*#agentsList \.crew-skeleton > :nth-child\(2\) \{\s*display: flex;\s*flex-direction: column;\s*justify-content: center/,
+  );
+});
