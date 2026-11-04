@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { JSDOM, VirtualConsole } from "jsdom";
+import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
 const dir = join(import.meta.dirname, "../mockups/dependencies");
@@ -81,17 +81,15 @@ describe("Dependencies mockup records", () => {
   });
 });
 
-/** Runs the mockup's own script for a query and returns the page, failing on any script error. */
+const script = /<script>([\s\S]*?)<\/script>/.exec(mockup)?.[1] ?? "";
+
+/** Runs the mockup's own script for a query; a script error throws and fails the test. */
 function render(search: string): Document {
-  const errors: string[] = [];
-  const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", (error) => errors.push(error.message));
-  const dom = new JSDOM(mockup, {
-    runScripts: "dangerously",
+  const dom = new JSDOM(mockup.replace(script, ""), {
+    runScripts: "outside-only",
     url: `http://localhost/mockup${search}`,
-    virtualConsole,
   });
-  expect(errors).toEqual([]);
+  dom.window.eval(script);
   return dom.window.document;
 }
 
