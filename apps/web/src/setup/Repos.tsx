@@ -57,7 +57,12 @@ export function Repos({ config }: { config: ConfigView }) {
         </button>
       </div>
       {adding !== false && (
-        <AddRepo repo={adding || undefined} config={config} close={() => setAdding(false)} />
+        <AddRepo
+          key={adding ? adding.id : "new"}
+          repo={adding || undefined}
+          config={config}
+          close={() => setAdding(false)}
+        />
       )}
       {config.repos.map((repo) => (
         <RepoCard key={repo.id} repo={repo} config={config} onConvert={() => setAdding(repo)} />
@@ -338,6 +343,7 @@ function seatIssues(
   adding: boolean,
   taken: string[],
   ids: Record<"sign" | "role" | "account" | "model", string>,
+  models: "ready" | "loading" | "error" | "none",
 ): FieldIssue[] {
   const found: FieldIssue[] = [];
   if (adding) {
@@ -354,8 +360,16 @@ function seatIssues(
     found.push({ id: ids.account, message: "Account: none is configured; add one in Accounts." });
   if (!form.model.trim())
     found.push({
-      id: ids.model,
-      message: "Model is required. Pick an account that has discovered models.",
+      // A disabled Model cannot take focus: with no choices the link goes to Account instead.
+      id: models === "ready" ? ids.model : ids.account,
+      message:
+        models === "loading"
+          ? "Model is required. The model list is still loading."
+          : models === "error"
+            ? "Model is required. The model list could not be read: retry it below."
+            : models === "none"
+              ? "Model is required. This account has no discovered models: pick another account."
+              : "Model is required.",
     });
   return found;
 }
@@ -367,6 +381,7 @@ function seatIssues(
  */
 function SeatEditor({
   seat,
+  missing = false,
   taken,
   config,
   defaultAccount,
@@ -374,6 +389,8 @@ function SeatEditor({
   onSave,
 }: {
   seat?: SeatInput;
+  /** The seat being edited has left config.yaml since the form opened. */
+  missing?: boolean;
   taken: string[];
   config: ConfigView;
   defaultAccount: string;
@@ -411,7 +428,8 @@ function SeatEditor({
     model: `${base}-model`,
     effort: `${base}-effort`,
   };
-  const catalog = useResource<AccountModelsView[]>(RESOURCES.allAccountModels).data;
+  const catalogRead = useResource<AccountModelsView[]>(RESOURCES.allAccountModels);
+  const catalog = catalogRead.data;
   const options = catalog?.find((account) => account.accountId === form.accountId)?.models ?? [];
   // An old seat may have a model that has since left a provider catalog.  Keep it visible while
   // editing that seat, but never make it a choice for a new one.
@@ -426,7 +444,21 @@ function SeatEditor({
   useEffect(() => {
     if (!seat && form.model === "" && options[0]) setForm({ ...form, model: options[0].model });
   }, [seat, form, options]);
-  const issues = attempted ? seatIssues(form, !seat, taken, ids) : [];
+  const modelsState: "ready" | "loading" | "error" | "none" =
+    models.length > 0
+      ? "ready"
+      : catalogRead.loading && !catalog
+        ? "loading"
+        : catalogRead.error
+          ? "error"
+          : "none";
+  const noModels =
+    modelsState === "loading"
+      ? "Loading models…"
+      : modelsState === "error"
+        ? "Could not read models"
+        : "No discovered models";
+  const issues = attempted ? seatIssues(form, !seat, taken, ids, modelsState) : [];
   const signError = issueOf(issues, ids.sign);
   const roleError = issueOf(issues, ids.role);
   const accountError = issueOf(issues, ids.account);
@@ -435,7 +467,7 @@ function SeatEditor({
     event.preventDefault();
     if (!guard.take()) return;
     setAttempted(true);
-    if (seatIssues(form, !seat, taken, ids).length > 0) {
+    if (seatIssues(form, !seat, taken, ids, modelsState).length > 0) {
       guard.release();
       setFailure(null);
       setFocusKey((key) => key + 1);
@@ -533,12 +565,12 @@ function SeatEditor({
             <label htmlFor={ids.model}>Model</label>
             <select
               {...fieldProps(ids.model, modelError)}
-              title={form.model || "No discovered models"}
+              title={form.model || noModels}
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value, effort: undefined })}
               disabled={saving || models.length === 0}
             >
-              <option value="">No discovered models</option>
+              <option value="">{noModels}</option>
               {models.map((model) => (
                 <option key={model.model} value={model.model}>
                   {model.model}
@@ -546,6 +578,18 @@ function SeatEditor({
               ))}
             </select>
             <FieldError id={ids.model} error={modelError} />
+            {modelsState === "error" && catalogRead.error && (
+              <p className="crit-t xs">
+                Could not read the model list: {catalogRead.error.message}{" "}
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => hub.refetch(RESOURCES.allAccountModels.path)}
+                >
+                  Retry
+                </button>
+              </p>
+            )}
           </div>
         </div>
         <div className="fpair">
@@ -572,6 +616,11 @@ function SeatEditor({
           </div>
         </div>
       </fieldset>
+      {missing && seat && (
+        <p role="status" className="feffect s">
+          {seat.id} is no longer in config.yaml. Add it back with these values, or cancel.
+        </p>
+      )}
       <ErrorSummary
         title={title}
         issues={issues}
@@ -587,7 +636,7 @@ function SeatEditor({
       )}
       <div className="fact">
         <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : "Save seat"}
+          {saving ? "Saving…" : missing ? "Add it back" : "Save seat"}
         </button>
         <button type="button" disabled={saving} onClick={onCancel}>
           Cancel
@@ -613,6 +662,7 @@ function Seats({
   // Where focus goes when the form closes: the button that opened it, or the add button if that went.
   const addButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const editSeed = useRef<SeatInput | undefined>(undefined);
   const restore = useRef(false);
   const closeForm = () => {
     restore.current = true;
@@ -688,6 +738,7 @@ function Seats({
                   className="sm"
                   onClick={(event) => {
                     opener.current = event.currentTarget;
+                    editSeed.current = seat;
                     setEditing(seat.id);
                     setAdding(false);
                   }}
@@ -709,14 +760,20 @@ function Seats({
       {(adding || editing) && (
         <SeatEditor
           key={editing ?? "new"}
-          seat={editing ? base.find((item) => item.id === editing) : undefined}
+          seat={
+            editing ? (base.find((item) => item.id === editing) ?? editSeed.current) : undefined
+          }
+          missing={!!editing && !base.some((item) => item.id === editing)}
           taken={base.map((item) => item.id)}
           config={config}
           defaultAccount={defaultAccount}
           onCancel={closeForm}
           onSave={(seat) =>
+            // A gone seat is only ever added back; a list equal to the base is never sent.
             write(
-              editing ? base.map((item) => (item.id === editing ? seat : item)) : [...base, seat],
+              editing && base.some((item) => item.id === editing)
+                ? base.map((item) => (item.id === editing ? seat : item))
+                : [...base, seat],
             )
           }
         />
@@ -745,6 +802,9 @@ const CHECK_TEXT: Record<CheckState, string> = {
   pass: "Pass",
   fail: "Fail",
 };
+/** The live checks only read, so a dropped connection there means nothing was saved. */
+const CHECK_LOST_TEXT =
+  "The connection dropped. Nothing was saved and your entries are kept. Run the checks again.";
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const REPO_ID_PATTERN = /^[a-z][a-z0-9-]{0,30}$/;
 const STEP_NAMES = ["repo", "checkout folder", "live checks", "mode and account"] as const;
@@ -952,7 +1012,9 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
     issues.length > 0
       ? "Fix before continuing"
       : failure?.uncertain
-        ? "Result unknown"
+        ? step === 3
+          ? "Check did not finish"
+          : "Result unknown"
         : step === 3
           ? "A check failed"
           : "Not saved";
@@ -1159,7 +1221,9 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
         message={failure?.text ?? null}
         focusKey={focusKey}
       >
-        {failure?.uncertain && issues.length === 0 && <p className="s">{UNCERTAIN_TEXT}</p>}
+        {failure?.uncertain && issues.length === 0 && (
+          <p className="s">{step === 3 ? CHECK_LOST_TEXT : UNCERTAIN_TEXT}</p>
+        )}
       </ErrorSummary>
       {busy && (
         <p role="status" className="fstatus s">

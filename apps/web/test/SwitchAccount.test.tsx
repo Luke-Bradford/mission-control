@@ -126,6 +126,8 @@ it.each([
   );
   fireEvent.submit(screen.getByRole("form", { name: "Switch account" }));
   expect((await screen.findByRole("alert")).textContent).toMatch(/seat is busy|transfer failed/);
+  const summary = await screen.findByRole("region", { name: /Not transferred|Result unknown/ });
+  expect(document.activeElement).toBe(summary);
   expect(screen.getByTitle(/^orbit ·/)).toBeTruthy();
 });
 
@@ -304,4 +306,20 @@ it("a double submit sends one transfer", async () => {
       ([path, init]) => path === "/api/seats/guido-1/transfer" && init?.method === "POST",
     ),
   ).toHaveLength(1);
+});
+
+it("a transfer that worked does not keep an earlier 'Fix before transferring'", async () => {
+  const fetch = await setup();
+  await refused(fetch);
+  fireEvent.change(await screen.findByRole("combobox", { name: "Account" }), {
+    target: { value: "nova" },
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "Fix before transferring" })).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Transfer account" }));
+  expect(await screen.findByText(/resumed on nova/)).toBeTruthy();
+  // the crew refetch moves the seat to nova, which is no longer a choice
+  fireEvent.change(screen.getByRole("combobox", { name: "Account" }), { target: { value: "" } });
+  expect(screen.queryByRole("region", { name: "Fix before transferring" })).toBeNull();
 });

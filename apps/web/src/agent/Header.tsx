@@ -279,6 +279,7 @@ function SwitchAccount({ row }: { row: CrewRow }) {
       setFocusKey((key) => key + 1);
       return;
     }
+    setAttempted(false);
     setBusy(true);
     setError(null);
     setUncertain(false);
@@ -288,13 +289,17 @@ function SwitchAccount({ row }: { row: CrewRow }) {
         ACTIONS.seatTransfer(row.id),
         { accountId },
       );
-      if (response.outcome === "refused")
+      if (response.outcome === "refused") {
         setError(`Transfer refused: ${response.reason ?? "No reason supplied"}`);
-      else if (response.outcome === "resumed")
+        setFocusKey((key) => key + 1);
+      } else if (response.outcome === "resumed")
         setResult(`${callSign(row)}: resumed on ${accountId}.`);
       else if (response.outcome === "fresh")
         setResult(`${callSign(row)}: started fresh on ${accountId} with a handoff brief.`);
-      else setError("Transfer returned an unexpected response. Refresh and try again.");
+      else {
+        setError("Transfer returned an unexpected response. Refresh and try again.");
+        setFocusKey((key) => key + 1);
+      }
     } catch (e) {
       setError(seatError(e));
       setUncertain(isUncertain(e instanceof ApiError ? e.status : undefined));
