@@ -26,6 +26,8 @@ with the real store; collectors are stubbed.
 | Topic gate (`flushEmits`) | `agents` and `attention` are rebuilt for hashing at most once per `GATE_CLOCK_MS`, or when the store changed, not on every tick. |
 | Triage and notifications | `scheduleTriage` and the notification reconcile look again only when the store, lock or login changed (or config or FLIGHT was signalled), or a minute passed; the look is not repeated on every bus topic. |
 | Open crew-seat run | An open run of a crew seat no longer keeps every loop tick reading the crew; only an open run of a loop does (a seat's state turns with its session row or the clock). |
+| Dead loop runs | A loop run left open for over a day (`ACTIVE_RUN_WINDOW_MS`) no longer counts as work in progress, so it cannot keep ticks from going quiet. The row is not changed. FLIGHT's copy had five such rows (two paused loops, July to October). |
+| Offsets | `setOffset` writes only when the offset moved, so reading an unchanged file does not move the store version. |
 | Store version | A collector status rewritten with the same result (only its time moved) no longer moves `readVersion`, so memoised views and cached responses survive an idle tick. The stored time is still written. |
 
 ## After (same fixture, warm)
@@ -43,3 +45,6 @@ runs keeping ticks from being quiet; the last two rows are the answer to that.
 
 Payload bytes of `/api/overview` and the SSE stream are unchanged (no field was added or
 removed; the overview differs only in the time-dependent figures).
+
+The fixture now also carries two such dead loop runs; the tick-pair figures above (2.2 ms with no
+browser, 3.1 ms with one) include them.

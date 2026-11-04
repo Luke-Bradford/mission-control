@@ -2424,6 +2424,27 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
   });
 
+  it("hasActiveRunOf: an agent's open run that started since the cutoff, not a dead old row", () => {
+    store.upsertRun(run({ id: "old", agentId: "loop-a", startedAt: 1_000, endedAt: null }));
+    expect(store.hasActiveRunOf(["loop-a"], 5_000)).toBe(false);
+    expect(store.hasActiveRunOf(["loop-a"], 500)).toBe(true);
+    expect(store.hasActiveRunOf(["loop-b"], 500)).toBe(false);
+    expect(store.hasActiveRunOf([], 0)).toBe(false);
+    store.upsertRun(run({ id: "old", agentId: "loop-a", startedAt: 1_000, endedAt: 2_000 }));
+    expect(store.hasActiveRunOf(["loop-a"], 500)).toBe(false);
+  });
+
+  it("setOffset leaves the read version alone when the offset is unchanged", () => {
+    store.setOffset("/same", 10);
+    const before = store.readVersion();
+    store.setOffset("/same", 10);
+    expect(store.readVersion()).toBe(before);
+    expect(store.getOffset("/same")).toBe(10);
+    store.setOffset("/same", 11);
+    expect(store.readVersion()).not.toBe(before);
+    expect(store.getOffset("/same")).toBe(11);
+  });
+
   it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
     const aside = { worktree: "/w/x", wake: false };
     store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));

@@ -2424,16 +2424,19 @@ export class Store {
   }
 
   /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
-  /** True when one of these agents has an open run that is not set aside. */
-  hasActiveRunOf(agentIds: readonly string[]): boolean {
+  /**
+   * True when one of these agents has an open run that is not set aside and started at or after
+   * `since`: a run left open for longer is a dead row, not work in progress.
+   */
+  hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
     if (agentIds.length === 0) return false;
     return (
       this.db
         .prepare(
-          `SELECT 1 FROM runs WHERE ended_at IS NULL AND agent_id IN (${agentIds.map(() => "?").join(",")})
+          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
              AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
         )
-        .get(...agentIds) !== undefined
+        .get(since, ...agentIds) !== undefined
     );
   }
 
@@ -4678,7 +4681,7 @@ export class Store {
   setOffset(path: string, offset: number): void {
     this.db
       .prepare(
-        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset",
+        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset WHERE file_offsets.offset != excluded.offset",
       )
       .run(path, offset);
   }

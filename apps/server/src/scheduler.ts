@@ -182,6 +182,8 @@ export const FLOW_FIRST_DELAY_MS = 7 * 60_000;
 export const EMIT_COALESCE_MS = 1000;
 /** A quiet loop tick repeats the ack and hold sweep at least this often. */
 export const SWEEP_REPEAT_MS = 60_000;
+/** A loop run left open longer than this is a dead row; it no longer keeps loop ticks reading the crew. */
+export const ACTIVE_RUN_WINDOW_MS = 24 * 60 * 60_000;
 /** The topic gate rebuilds a page's content at least this often, whatever the store did. */
 export const GATE_CLOCK_MS = 60_000;
 export { DIGEST_RETENTION_MS };
@@ -719,7 +721,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const quiet =
       inputs !== null &&
       inputs === lastInputs &&
-      !store.hasActiveRunOf(loopIds) &&
+      !store.hasActiveRunOf(loopIds, now() - ACTIVE_RUN_WINDOW_MS) &&
       ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
     // nothing can change state: no crew read
     if (quiet) return sweepAcks(undefined, true);

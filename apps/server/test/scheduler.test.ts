@@ -871,6 +871,43 @@ describe("scheduler", () => {
           expect(calls.every((call) => call[5] === true)).toBe(true);
         });
 
+        it("counts a loop's run left open for over a day as dead: its ticks go quiet", async () => {
+          store.upsertRun({
+            id: "dead",
+            agentId: "shop-app-ta",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW - 30 * 86_400_000,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: null,
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/dead.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
+          expect(store.run("dead")?.endedAt).toBeNull();
+        });
+
         it("reads no crew on quiet ticks while a crew seat's run is open and the seat is unchanged", async () => {
           store.upsertRun({
             id: "open-seat",
