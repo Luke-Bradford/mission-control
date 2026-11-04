@@ -318,7 +318,7 @@ it("the sweep leaves an old branch this hub did not create", async () => {
 
 it("a branch a review run touched, not made, is not this hub's to delete", async () => {
   store.upsertRun(
-    run("rev", "feature/reviewed", { endedAt: NOW - 40 * HOUR, status: "ok", reviewId: "r1" }),
+    run("rev", "feature/reviewed", { endedAt: NOW - 40 * HOUR, status: "ok", reviewId: 1 }),
   );
   const { gh, deleted } = fakeGh({ "feature/reviewed": 48 }, []);
   expect(await tidyWith(gh).sweep()).toEqual([]);
