@@ -166,7 +166,8 @@ it("the sweep deletes an orphan older than 24 hours and keeps open-PR, live-run,
   store.upsertRun(run("ended", "feature/ended", { endedAt: NOW - HOUR, status: "ok" }));
   store.upsertRun(run("orphan", "feature/orphan", { endedAt: NOW - 30 * HOUR, status: "ok" }));
   store.upsertRun(run("unmerged", "feature/unmerged", { endedAt: NOW - 30 * HOUR, status: "ok" }));
-  for (const [i, b] of ["feature/orphan", "feature/ended", "feature/young"].entries()) merged(i + 10, b);
+  for (const [i, b] of ["feature/orphan", "feature/ended", "feature/young"].entries())
+    merged(i + 10, b);
   const { gh, deleted } = fakeGh(
     {
       main: 500,
