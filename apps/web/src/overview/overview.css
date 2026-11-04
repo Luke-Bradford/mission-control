@@ -2800,6 +2800,10 @@ button.quota-details {
   margin-right: calc(-1 * var(--sp-2));
   padding-right: var(--sp-2);
 }
+/* The heading rule caps cells at their track; State's heading must reach as far as its cells do. */
+#agentsList .trow.head > :first-child {
+  max-width: none;
+}
 /* The row's own tint is translucent: paint the same tint over an opaque surface. */
 #agentsList .trow.flight > :first-child,
 #agentsList .trow.flight > :nth-child(2) {
