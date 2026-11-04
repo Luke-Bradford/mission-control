@@ -169,8 +169,8 @@
 
 /* Links in the error summary are targets of their own: at least 24px square. */
 .fsum a {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   min-width: 24px;
   min-height: 24px;
-  line-height: 24px;
 }
