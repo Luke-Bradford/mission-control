@@ -2,7 +2,7 @@
 
 Read this for an Overview, operational dashboard, or a substantial panel-layout change. Use the existing HUD tokens and accessibility rules.
 
-Your job is to arrive with one reasoned design, so the operator doesn't have to direct the layout. Published guidance gives principles but no widths, so the defaults below come from this operator's requests and from renders of this app. Depart from a default when you can say why. Counting tests is not a design verdict.
+Your job is to arrive with one reasoned design, so the operator doesn't have to direct the layout. Published guidance gives principles but no widths, so the defaults below come from this operator's requests and from renders of this app. Use them to fill in the panel budget described below, and depart from a default when you can say why. Counting tests is not a design verdict.
 
 ## What this operator asked for
 
@@ -38,7 +38,7 @@ Treat these as the brief. Later operator steering overrides them.
 
 **Fit by condensing, not removing.** Moving a figure or chart detail off the page counts as dropping it unless the operator has agreed. Merge duplicates, shorten labels and tighten panels first. If something still has to move, propose it and say why.
 
-One region in each column absorbs leftover height. Without one, the column leaves a hole on tall screens. Align both columns' bottom edges.
+One region in each column absorbs leftover height: the log or long list in the primary column, and in the supporting column whichever panel gains most from more rows. Without one, the column leaves a hole on tall screens. Align both columns' bottom edges.
 
 **Tables.** Give identity, state and number columns their longest realistic value and no more. One text column takes the remaining width, up to a readable limit. When the table is wider than that, add the next most useful column instead of widening the text. Keep related values next to each other: a status at the far side of a wide cell reads as a separate column.
 
@@ -57,9 +57,9 @@ A viewport is what the page actually gets, after browser toolbars, tabs and the 
 | True 4K at 100% | 3840×2160 | Scale up first, see below |
 | FLIGHT open | Each of the above less the rail | Recompose; a drawer is acceptable if panels would be crushed |
 
-Keep the ticket's smaller and short views too. Ask the operator for `innerWidth` and `innerHeight` if these look out of date.
+"Without page scrolling" is about the page: a named list may still scroll inside its panel. Test both ends of a range. Keep the ticket's smaller and short views too. Ask the operator for `innerWidth` and `innerHeight` if these look out of date.
 
-**Above about 3200 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. Prefer scaling the interface so the page composes like its 2560 layout, and add panels only if they answer a further question. On 4 November `zoom: 1.5` on the root reproduced the 2560 composition, but the lower panels overflowed and clipped, so heights must account for the scale. Re-render whichever method you use.
+**Above about 3200 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. Prefer scaling the interface so the page composes like its 2560 layout, and add panels only if they answer a further question. On 4 November `zoom: 1.5` on the root reproduced the 2560 composition, but the lower panels overflowed and clipped, so fix heights that depend on the viewport as part of the scaling. Re-render whichever method you use.
 
 ## What has already failed here
 
@@ -82,7 +82,7 @@ Record the reference CSS viewport, browser zoom, OS scaling, dock state and actu
 
 For the supported views, write a vertical budget: header + gutters + summary strip + main operational regions + gaps + footer. Identify exactly which panels and normal rows belong above the fold. Default operational status should not require searching a long page. Large histories and exceptional fifty-row lists can have named, visible internal scrolling; their availability is not proof that the overview itself fits.
 
-For Mission Control, examine the real viewports above with FLIGHT folded and expanded, plus 1920×1080, 2560×1440 and a 1920×1080 viewport at device scale 2 as nominal sizes. Keep required smaller/short views from the ticket. Do not substitute a different height for a named acceptance viewport.
+For Mission Control, examine every row of the viewport table above with FLIGHT folded and expanded. Also check 1920×1080, 2560×1440 and a 1920×1080 viewport at device scale 2; these extras don't replace any row. Keep required smaller/short views from the ticket. Do not substitute a different height for a named acceptance viewport.
 
 ## Size by purpose
 

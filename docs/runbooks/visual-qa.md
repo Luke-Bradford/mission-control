@@ -16,7 +16,7 @@ a separate plan records it before a substantial layout change. Include:
 - Normal data, field limits and exceptional states. A fifty-row stress case does not replace normal data.
 - Essential first-screen content, secondary detail and its visible route. Explain movement or disclosure.
 - A panel budget: meaningful columns/rows, minimum/preferred/maximum widths, useful height and why.
-- Supported CSS viewport, height, theme, rail and scaling cases; expected recomposition at each breakpoint. Use the height the page really gets after browser toolbars, not the monitor's.
+- Supported CSS viewport, height, theme, rail and scaling cases; expected recomposition at each breakpoint. Use the height the page really gets after browser toolbars, as listed in the [composition reference](../../.claude/skills/hud-design/references/dashboard-layout.md#viewports-use-the-real-ones).
 
 Include the promised layout outcome as well as required data. “All metrics remain visible” is weaker
 than “adapt the Overview coherently across 1080p and 4K while preserving accepted seat geometry”.
