@@ -8,6 +8,7 @@ import "@fontsource/ibm-plex-mono/latin-400.css";
 import "@fontsource/ibm-plex-mono/latin-500.css";
 import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
+import "../src/agent/Overview.css";
 import { createRoot } from "react-dom/client";
 import { AgentHeaderActions } from "../src/agent/Header.tsx";
 import { RESOURCES, streamStatus } from "../src/data.ts";

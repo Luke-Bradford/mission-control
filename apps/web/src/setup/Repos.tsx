@@ -470,38 +470,36 @@ function SeatEditor({
     >
       <fieldset className="fgroup">
         <legend>Seat</legend>
-        <div className="fpair">
-          <div className="ffield">
-            <label htmlFor={ids.sign}>Call sign</label>
-            <input
-              {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
-              value={form.id}
-              disabled={!!seat || saving}
-              onChange={(e) => setForm({ ...form, id: e.target.value })}
-            />
-            <span id={`${ids.sign}-hint`} className="fhint muted xs">
-              {seat
-                ? "A call sign cannot change once the seat exists."
-                : `${CALL_SIGN_HINT}, starting with a letter.`}
-            </span>
-            <FieldError id={ids.sign} error={signError} />
-          </div>
-          <div className="ffield">
-            <label htmlFor={ids.role}>Role</label>
-            <select
-              {...fieldProps(ids.role, roleError)}
-              value={form.role}
-              disabled={saving}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
-            >
-              {config.crew?.roles?.map((role) => (
-                <option key={role.name} value={role.name}>
-                  {roleLabel(config, role.name)}
-                </option>
-              ))}
-            </select>
-            <FieldError id={ids.role} error={roleError} />
-          </div>
+        <div className="ffield">
+          <label htmlFor={ids.sign}>Call sign</label>
+          <input
+            {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
+            value={form.id}
+            disabled={!!seat || saving}
+            onChange={(e) => setForm({ ...form, id: e.target.value })}
+          />
+          <span id={`${ids.sign}-hint`} className="fhint muted xs">
+            {seat
+              ? "A call sign cannot change once the seat exists."
+              : `${CALL_SIGN_HINT}, starting with a letter.`}
+          </span>
+          <FieldError id={ids.sign} error={signError} />
+        </div>
+        <div className="ffield">
+          <label htmlFor={ids.role}>Role</label>
+          <select
+            {...fieldProps(ids.role, roleError)}
+            value={form.role}
+            disabled={saving}
+            onChange={(e) => setForm({ ...form, role: e.target.value })}
+          >
+            {config.crew?.roles?.map((role) => (
+              <option key={role.name} value={role.name}>
+                {roleLabel(config, role.name)}
+              </option>
+            ))}
+          </select>
+          <FieldError id={ids.role} error={roleError} />
         </div>
       </fieldset>
       <fieldset className="fgroup">

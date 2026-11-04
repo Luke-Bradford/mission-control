@@ -525,10 +525,15 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
               left: menu?.left ?? -1,
               right: menu?.right ?? Number.POSITIVE_INFINITY,
               top: menu?.top ?? -1,
+              position: menu
+                ? getComputedStyle(document.querySelector(".agent-v2-menu") as Element).position
+                : "",
               viewport: window.innerWidth,
               loading: document.body.textContent?.includes("Loading accounts…") ?? false,
             };
           }, FORMS[0].form);
+          // the real menu is an absolute panel (Overview.css), which the width rule must widen
+          expect(seen.position).toBe("absolute");
           expect(seen.form).toBeGreaterThanOrEqual(400);
           expect(seen.form).toBeLessThanOrEqual(481);
           expect(seen.left).toBeGreaterThanOrEqual(0);
@@ -540,6 +545,36 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
         BROWSER_TEST_TIMEOUT_MS,
       );
     }
+  }
+
+  // A selected option's text must fit its select: native selects clip without an ellipsis.
+  for (const form of [FORMS[5], FORMS[6]]) {
+    it(
+      `${form.id}: every select shows its chosen text whole at 1600x1000`,
+      async () => {
+        const page = await open(form, { width: 1600, height: 1000 });
+        const clipped = await page.evaluate((selector) => {
+          const canvas = document.createElement("canvas").getContext("2d");
+          if (!canvas) throw new Error("no canvas");
+          return [...document.querySelectorAll<HTMLSelectElement>(`${selector} select`)]
+            .map((select) => {
+              const style = getComputedStyle(select);
+              canvas.font = style.font;
+              const text = select.selectedOptions[0]?.textContent ?? "";
+              const room =
+                select.clientWidth -
+                Number.parseFloat(style.paddingLeft) -
+                Number.parseFloat(style.paddingRight) -
+                24; // the arrow
+              return { id: select.id, text, need: canvas.measureText(text).width, room };
+            })
+            .filter((s) => s.need > s.room);
+        }, form.form);
+        expect(clipped).toEqual([]);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
   }
 
   // Inside the real shell: the rail (FLIGHT folded) and FLIGHT's dock expanded, for the widest form.
