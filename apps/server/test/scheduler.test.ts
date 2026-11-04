@@ -3103,6 +3103,34 @@ describe("quiet loop ticks", () => {
     },
   );
 
+  it("reads the crew for a running agent at most once a minute while its inputs are unchanged", async () => {
+    const row = { id: "shop-app-ta", kind: "loop", loopKind: "ta-loop", hudState: "running" };
+    const reads = vi
+      .spyOn(hud, "crew")
+      .mockReturnValue({ rows: [row] as unknown as CrewRow[], firstRunToday: null });
+    const debug: string[] = [];
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients: () => false,
+      debug: (line) => debug.push(line),
+    });
+    for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+    const settled = reads.mock.calls.length;
+    for (const offset of [15_000, 30_000, 45_000]) {
+      clock = NOW + offset;
+      await s.tick("ta");
+    }
+    expect(reads.mock.calls.length).toBe(settled);
+    clock = NOW + 61_000;
+    await s.tick("ta");
+    expect(reads.mock.calls.length).toBeGreaterThan(settled);
+    expect(debug.some((line) => line.includes("shop-app-ta is running"))).toBe(true);
+  });
+
   it("sweeps again at once after a write, and when a date hold comes due", async () => {
     const attention = vi.spyOn(hud, "attentionItems");
     const s = quiet(() => false);

@@ -28,6 +28,7 @@ with the real store; collectors are stubbed.
 | Open crew-seat run | An open run of a crew seat no longer keeps every loop tick reading the crew; only an open run of a loop does (a seat's state turns with its session row or the clock). |
 | Dead loop runs | A loop run left open for over a day (`ACTIVE_RUN_WINDOW_MS`) no longer counts as work in progress, so it cannot keep ticks from going quiet. The row is not changed. FLIGHT's copy had five such rows (two paused loops, July to October). |
 | Offsets | `setOffset` writes only when the offset moved, so reading an unchanged file does not move the store version. |
+| Seats and loops in a clock-driven state | A running, stalled or waiting agent with unchanged inputs makes a loop tick read the crew at most once a minute (`TIMED_COAST_MS`); stall and wait thresholds turn by the minute. The tick also logs, under `MC_DEBUG=1`, why it read the crew (`loop tick reads the crew: <reason>`). |
 | Store version | A collector status rewritten with the same result (only its time moved) no longer moves `readVersion`, so memoised views and cached responses survive an idle tick. The stored time is still written. |
 
 ## After (same fixture, warm)
