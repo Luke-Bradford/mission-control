@@ -2702,7 +2702,8 @@ describe("repo guidance at launch", () => {
     const argv = launches()[0]?.argv as string[];
     for (const flag of ["--restricted", "--tools", "--allowedTools", "--disallowedTools"])
       expect(argv).not.toContain(flag);
-    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    expect(argv).not.toContain("--permission-mode");
+    expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);

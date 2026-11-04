@@ -442,7 +442,8 @@ describe("startWatch", () => {
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
     for (const flag of ["--tools", "--allowedTools", "--disallowedTools", "--restricted"])
       expect(argv).not.toContain(flag);
-    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    expect(argv).not.toContain("--permission-mode");
+    expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);

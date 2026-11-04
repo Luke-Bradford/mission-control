@@ -471,6 +471,22 @@ export const PROTECTED_FILES = [
  * through the mc tools. `git add` and `git commit` could only fail in the sandbox now; denying
  * them by name says so before they run.
  */
+/** FLIGHT's full profile: every built-in the controller uses, unrestricted by path or command. */
+export const FLIGHT_FULL_BUILTINS = [
+  "Bash",
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "TodoWrite",
+  "Skill",
+  "ToolSearch",
+  "Task",
+  "WebFetch",
+  "WebSearch",
+] as const;
 export const DENIED_TOOLS = [
   "Bash(git add:*)",
   "Bash(git commit:*)",
@@ -1306,8 +1322,16 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // Keep the guard hooks; use the controller's tools and filesystem without per-tool grants.
-    args.splice(args.indexOf("--settings"), 0, "--permission-mode", "bypassPermissions");
+    // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+    // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`, so
+    // bypassPermissions would be ignored and every tool outside this list refused: list them.
+    args.splice(
+      args.indexOf("--append-system-prompt-file"),
+      0,
+      "--allowedTools",
+      ...FLIGHT_FULL_BUILTINS,
+      `mcp__${MC_MCP_SERVER}__*`,
+    );
     return args;
   }
   const settingsAt = args.indexOf("--settings");
