@@ -52,10 +52,45 @@ function contactThread(path: string): unknown {
   };
 }
 
+const HOUR_MS = 3_600_000;
+
+/** Messages per hour over the last 24, between the pairs the links name. Built from the clock. */
+function traffic(): unknown {
+  const links = (
+    getState().api["/api/comms/links"] as { links: { from: string; to: string; count: number }[] }
+  ).links;
+  const start = Math.floor(Date.now() / HOUR_MS) * HOUR_MS - 23 * HOUR_MS;
+  const hours = Array.from({ length: 24 }, (_, h) =>
+    links.map((link, i) => ({
+      from: link.from,
+      to: link.to,
+      hour: start + h * HOUR_MS,
+      // Busier towards the present, and the newest hour follows the running count.
+      count:
+        h === 23
+          ? Math.ceil(link.count / 4)
+          : Math.max(0, 1 + ((h * 5 + i * 3) % 4) - (h < 8 ? 1 : 0)),
+    })),
+  ).flat();
+  return { hours: hours.filter((entry) => entry.count > 0) };
+}
+
+/** The QA history, narrowed to one repository when the read names one. */
+function history(path: string): unknown {
+  const m = /^\/api\/qa\/history\?(.*)$/.exec(path);
+  if (!m) return undefined;
+  const page = getState().api["/api/qa/history?limit=50"] as { entries: { repoId: string }[] };
+  const repo = new URLSearchParams(m[1]).get("repoId");
+  return repo ? { ...page, entries: page.entries.filter((e) => e.repoId === repo) } : page;
+}
+
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
   if (key in api) return json(api[key]);
+  if (path === "/api/comms/traffic") return json(traffic());
+  const filtered = history(path);
+  if (filtered !== undefined) return json(filtered);
   const range = telemetryRange(path);
   if (range !== undefined && range in api) return json(api[range]);
   const thread = contactThread(path);

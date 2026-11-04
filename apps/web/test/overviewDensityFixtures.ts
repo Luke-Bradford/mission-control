@@ -577,10 +577,14 @@ export function demoSeed() {
     ...base.api,
     ...demoPageAnswers(),
     ...Object.fromEntries(
-      rows.flatMap((row) => [
-        [`/api/agents/${row.id}`, agentView(row)],
-        [`/api/crew/${row.id}`, agentView(row).row],
-      ]),
+      rows.flatMap((row, index) => {
+        const view = demoAgentView(row, index);
+        return [
+          [`/api/agents/${row.id}`, view],
+          [`/api/crew/${row.id}`, view.row],
+          [`/api/agents/${row.id}/stream?limit=20`, demoStream(row, index)],
+        ];
+      }),
     ),
     "/api/crew?shape=summary": { rows, firstRunToday: NOW - 3 * 60 * MIN },
     "/api/attention": attention,
@@ -594,7 +598,8 @@ export function demoSeed() {
       may: { pickUp: true, research: false, check: true, status: true, safePr: false },
     },
   };
-  for (const t of DEMO_TICKETS)
+  for (const t of DEMO_TICKETS) {
+    const seat = t.seat;
     api[`/api/tickets/${DEMO_REPO}/${t.n}`] = {
       repoId: DEMO_REPO,
       number: t.n,
@@ -610,10 +615,125 @@ export function demoSeed() {
       body: t.title,
       bodyTruncated: false,
       githubError: null,
-      runs: [],
+      runs: seat ? [demoRun(seat, rows)] : [],
       prs: [],
-      timeline: [],
+      timeline: seat ? demoTimeline(t.n, seat) : [],
       nextBefore: null,
     };
+  }
   return { ...base, rows, attention, summary, api };
+}
+
+const DEMO_TOOLS = ["Read", "Edit", "Bash", "Grep", "Write"] as const;
+
+/** A seat's page: tools used so far, a build loop part-way through, a story and a next step. */
+function demoAgentView(row: CrewRow, index: number) {
+  const view = agentView(row);
+  const calls = 14 + index * 3;
+  view.tools = {
+    total: calls,
+    failed: 0,
+    byTool: DEMO_TOOLS.map((name, i) => ({
+      name,
+      calls: Math.floor(calls / 5) + (i < calls % 5 ? 1 : 0),
+      failed: 0,
+    })),
+  };
+  view.health = { label: "Running", blocking: null, failedTools: 0 };
+  view.steps = ["plan", "go/no-go", "build", "checks", "review", "draft PR"].map((label, i) => ({
+    id: label,
+    label,
+    state: i < 2 ? "done" : i === 2 ? "current" : "todo",
+    tries: i === 2 ? 1 : null,
+    failures: null,
+    limit: i === 3 || i === 4 ? 3 : null,
+    durationMs: i < 2 ? 4 * MIN : null,
+    since: null,
+    reason: null,
+  }));
+  if (row.digest) {
+    row.digest.toolCalls = calls;
+    row.digest.turns = 6 + index;
+  }
+  view.row = row;
+  return view;
+}
+
+/** What a seat has just done, newest last: reads, edits and a note to the crew. */
+function demoStream(row: CrewRow, index: number) {
+  const tool = (i: number) => {
+    const name = DEMO_TOOLS[(i + index) % DEMO_TOOLS.length] ?? "Read";
+    return {
+      id: `${row.id}:${i}:0`,
+      at: NOW - (8 - i) * MIN,
+      kind: "tool" as const,
+      text: `${name} src/${row.id}/work-${i}.ts`,
+      tool: {
+        name,
+        input: `src/${row.id}/work-${i}.ts`,
+        result: "ok",
+        ms: 120 + i * 40,
+        error: false,
+      },
+    };
+  };
+  return {
+    runId: row.run?.id ?? null,
+    events: [
+      {
+        id: `${row.id}:m`,
+        at: NOW - 9 * MIN,
+        kind: "msg" as const,
+        text: `Starting on ${row.ticketTitle ?? "the next ticket"}.`,
+      },
+      ...Array.from({ length: 6 }, (_, i) => tool(i)),
+    ],
+    tasks: [
+      { id: "t1", text: "Read the module", status: "done" as const },
+      { id: "t2", text: "Make the change", status: "in_progress" as const },
+      { id: "t3", text: "Run the tests", status: "pending" as const },
+    ],
+    truncated: false,
+    hasMore: false,
+    lastOutputAt: NOW - MIN,
+    reason: null,
+  };
+}
+
+function demoRun(seat: string, rows: readonly CrewRow[]) {
+  const run = rows.find((r) => r.id === seat)?.run;
+  return {
+    id: run?.id ?? `demo-run-${seat}`,
+    seat,
+    status: "running" as const,
+    phase: "build",
+    startedAt: NOW - 25 * MIN,
+    endedAt: null,
+    tokens: { input: 12_000, output: 3_400, cacheRead: 1_200_000, cacheCreate: 40_000 },
+    costUsd: 2.47,
+  };
+}
+
+function demoTimeline(n: number, seat: string) {
+  return [
+    {
+      key: `c:${n}`,
+      at: NOW - 6 * MIN,
+      kind: "comms" as const,
+      id: `comms:${n}`,
+      from: seat,
+      to: "crew",
+      label: null,
+      text: "Tests pass locally; pushing the branch now.",
+    },
+    {
+      key: `r:${n}`,
+      at: NOW - 25 * MIN,
+      kind: "run" as const,
+      runId: `demo-run-${seat}`,
+      seat,
+      status: "running" as const,
+      phase: "build",
+    },
+  ];
 }

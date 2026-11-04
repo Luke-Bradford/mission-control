@@ -5,6 +5,8 @@
  */
 import type {
   ActivityRow,
+  AgentDetailView,
+  AgentStream,
   CommsMessage,
   CrewRow,
   LimitRow,
@@ -21,6 +23,7 @@ import {
   type DemoTicket,
   openPrs,
   pipelineStages,
+  prFlowView,
 } from "../../test/demoSeedPages.ts";
 import { NOW } from "../../test/fixtures.ts";
 import { demoSeed } from "../../test/overviewDensityFixtures.ts";
@@ -102,6 +105,15 @@ const TICKET_MOVES: readonly { n: number; to: DemoTicket["stage"]; seat: string 
   { n: 101, to: "review", seat: "dev-1" },
 ];
 
+type CommsLink = {
+  from: string;
+  to: string;
+  count: number;
+  lastId?: string;
+  lastAt?: number;
+  lastText?: string;
+};
+
 const rowsOf = (s: DemoState): CrewRow[] => (s.api[CREW_PATH] as { rows: CrewRow[] }).rows;
 const summaryOf = (s: DemoState): OverviewSummary => s.api["/api/overview"] as OverviewSummary;
 const snapshotOf = (s: DemoState): MapSnapshot => s.api[MAP_PATH] as MapSnapshot;
@@ -138,6 +150,31 @@ function say(s: DemoState, at: number, index: number) {
   };
   dock.events.push({ id: `demo:${id}`, at, kind: "msg", text });
   if (dock.events.length > 20) dock.events.shift();
+  // The seat's own page, and the graph of who talks to whom.
+  pushEvent(s, from, { id: `demo:${id}`, at, kind: "msg", text });
+  bumpLink(s, from, at, text, message.id);
+}
+
+type SeatEvent = AgentStream["events"][number];
+
+/** Add an event to a seat's transcript, keeping the last 20. */
+function pushEvent(s: DemoState, seat: string, event: SeatEvent) {
+  const stream = s.api[`/api/agents/${seat}/stream?limit=20`] as AgentStream | undefined;
+  if (!stream) return;
+  stream.events.push(event);
+  if (stream.events.length > 20) stream.events.shift();
+  stream.lastOutputAt = event.at;
+}
+
+/** One more message on the pair `from` talks to most (or on its line to FLIGHT). */
+function bumpLink(s: DemoState, from: string, at: number, text: string, id: string) {
+  const links = (s.api["/api/comms/links"] as { links: CommsLink[] }).links;
+  const link = links.find((l) => l.from === from) ?? links[0];
+  if (!link) return;
+  link.count += 1;
+  link.lastAt = at;
+  link.lastText = text;
+  link.lastId = id;
 }
 
 function work(s: DemoState, at: number) {
@@ -160,6 +197,23 @@ function work(s: DemoState, at: number) {
     else row.digest.minuteTokens.push([minute, 900]);
   }
   if (row.run?.tokens) row.run.tokens.output += 900;
+  // The seat's own page: one more tool call in its transcript and its tool counts.
+  const detail = `src/${seat}/work.ts`;
+  pushEvent(s, seat, {
+    id: `${seat}:demo:${s.beat}`,
+    at,
+    kind: "tool",
+    text: `${tool} ${detail}`,
+    tool: { name: tool, input: detail, result: "ok", ms: 150, error: false },
+  });
+  const view = s.api[`/api/agents/${seat}`] as AgentDetailView | undefined;
+  if (view) {
+    view.row = row;
+    if (view.tools.total !== null) view.tools.total += 1;
+    const entry = view.tools.byTool.find((t) => t.name === tool);
+    if (entry) entry.calls += 1;
+    else view.tools.byTool.push({ name: tool, calls: 1, failed: 0 });
+  }
 }
 
 function burn(s: DemoState) {
@@ -204,6 +258,7 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   const prs = openPrs(s.tickets).map((pr) => ({ ...pr, updatedAt: at }));
   s.api[`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`] = prs;
   s.api[`/api/repos/${DEMO_REPO}/prs`] = prs;
+  s.api["/api/prs/flow"] = shiftTimes(prFlowView(s.tickets), NOW, shift);
   logActivity(
     s,
     at,

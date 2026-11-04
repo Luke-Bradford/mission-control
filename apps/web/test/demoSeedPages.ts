@@ -20,10 +20,11 @@ import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
 import { prFlowFixture } from "./prFlowFixture.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
-import { qaHistoryApi } from "./qaHistoryFixture.ts";
+import { qaHistoryApi, qaHistorySavedReport } from "./qaHistoryFixture.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
 
 export const DEMO_REPO = "shop-app";
+export const DEMO_REPOS = [DEMO_REPO, "site-builder"] as const;
 
 /** The seats, in the order the crew table lists them. */
 export const SEAT_IDS = [
@@ -126,6 +127,10 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
   );
 }
 
+/** Every ticket's PR number, so a ticket that moves during the scene still has its reads. */
+export const allPrs = (tickets: readonly DemoTicket[]) =>
+  tickets.filter((t) => t.stage !== "ready").map((t) => ({ number: t.n + 1000 }));
+
 /** Tickets still being built that already have a PR open. */
 const BUILDING_WITH_PR: ReadonlySet<number> = new Set([103, 105, 106]);
 
@@ -212,6 +217,22 @@ export const flightMessages = (): CommsMessage[] => [
   }),
 ];
 
+/** Who talks to whom: a ring of working seats, each pair with a running count. */
+export function commsLinks() {
+  const talkers = SEAT_IDS.filter((id) => id !== "dev-9");
+  return talkers
+    .flatMap((from, i) => [
+      {
+        from,
+        to: talkers[(i + 1) % talkers.length] as string,
+        count: 4 + ((i * 3) % 7),
+        tokens: 900 + i * 130,
+      },
+      { from, to: "flight-1", count: 2 + (i % 4), tokens: 400 + i * 60 },
+    ])
+    .filter((link) => link.from !== link.to);
+}
+
 function commsApi(): Record<string, unknown> {
   const crew = crewMessages();
   const flight = flightMessages();
@@ -221,16 +242,18 @@ function commsApi(): Record<string, unknown> {
     "/api/comms/flight": { messages: flight, cursor: "comms:1003", unread: 0 },
     "/api/comms/mentions": { mentions: [] },
     "/api/comms/pins": { messages: [] },
-    "/api/comms/links": {
-      links: [
-        { from: "dev-1", to: "dev-2", count: 6, tokens: 2400 },
-        { from: "dev-3", to: "dev-9", count: 4, tokens: 1800 },
-        { from: "dev-4", to: "flight-1", count: 3, tokens: 900 },
-      ],
+    "/api/comms/links": { links: commsLinks() },
+    // Traffic is hour by hour from the clock, so source.ts builds it on each read.
+    "/api/comms/metrics": {
+      from: NOW - 24 * HOUR,
+      to: NOW,
+      p95BySeat: SEAT_IDS.filter((id) => id !== "dev-9").map((seatId, i) => ({
+        seatId,
+        p95: 220 + i * 35,
+        n: 12 + i * 3,
+      })),
     },
-    "/api/comms/traffic": { rows: [], total: 0 },
-    "/api/comms/metrics": { messages: crew.length, perHour: 40 },
-    "/api/comms/chatter": { rows: [] },
+    "/api/comms/chatter": { pairs: [] },
     ...Object.fromEntries(
       SEAT_IDS.flatMap((id) => {
         const mine = crew.filter((m) => m.from === id).slice(-8);
@@ -509,7 +532,7 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
   const clock = Date.now();
   const fixture = shiftTimes(qaAcceptanceFixture(1), clock, NOW - clock);
   const out: Record<string, unknown> = {};
-  for (const pr of openPrs(tickets)) {
+  for (const pr of allPrs(tickets)) {
     for (const [path, value] of Object.entries(fixture)) {
       if (path === "/api/qa/queue") continue;
       const own = (text: string) =>
@@ -590,7 +613,7 @@ function memoryApi(): Record<string, unknown> {
 function prFiles(tickets: readonly DemoTicket[]): Record<string, unknown> {
   const tree = mapFiles();
   return Object.fromEntries(
-    openPrs(tickets).map((pr, i) => [
+    allPrs(tickets).map((pr, i) => [
       `/api/repos/${DEMO_REPO}/prs/${pr.number}/files`,
       { files: [0, 1, 2].map((k) => tree[(i * 5 + k * 7) % tree.length]?.path ?? "") },
     ]),
@@ -680,20 +703,42 @@ export function demoPageAnswers(
 ): Record<string, unknown> {
   const telemetry = telemetryView();
   const clock = Date.now();
-  const ownRepo = (text: string) =>
+  const ownRepo = (text: string, repo = DEMO_REPO) =>
     text
-      .replaceAll("repo=sample", `repo=${DEMO_REPO}`)
-      .replaceAll('"repoId":"sample"', `"repoId":"${DEMO_REPO}"`);
+      .replaceAll("repo=sample", `repo=${repo}`)
+      .replaceAll('"repoId":"sample"', `"repoId":"${repo}"`);
+  const base = {
+    ...codeHealthBrowserApi(NOW),
+    ...codeRiskFixture(NOW).api,
+    ...testHealthFixture(NOW).api,
+  };
   const health = Object.fromEntries(
-    Object.entries({
-      ...codeHealthBrowserApi(NOW),
-      ...codeRiskFixture(NOW).api,
-      ...testHealthFixture(NOW).api,
-    })
-      .filter(([path]) => path.startsWith("/api/code-health"))
-      .map(([path, value]) => [ownRepo(path), JSON.parse(ownRepo(JSON.stringify(value)))]),
+    DEMO_REPOS.flatMap((repo) =>
+      Object.entries(base)
+        .filter(([path]) => path.startsWith("/api/code-health"))
+        .map(([path, value]) => [
+          ownRepo(path, repo),
+          JSON.parse(ownRepo(JSON.stringify(value), repo)),
+        ]),
+    ),
   );
-  const history = shiftTimes(qaHistoryApi(3), clock, NOW - clock);
+  // The history fixture is written for other repos; Demo's are its own.
+  const history = JSON.parse(
+    JSON.stringify(shiftTimes(qaHistoryApi(3), clock, NOW - clock))
+      .replaceAll("mission-control", DEMO_REPO)
+      .replaceAll('{"id":"sample"}', '{"id":"site-builder"}'),
+  ) as Record<string, unknown>;
+  for (const i of [0, 2]) {
+    const report = JSON.parse(
+      JSON.stringify(shiftTimes(qaHistorySavedReport(i), clock, NOW - clock)).replaceAll(
+        "mission-control",
+        DEMO_REPO,
+      ),
+    );
+    const path = `/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${report.prNumber}`;
+    history[path] = { reports: [report] };
+    history[`${path}&headSha=${report.headSha}`] = { reports: [report] };
+  }
   return {
     ...health,
     ...history,
