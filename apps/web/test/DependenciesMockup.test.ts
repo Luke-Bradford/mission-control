@@ -89,7 +89,7 @@ function render(search: string): Document {
     runScripts: "outside-only",
     url: `http://localhost/mockup${search}`,
   });
-  dom.window.eval(script);
+  (dom.window as unknown as { eval(code: string): void }).eval(script);
   return dom.window.document;
 }
 
