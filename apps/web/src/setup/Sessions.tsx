@@ -93,7 +93,9 @@ interface FormState {
   sessionId: string;
   editId: string | null;
   role: string;
-  id: string | null;
+  id: string;
+  /** The call sign is still the one derived from the role; typing over it stops that. */
+  idAuto: boolean;
   accountId: string;
   model: string;
   effort: CrewEffort | "";
@@ -116,7 +118,8 @@ function seatForm(
     sessionId,
     editId: editing?.id ?? null,
     role: editing?.role ?? first?.name ?? "",
-    id: null,
+    id: first ? freeCallSign(config, editing?.role ?? first.name) : "",
+    idAuto: true,
     accountId: editing?.accountId ?? account?.id ?? "",
     model:
       editing?.model ?? (account?.vendor === "codex" ? "gpt-5.6-sol" : (first?.model ?? "sonnet")),
@@ -216,7 +219,7 @@ function SeatForm({
   const status = statuses.data?.find((a) => a.accountId === form.accountId);
   const unavailable = session.seats.find((s) => s.id === form.editId)?.unavailable;
   const cliHint = unavailable || statuses.error || (status && status.status !== "logged-in");
-  const id = form.editId ?? form.id ?? freeCallSign(config, form.role);
+  const id = form.editId ?? form.id;
   const patch = (p: Partial<FormState>) => setForm({ ...form, ...p });
   const base = useId();
   const ids = {
@@ -253,6 +256,7 @@ function SeatForm({
     const next = roles.find((r) => r.name === name);
     patch({
       role: name,
+      ...(form.idAuto ? { id: freeCallSign(config, name) } : {}),
       model: vendor === "codex" ? "gpt-5.6-sol" : (next?.model ?? form.model),
       scratch: false,
       area: next?.mode === "writer" ? form.area : "",
@@ -272,8 +276,7 @@ function SeatForm({
     onSave(seat);
   }
 
-  const shown =
-    failure?.formKey === seatFormKey(form) || failure?.formKey === null ? failure : null;
+  const shown = failure?.formKey === seatFormKey(form) ? failure : null;
   const title =
     issues.length > 0 ? "Fix before saving" : shown?.uncertain ? "Result unknown" : "Not saved";
   return (
@@ -329,7 +332,7 @@ function SeatForm({
               {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
               value={id}
               disabled={busy}
-              onChange={(e) => patch({ id: e.target.value })}
+              onChange={(e) => patch({ id: e.target.value, idAuto: false })}
             />
             <FieldError id={ids.sign} error={signError} />
           </div>
@@ -488,6 +491,7 @@ function CrewSession({
   setForm,
   busy,
   failure,
+  clearFailure,
   save,
   close,
 }: {
@@ -500,6 +504,7 @@ function CrewSession({
   setForm: (f: FormState | null) => void;
   busy: boolean;
   failure: SaveFailure | null;
+  clearFailure: () => void;
   save: SaveSeats;
   close: (opener: HTMLButtonElement) => void;
 }) {
@@ -549,6 +554,7 @@ function CrewSession({
   function open(editing: SeatInput | null, from: HTMLElement) {
     setRemoving(null);
     opener.current = from;
+    clearFailure();
     setForm(seatForm(config, session.id, editing));
   }
 
@@ -1067,9 +1073,6 @@ export function Sessions({ config }: { config: ConfigView }) {
                   </div>
                   <div className="ffield">
                     <label htmlFor={sessionIds.name}>Name</label>
-                    <span id={`${sessionIds.name}-hint`} className="fhint xs">
-                      Leave empty to use the repo folder's name.
-                    </span>
                     <input
                       {...fieldProps(
                         sessionIds.name,
@@ -1086,6 +1089,9 @@ export function Sessions({ config }: { config: ConfigView }) {
                     />
                   </div>
                 </div>
+                <p id={`${sessionIds.name}-hint`} className="fhint muted xs">
+                  Name: leave empty to use the repo folder's name.
+                </p>
                 <div className="ffield">
                   <label htmlFor={sessionIds.source}>Repo</label>
                   <input
@@ -1240,6 +1246,7 @@ export function Sessions({ config }: { config: ConfigView }) {
           setForm={setForm}
           busy={busy}
           failure={failure?.sessionId === s.id ? failure : null}
+          clearFailure={() => setFailure(null)}
           save={save}
           close={(opener) => void closeSession(s.id, opener)}
         />

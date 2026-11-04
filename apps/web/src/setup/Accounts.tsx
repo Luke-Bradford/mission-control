@@ -190,7 +190,12 @@ const OVERLAY_ID = "account-editor";
 const FIELD = (key: string) => `account-${key}`;
 
 /** What the server's schema would refuse, found before sending; the server stays the judge. */
-function accountIssues(draft: Draft, edit: boolean, ids: Record<string, string>): FieldIssue[] {
+function accountIssues(
+  draft: Draft,
+  edit: boolean,
+  ids: Record<string, string>,
+  hadProfile: boolean,
+): FieldIssue[] {
   const found: FieldIssue[] = [];
   if (!edit && !ACCOUNT_NAME.test(draft.name))
     found.push({
@@ -198,8 +203,11 @@ function accountIssues(draft: Draft, edit: boolean, ids: Record<string, string>)
       message: "Name must be 1–40 letters, digits, . _ or -, starting with a letter or digit.",
     });
   if (draft.provider === "codex") {
-    if (draft.cliProfile === "")
-      found.push({ id: ids.profile, message: "Login profile folder is required for Codex." });
+    if (draft.cliProfile === "" && hadProfile)
+      found.push({
+        id: ids.profile,
+        message: "Login profile folder cannot be emptied once it is set.",
+      });
     else if (draft.cliProfile.length > PROFILE_MAX)
       found.push({
         id: ids.profile,
@@ -244,7 +252,8 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
     stop: `${base}-${FIELD("stop")}`,
   };
   const edit = account !== null;
-  const issues = attempted ? accountIssues(draft, edit, ids) : [];
+  const hadProfile = !!account?.cliProfile;
+  const issues = attempted ? accountIssues(draft, edit, ids, hadProfile) : [];
   const change = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }));
 
@@ -267,7 +276,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!guard.take()) return;
-    const found = accountIssues(draft, edit, ids);
+    const found = accountIssues(draft, edit, ids, hadProfile);
     setAttempted(true);
     if (found.length > 0) {
       guard.release();
@@ -277,6 +286,8 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
     }
     setSaving(true);
     setFailure(null);
+    // Every control is disabled while the write is out: keep focus inside the modal.
+    dialog.current?.focus();
     const body = {
       provider: draft.provider,
       ...(draft.provider === "codex" && draft.cliProfile ? { cliProfile: draft.cliProfile } : {}),
@@ -290,7 +301,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
       hub.refetch(RESOURCES.config.path);
       hub.refetch(RESOURCES.accountStatus.path);
       if (edit) hub.refetch(RESOURCES.accountModels(account.id).path);
-      close();
+      if (alive.current) close();
     } catch (cause) {
       const uncertain = isUncertain(cause instanceof ApiError ? cause.status : undefined);
       if (uncertain) {
@@ -301,7 +312,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
       if (alive.current) {
         setFailure({ text: errorText(cause), uncertain });
         setFocusKey((key) => key + 1);
-      }
+      } else toast(errorText(cause));
     } finally {
       guard.release();
       if (alive.current) setSaving(false);
@@ -318,6 +329,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop takes focus from a click, so Tab stays trapped
     <div
       className="account-editor"
+      tabIndex={-1}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -329,6 +341,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
     >
       <div
         ref={dialog}
+        tabIndex={-1}
         className="account-dialog"
         role="dialog"
         aria-modal="true"
@@ -374,7 +387,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
             <legend>Sign-in</legend>
             {draft.provider === "codex" ? (
               <div className="ffield">
-                <label htmlFor={ids.profile}>Login profile folder (absolute)</label>
+                <label htmlFor={ids.profile}>Login profile folder (absolute, optional)</label>
                 <input
                   {...fieldProps(ids.profile, profileError, `${ids.profile}-hint`)}
                   value={draft.cliProfile}
@@ -383,8 +396,8 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
                   onChange={(e) => change("cliProfile", e.target.value)}
                 />
                 <span id={`${ids.profile}-hint`} className="fhint muted xs">
-                  Each Codex account has its own signed-in profile. Credentials are never shown or
-                  stored by Mission Control.
+                  Each Codex account has its own signed-in profile. Empty uses this machine's Codex
+                  login. Credentials are never shown or stored by Mission Control.
                 </span>
                 <FieldError id={ids.profile} error={profileError} />
               </div>

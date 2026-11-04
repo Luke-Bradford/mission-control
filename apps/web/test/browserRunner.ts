@@ -184,6 +184,12 @@ async function startable(): Promise<boolean> {
   }
 }
 const SKIP = NO_BROWSER || (!MUST_RUN && !(await startable()));
+if (SKIP && BROWSER) {
+  // Say so out loud: a green local run of a skipped layout check proves nothing about the layout.
+  console.warn(
+    `Rendered tests are SKIPPED: ${BROWSER} is installed but could not start here. CI still runs them.`,
+  );
+}
 
 /** Builds the harness pages once. */
 async function buildHarness(outDir: string): Promise<void> {

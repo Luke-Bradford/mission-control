@@ -148,7 +148,7 @@
   width: min(640px, 100%);
   margin: auto;
   padding: var(--sp-5);
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   box-shadow: var(--shadow);
@@ -915,6 +915,7 @@
 
 .ffield {
   display: grid;
+  align-content: start;
   gap: var(--sp-1);
   min-width: 0;
 }
@@ -947,6 +948,7 @@
 
 .fpair {
   display: grid;
+  align-items: start;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-4);
 }

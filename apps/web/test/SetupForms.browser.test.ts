@@ -114,10 +114,58 @@ const inWindow = (page: RenderedPage, selector: string) =>
       : null;
   }, selector);
 
+/** Every pair of fields shares one top and its controls are exactly 32px tall. */
+const pairsAligned = (page: RenderedPage, scope: string) =>
+  page.evaluate((root) => {
+    const pairs = [...document.querySelectorAll(`${root} .fpair`)];
+    return pairs.every((pair) => {
+      const controls = [...pair.querySelectorAll("input, select")].map((c) =>
+        c.getBoundingClientRect(),
+      );
+      return (
+        controls.length > 0 &&
+        controls.every((c) => Math.abs(c.height - 32) < 0.5 && Math.abs(c.top - controls[0].top) < 0.5)
+      );
+    });
+  }, scope);
+
+/** Make the form's own invalid attempt: bad values, then the submit button. */
+const attempt = (page: RenderedPage, form: (typeof FORMS)[number]) =>
+  page.evaluate(
+    async (arg) => {
+      const root = document.querySelector(arg.scope);
+      const field = (label: string) => {
+        const id = [...(root?.querySelectorAll("label") ?? [])].find(
+          (l) => l.textContent === label,
+        )?.htmlFor;
+        return id ? (document.getElementById(id) as HTMLInputElement | null) : null;
+      };
+      const set = (label: string, value: string) => {
+        const input = field(label);
+        if (!input) return;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      if (arg.id === "F01") set("Call sign", "Bad Name");
+      if (arg.id === "F02") set("Model", " ");
+      if (arg.id === "F05") {
+        set("Alert at", "95");
+        set("Stop at", "90");
+      }
+      await new Promise((r) => setTimeout(r, 50));
+      root?.querySelector<HTMLButtonElement>(".fact button[type=submit]")?.click();
+      await new Promise((r) => setTimeout(r, 50));
+    },
+    { scope: form.form, id: form.id },
+  );
+
 describeRendered("Setup agent, session and account forms, rendered", () => {
   for (const colorScheme of ["light", "dark"] as const) {
     for (const [width, height] of [
       [1280, 900],
+      [1440, 900],
+      [1600, 1000],
+      [1920, 1080],
       [2560, 1440],
     ] as const) {
       for (const form of FORMS) {
@@ -138,12 +186,64 @@ describeRendered("Setup agent, session and account forms, rendered", () => {
             const fields = await page.boxes(`${form.form} .fgroup`);
             const last = fields[fields.length - 1];
             expect(actions.y).toBeGreaterThanOrEqual((last?.y ?? 0) + (last?.height ?? 0) - 1);
+            expect(await pairsAligned(page, form.form)).toBe(true);
+            await attempt(page, form);
+            expect(await pairsAligned(page, form.form)).toBe(true);
+            if (form.form === ".account-dialog") {
+              const opaque = await page.evaluate(
+                () => getComputedStyle(document.querySelector(".account-dialog") as Element).backgroundColor,
+                null,
+              );
+              expect(opaque).not.toBe("rgba(0, 0, 0, 0)");
+              expect(opaque).not.toBe("transparent");
+            }
             expect(page.errors()).toEqual([]);
             await page.close();
           },
           BROWSER_TEST_TIMEOUT_MS,
         );
       }
+    }
+  }
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const form of FORMS) {
+      it(
+        `${form.id}: an invalid attempt focuses the summary, the action stays reachable and Cancel returns focus at 1600x700 ${colorScheme}`,
+        async () => {
+          const page = await render(form, 1600, 700, colorScheme);
+          await attempt(page, form);
+          await page.box(".fsum");
+          expect(
+            await page.evaluate(() => document.activeElement?.classList.contains("fsum"), null),
+          ).toBe(true);
+          const painted = await page.evaluate((scope) => {
+            const root = document.querySelector(scope);
+            const action = root?.querySelector<HTMLElement>(".fact button[type=submit]");
+            action?.scrollIntoView({ block: "nearest" });
+            const rect = action?.getBoundingClientRect();
+            if (!action || !rect) return false;
+            const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+            return rect.top >= 0 && rect.bottom <= window.innerHeight && action.contains(hit);
+          }, form.form);
+          expect(painted).toBe(true);
+          const returned = await page.evaluate(
+            async (arg) => {
+              const root = document.querySelector(arg.scope);
+              const cancel = [...(root?.querySelectorAll("button") ?? [])].find(
+                (b) => b.textContent === "Cancel",
+              );
+              cancel?.click();
+              await new Promise((r) => setTimeout(r, 100));
+              return document.activeElement?.textContent === arg.opener;
+            },
+            { scope: form.form, opener: form.open },
+          );
+          expect(returned).toBe(true);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
     }
   }
 

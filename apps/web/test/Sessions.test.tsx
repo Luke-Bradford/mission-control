@@ -307,6 +307,47 @@ describe("agent form: grouping and recoverable input", () => {
     expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", "inco-9");
   });
 
+  it("keeps the derived call sign after an unknown outcome so a retry cannot add a second agent", async () => {
+    const { form } = await seatMount({
+      [`POST ${SEATS}`]: () => ({ status: 500, body: { error: "lost" } }),
+    });
+    const first = (within(form).getByLabelText("Call sign") as HTMLInputElement).value;
+    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
+    await within(form).findByRole("region", { name: "Result unknown" });
+    const seated = CREW_CONFIG.crew?.sessions[0]?.seats[0];
+    if (!CREW_CONFIG.crew || !seated) throw new Error("no crew");
+    const [session] = CREW_CONFIG.crew.sessions;
+    lastView.rerender(
+      <>
+        <Sessions
+          config={{
+            ...CREW_CONFIG,
+            crew: {
+              ...CREW_CONFIG.crew,
+              sessions: [
+                { ...session, seats: [...(session?.seats ?? []), { ...seated, id: first }] },
+              ],
+            },
+          }}
+        />
+        <Toast />
+      </>,
+    );
+    expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", first);
+  });
+
+  it("does not show an old failure in a newly opened form", async () => {
+    const { form, opener } = await seatMount({
+      [`POST ${SEATS}`]: () => ({ status: 400, body: { error: "old refusal" } }),
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
+    await within(form).findByRole("region", { name: "Not saved" });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(opener);
+    const again = screen.getByRole("form", { name: "Add agent to s/s1" });
+    expect(within(again).queryByRole("region", { name: "Not saved" })).toBeNull();
+  });
+
   it("keeps the draft when the config refreshes under it", async () => {
     const { form } = await seatMount();
     fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: "inco-9" } });

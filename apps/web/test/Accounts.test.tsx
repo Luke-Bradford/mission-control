@@ -235,8 +235,11 @@ describe("account editor: recoverable input", () => {
     expect(posts(fetch)).toHaveLength(0);
     // codex needs a profile; claude does not and must not be blocked by the hidden field
     fireEvent.change(name, { target: { value: "codex-new" } });
+    fireEvent.change(within(dialog).getByLabelText(/Login profile folder/), {
+      target: { value: "x".repeat(4097) },
+    });
     submit(dialog);
-    expect(within(dialog).getByRole("link", { name: /profile/i })).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: /at most 4096/ })).toBeTruthy();
     fireEvent.change(within(dialog).getByLabelText("Vendor"), { target: { value: "claude" } });
     expect(within(dialog).queryByLabelText(/Login profile folder/)).toBeNull();
     submit(dialog);
@@ -392,5 +395,38 @@ describe("account editor: recoverable input", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(posts(fetch)).toHaveLength(0);
     expect(document.activeElement).toBe(again.opener);
+  });
+
+  it("saves thresholds of a Codex account that has no profile", async () => {
+    const fetch = load({ "PUT /api/accounts/codex-main": { account: {} } });
+    render(<Accounts config={CONFIG} />);
+    const opener = (await screen.findAllByRole("button", { name: "Edit" }))[1] as HTMLElement;
+    fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "Edit account" });
+    fireEvent.change(within(dialog).getByLabelText("Alert at"), { target: { value: "60" } });
+    submit(dialog);
+    await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+    expect(JSON.parse(String(posts(fetch)[0]?.[1]?.body))).toEqual({
+      provider: "codex",
+      alertAt: 60,
+      stopAt: 80,
+    });
+  });
+
+  it("keeps Tab inside the modal even when focus is on the backdrop, and a late result cannot close another editor", async () => {
+    const fetch = load();
+    const release = hold(fetch, "PUT", "/api/accounts/claude-main");
+    render(<Accounts config={CONFIG} />);
+    const { dialog } = await openEdit();
+    expect(dialog.parentElement?.getAttribute("tabindex")).toBe("-1");
+    submit(dialog);
+    expect(document.activeElement).toBe(dialog);
+    const second = (await screen.findAllByRole("button", { name: "Edit" }))[1] as HTMLElement;
+    fireEvent.click(second);
+    const other = screen.getByRole("dialog", { name: "Edit account" });
+    expect(within(other).getByRole("heading", { name: "Edit codex-main" })).toBeTruthy();
+    release(200, { account: {} });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("heading", { name: "Edit codex-main" })).toBeTruthy();
   });
 });
