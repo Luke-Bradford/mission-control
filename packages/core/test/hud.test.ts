@@ -563,12 +563,17 @@ describe("crewHudState", () => {
     expect(crewHudState(seat("running", "r1", now - STALL_MS), null, now)).toBe("stalled");
     expect(crewHudState(seat("starting", "r1", now - STALL_MS), null, now)).toBe("stalled");
   });
-  it("a seat that holds the test lock runs silent until its Bash limit", () => {
+  it("counts a lock holder's silence from when it took the lock", () => {
     const silent = now - 30 * 60_000;
-    const since = (ms: number) => crewHudState(seat("running"), silent, now, false, now - ms);
-    expect(since(STALL_MS)).toBe("running");
-    expect(since(CHECK_BASH_TIMEOUT_MS - 1)).toBe("running");
-    expect(since(CHECK_BASH_TIMEOUT_MS)).toBe("stalled");
+    const held = (ms: number) => crewHudState(seat("running"), silent, now, false, now - ms);
+    // the wait for the lock was not the seat's
+    expect(held(STALL_MS - 1)).toBe("running");
+    // it held the lock and went quiet: a healthy Claude check writes a heartbeat
+    expect(held(STALL_MS)).toBe("stalled");
+    // output after the lock was taken still counts
+    expect(crewHudState(seat("running"), now - 1000, now, false, now - 40 * 60_000)).toBe(
+      "running",
+    );
     // no hold: the usual rule
     expect(crewHudState(seat("running"), silent, now)).toBe("stalled");
     // a hold says nothing about a seat that is not in a turn

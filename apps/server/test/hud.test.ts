@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  CHECK_BASH_TIMEOUT_MS,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -2266,7 +2265,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(crew(c, store, NOW).rows.find((r) => r.id === "GUIDO-2")?.hudState).toBe("stalled");
   });
 
-  it("shows a seat running a long check under the test lock as running, until its Bash limit", () => {
+  it("counts a lock holder's silence from when it took the lock, not from its wait", () => {
     const c = withCrew();
     crewRun("c1", "GUIDO-1");
     crewRun("c2", "GUIDO-2");
@@ -2281,13 +2280,14 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         command: "pnpm -s test:related",
         since: NOW - held,
       },
-      waiting: [{ runId: "c2", seatId: "GUIDO-2", command: "pnpm -s test", since: NOW - MIN }],
+      waiting: [],
     });
     const state = (l: TestLockState) =>
       crew(c, store, NOW, l).rows.find((r) => r.id === "GUIDO-1")?.hudState;
-    expect(state(lock(20 * MIN))).toBe("running");
-    expect(items(c, lock(20 * MIN))).toEqual([]);
-    expect(state(lock(CHECK_BASH_TIMEOUT_MS))).toBe("stalled");
+    // silent for 20 minutes, but it was granted the lock a moment ago
+    expect(state(lock(MIN))).toBe("running");
+    // it held the lock and went quiet: a healthy Claude check writes a heartbeat
+    expect(state(lock(11 * MIN))).toBe("stalled");
     // another seat's hold does not cover this one
     const other: TestLockState = {
       holder: { runId: "c2", seatId: "GUIDO-2", command: "pnpm -s test", since: NOW - MIN },
@@ -2305,13 +2305,13 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
     store.setDigest("c2", digest({ lastEventAt: NOW - MIN }));
     const lock: TestLockState = {
-      holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 46 * MIN },
+      holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 15 * MIN },
       waiting: [{ runId: "c2", seatId: "GUIDO-2", command: "pnpm -s test", since: NOW - 4 * MIN }],
     };
     const lockItems = items(c, lock).filter((i) => i.kind === "lock");
     expect(lockItems).toEqual([
       {
-        key: `lock:c1:${NOW - 46 * MIN}`,
+        key: `lock:c1:${NOW - 15 * MIN}`,
         kind: "lock",
         agentId: "GUIDO-1",
         repoId: "shop-app",

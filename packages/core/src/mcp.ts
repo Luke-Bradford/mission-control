@@ -414,7 +414,7 @@ export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
  * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, and a
  * branch that touches a widely imported file can never finish its related tests inside it (#1398).
  * 45 minutes is above the 39.5 minutes CI's five test jobs add up to on c2bea393, setup included,
- * and a hung check holds the test lock for no longer than that. A wait for the test lock does not
+ * and on a healthy Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
  * count: it happens in the PreToolUse hook, before the CLI starts the command's clock.
  */
 export const CHECK_BASH_TIMEOUT_MS = 45 * 60_000;
