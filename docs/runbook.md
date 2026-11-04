@@ -2219,12 +2219,16 @@ touched.
   or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
   last PR on its branch merged; nothing is sent, so a merged branch is not
   recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
+- **Only its own branches.** The hub deletes only a branch that one of its own work runs created
+  (a review run does not count). A second hub on the same repo has runs this hub cannot see, so a
+  branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
 - **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
   branch) that closed without merging. The PR page keeps its commits.
-- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes every
-  remote branch with no open PR, no live run, and no commit for 24 hours. A branch that is the base
-  of an open PR stays. A run parked on a closed PR does not hold its branch; any other unended run
-  does. Each deletion is a hub event on the Activity page.
+- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
+  branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
+  its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any
+  unended run holds its branch, a run parked on a closed PR included. Each deletion is a hub event on
+  the Activity page.
 - **Never touched:** the default branch, `archive/*`, and `repos[].keep_branches`. If any read of
   branches or PRs fails, nothing is deleted for that repo.
 - **Local.** Every 10 minutes the hub fetches each seat clone with `--prune` and drops the local

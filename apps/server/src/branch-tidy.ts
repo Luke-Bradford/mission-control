@@ -36,6 +36,8 @@ export interface RemoteBranch {
   name: string;
   /** The tip commit's date; null when GitHub gave none. */
   committedAt: number | null;
+  /** The tip commit's SHA; null when GitHub gave none. */
+  sha: string | null;
 }
 
 /** Whether the hub must leave `branch` alone: the default branch, `archive/*`, or the repo's keep-list. */
@@ -61,7 +63,7 @@ export interface BranchTidyDeps {
 export interface BranchTidy {
   /** Deletes the branches of crew PRs that closed unmerged; the branches deleted, as `repo:branch`. */
   closedPass(): Promise<string[]>;
-  /** Deletes every branch with no open PR, no live run and no commit for 24 hours. */
+  /** Deletes every branch with no open PR, no live run, no commit for 24 hours and a merged tip. */
   sweep(): Promise<string[]>;
   /** Fetches each seat clone and drops its local branches that are merged or gone. */
   pruneLocal(): Promise<string[]>;
@@ -71,7 +73,7 @@ const REFS_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     refs(refPrefix: "refs/heads/", first: 100, after: $after) {
-      nodes { name target { ... on Commit { committedDate } } }
+      nodes { name target { ... on Commit { oid committedDate } } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -107,7 +109,7 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       let repository: {
         defaultBranchRef?: { name?: unknown } | null;
         refs?: {
-          nodes?: { name?: unknown; target?: { committedDate?: unknown } | null }[];
+          nodes?: { name?: unknown; target?: { oid?: unknown; committedDate?: unknown } | null }[];
           pageInfo?: { hasNextPage?: unknown; endCursor?: unknown };
         };
       } | null;
@@ -126,7 +128,8 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       for (const n of refs.nodes) {
         if (typeof n?.name !== "string") continue;
         const at = Date.parse(String(n.target?.committedDate));
-        branches.push({ name: n.name, committedAt: Number.isNaN(at) ? null : at });
+        const sha = typeof n.target?.oid === "string" ? n.target.oid : null;
+        branches.push({ name: n.name, committedAt: Number.isNaN(at) ? null : at, sha });
       }
       if (refs.pageInfo?.hasNextPage !== true) {
         return defaultBranch === null ? null : { defaultBranch, branches };
@@ -176,8 +179,6 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
   function liveBranches(repoId: string): Set<string> {
     const out = new Set<string>();
     for (const run of deps.store.runsActiveSince(Number.MAX_SAFE_INTEGER)) {
-      // a run parked on a closed PR holds nothing: its PR is gone and nothing lifts that park
-      if (run.loop?.parked?.kind === "pr-closed") continue;
       if (run.repoId === repoId && run.endedAt === null && run.branch !== null) out.add(run.branch);
     }
     for (const h of deps.store.latestHandoffs(repoId))
@@ -309,9 +310,23 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
 
     async sweep() {
       const cutoff = now() - SWEEP_MIN_AGE_MS;
+      // a branch's tip is merged only when a merged PR of that branch had this very commit as its head:
+      // an idle branch with other commits may hold work nothing else has
+      const merged = new Map<string, Set<string>>();
+      for (const repo of deps.config.repos) {
+        const tips = new Set<string>();
+        for (const pr of deps.store.pullRequests(repo.id)) {
+          if (pr.state === "merged") tips.add(`${pr.branch}@${pr.headSha}`);
+        }
+        merged.set(repo.id, tips);
+      }
       return tidy(
-        (b) => b.committedAt !== null && b.committedAt <= cutoff,
-        "no open PR, no live run, no commit for 24 hours",
+        (b, repoId) =>
+          b.committedAt !== null &&
+          b.committedAt <= cutoff &&
+          b.sha !== null &&
+          merged.get(repoId)?.has(`${b.name}@${b.sha}`) === true,
+        "no open PR, no live run, no commit for 24 hours, its tip merged",
       );
     },
 
