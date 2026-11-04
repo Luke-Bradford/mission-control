@@ -33,7 +33,7 @@ Treat these as the brief. Later operator steering overrides them.
 | Primary table | 60–70% of the canvas width | It carries the most fields and answers the page's main question |
 | Supporting column | The rest, one column; panels sized to their content | Compact status doesn't improve by getting wider |
 | Summary strip | One row, at most 96 px | It should be scanned in one pass; shrink the tiles before adding a second row |
-| Log or long list | The one region that flexes vertically, showing as many one-line rows as fit | It gains from every extra row, and it prevents a hole at the bottom of the page |
+| Log or long list | Flexes vertically in the primary column, showing as many one-line rows as fit | It gains from every extra row, and it prevents a hole at the bottom of the page |
 | Everything else | Height set by content | Stretched panels create empty boxes and flat charts |
 
 **Fit by condensing, not removing.** Moving a figure or chart detail off the page counts as dropping it unless the operator has agreed. Merge duplicates, shorten labels and tighten panels first. If something still has to move, propose it and say why.
