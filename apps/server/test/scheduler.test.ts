@@ -827,10 +827,12 @@ describe("scheduler", () => {
           await s.stop();
         });
 
-        it("records state changes from the summary crew while no browser is connected and a run is open", async () => {
+        // A loop's state turns with its run's output, which the state inputs do not read; a crew
+        // seat's turns with its session row, which they do (see the next test).
+        it("records state changes from the summary crew while no browser is connected and a loop's run is open", async () => {
           store.upsertRun({
             id: "open",
-            agentId: "seat-guido",
+            agentId: "shop-app-ta",
             repoId: "shop-app",
             seq: 1,
             startedAt: NOW,
@@ -867,6 +869,44 @@ describe("scheduler", () => {
           const calls = vi.mocked(hud.crew).mock.calls.slice(before);
           expect(calls.length).toBeGreaterThan(0);
           expect(calls.every((call) => call[5] === true)).toBe(true);
+        });
+
+        it("reads no crew on quiet ticks while a crew seat's run is open and the seat is unchanged", async () => {
+          store.upsertRun({
+            id: "open-seat",
+            agentId: "seat-guido",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: "shop-app#1",
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/y.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          at = NOW + 30_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
         });
 
         it("records a loop's error while no browser is connected and no run is open", async () => {
@@ -3040,5 +3080,37 @@ describe("quiet loop ticks", () => {
     await s.tick("ta");
     expect(holds(store)["ask:soon"]?.releasedAt).toBe(NOW + 20_000);
     expect(attention.mock.calls.length).toBeGreaterThanOrEqual(quietReads);
+  });
+});
+
+describe("triage look", () => {
+  it("reads attention again only when the store, config or FLIGHT changed, or a minute passed", async () => {
+    vi.useFakeTimers();
+    let clock = NOW;
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = createScheduler({ config, store, bus, now: () => clock, collectors: stubs() });
+    try {
+      s.start();
+      await vi.advanceTimersByTimeAsync(3_000);
+      bus.emit("attention"); // one look at the settled store
+      const settled = attention.mock.calls.length;
+      clock += 5_000;
+      bus.emit("attention");
+      bus.emit("boards");
+      expect(attention.mock.calls.length).toBe(settled);
+      store.setSetting("triage-test", "x");
+      bus.emit("attention");
+      const written = attention.mock.calls.length;
+      expect(written).toBeGreaterThan(settled);
+      bus.emit("config");
+      expect(attention.mock.calls.length).toBeGreaterThan(written);
+      const configured = attention.mock.calls.length;
+      clock += 61_000;
+      bus.emit("attention");
+      expect(attention.mock.calls.length).toBeGreaterThan(configured);
+    } finally {
+      await s.stop();
+      vi.useRealTimers();
+    }
   });
 });

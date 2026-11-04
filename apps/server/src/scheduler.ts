@@ -560,9 +560,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   let triageTimer: NodeJS.Timeout | null = null;
   let triageAt = 0;
+  /** What the last triage look read: the same store and lock a minute on need not be read again. */
+  let triaged: { at: number; basis: string } | null = null;
   const scheduleTriage = () => {
     const at = now();
     if (triageTimer !== null && triageAt <= at) return;
+    // A look at an unchanged store finds the due times it found: each already has its timer, and
+    // the clock-only items turn over by the minute.
+    const basisNow = () => JSON.stringify([store.readVersion(), deps.lockState?.() ?? NO_LOCK]);
+    if (
+      triaged !== null &&
+      triaged.basis === basisNow() &&
+      at >= triaged.at &&
+      at - triaged.at < SWEEP_REPEAT_MS
+    )
+      return;
     if (triageTimer !== null) clearTimeout(triageTimer);
     triageTimer = null;
     const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
@@ -571,10 +583,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // a FLIGHT that is not running shows as not triaging once its restart grace has passed
     const shows = flightNotTriagingDueAt(config, store, at);
     if (shows !== null && shows > at) due.push(shows);
+    // after the look: a view it built may have written, and that is not a change
+    triaged = { at, basis: basisNow() };
     if (due.length === 0) return;
     triageAt = Math.min(...due);
     triageTimer = setTimeout(() => {
       triageTimer = null;
+      triaged = null;
       // never read a view built earlier in this second: the timer's reason is that time has passed
       forgetViews(store);
       void applyDefaults();
@@ -696,11 +711,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // a caller that cannot say who watches (a unit test) reads eagerly
     const inputs = deps.hasViewClients !== undefined ? stateInputs(config, store) : null;
     // an agent no longer configured keeps its last event, and no row of it changes
-    const configured = new Set(configuredAgents(config).map((a) => a.id));
+    const agents = configuredAgents(config);
+    const configured = new Set(agents.map((a) => a.id));
+    // A crew seat's state turns with its session row (in the inputs) or the clock (timed states),
+    // open run or not; a loop's turns with its run's output, which the inputs do not read.
+    const loopIds = agents.filter((a) => a.kind === "loop").map((a) => a.id);
     const quiet =
       inputs !== null &&
       inputs === lastInputs &&
-      !store.hasActiveRun() &&
+      !store.hasActiveRunOf(loopIds) &&
       ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
     // nothing can change state: no crew read
     if (quiet) return sweepAcks(undefined, true);
@@ -1384,6 +1403,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
+        // config and FLIGHT's liveness are not in the store version
+        if (t === "config" || t === "flight") triaged = null;
         if (["agents", "escalations", "attention", "flight", "boards", "config"].includes(t))
           scheduleTriage();
       });

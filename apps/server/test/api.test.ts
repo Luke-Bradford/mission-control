@@ -107,6 +107,7 @@ import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { LocalNotifications } from "../src/local-notifications.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
@@ -9717,6 +9718,35 @@ describe("overview", () => {
     expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
       true,
     );
+  });
+
+  it("reconciles notifications again only when the store changed or a minute passed", async () => {
+    await new Promise((r) => setTimeout(r, 1_100)); // the reconcile armed at ready
+    vi.useFakeTimers();
+    const reads = vi.spyOn(LocalNotifications.prototype, "reconcile");
+    try {
+      store.setSetting("notifications-test", "0");
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      const first = reads.mock.calls.length;
+      expect(first).toBeGreaterThan(0);
+      clock += 5_000;
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reads).toHaveBeenCalledTimes(first);
+      store.setSetting("notifications-test", "1");
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      const written = reads.mock.calls.length;
+      expect(written).toBeGreaterThan(first);
+      clock += 61_000;
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reads.mock.calls.length).toBeGreaterThan(written);
+    } finally {
+      reads.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("shares attention for two seconds and invalidates on non-machine topics", async () => {
