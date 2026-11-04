@@ -24,16 +24,77 @@ export interface MapPersist {
   put(kind: string, scope: string, key: string, value: string, exclusive: boolean): void;
 }
 
-/** The largest single file the Map reads, and the most it reads from one tree. */
+/** The largest code file or manifest the Map opens for links; nothing else is ever opened. */
 export const MAP_BLOB_MAX_BYTES = 1024 * 1024;
-export const MAP_TREE_BUDGET_BYTES = 48 * 1024 * 1024;
+/** A tile's weight is its bytes over this, so a file the Map never opens still gets a size. */
+export const MAP_BYTES_PER_TILE_UNIT = 32;
+const MAP_PARSED_MAX = 20_000;
+const MAP_CODE = /\.[cm]?[jt]sx?$/;
 
-/** Evidence, images and other generated records are not part of the Map's graph. */
-export function mapReadable(path: string): boolean {
-  return (
-    !/^docs\/evidence\//.test(path) &&
-    !/\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|woff2?|ttf|mp4|mov|log|patch)$/i.test(path)
+export const mapTileSize = (bytes: number): number =>
+  bytes === 0 ? 0 : Math.max(1, Math.ceil(bytes / MAP_BYTES_PER_TILE_UNIT));
+
+/** What the links need from one blob, keyed by its sha so a new commit rereads only changed files. */
+interface ParsedBlob {
+  specs: { specifier: string; names: string[] }[];
+  exported: string[];
+  stars: string[];
+  exports: [name: string, target: string][];
+}
+const parsedBlobs = new Map<string, ParsedBlob>();
+
+function parseBlob(content: string): ParsedBlob {
+  const specs: ParsedBlob["specs"] = [];
+  for (const match of content.matchAll(
+    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"']+)["']/g,
+  )) {
+    const clause =
+      match.index === undefined
+        ? ""
+        : content.slice(Math.max(0, content.lastIndexOf("import", match.index)), match.index);
+    const names = [...clause.matchAll(/\{([^}]+)\}/g)].flatMap((named) =>
+      (named[1] as string).split(",").map(
+        (part) =>
+          part
+            .trim()
+            .replace(/^type\s+/, "")
+            .split(/\s+as\s+/)[0] ?? "",
+      ),
+    );
+    specs.push({ specifier: match[1] as string, names });
+  }
+  const exported = new Set<string>();
+  for (const m of content.matchAll(
+    /\bexport\s+(?:declare\s+)?(?:type\s+)?(?:const|let|var|class|function|interface|enum|namespace|type)\s+([\w$]+)/g,
+  ))
+    exported.add(m[1] as string);
+  for (const m of content.matchAll(/\bexport\s*{([^}]*)}/g))
+    for (const id of (m[1] as string).matchAll(/[\w$]+/g)) exported.add(id[0]);
+  const stars = [...content.matchAll(/\bexport\s*\*\s+from\s*["']([^"']+)["']/g)].map(
+    (m) => m[1] as string,
   );
+  const exports: ParsedBlob["exports"] = [];
+  if (content.trimStart().startsWith("{")) {
+    try {
+      const manifest = JSON.parse(content);
+      if (
+        typeof manifest.name === "string" &&
+        manifest.exports &&
+        typeof manifest.exports === "object"
+      ) {
+        for (const [name, target] of Object.entries(manifest.exports)) {
+          if (typeof target === "string" && target.startsWith("./"))
+            exports.push([
+              name === "." ? manifest.name : `${manifest.name}/${name.replace(/^\.\//, "")}`,
+              target,
+            ]);
+        }
+      }
+    } catch {
+      // A malformed manifest does not hide the rest of the tree.
+    }
+  }
+  return { specs, exported: [...exported], stars, exports };
 }
 
 /** The History lens's deliberately bounded view of merged work. */
@@ -85,75 +146,67 @@ export function mapTree(
     if (found) return structuredClone(found);
     const readTree = async (): Promise<Pick<Tree, "tree" | "imports">> => {
       const treeSha = (await git("rev-parse", "--verify", `${commit}^{tree}`)).trim();
-      const listed = (await git("ls-tree", "-rzl", treeSha)).split("\0").flatMap((row) => {
+      const entries = (await git("ls-tree", "-rzl", treeSha)).split("\0").flatMap((row) => {
         const match = /^(?:100[0-7]{3}|120000) blob ([a-f0-9]+) +(\d+)\t([\s\S]+)$/.exec(row);
-        return match && mapReadable(match[3] as string)
+        return match
           ? [{ sha: match[1] as string, size: Number(match[2]), path: match[3] as string }]
           : [];
       });
-      // A blob over the per-file cap, or past the total budget, stays in the tree unread (0 lines).
-      let budget = MAP_TREE_BUDGET_BYTES;
-      const entries = listed.map((entry) => {
-        const read = entry.size <= MAP_BLOB_MAX_BYTES && entry.size <= budget;
-        if (read) budget -= entry.size;
-        return { ...entry, read };
-      });
-      const toRead = entries.filter((e) => e.read);
-      const blobs = await new Promise<Buffer>((resolve, reject) => {
-        const child = spawn("git", [...args, "cat-file", "--batch"], {
-          env,
-          timeout: GIT_TIMEOUT_MS,
+      // The tree and its tile sizes come from file metadata alone; only code and manifests are opened.
+      const tree = entries.map((e) => ({ path: e.path, lines: mapTileSize(e.size) }));
+      const wanted = entries.filter(
+        (e) =>
+          e.size <= MAP_BLOB_MAX_BYTES &&
+          (MAP_CODE.test(e.path) || posix.basename(e.path) === "package.json"),
+      );
+      const missing = [...new Set(wanted.map((e) => e.sha))].filter((sha) => !parsedBlobs.has(sha));
+      if (missing.length) {
+        const blobs = await new Promise<Buffer>((resolve, reject) => {
+          const child = spawn("git", [...args, "cat-file", "--batch"], {
+            env,
+            timeout: GIT_TIMEOUT_MS,
+          });
+          const chunks: Buffer[] = [];
+          child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+          child.stderr.resume();
+          child.on("error", reject);
+          child.stdin.on("error", reject);
+          child.on("close", (code) =>
+            code === 0
+              ? resolve(Buffer.concat(chunks))
+              : reject(new Error("git could not read the files")),
+          );
+          child.stdin.end(`${missing.join("\n")}\n`);
         });
-        const chunks: Buffer[] = [];
-        child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-        child.stderr.resume();
-        child.on("error", reject);
-        child.stdin.on("error", reject);
-        child.on("close", (code) =>
-          code === 0
-            ? resolve(Buffer.concat(chunks))
-            : reject(new Error("git could not read the files")),
-        );
-        child.stdin.end(toRead.length ? `${toRead.map((e) => e.sha).join("\n")}\n` : "");
-      });
-      let offset = 0;
-      const sources = new Map<string, string>();
-      const workspace = new Map<string, string>();
-      const tree = entries.map((entry) => {
-        if (!entry.read) return { path: entry.path, lines: 0 };
-        const end = blobs.indexOf(10, offset);
-        const size = Number(blobs.subarray(offset, end).toString().split(" ")[2]);
-        if (end < 0 || !Number.isSafeInteger(size)) throw new Error("invalid map blob");
-        const bytes = blobs.subarray(end + 1, end + 1 + size);
-        offset = end + size + 2;
-        const content = bytes.includes(0) ? "" : bytes.toString("utf8");
-        if (/\.[cm]?[jt]sx?$/.test(entry.path)) sources.set(entry.path, content);
-        if (posix.basename(entry.path) === "package.json") {
-          try {
-            const manifest = JSON.parse(content);
-            if (
-              typeof manifest.name === "string" &&
-              manifest.exports &&
-              typeof manifest.exports === "object"
-            ) {
-              for (const [name, target] of Object.entries(manifest.exports)) {
-                if (typeof target === "string" && target.startsWith("./")) {
-                  workspace.set(
-                    name === "." ? manifest.name : `${manifest.name}/${name.replace(/^\.\//, "")}`,
-                    posix.join(posix.dirname(entry.path), target),
-                  );
-                }
-              }
-            }
-          } catch {
-            // A malformed manifest does not hide the rest of the tree.
+        let offset = 0;
+        for (const sha of missing) {
+          const end = blobs.indexOf(10, offset);
+          if (end < 0) throw new Error("invalid map blob");
+          const header = blobs.subarray(offset, end).toString().split(" ");
+          if (header[1] === "missing") {
+            offset = end + 1;
+            parsedBlobs.set(sha, { specs: [], exported: [], stars: [], exports: [] });
+            continue;
           }
+          const size = Number(header[2]);
+          if (!Number.isSafeInteger(size)) throw new Error("invalid map blob");
+          const bytes = blobs.subarray(end + 1, end + 1 + size);
+          offset = end + size + 2;
+          parsedBlobs.set(sha, parseBlob(bytes.includes(0) ? "" : bytes.toString("utf8")));
+          if (parsedBlobs.size > MAP_PARSED_MAX)
+            parsedBlobs.delete(parsedBlobs.keys().next().value as string);
         }
-        return {
-          path: entry.path,
-          lines: content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0),
-        };
-      });
+      }
+      const parsed = (sha: string): ParsedBlob =>
+        parsedBlobs.get(sha) ?? { specs: [], exported: [], stars: [], exports: [] };
+      const sources = new Map<string, ParsedBlob>();
+      const workspace = new Map<string, string>();
+      for (const e of wanted) {
+        const blob = parsed(e.sha);
+        if (MAP_CODE.test(e.path)) sources.set(e.path, blob);
+        for (const [name, target] of blob.exports)
+          workspace.set(name, posix.join(posix.dirname(e.path), target));
+      }
       const paths = new Set(tree.map((f) => f.path));
       const resolve = (base: string): string | null => {
         const candidates = [
@@ -163,22 +216,6 @@ export function mapTree(
         ];
         return candidates.find((p) => paths.has(p)) ?? null;
       };
-      // Each file's exported names, found once: a per-name regex over every source was the slow part.
-      const exported = new Map<string, Set<string>>();
-      const exportNames = (path: string): Set<string> => {
-        const known = exported.get(path);
-        if (known) return known;
-        const names = new Set<string>();
-        const content = sources.get(path) ?? "";
-        for (const m of content.matchAll(
-          /\bexport\s+(?:declare\s+)?(?:type\s+)?(?:const|let|var|class|function|interface|enum|namespace|type)\s+([\w$]+)/g,
-        ))
-          names.add(m[1] as string);
-        for (const m of content.matchAll(/\bexport\s*{([^}]*)}/g))
-          for (const id of (m[1] as string).matchAll(/[\w$]+/g)) names.add(id[0]);
-        exported.set(path, names);
-        return names;
-      };
       const exportedFrom = (
         path: string,
         name: string,
@@ -186,11 +223,10 @@ export function mapTree(
       ): string | null => {
         if (seen.has(path)) return null;
         seen.add(path);
-        const content = sources.get(path);
-        if (!content) return null;
-        if (exportNames(path).has(name)) return path;
-        for (const star of content.matchAll(/\bexport\s*\*\s+from\s*["']([^"']+)["']/g)) {
-          const specifier = star[1] as string;
+        const blob = sources.get(path);
+        if (!blob) return null;
+        if (blob.exported.includes(name)) return path;
+        for (const specifier of blob.stars) {
           const next = specifier.startsWith(".")
             ? resolve(posix.normalize(posix.join(posix.dirname(path), specifier)))
             : resolve(workspace.get(specifier) ?? "");
@@ -201,31 +237,15 @@ export function mapTree(
         return null;
       };
       const imports: Tree["imports"] = [];
-      for (const [from, content] of sources) {
+      for (const [from, blob] of sources) {
         const targets = new Set<string>();
-        for (const match of content.matchAll(
-          /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"']+)["']/g,
-        )) {
-          const specifier = match[1] as string;
+        for (const { specifier, names } of blob.specs) {
           const base = specifier.startsWith(".")
             ? posix.normalize(posix.join(posix.dirname(from), specifier))
             : workspace.get(specifier);
           if (!base) continue;
           const to = resolve(base);
           if (!to) continue;
-          const clause =
-            match.index === undefined
-              ? ""
-              : content.slice(Math.max(0, content.lastIndexOf("import", match.index)), match.index);
-          const names = [...clause.matchAll(/\{([^}]+)\}/g)].flatMap((named) =>
-            (named[1] as string).split(",").map(
-              (part) =>
-                part
-                  .trim()
-                  .replace(/^type\s+/, "")
-                  .split(/\s+as\s+/)[0] ?? "",
-            ),
-          );
           if (names.length === 0) targets.add(to);
           else for (const name of names) targets.add(exportedFrom(to, name) ?? to);
         }

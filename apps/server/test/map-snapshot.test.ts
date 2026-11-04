@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MapSnapshot, PullRequestView } from "@mc/core";
 import { afterEach, expect, it } from "vitest";
-import { MAP_HISTORY_WINDOW_MS, mapTree } from "../src/map/snapshot.ts";
+import { MAP_HISTORY_WINDOW_MS, mapTileSize, mapTree } from "../src/map/snapshot.ts";
 
 import { mapCheckout } from "./map-checkout.ts";
 
@@ -237,7 +237,7 @@ it("persists the tree, imports and each merge's files, and reuses them without r
   }
 });
 
-it("reads a tree over 64 MiB by skipping evidence, images and oversized blobs", async () => {
+it("reads a tree over 64 MiB from file metadata, opening only code and manifests", async () => {
   dir = mkdtempSync(join(tmpdir(), "mc-map-big-"));
   const checkout = mapCheckout(dir);
   git(checkout, "branch", "-M", "main");
@@ -253,14 +253,28 @@ it("reads a tree over 64 MiB by skipping evidence, images and oversized blobs", 
   git(checkout, "commit", "-qm", "big tree");
   git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
   const data = await mapTree(checkout, "origin/main");
-  const paths = data.tree.map((f) => f.path);
-  expect(paths).toContain("packages/core/src/map.ts");
-  expect(paths.some((p) => p.startsWith("docs/evidence/"))).toBe(false);
-  expect(paths).not.toContain("shot.png");
-  expect(paths).toContain("generated.ts");
-  expect(data.tree.find((f) => f.path === "generated.ts")?.lines).toBe(0);
+  const size = (path: string) => data.tree.find((f) => f.path === path)?.lines;
+  expect(size("docs/evidence/run/out-0.log")).toBe(mapTileSize(20 * 1024 * 1024));
+  expect(size("shot.png")).toBe(mapTileSize(2 * 1024 * 1024));
+  expect(size("generated.ts")).toBeGreaterThan(0);
   expect(data.imports).toContainEqual({
     from: "packages/core/src/map.ts",
     to: "packages/core/src/types.ts",
   });
+  expect(data.imports.some((i) => i.from === "generated.ts")).toBe(false);
 }, 60_000);
+
+it("rereads only the blobs a new commit changed", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-sha-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const first = await mapTree(checkout, "origin/main");
+  writeFileSync(join(checkout, "extra.ts"), 'import { x } from "./packages/core/src/map.ts";\n');
+  git(checkout, "add", ".");
+  git(checkout, "commit", "-qm", "extra");
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const second = await mapTree(checkout, "origin/main");
+  expect(second.imports.filter((i) => i.from !== "extra.ts")).toEqual(first.imports);
+  expect(second.imports).toContainEqual({ from: "extra.ts", to: "packages/core/src/map.ts" });
+});
