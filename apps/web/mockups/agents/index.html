@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mission Control · Agents mockup (GUIDO-1, busy)</title>
+    <style>
+      :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface2:#131a23;--line:#1b2430;--line2:#2a3646;--fg:#e7eaef;--fg2:#aab2bf;--muted:#808999;--accent:#56d8e6;--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7;--seat:#56d8e6;--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;--display:"Barlow Semi Condensed",sans-serif;--rail:0px}
+      :root[data-theme="light"]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface2:#eef1f5;--line:#dfe3ea;--line2:#c6cdd8;--fg:#121720;--fg2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--ok:#157246;--warn:#8d5b00;--crit:#a73838;--think:#6b4fc4}
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--sans);overflow:hidden}
+      body.flight{--rail:316px}
+      a{color:var(--accent);text-decoration:none}
+      a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+      button{font:inherit;color:var(--fg);background:var(--surface2);border:1px solid var(--line2);border-radius:6px;min-height:24px;min-width:24px;padding:0 8px;cursor:pointer}
+      .mono{font-family:var(--mono)}
+      .muted{color:var(--muted)} .fg2{color:var(--fg2)}
+      /* shell */
+      .top{height:52px;padding:0 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:24px;margin-right:var(--rail)}
+      .brand{font:700 19px var(--display);letter-spacing:.12em}
+      .nav{display:flex;gap:4px}.nav a{padding:4px 8px;color:var(--fg2);min-height:24px;display:inline-flex;align-items:center}.nav a.on{color:var(--fg);border-bottom:2px solid var(--accent)}
+      .health{margin-left:auto;display:flex;gap:16px;align-items:center;font:12px var(--mono);color:var(--fg2)}
+      .dock{position:fixed;top:52px;right:0;bottom:0;width:var(--rail);background:var(--surface);border-left:1px solid var(--line2);overflow:hidden;display:none}
+      body.flight .dock{display:block}
+      .dock .head{padding:0 16px}
+      .dock p{margin:0;padding:8px 16px;border-bottom:1px solid var(--line);font-size:12px}
+      /* page: header 52 + padding 16*2; the grid fills the rest and never scrolls the page */
+      main{height:calc(100vh - 52px);margin-right:var(--rail);padding:16px 24px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px}
+      .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+      .head{flex:0 0 auto;height:38px;padding:0 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);font:600 14px var(--sans)}
+      .head .sub{color:var(--muted);font:12px var(--mono);font-weight:400}
+      .head .end{margin-left:auto;display:flex;gap:8px;align-items:center}
+      /* identity strip */
+      .ident{padding:8px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;row-gap:2px;overflow:visible}
+      .ident h2{margin:0;font:600 18px/24px var(--display);letter-spacing:.04em;display:flex;align-items:center;gap:8px;white-space:nowrap}
+      .ident h2 i{width:10px;height:10px;border-radius:50%;background:var(--seat)}
+      .ident h2 .rt{color:var(--fg2);font:400 13px var(--sans);letter-spacing:0}
+      .state{font:600 12px var(--mono);padding:0 8px;border:1px solid var(--ok);color:var(--ok);border-radius:99px;line-height:20px;display:inline-flex;gap:4px;align-items:center}
+      .state::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+      .ident .row2{grid-column:1;display:flex;gap:16px;align-items:baseline;min-width:0;white-space:nowrap}
+      .ident .row2 b{overflow:hidden;text-overflow:ellipsis;min-width:0;font-weight:600}
+      .ident .row2 .keep{flex:0 0 auto}
+      .acts{grid-column:2;grid-row:1 / span 2;display:flex;gap:8px;align-items:center}
+      .acts .danger{border-color:var(--crit);color:var(--crit)}
+      .pick{display:flex;gap:8px;align-items:center}
+      .pick select{font:12px var(--mono);color:var(--fg);background:var(--surface2);border:1px solid var(--line2);border-radius:6px;min-height:24px}
+      /* columns */
+      .cols{display:grid;grid-template-columns:minmax(0,1fr) clamp(440px,24vw,560px);gap:12px;min-height:0}
+      .right{display:flex;flex-direction:column;gap:12px;min-height:0}
+      .right>*{flex:0 0 auto}
+      .right>.tabs{flex:1 1 0;min-height:160px}
+      /* next move */
+      .next{padding:8px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;border-left:3px solid var(--warn)}
+      .next b{font-size:13px}.next p{margin:0;color:var(--fg2);font-size:12px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+      .next .btn{align-self:center;grid-row:1 / span 2;grid-column:2;display:inline-flex;align-items:center;min-height:24px;padding:0 12px;border:1px solid var(--line2);border-radius:6px;background:var(--surface2);color:var(--fg)}
+      /* figures */
+      .figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+      .fig{padding:8px 16px;border-right:1px solid var(--line)}.fig:last-child{border-right:0}
+      .fig label{display:block;font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+      .fig b{font:600 20px/26px var(--display);letter-spacing:.02em}
+      .fig small{display:block;font:12px var(--mono);color:var(--fg2)}
+      .meter{height:6px;margin-top:4px;background:var(--line2);border-radius:4px}.meter i{display:block;height:100%;background:var(--ok);border-radius:4px}.meter.warn i{background:var(--warn)}
+      /* loop line */
+      .loop{padding:8px 16px}
+      .loop ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+      .loop li{font:12px var(--mono);color:var(--muted);display:inline-flex;gap:4px;align-items:center;min-height:24px;padding:0 8px;border:1px solid var(--line);border-radius:6px}
+      .loop li.done{color:var(--fg2)}.loop li.done::before{content:"✓";color:var(--ok)}
+      .loop li.now{color:var(--fg);border-color:var(--accent)}.loop li.now::before{content:"●";color:var(--accent)}
+      .loop li.held{color:var(--warn);border-color:var(--warn)}.loop li.held::before{content:"▲"}
+      .loop .cap{font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+      /* prompt bar */
+      .prompt{padding:8px 16px}
+      .pbar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:4px 0;gap:1px;background:var(--line)}
+      .pbar i{display:block;height:100%}
+      .plegend{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;font:12px var(--mono);color:var(--fg2)}
+      .plegend span{display:flex;gap:4px;align-items:baseline}.plegend em{font-style:normal;margin-left:auto;color:var(--fg)}
+      .plegend .big{color:var(--warn)}
+      .sw{width:8px;height:8px;border-radius:2px;flex:0 0 auto;align-self:center}
+      /* tabs */
+      .tabbar{flex:0 0 auto;display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--line);overflow:hidden}
+      .tabbar button{border:0;background:none;color:var(--fg2);border-radius:6px;white-space:nowrap}
+      .tabbar button[aria-selected="true"]{color:var(--fg);background:var(--surface2);box-shadow:inset 0 -2px 0 var(--accent)}
+      .tabbar .n{font:11px var(--mono);color:var(--muted);margin-left:4px}
+      .tabbody{flex:1 1 auto;min-height:0;overflow:auto;padding:8px 16px;scrollbar-color:var(--line2) transparent}
+      .tabbody[hidden]{display:none}
+      .task{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;min-height:28px;align-items:center;border-bottom:1px solid var(--line)}
+      .task .ck{font:12px var(--mono)}.task .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task .d{font:12px var(--mono);color:var(--muted)}
+      .ok{color:var(--ok)}.warn{color:var(--warn)}.crit{color:var(--crit)}.think{color:var(--think)}
+      .lab{display:inline-block;font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:0 4px;margin-bottom:4px}
+      .tabbody p{margin:4px 0}
+      /* activity */
+      .activity{display:flex;flex-direction:column}
+      .filters{display:flex;gap:4px}
+      .filters button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+      .live{font:12px var(--mono);color:var(--ok);display:inline-flex;gap:4px;align-items:center}.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+      .colhead,.arow{display:grid;grid-template-columns:64px 76px 84px minmax(0,1fr) 112px 72px;gap:12px;align-items:center;padding:0 16px}
+      .colhead{flex:0 0 auto;height:28px;border-bottom:1px solid var(--line);font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+      .rows{flex:1 1 0;min-height:0;overflow:auto;scrollbar-color:var(--line2) transparent}
+      .arow{height:28px;border-bottom:1px solid var(--line)}
+      .arow .tm,.arow .du{font:12px var(--mono);color:var(--muted)}
+      .arow .du{text-align:right}
+      .arow .kind{font:12px var(--mono);color:var(--fg2)}
+      .arow .tool{font:600 12px var(--mono)}
+      .arow .tgt{font:12px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+      .arow .tgt .dim{color:var(--muted)}
+      .arow .res{font:12px var(--mono);color:var(--fg2);white-space:nowrap}
+      .arow.fail{background:color-mix(in srgb,var(--crit) 8%,transparent)}
+      .arow.fail .res{color:var(--crit)}
+      .arow.say .tgt{font:13px var(--sans);color:var(--fg)}
+      .arow.think .tool,.arow.think .tgt{color:var(--think)}
+      .arow.now{border-left:2px solid var(--accent);padding-left:14px}
+      .tail{flex:0 0 auto;display:flex;gap:16px;padding:0 16px;height:32px;align-items:center;border-top:1px solid var(--line);font:12px var(--mono);color:var(--fg2)}
+      .tail .end{margin-left:auto}
+      @media (max-width:2000px){.colhead,.arow{grid-template-columns:56px 68px 76px minmax(0,1fr) 96px 64px;gap:8px}}
+    </style>
+  </head>
+  <body>
+    <!-- Fixture: GUIDO-1 on a rework of ticket 1403 at 2560x1145. Names, figures and commands are illustration. -->
+    <header class="top">
+      <div class="brand">MISSION CONTROL</div>
+      <nav class="nav"><a href="#">Overview</a><a href="#">Board</a><a href="#" class="on">Agents</a><a href="#">Map</a><a href="#">Comms</a><a href="#">Telemetry</a><a href="#">Audit</a></nav>
+      <div class="health"><span>CREW <b class="ok">4 working</b></span><button id="flightBtn" type="button" aria-pressed="false">FLIGHT</button><button id="themeBtn" type="button">Light</button><span>22:58</span></div>
+    </header>
+    <aside class="dock" aria-label="FLIGHT dock"><div class="head">FLIGHT <span class="sub">watching 11 seats</span></div><p><b>2 need you</b><br><span class="sub">One review waits · one loop is paused</span></p><p>Next: wait for the Agents design to be approved.</p></aside>
+
+    <main id="page-agent">
+      <section class="panel ident" aria-label="guido-1 details">
+        <h2><i></i>GUIDO-1<span class="rt">· docs and design guidance</span>
+          <span class="state">Running</span>
+          <span class="fg2" style="font:12px var(--mono);letter-spacing:0">for 14m · rework, review round 2 of 3</span></h2>
+        <div class="acts">
+          <span class="pick"><label class="muted mono" for="seat" style="font-size:12px">Seat</label>
+            <select id="seat" aria-label="Choose seat"><option>GUIDO-1 · running</option><option>INCO-1 · running</option><option>RETRO-1 · reviewing</option><option>FLIGHT-1 · running</option><option>GUIDO-2 · free</option></select></span>
+          <button type="button">Message</button><button type="button">Pause</button><button type="button" class="danger">Interrupt</button><button type="button" aria-label="More actions">More ▾</button>
+        </div>
+        <div class="row2">
+          <a class="keep" href="#">mission-control#1403</a>
+          <b title="Skills carry the operator's rules on dashboard layout, with the real viewports">Skills carry the operator's rules on dashboard layout, with the real viewports</b>
+          <span class="keep mono muted">feature/1403-skills-carry-dashboard-rules</span>
+          <span class="keep"><a href="#">PR 1408</a> · <a href="#">3 screenshots</a></span>
+          <span class="keep mono fg2">writer · s/2 · claude-opus · area docs/**</span>
+        </div>
+      </section>
+
+      <div class="cols">
+        <section class="panel activity" id="activity" aria-label="Activity">
+          <div class="head">Activity <span class="sub" id="count">47 events · last 14 min</span>
+            <div class="end"><span class="live">Live</span>
+              <span class="filters" role="group" aria-label="Filter activity"><button type="button" aria-pressed="true">All</button><button type="button" aria-pressed="false">Tools</button><button type="button" aria-pressed="false">Messages</button><button type="button" aria-pressed="false">Failed 2</button></span>
+              <button type="button" aria-pressed="true">Follow</button></div></div>
+          <div class="colhead"><span>Time</span><span>Kind</span><span>Tool</span><span>What it did</span><span>Result</span><span style="text-align:right">Took</span></div>
+          <div class="rows" id="rows" tabindex="0" aria-label="Activity rows, newest first"></div>
+          <div class="tail"><span>47 events · 31 tool calls · 2 failed</span><span class="muted">Working directory <code>worktrees/mission-control/guido-1-1403</code> is removed from each row</span><a class="end" href="#">Open full trace ›</a></div>
+        </section>
+
+        <div class="right">
+          <section class="panel next" aria-label="Next move">
+            <b>Your next move · none; FLIGHT is waiting on this run</b>
+            <p>Round 2 of 3: RETRO-1 asked for the real-viewport table and the "dropped or moved" wording. GUIDO-1 is editing both.</p>
+            <a class="btn" href="#">Open Comms</a>
+          </section>
+
+          <section class="panel figs" aria-label="Run figures">
+            <div class="fig"><label>Cost this run</label><b>$0.71</b><small>est. · 20 turns</small></div>
+            <div class="fig"><label>Context now</label><b>73.8k</b><small>of 200k · 37%</small><div class="meter"><i style="width:37%"></i></div></div>
+            <div class="fig"><label>Tools</label><b>31</b><small class="crit">2 failed</small></div>
+          </section>
+
+          <section class="panel loop" aria-label="Build loop">
+            <ol><li class="cap" style="border:0;padding:0">Loop · feature</li>
+              <li class="done">plan</li><li class="done">build</li><li class="done">checks</li><li class="now">review 2/3</li><li>draft PR</li><li>merge</li></ol>
+          </section>
+
+          <section class="panel prompt" aria-label="Prompt sections">
+            <div style="display:flex;gap:8px;align-items:baseline"><b>Prompt sections</b><span class="muted mono" style="font-size:12px">this run · est. 24.7k tokens</span><a class="mono" style="margin-left:auto;font-size:12px" href="#">Open prompt ›</a></div>
+            <div class="pbar" role="img" aria-label="Standing orders 3,952; role prompt 1,398; tool results 16,299; other 3,051"><i style="width:16%;background:var(--warn)"></i><i style="width:5.7%;background:var(--accent)"></i><i style="width:66%;background:var(--think)"></i><i style="width:12.3%;background:var(--muted)"></i></div>
+            <div class="plegend"><span class="big"><i class="sw" style="background:var(--warn)"></i>Standing orders<em>3,952</em></span><span><i class="sw" style="background:var(--accent)"></i>Role prompt<em>1,398</em></span><span><i class="sw" style="background:var(--think)"></i>Tool results<em>16,299</em></span><span><i class="sw" style="background:var(--muted)"></i>Other<em>3,051</em></span></div>
+          </section>
+
+          <section class="panel tabs" aria-label="Plan, queue, files, report, runs and context">
+            <div class="tabbar" role="tablist" aria-label="Seat details">
+              <button role="tab" aria-selected="true" data-tab="plan">Plan<span class="n">4/7</span></button>
+              <button role="tab" aria-selected="false" data-tab="queue">Queue<span class="n">1</span></button>
+              <button role="tab" aria-selected="false" data-tab="files">Files<span class="n">6</span></button>
+              <button role="tab" aria-selected="false" data-tab="report">Report</button>
+              <button role="tab" aria-selected="false" data-tab="runs">Runs<span class="n">3</span></button>
+              <button role="tab" aria-selected="false" data-tab="context">Context</button>
+            </div>
+            <div class="tabbody" data-panel="plan" role="tabpanel">
+              <div class="task"><span class="ck ok">✓</span><span class="t">Read the operator's four recorded complaints</span><span class="d">2m</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Add real viewports table to dashboard-layout</span><span class="d">4m</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Add "dropped or moved" rule</span><span class="d">3m</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Run the docs link check</span><span class="d">1m</span></div>
+              <div class="task"><span class="ck think">●</span><span class="t"><b>Round 2: add device-scale caveat and the 1920x940 case</b></span><span class="d">now</span></div>
+              <div class="task"><span class="ck muted">○</span><span class="t muted">Re-run the link check</span><span class="d"></span></div>
+              <div class="task"><span class="ck muted">○</span><span class="t muted">Reply to RETRO-1 with the diff</span><span class="d"></span></div>
+            </div>
+            <div class="tabbody" data-panel="queue" role="tabpanel" hidden>
+              <div class="task"><span class="ck warn">1</span><span class="t">RETRO-1 · fresh whole-branch review after round 2</span><span class="d">queued 6m</span></div>
+              <p class="muted mono" style="font-size:12px">Queue holds work for this seat. Move up asks FLIGHT.</p>
+            </div>
+            <div class="tabbody" data-panel="files" role="tabpanel" hidden>
+              <div class="task"><span class="ck warn">M</span><span class="t mono">.claude/skills/hud-design/references/dashboard-layout.md</span><span class="d">+41 −6</span></div>
+              <div class="task"><span class="ck warn">M</span><span class="t mono">.claude/skills/hud-design/SKILL.md</span><span class="d">+3 −1</span></div>
+              <div class="task"><span class="ck warn">M</span><span class="t mono">docs/runbooks/visual-qa.md</span><span class="d">+12 −0</span></div>
+              <div class="task"><span class="ck ok">A</span><span class="t mono">docs/design/real-viewports.md</span><span class="d">+58</span></div>
+              <div class="task"><span class="ck warn">M</span><span class="t mono">docs/direction.md</span><span class="d">+2 −2</span></div>
+              <div class="task"><span class="ck warn">M</span><span class="t mono">README.md</span><span class="d">+1 −1</span></div>
+            </div>
+            <div class="tabbody" data-panel="report" role="tabpanel" hidden>
+              <span class="lab">Previous run · round 1 · 2h ago</span>
+              <p>Skills now carry the layout rules. Link check passes. Two done-when lines are met; one is open.</p>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Skill names real viewports</span><span class="d">met</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Dropped-or-moved list rule</span><span class="d">met</span></div>
+              <div class="task"><span class="ck warn">○</span><span class="t">Device-scale caveat</span><span class="d">open</span></div>
+            </div>
+            <div class="tabbody" data-panel="runs" role="tabpanel" hidden>
+              <div class="task"><span class="ck think">●</span><span class="t">Round 2 · this run</span><span class="d">14m</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">Round 1 · reported, 3 findings</span><span class="d">52m</span></div>
+              <div class="task"><span class="ck ok">✓</span><span class="t">First build · draft PR 1408</span><span class="d">1h 40m</span></div>
+              <p class="muted mono" style="font-size:12px">Attempts and previous runs. RETRO-1 round 1 and an Explore subagent sit with them.</p>
+            </div>
+            <div class="tabbody" data-panel="context" role="tabpanel" hidden>
+              <div class="task"><span class="t">Context window</span><span></span><span class="d">73.8k of 200k</span></div>
+              <div class="task"><span class="t">Compactions</span><span></span><span class="d">1</span></div>
+              <div class="task"><span class="t">Model</span><span></span><span class="d">claude-opus</span></div>
+              <div class="task"><span class="t">Account</span><span></span><span class="d">claude-main</span></div>
+              <p class="muted mono" style="font-size:12px">Instructions the seat was given open here.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      // Newest first. cwd is stripped: the row reads the command, not .../worktrees/mission-control/guido-1-1403.
+      const rows = [
+        ["22:58:12","Tool","Bash","pnpm -s docs:links","running…","",1],
+        ["22:58:05","Edit","Edit","dashboard-layout.md · add the 1920x940 row to the viewports table","+9 −1","0.3s"],
+        ["22:57:50","Think","thinking","×4 · works out where the device-scale caveat belongs","","14s"],
+        ["22:57:31","Tool","Read","docs/runbooks/visual-qa.md · lines 40–120","80 lines","0.1s"],
+        ["22:57:22","Tool","Grep","\"device scale\" in .claude/skills, docs","3 files","0.2s"],
+        ["22:57:09","Say","Message","Round 2 asks for the real-viewport row and the caveat. I will add both, then re-run the link check.","","",0,"say"],
+        ["22:56:48","Tool","Bash","git diff --stat origin/main","6 files","0.4s"],
+        ["22:56:33","Tool","Bash","pnpm -s lint","exit 1 · failed","6.1s",0,"fail"],
+        ["22:56:11","Edit","Edit","SKILL.md · add Plan checklist line for first-screen fields","+3 −1","0.2s"],
+        ["22:55:58","Think","thinking","×2","","8s"],
+        ["22:55:40","Tool","Read","docs/design/system.md · lines 1–90","90 lines","0.1s"],
+        ["22:55:27","Tool","Bash","rg -n \"viewport\" .claude/skills/hud-design","12 matches","0.2s"],
+        ["22:55:02","Tool","Read","apps/web/src/hud.css · lines 1–60","60 lines","0.1s"],
+        ["22:54:41","Tool","Bash","pnpm -s vitest run test/links.test.ts","exit 0 · 21 passed","3.8s"],
+        ["22:54:20","Edit","Edit","docs/runbooks/visual-qa.md · name the Design section","+12 −0","0.2s"],
+        ["22:54:01","Think","thinking","×3","","11s"],
+        ["22:53:44","Tool","Glob","docs/**/*.md","38 files","0.1s"],
+        ["22:53:30","Tool","Bash","git status --short","6 changed","0.1s"],
+        ["22:53:12","Tool","Read","docs/direction.md · lines 20–70","50 lines","0.1s"],
+        ["22:52:47","Tool","Bash","pnpm -s docs:links","exit 1 · failed","4.2s",0,"fail"],
+        ["22:52:20","Edit","Edit","dashboard-layout.md · Truncation paragraph","+6 −2","0.2s"],
+        ["22:52:01","Tool","Read","dashboard-layout.md","143 lines","0.1s"],
+        ["22:51:36","Tool","Bash","git log --oneline -5","5 commits","0.1s"],
+        ["22:51:10","Think","thinking","×2","","9s"],
+        ["22:50:49","Tool","Bash","gh pr view 1408 --json reviews","1 review","0.9s"],
+        ["22:50:21","Say","Message","Starting round 2. RETRO-1 found 3 issues; reading them first.","","",0,"say"],
+        ["22:50:02","Tool","Read","RETRO-1 findings · round 1","3 findings","0.1s"],
+        ["22:49:41","Tool","Bash","pnpm -s typecheck","exit 0","11.4s"],
+        ["22:49:10","Edit","Edit","dashboard-layout.md · Compose in this order","+14 −3","0.3s"],
+        ["22:48:42","Tool","Bash","rg -n \"history\" docs","7 matches","0.2s"],
+        ["22:48:05","Tool","Read","SKILL.md","46 lines","0.1s"],
+        ["22:47:30","Think","thinking","×5","","21s"],
+        ["22:46:51","Tool","Bash","git fetch origin main","up to date","1.2s"],
+        ["22:46:20","Tool","Read","docs/design/flight-deck.md","60 lines","0.1s"],
+        ["22:45:44","Tool","Bash","sed -n 1,80p docs/runbooks/table-qa.md","80 lines","0.1s"],
+        ["22:45:10","Edit","Edit","visual-qa.md · Retain context and detail","+7 −1","0.2s"],
+        ["22:44:36","Tool","Bash","wc -l docs/design/*.md","3 files","0.1s"],
+        ["22:44:02","Tool","Read","operator screenshot notes, 4 November","12 lines","0.1s"],
+        ["22:43:30","Tool","Bash","cd apps/web && pnpm -s vitest run test/Agent.test.tsx","exit 0 · 14 passed","5.9s"],
+        ["22:42:58","Say","Message","Link check fails on two anchors; fixing them now.","","",0,"say"],
+        ["22:42:31","Tool","Bash","pnpm -s docs:links","exit 1 · failed","4.0s",0,"fail"],
+        ["22:41:50","Edit","Edit","README.md · fix anchor","+1 −1","0.2s"],
+        ["22:41:12","Tool","Read","README.md","88 lines","0.1s"],
+        ["22:40:34","Think","thinking","×2","","7s"],
+        ["22:39:58","Tool","Bash","git diff origin/main -- docs","412 lines","0.3s"],
+        ["22:39:20","Tool","Read","visual-qa.md","121 lines","0.1s"],
+        ["22:38:44","Say","Message","Round 1 reported. Continuing with the open done-when line.","","",0,"say"],
+      ];
+      const host = document.getElementById("rows");
+      for (const [tm, kind, tool, tgt, res, du, now, cls] of rows) {
+        const d = document.createElement("div");
+        d.className = "arow" + (cls ? " " + cls : "") + (kind === "Think" ? " think" : "") + (now ? " now" : "");
+        const [head, ...rest] = tgt.split(" · ");
+        const t = rest.length && kind !== "Think" ? `${head} <span class="dim">· ${rest.join(" · ")}</span>` : tgt;
+        d.innerHTML = `<span class="tm">${tm}</span><span class="kind">${kind}</span><span class="tool">${tool}</span><span class="tgt" tabindex="0" title="${tgt.replace(/"/g, "&quot;")}">${t}</span><span class="res">${res}</span><span class="du">${du}</span>`;
+        host.append(d);
+      }
+      // Tabs
+      const tabs = [...document.querySelectorAll(".tabbar button")];
+      for (const b of tabs) b.addEventListener("click", () => {
+        for (const o of tabs) o.setAttribute("aria-selected", String(o === b));
+        for (const p of document.querySelectorAll(".tabbody")) p.hidden = p.dataset.panel !== b.dataset.tab;
+      });
+      // FLIGHT rail and theme toggles; also readable from the URL for rendering: ?flight=1&theme=light
+      const q = new URLSearchParams(location.search);
+      const setFlight = (on) => { document.body.classList.toggle("flight", on); document.getElementById("flightBtn").setAttribute("aria-pressed", String(on)); };
+      const setTheme = (t) => { document.documentElement.dataset.theme = t; document.getElementById("themeBtn").textContent = t === "dark" ? "Light" : "Dark"; };
+      setFlight(q.get("flight") === "1"); setTheme(q.get("theme") === "light" ? "light" : "dark");
+      document.getElementById("flightBtn").addEventListener("click", () => setFlight(!document.body.classList.contains("flight")));
+      document.getElementById("themeBtn").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+    </script>
+  </body>
+</html>
