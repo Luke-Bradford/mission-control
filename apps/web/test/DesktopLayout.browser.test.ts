@@ -106,7 +106,9 @@ describeRendered("Approved compact desktop shell", () => {
             if (width < 2200) await page.click(".dockrail button");
             await page.boxes(".dock-summary-item");
             const expanded = await shellMetrics(page);
-            expect(expanded.dockWidth).toBe(width < 1700 ? 540 : width < 2200 ? 620 : 380);
+            expect(expanded.dockWidth).toBe(
+              width < 1500 ? 380 : width < 1700 ? 540 : width < 2200 ? 620 : 380,
+            );
             expect(expanded.summaryItems).toBe(3);
             expect(expanded.smallControls).toEqual([]);
             if (width < 2200) expect(expanded.selected).toBe("dockHeading");

@@ -266,6 +266,21 @@ describeRendered("Overview composition", () => {
     ).toBe(true);
   }, 60_000);
 
+  it("gives FLIGHT its own column when the page is stacked, covering nothing", async () => {
+    const page = await open("mixed", 1280, 800);
+    await settled(page);
+    await page.click(".dockrail button");
+    const m = await page.evaluate(() => {
+      const dock = document.querySelector("#dock")?.getBoundingClientRect();
+      const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
+      return {
+        cover: !!document.querySelector(".overview-flight-overlay"),
+        apart: !!dock && !!crew && crew.right <= dock.left,
+      };
+    }, undefined);
+    expect(m).toEqual({ cover: false, apart: true });
+  }, 60_000);
+
   it("holds the same composition in the light theme", async () => {
     const page = await open("mixed", 2560, 1145, false);
     await settled(page);

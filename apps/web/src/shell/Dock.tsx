@@ -36,7 +36,6 @@ import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
 import {
   openItem,
-  ROOMY_QUERY,
   setDockCollapsed,
   setFlightUnread,
   toggleDock,
@@ -381,20 +380,23 @@ function DockMeta({ flight }: { flight: FlightView | undefined }) {
  * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
  * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
  */
-/** Below the roomy width, FLIGHT on the Overview covers the side column so Crew keeps its width. */
+/** The widths with two columns and no room for FLIGHT beside them. Below, the Overview stacks. */
+const OVERVIEW_COVER_QUERY = "(min-width: 1500px) and (max-width: 2199px)";
+
+/** At those widths, FLIGHT on the Overview covers the side column so Crew keeps its width. */
 export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeof useDock>) {
-  const [roomy, setRoomy] = useState(
-    () => typeof matchMedia !== "undefined" && matchMedia(ROOMY_QUERY).matches,
+  const [covers, setCovers] = useState(
+    () => typeof matchMedia !== "undefined" && matchMedia(OVERVIEW_COVER_QUERY).matches,
   );
   useEffect(() => {
     if (typeof matchMedia === "undefined") return;
-    const media = matchMedia(ROOMY_QUERY),
-      update = () => setRoomy(media.matches);
+    const media = matchMedia(OVERVIEW_COVER_QUERY),
+      update = () => setCovers(media.matches);
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  return overview && dock.wide && dock.visible && !dock.collapsed && !roomy;
+  return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
 export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {

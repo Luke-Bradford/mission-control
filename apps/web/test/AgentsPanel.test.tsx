@@ -217,6 +217,10 @@ it("shows FLIGHT, the crew and the observed loops as rows of one table, in eleve
       expect(row.querySelector(".step-cell .stepbar")).toBeTruthy();
       expect(row.querySelector(".step-cell")?.textContent).toBe("implement");
     }
+    if (row.querySelector(".ticket-cell")?.textContent?.includes("last #")) {
+      expect(row.querySelector(".step-cell .stepbar")).toBeNull();
+      expect(row.querySelector(".ticket-cell")?.textContent).not.toContain("Working on");
+    }
     expect(row.querySelector(".spark, .agent-model")).toBeNull();
     expect(row.querySelectorAll(".crew-lane")).toHaveLength(1);
     // Tok 1h: the hour's input and output tokens.

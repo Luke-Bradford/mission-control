@@ -98,6 +98,8 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
   });
 }
 
+const OPEN_RUN_LINE = "Run open, not in a turn";
+
 function WorkCell({
   row,
   doing,
@@ -135,6 +137,8 @@ function WorkCell({
     );
   }
   if (!current) {
+    // An open run on an idle session isn't in a turn, so it must not read as working on the ticket.
+    const line = row?.hudState === "idle" && hasActiveRun(row) ? OPEN_RUN_LINE : doing;
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
       .filter(Boolean)
       .join(" · ");
@@ -142,9 +146,9 @@ function WorkCell({
       <span role="cell" className="ellip s ticket-cell work-cell muted">
         {refs && <span className="ellip">last {refs}</span>}
         {note ??
-          (doing || !refs ? (
-            <span className="ellip xs muted" title={doing}>
-              {doing || DASH}
+          (line || !refs ? (
+            <span className="ellip xs muted" title={line}>
+              {line || DASH}
             </span>
           ) : null)}
         {actions}
