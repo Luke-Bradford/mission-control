@@ -19,13 +19,13 @@ Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-q
 ## Build
 
 - [ ] **[I]** Tokens: spacing 4/8/12/16/24/32/48; text minimum 12 px, except 11 px mono labels (§2–4).
-- [ ] **[I]** Nothing clips; lists scroll visibly (§5–7).
+- [ ] **[I]** Nothing clips without an ellipsis; lists scroll visibly (§5–7).
 - [ ] **[I]** States have words/shapes alongside colour (§2–4).
 - [ ] **[I]** Empty/loading/error/stale/disconnected states; never "No data" (§5–7).
 - [ ] **[I]** Controls: keyboard reachable, named, focus-visible, minimum 24×24 px (§8–9).
 - [ ] Maximum four text lines per box (§5–7).
 - [ ] Tables: 40 px rows (32 compact), right-aligned tabular numbers, visible sort, unknown `—` (§5–7).
-- [ ] Content-aware columns; aligned headers/body; useful padding/density without wasted space.
+- [ ] Content-aware columns; aligned headers/body; useful padding/density.
 - [ ] **[I]** Readable labels/units/actions; only free text truncates, with keyboard access to full content.
 - [ ] Clock ticks do not rebuild pages (§8–9).
 

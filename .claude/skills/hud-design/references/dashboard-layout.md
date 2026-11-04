@@ -45,7 +45,7 @@ Then build the page from those numbers:
 - Stack each column in rank order. Use the fewest columns that keep the primary and next action on the first screen.
 - The supporting column is as wide as its widest panel. The primary takes what remains, usually 60–75% of the canvas.
 - If the supporting column leaves the primary below its minimum, shorten that panel's content or move the panel. Don't squeeze both.
-- Exactly one region per column takes spare height, or the column leaves a hole on tall screens. Choose the one with the most rows that don't fit.
+- Exactly one region per column takes spare height, or the column leaves a hole on tall screens. Choose the one with the most rows that don't fit. Both columns end level.
 - A short column shouldn't wait for the tallest panel in the other column to show its next panel.
 
 Then write the vertical budget at each viewport: header + gutters + panels + gaps. Name the panels and normal rows that must be on the first screen. If a column doesn't fit, tighten padding, merge duplicates and shorten labels. Propose moving something only after that, and don't shrink text.
@@ -68,9 +68,9 @@ Record the reference CSS viewport, browser zoom, OS scaling, FLIGHT rail state a
 | Vendor allowance | One plot per vendor, each on its own scale: allowance used so far against the weekly reset, then tokens per minute | A shared axis flattens the smaller vendor |
 | Stat tiles | Avoid. Put a figure in the head of the panel it explains. Use a strip only if no panel can carry the figure: one row, at most 96 px | Lone numbers lack context |
 
-Three token measures differ and need their own labels: context capacity (one seat's working memory), provider allowance (the vendor's limit) and throughput (tokens per minute). Don't repeat them to fill space. Keep real units, denominators, and stale and unknown states.
+Three token measures differ and need their own labels: context capacity (one seat's working memory), provider allowance (the vendor's limit) and throughput (tokens per minute). Don't repeat them to fill space. Keep real units, denominators, and stale and unknown states. Don't fabricate a series or silently change a unit.
 
-**Truncation.** Numbers, units, states, identifiers and actions never truncate. Free text such as a ticket title or log line may end in an ellipsis if its full text is reachable by keyboard. In a table cell that comes after at most two lines. Nothing clips without an ellipsis, and a critical warning stays visible.
+**Truncation.** Numbers, units, states, identifiers and actions never truncate. Free text such as a ticket title or log line may end in an ellipsis. Its full text must be reachable by keyboard. In a table cell, wrap to at most two lines before the ellipsis. Nothing clips without an ellipsis, and a critical warning stays visible.
 
 **Removing things.** Condense first. A redesign may then move or remove figures, axes and panels, but the operator agrees first. Put a "dropped or moved" list in the proposal, saying where each item goes. A build never drops one quietly.
 
@@ -119,7 +119,7 @@ Zoom multiplies viewport units, so size with `--vh` and `--dvh`, which divide by
 
 Inspect settled full-page screenshots before crops. Use one source-shaped dataset for before and after, and label fictional versus copied data. Ask whether the operator can find active and held work, remaining capacity, system constraints and the next useful action without page scrolling.
 
-Record panel bounds and the first visible content, plus a verdict on hierarchy, column allocation, chart shape, padding and useful information per region. A dashboard that loses its primary information from the first screen fails, and that is an Important finding, however far it can be scrolled. More screenshots or hashes don't repair that.
+Record panel bounds and the first visible content, plus a verdict on hierarchy, column allocation, chart shape, padding and useful information per region. A dashboard that loses its primary information from the first screen fails, however far it can be scrolled. That is an Important finding. More screenshots or hashes don't repair that.
 
 Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry this budget into the plan, rendered review and saved report.
 
