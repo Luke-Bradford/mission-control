@@ -31,6 +31,7 @@ import {
   crewSandboxTmp,
   DEFAULT_SEAT_COMMANDS,
   DENIED_TOOLS,
+  FLIGHT_FULL_BUILTINS,
   FLIGHT_TOOLS,
   foldForMatch,
   globMatches,
@@ -94,9 +95,17 @@ const asArgv = (tools: readonly string[]) =>
 describe("crewCliArgs", () => {
   it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    for (const flag of ["--tools", "--allowedTools", "--disallowedTools", "--restricted"])
+    for (const flag of ["--tools", "--disallowedTools", "--restricted"])
       expect(args).not.toContain(flag);
-    expect(args[args.indexOf("--permission-mode") + 1]).toBe("bypassPermissions");
+    // The credential scrub forces the CLI's permission mode to `default`, so a bypass flag does
+    // nothing and FLIGHT's tools must be listed, or every hub tool call is refused.
+    expect(CREW_CLI_ENV.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+    expect(args).not.toContain("--permission-mode");
+    const allowed = args.slice(
+      args.indexOf("--allowedTools") + 1,
+      args.indexOf("--append-system-prompt-file"),
+    );
+    expect(allowed).toEqual([...FLIGHT_FULL_BUILTINS, "mcp__mc__*"]);
     const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
     expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);
