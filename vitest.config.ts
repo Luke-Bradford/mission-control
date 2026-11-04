@@ -46,7 +46,7 @@ export default defineConfig({
           name: "core",
           environment: "node",
           include: ["packages/**/test/**/*.test.ts"],
-          // 4 Nov: agentcomms tests that start several CLI processes passed the 5 s default on loaded runners.
+          // Tests that start processes can pass vitest's 5 s default on a loaded CI runner.
           testTimeout: 15_000,
         },
       },

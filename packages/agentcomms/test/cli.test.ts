@@ -11,11 +11,13 @@ const shim = resolve("packages/agentcomms/bin/agentcomms");
 let root: string;
 let relay: Awaited<ReturnType<typeof startNodeRelay>> | undefined;
 const children: ChildProcess[] = [];
+// These tests start real CLI processes, which slow badly when browser tests run beside them on CI.
+const CLI_TEST_MS = 30_000;
 const cli = (home: string, ...args: string[]) =>
   exec(shim, args, {
     env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
-    // One CLI call takes about 0.3 s here, but a browser test beside it on CI can slow it badly.
-    timeout: 30_000,
+    // Below each test's own limit, so a hung call fails here with its output, not as a test timeout.
+    timeout: 15_000,
   });
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "comms-cli-"));
@@ -35,30 +37,39 @@ afterEach(async () => {
   relay = undefined;
   await rm(root, { recursive: true, force: true });
 });
-it("initializes private keys and refuses duplicate agent names within a subscription", async () => {
-  await cli(root, "init", "--member", "Alice", "--github", "alice");
-  await cli(root, "agent", "add", "helper", "--subscription", "home");
-  await expect(cli(root, "agent", "add", "helper", "--subscription", "home")).rejects.toThrow(
-    /already exists/,
-  );
-  const keys = await readdir(join(root, "keys"));
-  expect(keys).toHaveLength(2);
-  for (const name of keys) expect((await stat(join(root, "keys", name))).mode & 0o777).toBe(0o600);
-  const config = await readFile(join(root, "config.json"), "utf8");
-  expect(config).not.toContain("privateKey");
-  await expect(cli(root, "init", "--member", "Overwrite")).rejects.toThrow(/already initialized/);
-});
-it("rejects an agent entry pointing to the member identity before loading that key file", async () => {
-  await cli(root, "init", "--member", "Alice");
-  await cli(root, "agent", "add", "helper", "--subscription", "home");
-  const path = join(root, "config.json");
-  const config = JSON.parse(await readFile(path, "utf8"));
-  config.member.agents[0].id = config.member.id;
-  config.member.agents[0].signPublicKey = config.member.id;
-  await writeFile(path, JSON.stringify(config));
-  await rm(join(root, "keys", `${config.member.id}.json`));
-  await expect(cli(root, "daemon")).rejects.toThrow(/Invalid member signature/);
-});
+it(
+  "initializes private keys and refuses duplicate agent names within a subscription",
+  async () => {
+    await cli(root, "init", "--member", "Alice", "--github", "alice");
+    await cli(root, "agent", "add", "helper", "--subscription", "home");
+    await expect(cli(root, "agent", "add", "helper", "--subscription", "home")).rejects.toThrow(
+      /already exists/,
+    );
+    const keys = await readdir(join(root, "keys"));
+    expect(keys).toHaveLength(2);
+    for (const name of keys)
+      expect((await stat(join(root, "keys", name))).mode & 0o777).toBe(0o600);
+    const config = await readFile(join(root, "config.json"), "utf8");
+    expect(config).not.toContain("privateKey");
+    await expect(cli(root, "init", "--member", "Overwrite")).rejects.toThrow(/already initialized/);
+  },
+  CLI_TEST_MS,
+);
+it(
+  "rejects an agent entry pointing to the member identity before loading that key file",
+  async () => {
+    await cli(root, "init", "--member", "Alice");
+    await cli(root, "agent", "add", "helper", "--subscription", "home");
+    const path = join(root, "config.json");
+    const config = JSON.parse(await readFile(path, "utf8"));
+    config.member.agents[0].id = config.member.id;
+    config.member.agents[0].signPublicKey = config.member.id;
+    await writeFile(path, JSON.stringify(config));
+    await rm(join(root, "keys", `${config.member.id}.json`));
+    await expect(cli(root, "daemon")).rejects.toThrow(/Invalid member signature/);
+  },
+  CLI_TEST_MS,
+);
 it("creates, invites, joins, approves, exchanges, and rotates on removal", async () => {
   const a = join(root, "a");
   const b = join(root, "b");
