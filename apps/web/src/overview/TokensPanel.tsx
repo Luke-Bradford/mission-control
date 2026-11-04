@@ -1,6 +1,13 @@
-import type { ConfigView, Crew, LimitRow } from "@mc/core";
+import {
+  type ConfigView,
+  type Crew,
+  type HealthRow,
+  type LimitRow,
+  type OverviewTimeline,
+  usageCollector,
+} from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm, kTokens, percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
@@ -13,18 +20,34 @@ const WEEK_MS = 7 * DAY_MS;
 
 type WeekRow = Extract<LimitRow, { window: "7d" }>;
 
-/** The plain-words verdict on a week's pace, with shape and colour both carrying it. */
-function paceVerdict(row: WeekRow, now: number, tz: string | null) {
+/** Whether a reading can be trusted, by the rule the complete allowance table uses. */
+const isStale = (row: LimitRow, now: number, failed: boolean) =>
+  row.stale || now - row.sampledAt > 60 * 60_000 || failed;
+
+/** The plain-words verdict on the week, by the same rule the hub uses to refuse new runs. */
+function paceVerdict(
+  row: WeekRow,
+  five: LimitRow | undefined,
+  now: number,
+  tz: string | null,
+  stale: boolean,
+) {
+  if (row.resetAt <= now) return { text: "Reading is from before the last reset", tone: "warn-t" };
   if (row.used >= row.stopAt)
     return { text: "At its stop line · new runs refused", tone: "crit-t" };
+  if (five && five.used >= row.stopAt)
+    return { text: "5h at its stop line · new runs refused", tone: "crit-t" };
+  const last = stale ? "Last reading: " : "";
+  if (row.used >= row.alertAt) return { text: `${last}Past its alert line`, tone: "warn-t" };
   if (row.stopForecast !== null && row.stopForecast < row.resetAt)
     return {
-      text: `Stops about ${tz ? resetWhen({ ...row, resetAt: row.stopForecast }, now, tz) : "soon"}`,
+      text: `${last}Stops about ${tz ? resetWhen({ ...row, resetAt: row.stopForecast }, now, tz) : "soon"}`,
       tone: "warn-t",
     };
-  if (row.projected === null) return { text: "Too few readings to project", tone: "muted" };
-  if (row.projected >= row.alertAt) return { text: "Will pass its alert line", tone: "warn-t" };
-  return { text: "On pace", tone: "ok-t" };
+  if (row.projected === null) return { text: `${last}Too few readings to project`, tone: "muted" };
+  if (row.projected >= row.alertAt)
+    return { text: `${last}Will pass its alert line`, tone: "warn-t" };
+  return { text: `${last}On pace`, tone: stale ? "muted" : "ok-t" };
 }
 
 /** The week so far against its limits, then where this pace ends by the reset. */
@@ -87,35 +110,52 @@ function BurnUp({ row, now, tz }: { row: WeekRow; now: number; tz: string | null
           alert {row.alertAt}
         </span>
       </div>
-      <div className="plot-axis num" aria-hidden="true">
-        {days.map((day) => (
-          <span key={day}>
+      <div className="burnup-axis num" aria-hidden="true">
+        {days.map((day, i) => (
+          <span key={day} style={{ left: `${(i / days.length) * 100}%` }}>
             {tz
               ? new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: tz }).format(day)
               : ""}
           </span>
         ))}
-        <span>reset</span>
+        <span className="burnup-reset">reset</span>
       </div>
     </div>
   );
 }
 
 /** Tokens a minute on this account for the last hour, on its own scale. */
-function HourBars({ rows, account, now }: { rows: Crew["rows"]; account: string; now: number }) {
+function HourBars({
+  rows,
+  lanes,
+  account,
+  now,
+}: {
+  rows: Crew["rows"];
+  lanes: OverviewTimeline["lanes"] | undefined;
+  account: string;
+  now: number;
+}) {
   const series = rows
     .filter((row) => row.accountId === account)
-    .map((row) => laneTokens(row.digest, now));
+    .map((row) =>
+      laneTokens(
+        row.digest,
+        now,
+        lanes?.find((lane) => lane.agentId === row.id),
+      ),
+    );
   const values = Array.from({ length: LANE_MINUTES }, (_, i) =>
     series.reduce((sum, seat) => sum + (seat[i] ?? 0), 0),
   );
   const total = values.reduce((sum, value) => sum + value, 0);
   const peak = Math.max(0, ...values);
-  const latest = values.at(-1) ?? 0;
+  // The current minute is still filling, so the reading is the last whole one.
+  const latest = values.at(-2) ?? 0;
   return (
     <div className="hourbars">
       <div className="plot-reading s">
-        <span>last hour {kTokens(total)}</span>
+        <span title="Input and output tokens, across runs">last hour {kTokens(total)}</span>
         <span>peak {kTokens(peak)}/min</span>
       </div>
       <svg
@@ -142,7 +182,7 @@ function HourBars({ rows, account, now }: { rows: Crew["rows"]; account: string;
       <div className="plot-axis num" aria-hidden="true">
         <span>−60m</span>
         <span>−30m</span>
-        <span>now {kTokens(latest)}</span>
+        <span title="Tokens in the last whole minute">now {kTokens(latest)}/min</span>
       </div>
     </div>
   );
@@ -158,6 +198,8 @@ export function TokensPanel() {
   const now = useNow();
   const tz = useTz();
   const accounts = config?.accounts.map((account) => account.id) ?? [];
+  const health = useResource<HealthRow[]>(RESOURCES.health).data ?? [];
+  const lanes = useResource<OverviewTimeline>(RESOURCES.overviewTimeline).data?.lanes;
   return (
     <Panel
       id="tokensP"
@@ -177,7 +219,10 @@ export function TokensPanel() {
     >
       {limits.error && (
         <p role="status" className="pb s warn-t">
-          {limits.data ? "Refresh failed. Showing the last readings." : "Allowance could not load."}
+          {limits.data ? "Refresh failed. Showing the last readings." : "Allowance could not load."}{" "}
+          <button type="button" className="sm" onClick={() => hub.refetch(RESOURCES.limits.path)}>
+            Refresh allowance
+          </button>
         </p>
       )}
       {!limits.data && !limits.error && <p className="pb s muted">Loading allowance…</p>}
@@ -192,7 +237,14 @@ export function TokensPanel() {
         const five = limits.data?.find(
           (row) => row.accountId === account && row.window === "5h" && row.resetAt > now,
         );
-        const verdict = week ? paceVerdict(week, now, tz) : null;
+        const stale =
+          !!week &&
+          isStale(
+            week,
+            now,
+            !!health.find((row) => row.collector === usageCollector(account))?.error,
+          );
+        const verdict = week ? paceVerdict(week, five, now, tz, stale) : null;
         const setup = setupPath("accounts");
         return (
           <div className="token-account" key={account}>
@@ -201,7 +253,7 @@ export function TokensPanel() {
                 <b>{account}</b>
               </a>
               <span className="token-used num">{week ? percent(week.used) : "—"}</span>
-              {week?.projected != null && (
+              {week?.projected != null && week.used < week.stopAt && week.resetAt > now && (
                 <span className="s muted">
                   → {percent(week.projected)} by reset {tz ? resetWhen(week, now, tz) : ""}
                 </span>
@@ -212,7 +264,7 @@ export function TokensPanel() {
                   {tz ? `, resets ${hhmm(five.resetAt, tz)}` : ""}
                 </span>
               )}
-              {week?.stale && (
+              {stale && week && (
                 <span className="s warn-t">· read {tz ? hhmm(week.sampledAt, tz) : "earlier"}</span>
               )}
               {verdict && <span className={`token-verdict s ${verdict.tone}`}>{verdict.text}</span>}
@@ -223,7 +275,7 @@ export function TokensPanel() {
               ) : (
                 <p className="s muted">No weekly reading yet.</p>
               )}
-              {crew && <HourBars rows={crew.rows} account={account} now={now} />}
+              {crew && <HourBars rows={crew.rows} lanes={lanes} account={account} now={now} />}
             </div>
           </div>
         );

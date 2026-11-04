@@ -1533,6 +1533,20 @@ describe("Machine panel: the test lock box", () => {
 });
 
 describe("Machine panel", () => {
+  it("graphs free disk GiB with gaps for missing minutes", async () => {
+    stubFetch({
+      "/api/overview": { ...OVERVIEW, machine: { disk: [80, null, 40, 60] } },
+      "/api/machine": { latest: null },
+      "/api/test-lock": { holder: null, waiting: [] },
+    });
+    render(<MachinePanel />);
+    const graph = await screen.findByRole("img", { name: "Disk history · GiB free" });
+    expect(graph.getAttribute("data-max")).toBe("80");
+    expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
+      "M0.0,3.0M66.7,12.5L100.0,7.8",
+    );
+  });
+
   it("shows the transcript footprint and each seat's files on hover", async () => {
     stub({
       transcripts: {

@@ -92,14 +92,14 @@
   --panel-head-y: var(--sp-2);
 }
 
-/* Above about 3200 CSS px the interface scales instead of stretching: a true 4K screen at 100%
-   composes like the 2560 layout. Viewport units are zoomed too (100vh paints 150% of the screen),
+/* From 3300 CSS px, which zooms to the 2200 px layout, the interface scales instead of stretching:
+   a true 4K screen at 100% composes like the 2560 layout. Viewport units are zoomed too (100vh paints 150% of the screen),
    so every height taken from the viewport goes through --vh and --dvh. */
 :root {
   --vh: 1vh;
   --dvh: 1dvh;
 }
-@media (min-width: 3200px) {
+@media (min-width: 3300px) {
   html {
     zoom: 1.5;
   }

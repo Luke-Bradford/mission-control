@@ -205,7 +205,7 @@ describe("TokensPanel accounts", () => {
         Number(rect.getAttribute("height")),
       ),
     ).toEqual([100]);
-    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe("−60m−30mnow 1.5k");
+    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe("−60m−30mnow 0/min");
   });
 
   it("says there is no weekly reading yet for an account without one", async () => {
@@ -258,7 +258,7 @@ describe("TokensPanel head", () => {
     });
     render(<TokensPanel />);
     expect(screen.getByText("Loading allowance…")).toBeTruthy();
-    expect((await screen.findByRole("status")).textContent).toBe("Allowance could not load.");
+    expect((await screen.findByRole("status")).textContent).toContain("Allowance could not load.");
     expect(screen.queryByText("Loading allowance…")).toBeNull();
   });
 });

@@ -1431,6 +1431,8 @@ export interface OverviewTimeline {
     agentId: string;
     spans: { kind: "turn" | "checks" | "lock" | "review"; from: number; to: number | null }[];
     ticks: number[];
+    /** Input and output tokens per minute across every run in the window, oldest first. */
+    tokens?: [number, number][];
   }[];
 }
 

@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { elapsed, percent } from "../fmt.ts";
+import { elapsed, percent, plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
@@ -91,8 +91,11 @@ export function PipelinePanel() {
           <b data-metric="cycleTime" title={metricTitle(metrics, "cycleTime")}>
             {r.cycleTime?.value ?? DASH}
           </b>{" "}
-          · CI <b>{percent(ci?.pct)}</b>
-          {ci?.runs ? ` of ${ci.runs} runs` : ""}
+          · CI{" "}
+          <b title="CI runs that passed in the last 24 hours, of those that finished">
+            {percent(ci?.pct)}
+          </b>
+          {ci?.runs ? ` of ${plural(ci.runs, "run")} in 24h` : ""}
           {ci?.redNow ? <span className="crit-t"> · {ci.redNow} red now</span> : null}
         </>
       }
@@ -102,6 +105,13 @@ export function PipelinePanel() {
           {data
             ? "Board refresh failed. Showing the last received cards."
             : "Board could not load."}
+        </p>
+      )}
+      {metrics.error && (
+        <p role="status" className="pb s warn-t">
+          {metrics.view
+            ? "Registry figures: refresh failed, showing stale values."
+            : `Registry figures could not load: ${metrics.error.message}`}
         </p>
       )}
       <div className="board-stages" aria-busy={!data && !error}>

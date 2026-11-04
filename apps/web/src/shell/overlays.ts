@@ -199,7 +199,7 @@ export function useBuildStatus(): [boolean, (on: boolean) => void] {
  * breakpoint closes the drawer (catalogue §1.4).
  */
 const WIDE_QUERY = "(min-width: 1200px)";
-const ROOMY_QUERY = "(min-width: 2200px)";
+export const ROOMY_QUERY = "(min-width: 2200px)";
 const DRAWER = "dock";
 
 export interface DockState {

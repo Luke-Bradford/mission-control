@@ -344,7 +344,7 @@ function FlightRow({
           ) : undefined
         }
       />
-      <RowMeasures row={row} name="FLIGHT" idle="Watching" lane={lane} max={max} />
+      <RowMeasures row={row} name="FLIGHT" idle={DASH} lane={lane} max={max} />
     </div>
   );
 }
@@ -468,13 +468,25 @@ function RowMeasures({
   max: number;
 }) {
   const now = useNow();
-  const tokens = row ? laneTokens(row.digest, now).reduce((sum, value) => sum + value, 0) : null;
+  const tokens = row
+    ? laneTokens(row.digest, now, lane).reduce((sum, value) => sum + value, 0)
+    : null;
+  const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
+  const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
   const run = row?.run;
   return (
     <>
       <StepCell row={row} idle={idle} />
       {row ? (
-        <CrewLane row={row} name={name} lane={lane} now={now} max={max} />
+        <CrewLane
+          row={row}
+          name={name}
+          lane={lane}
+          now={now}
+          max={max}
+          openEnd={openEnd}
+          known={timeline.data !== undefined}
+        />
       ) : (
         <span role="cell">{DASH}</span>
       )}
@@ -483,7 +495,7 @@ function RowMeasures({
         className="num xs"
         title={
           run?.tokens
-            ? `Input and output tokens in the last hour. This run: input ${kTokens(run.tokens.input)} · output ${kTokens(run.tokens.output)} · cache read ${kTokens(run.tokens.cacheRead)} · cache write ${kTokens(run.tokens.cacheCreate)}`
+            ? `Input and output tokens in the last hour, across runs. This run: input ${kTokens(run.tokens.input)} · output ${kTokens(run.tokens.output)} · cache read ${kTokens(run.tokens.cacheRead)} · cache write ${kTokens(run.tokens.cacheCreate)}`
             : "Input and output tokens in the last hour"
         }
       >
@@ -559,11 +571,9 @@ function AgentRow({
   selected,
   lock,
   lane,
-  firstLoop = false,
 }: {
   row: Crew["rows"][number];
   lane: Lane | undefined;
-  firstLoop?: boolean;
   items: AttentionItem[];
   max: number;
   tz: string | null;
@@ -604,12 +614,7 @@ function AgentRow({
         : status.label === "Free" && crewStatus?.enabled === false
           ? "Crew is paused"
           : (status.reason ?? statusLabel);
-  const cls = [
-    "trow",
-    mine.length > 0 ? "needs" : running ? "going" : "",
-    selected ? "sel" : "",
-    firstLoop ? "first-loop" : "",
-  ];
+  const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const stateWaits =
     !queued && !row.crewPause && row.loop?.wait === "lock" && lockSince(lock, row.run?.id) !== null;
@@ -757,7 +762,9 @@ export function AgentsPanel() {
   const maxOf = (account: string | null | undefined) =>
     Math.max(
       1,
-      ...allRows.filter((r) => r.accountId === account).flatMap((r) => laneTokens(r.digest, now)),
+      ...allRows
+        .filter((r) => r.accountId === account)
+        .flatMap((r) => laneTokens(r.digest, now, laneOf(r.id))),
     );
   const placeholders = config
     ? configuredAgents(config).filter((agent) => agent.id !== flightId && matchesSession(agent))
@@ -813,10 +820,17 @@ export function AgentsPanel() {
           Crew refresh failed. Showing the last received rows.
         </p>
       )}
+      {timeline.error && (
+        <p role="status" className="pb warn-t">
+          {timeline.data
+            ? "Activity refresh failed. Lanes show the last received hour."
+            : "Activity could not load, so the lanes show tokens only."}
+        </p>
+      )}
       <CrewOverflowNote
         id={scrollHint}
         table={rosterElement}
-        count={seatCount}
+        count={seatCount + loopRows.length}
         pending={!crew.data && !crew.error}
       />
       <div
@@ -838,6 +852,7 @@ export function AgentsPanel() {
               role="columnheader"
               key={label}
               title={title ?? label}
+              aria-label={label}
               className={[wide && "crew-wide", num && "num"].filter(Boolean).join(" ") || undefined}
             >
               {label === "Last hour" ? (
@@ -862,7 +877,7 @@ export function AgentsPanel() {
           lock={lock}
           lane={flight ? laneOf(flight.id) : undefined}
         />
-        {[...(seatRows ?? []), ...loopRows].map((row, index) => (
+        {rows?.map((row) => (
           <AgentRow
             key={row.id}
             row={row}
@@ -872,7 +887,6 @@ export function AgentsPanel() {
             selected={row.id === selected}
             lock={lock}
             lane={laneOf(row.id)}
-            firstLoop={index === (seatRows?.length ?? 0) && index > 0}
           />
         ))}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}

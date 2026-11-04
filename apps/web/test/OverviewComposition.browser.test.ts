@@ -132,6 +132,103 @@ describeRendered("Overview composition", () => {
     expect(await page.reachable("#tokensP")).toEqual([true]);
   }, 60_000);
 
+  it.each(["error", "stale", "disconnected", "loading"] as const)(
+    "the %s state says so in words, without breaking the page",
+    async (scenario) => {
+      const page = await renderAt({
+        page: "test/overviewDensityBrowser.html",
+        width: 1920,
+        height: 940,
+        search: `?state=${scenario}`,
+        colorScheme: "dark",
+        api: overviewDensityFixture(scenario).api,
+      });
+      await page.evaluate(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }, undefined);
+      const m = await page.evaluate(() => {
+        const doc = document.documentElement;
+        return {
+          pageScroll: doc.scrollHeight - innerHeight,
+          words: document.querySelector("#page-overview")?.textContent ?? "",
+        };
+      }, undefined);
+      expect(page.errors()).toEqual([]);
+      expect(m.pageScroll).toBeLessThanOrEqual(0);
+      expect(m.words.length).toBeGreaterThan(0);
+    },
+    60_000,
+  );
+
+  it("keeps every row's controls and links reachable at the reference size", async () => {
+    const page = await open("mixed", 1920, 940);
+    await settled(page);
+    expect(page.errors()).toEqual([]);
+    for (const selector of [
+      "#agentsList .rowlink",
+      "#agentsList button",
+      ".board-card",
+      ".needs-row",
+    ])
+      expect((await page.reachable(selector, ".overview-grid")).every(Boolean), selector).toBe(
+        true,
+      );
+    const small = await page.evaluate(() => {
+      const selector = ".board-stage h3 a, .token-head a, .mac-row h2 a, #page-overview .ph h2 a";
+      return [...document.querySelectorAll(selector)]
+        .map((link) => link.getBoundingClientRect())
+        .filter((box) => box.height < 24).length;
+    }, undefined);
+    expect(small).toBe(0);
+  }, 60_000);
+
+  it("opens a Needs-you item from the keyboard", async () => {
+    const page = await open("mixed", 1920, 940);
+    await settled(page);
+    await page.evaluate(
+      () => document.querySelector<HTMLElement>(".needs-row")?.focus(),
+      undefined,
+    );
+    await page.press("Enter");
+    await page.evaluate(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }, undefined);
+    expect(await page.evaluate(() => location.search + location.pathname, undefined)).not.toBe("");
+    expect(page.errors()).toEqual([]);
+  }, 60_000);
+
+  it("FLIGHT covers the side column at 1920 and the page behind stays usable", async () => {
+    const page = await open("mixed", 1920, 940);
+    await settled(page);
+    await page.click(".dockrail button");
+    const covered = await page.evaluate(() => {
+      const dock = document.querySelector("#dock")?.getBoundingClientRect();
+      const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
+      const link = document.querySelector<HTMLElement>("#agentsList .rowlink");
+      const box = link?.getBoundingClientRect();
+      const hit = box && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return {
+        overlapsCrew: !!dock && !!crew && dock.left < crew.right,
+        crewReachable: !!link && !!hit && (link === hit || link.contains(hit)),
+        inert: ["main", "header.top", "footer.keys"].filter((s) =>
+          document.querySelector(s)?.hasAttribute("inert"),
+        ),
+      };
+    }, undefined);
+    expect(covered).toEqual({ overlapsCrew: false, crewReachable: true, inert: [] });
+    await page.evaluate(
+      () => document.querySelector<HTMLElement>("#dockHeading")?.focus(),
+      undefined,
+    );
+    await page.press("Escape");
+    expect(
+      await page.evaluate(
+        () => document.querySelector("#dock")?.classList.contains("collapsed"),
+        undefined,
+      ),
+    ).toBe(true);
+  }, 60_000);
+
   it("holds the same composition in the light theme", async () => {
     const page = await open("mixed", 2560, 1145, false);
     await settled(page);

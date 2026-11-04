@@ -35,15 +35,13 @@ import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
 import {
-  closeTopOverlay,
   openItem,
+  ROOMY_QUERY,
   setDockCollapsed,
   setFlightUnread,
   toggleDock,
   trapTab,
   useDock,
-  useItem,
-  useOverlay,
   useReturnFocus,
 } from "./overlays.ts";
 import "./Dock.css";
@@ -382,14 +380,14 @@ function DockMeta({ flight }: { flight: FlightView | undefined }) {
  * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
  * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
  */
-/** Overview preserves useful plot widths below the roomy desktop breakpoint. */
+/** Below the roomy width, FLIGHT on the Overview covers the side column so Crew keeps its width. */
 export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeof useDock>) {
   const [roomy, setRoomy] = useState(
-    () => typeof matchMedia !== "undefined" && matchMedia("(min-width: 2200px)").matches,
+    () => typeof matchMedia !== "undefined" && matchMedia(ROOMY_QUERY).matches,
   );
   useEffect(() => {
     if (typeof matchMedia === "undefined") return;
-    const media = matchMedia("(min-width: 2200px)"),
+    const media = matchMedia(ROOMY_QUERY),
       update = () => setRoomy(media.matches);
     update();
     media.addEventListener("change", update);
@@ -398,20 +396,16 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && !roomy;
 }
 
-export function Dock({ overviewOverlay = false }: { overviewOverlay?: boolean } = {}) {
+export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
   const hide = useRef<HTMLButtonElement>(null);
   const rail = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const drawer = visible && !wide;
-  const modal = drawer || overviewOverlay;
-  const item = useItem();
-  const foreground = overviewOverlay && item === null;
-  useOverlay("overview-flight", overviewOverlay, () => setDockCollapsed(true));
   const waitingItems = useResource<AttentionItem[]>(RESOURCES.attention);
   const waiting = useNeedsYou().length;
   const fold = () => setDockCollapsed(!collapsed);
-  useReturnFocus(modal);
+  useReturnFocus(drawer);
   useEffect(() => {
     if (drawer) hide.current?.focus();
   }, [drawer]);
@@ -471,24 +465,23 @@ export function Dock({ overviewOverlay = false }: { overviewOverlay?: boolean } 
       {drawer && (
         <div className="dockscrim" data-testid="dock-scrim" onClick={toggle} aria-hidden="true" />
       )}
-      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the dynamic dialog role and aria-modal are enabled together for the Overview overlay only. */}
       <aside
         className={collapsed ? "dock collapsed" : "dock"}
         id="dock"
         aria-label="FLIGHT"
-        role={foreground ? "dialog" : undefined}
-        aria-modal={foreground ? true : undefined}
-        aria-hidden={overviewOverlay && item !== null ? true : undefined}
         hidden={!visible}
         onKeyDown={
-          modal
-            ? (event) => {
-                if (overviewOverlay && event.key === "Escape") {
-                  event.preventDefault();
-                  closeTopOverlay();
-                } else trapTab(event);
-              }
-            : undefined
+          drawer
+            ? trapTab
+            : coversPage
+              ? (event) => {
+                  // The page behind stays usable, so the cover needs only a quick way to fold.
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setDockCollapsed(true);
+                  }
+                }
+              : undefined
         }
       >
         <div className="panel">

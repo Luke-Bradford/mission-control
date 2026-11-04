@@ -33,7 +33,18 @@ createRoot(root).render(
         <div style={{ display: "grid", gap: 8, alignContent: "start", overflow: "auto" }}>
           <section className="panel" data-surface="overview">
             <h2>Overview</h2>
-            <CrewLane row={row} name={row.id} lane={undefined} now={Date.now()} max={10} />
+            <CrewLane
+              row={row}
+              name={row.id}
+              lane={{
+                agentId: row.id,
+                spans: [],
+                ticks: [],
+                tokens: [[Math.floor(Date.now() / 60_000) * 60_000, 5]],
+              }}
+              now={Date.now()}
+              max={10}
+            />
           </section>
           <section className="panel" data-surface="agent">
             <h2>Agent</h2>

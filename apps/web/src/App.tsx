@@ -159,9 +159,9 @@ export function App({
           Skip to board
         </a>
       )}
-      <Header page={tabOf(shown)} inert={overviewOverlay} />
+      <Header page={tabOf(shown)} />
       <div className={`shell${showDock ? "" : " shell-full"}`}>
-        <main inert={overviewOverlay}>
+        <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>
               {r &&
@@ -175,9 +175,9 @@ export function App({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock overviewOverlay={overviewOverlay} />}
+        {showDock && <Dock coversPage={overviewOverlay} />}
       </div>
-      <Footer inert={overviewOverlay} />
+      <Footer />
       <Toast />
       <HelpModal />
       <CommandPalette />

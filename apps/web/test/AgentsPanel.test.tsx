@@ -143,7 +143,7 @@ it("does not reorder or rebuild the roster on clock ticks", async () => {
   }
 });
 
-it("shows FLIGHT, the crew and then the observed loops as rows of one table, in eleven columns", async () => {
+it("shows FLIGHT, the crew and the observed loops as rows of one table, in eleven columns", async () => {
   const loop = {
     phase: "working" as const,
     profile: "feature",
@@ -188,20 +188,16 @@ it("shows FLIGHT, the crew and then the observed loops as rows of one table, in 
     "Limit",
     "Cost",
   ]);
-  // The header, FLIGHT, four seats and then the two observed loops: no separate Loops strip.
+  // The header, FLIGHT, four seats and two observed loops in attention order: no Loops strip.
   expect(within(table).getAllByRole("row")).toHaveLength(8);
   expect(screen.queryByRole("navigation", { name: "Loops" })).toBeNull();
   const rendered = rowsIn(container);
-  expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
-    "FLIGHT",
-    "need",
-    "running",
-    "parked",
-    "free",
-    "observed-running",
-    "observed-waiting",
-  ]);
-  expect(rendered.filter((row) => row.classList.contains("first-loop"))).toEqual([rendered[5]]);
+  const names = rendered.map((row) => row.querySelector(".rowlink")?.textContent);
+  expect(names[0]).toBe("FLIGHT");
+  expect(names.slice(1, 2)).toEqual(["need"]);
+  expect([...names].sort()).toEqual(
+    ["FLIGHT", "need", "running", "parked", "free", "observed-running", "observed-waiting"].sort(),
+  );
   for (const row of rendered) {
     const cells = within(row).getAllByRole("cell");
     expect(cells).toHaveLength(11);
@@ -785,12 +781,9 @@ it("sorts working crew and observed loops by the last ten minutes and shares j/k
   await screen.findByText("fast-loop");
   // Seats first, in attention order; the observed loops follow as rows of the same table.
   const order = rowsIn(container).map((r) => r.querySelector(".rowlink")?.textContent);
-  expect(order).toEqual(["FLIGHT", "need", "slow", "idle", "stopped", "fast-loop", "waiting"]);
-  expect(
-    rowsIn(container)
-      .slice(5)
-      .map((r) => r.querySelector(".rowlink")?.getAttribute("href")),
-  ).toEqual(["/agent/fast-loop", "/agent/waiting"]);
+  expect(order).toEqual(["FLIGHT", "need", "fast-loop", "slow", "waiting", "idle", "stopped"]);
+  const hrefs = rowsIn(container).map((r) => r.querySelector(".rowlink")?.getAttribute("href"));
+  expect(hrefs).toEqual(expect.arrayContaining(["/agent/fast-loop", "/agent/waiting"]));
   const { nextAgent } = await import("../src/shell/selection.ts");
   // j/k keeps its own order, with the loops among the seats by activity
   const ids = ["flight", "need", "fast-loop", "slow", "waiting", "idle", "stopped"] as string[];

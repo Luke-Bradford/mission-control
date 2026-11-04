@@ -1,10 +1,10 @@
 import { useBuildStatus } from "./overlays.ts";
 
 /** Build-status toggle and legend, then the key hints (catalogue §1.2; `s Setup` added, §7.6). */
-export function Footer({ inert = false }: { inert?: boolean } = {}) {
+export function Footer() {
   const [on, setOn] = useBuildStatus();
   return (
-    <footer className="keys" inert={inert}>
+    <footer className="keys">
       <button
         type="button"
         className="sm"

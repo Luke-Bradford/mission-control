@@ -2213,28 +2213,26 @@ button.quota-details {
   --table-row: 40px;
 }
 #agentsList {
-  max-height: calc(12.6 * var(--table-row));
+  /* Room for the crew's normal rows; a far larger crew scrolls and leaves the Board its space. */
+  max-height: calc(60 * var(--dvh));
   overflow-x: hidden;
   scrollbar-gutter: auto;
 }
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 76px 168px minmax(0, 1fr) 104px 168px 44px 40px 48px;
+  grid-template-columns: 88px 168px minmax(0, 1fr) 104px 168px 44px 40px 48px;
   padding-inline: var(--sp-3);
 }
 #agentsList .trow.head {
   height: var(--sp-5);
   min-height: var(--sp-5);
 }
-#agentsList .trow.first-loop {
-  border-top-color: var(--line-2);
-}
 .crew-wide {
   display: none;
 }
 @container agents (min-width: 1440px) {
   #agentsList .trow {
-    grid-template-columns: 76px 168px minmax(0, 1fr) 104px 224px 52px 52px 52px 40px 60px 48px;
+    grid-template-columns: 88px 168px minmax(0, 1fr) 104px 224px 52px 52px 52px 40px 60px 48px;
   }
   .crew-wide {
     display: block;
@@ -2597,6 +2595,20 @@ button.quota-details {
   white-space: nowrap;
   transform: translateY(-50%);
 }
+.burnup-axis {
+  position: relative;
+  height: var(--lh-axis);
+  margin-right: var(--sp-7);
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
+  color: var(--muted);
+}
+.burnup-axis > span {
+  position: absolute;
+  top: 0;
+}
+.burnup-axis > .burnup-reset {
+  right: 0;
+}
 .plot-axis {
   display: flex;
   justify-content: space-between;
@@ -2606,6 +2618,7 @@ button.quota-details {
 .plot-reading {
   display: flex;
   justify-content: space-between;
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 @media (min-height: 1100px) {
@@ -2702,4 +2715,24 @@ button.quota-details {
 #agentsList .agent-identity > .xs::before,
 #agentsList .agent-identity > a.xs::before {
   content: none;
+}
+@media (max-width: 1699px) {
+  #actP .ph {
+    flex-wrap: wrap;
+  }
+}
+/* A link that carries a panel or lane name stays a full-size target. */
+.board-stage h3 a,
+.token-head a,
+.mac-row h2 a,
+#page-overview .ph h2 a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sp-5);
+}
+@container overview-canvas (min-width: 2000px) {
+  .board-stage.merging {
+    max-height: 40%;
+    overflow-y: auto;
+  }
 }

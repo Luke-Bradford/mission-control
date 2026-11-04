@@ -21,14 +21,22 @@ export const LANE_KINDS: readonly { kind: SpanKind; label: string; color: string
 ];
 
 /** Tokens per minute for the last hour, ending at the shared panel clock. */
-export function laneTokens(digest: CrewRow["digest"], now: number): number[] {
+export function laneTokens(
+  digest: CrewRow["digest"],
+  now: number,
+  lane?: Pick<Lane, "tokens">,
+): number[] {
   const end = Math.floor(now / MINUTE_MS) * MINUTE_MS;
-  const buckets = new Map(digest?.minuteTokens ?? []);
+  // The lane covers every run in the hour; a row's digest only covers its latest run.
+  const buckets = new Map(lane?.tokens ?? digest?.minuteTokens ?? []);
   return Array.from(
     { length: LANE_MINUTES },
     (_, i) => buckets.get(end - (LANE_MINUTES - 1 - i) * MINUTE_MS) ?? 0,
   );
 }
+
+/** An open span says only that no end is recorded, so it counts as work only for a seat in a turn. */
+const inTurn = (row: CrewRow): boolean => row.hudState === "running" || row.hudState === "stalled";
 
 /** A seat's last hour on the crew's shared clock: tokens as bars, what it was doing as a band. */
 export function CrewLane({
@@ -37,29 +45,35 @@ export function CrewLane({
   lane,
   now,
   max,
+  openEnd = now,
+  known = true,
 }: {
   row: CrewRow;
   name: string;
   lane: Lane | undefined;
   now: number;
+  /** Where an open span stops being known: the last good reading when the feed has failed. */
+  openEnd?: number;
+  /** False while the activity feed has not loaded or could not load. */
+  known?: boolean;
   /** The tallest minute on this seat's account: vendors count tokens on different scales. */
   max: number;
 }) {
-  const values = laneTokens(row.digest, now);
+  const values = laneTokens(row.digest, now, lane);
   const from = now - LANE_MINUTES * MINUTE_MS;
   const x = (at: number) => (Math.max(0, at - from) / (LANE_MINUTES * MINUTE_MS)) * LANE_MINUTES;
-  // An open turn on a parked seat has no known end, so it is not painted as work.
   const spans = (lane?.spans ?? []).filter(
     (span) =>
-      !(span.to === null && span.kind === "turn" && row.hudState === "parked") &&
-      (span.to ?? now) > from,
+      !(span.to === null && span.kind === "turn" && !inTurn(row)) && (span.to ?? openEnd) > from,
   );
   const total = values.reduce((sum, value) => sum + value, 0);
   const did = [...new Set(spans.map((span) => span.kind))]
     .map((kind) => LANE_KINDS.find((entry) => entry.kind === kind)?.label)
     .filter(Boolean)
     .join(", ");
-  const label = `${name}, last hour: ${kTokens(total)} tokens · ${did || "no recorded work"}`;
+  const label = `${name}, last hour: ${kTokens(total)} tokens · ${
+    known ? did || "no recorded work" : "work not known"
+  }`;
   return (
     <span role="cell" className="crew-lane">
       <svg
@@ -87,7 +101,7 @@ export function CrewLane({
         })}
         {spans.map((span) => {
           const start = x(span.from);
-          const end = x(span.to ?? now);
+          const end = x(span.to ?? openEnd);
           if (end <= start) return null;
           return (
             <rect
