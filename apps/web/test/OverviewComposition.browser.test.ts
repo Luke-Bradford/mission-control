@@ -153,6 +153,9 @@ describeRendered("Overview composition", () => {
         const deadline = performance.now() + 20_000;
         while (!status().includes(expected) && performance.now() < deadline)
           await new Promise((resolve) => setTimeout(resolve, 50));
+        // The checks below need the other panels' late layout and errors, not only the first paint.
+        await document.fonts.ready;
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }, words);
       const m = await page.evaluate(
         () => ({
@@ -163,7 +166,7 @@ describeRendered("Overview composition", () => {
       );
       expect(page.errors()).toEqual([]);
       expect(m.pageScroll).toBeLessThanOrEqual(0);
-      expect(m.status).toContain(words);
+      expect(m.status, "status text 20 s after opening").toContain(words);
     },
     60_000,
   );
