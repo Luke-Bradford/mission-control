@@ -166,26 +166,63 @@ describeRendered("Overview composition", () => {
       );
       expect(page.errors()).toEqual([]);
       expect(m.pageScroll).toBeLessThanOrEqual(0);
-      expect(m.status, "status text 20 s after opening").toContain(words);
+      expect(m.status, "status text after waiting up to 20 s for it").toContain(words);
     },
     60_000,
   );
 
-  it.each([1280, 1366, 1500, 1505, 1512, 1536, 1600, 1700])(
-    "keeps Crew and the side column apart at %i wide",
+  const crewSideOverlap = (page: RenderedPage) =>
+    page.evaluate(async () => {
+      // The width reaches the layout through a media query change and a React update: wait for it to hold.
+      const read = () => {
+        const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
+        const side = document.querySelector("#overviewNextP")?.getBoundingClientRect();
+        return crew && side ? { crew, side } : null;
+      };
+      const key = () => {
+        const now = read();
+        return now ? JSON.stringify([now.crew, now.side]) : "missing";
+      };
+      const deadline = performance.now() + 5000;
+      let last = "";
+      let held = 0;
+      while (held < 3 && performance.now() < deadline) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const next = key();
+        held = next === last ? held + 1 : 0;
+        last = next;
+      }
+      const now = read();
+      if (!now) return "panel missing";
+      const { crew, side } = now;
+      return crew.right <= side.left || side.right <= crew.left || crew.bottom <= side.top
+        ? "apart"
+        : "overlap";
+    }, undefined);
+
+  // Fresh loads where the layout changes; the other widths resize one browser, because a launch per
+  // width slowed the tests running beside this file.
+  it.each([1500, 1536])(
+    "keeps Crew and the side column apart when first opened at %i wide",
     async (width) => {
       const page = await open("mixed", width, 900);
       await settled(page);
-      const overlap = await page.evaluate(() => {
-        const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
-        const side = document.querySelector("#overviewNextP")?.getBoundingClientRect();
-        if (!crew || !side) return true;
-        return !(crew.right <= side.left || side.right <= crew.left || crew.bottom <= side.top);
-      }, undefined);
-      expect(overlap).toBe(false);
+      expect(await crewSideOverlap(page)).toBe("apart");
     },
     60_000,
   );
+
+  it("keeps Crew and the side column apart as the window changes width", async () => {
+    const page = await open("mixed", 1280, 900);
+    await settled(page);
+    const results: Record<number, string> = {};
+    for (const width of [1280, 1366, 1500, 1505, 1512, 1536, 1600, 1700, 1505, 1280]) {
+      await page.resize(width, 900);
+      const result = await crewSideOverlap(page);
+      if (result !== "apart") results[width] = result;
+    }
+    expect(results).toEqual({});
+  }, 60_000);
 
   it("keeps every row's controls and links reachable at the reference size", async () => {
     const page = await open("mixed", 1920, 940);
