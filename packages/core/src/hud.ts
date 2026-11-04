@@ -359,13 +359,22 @@ export function crewHudState(
   now: number,
   /** The seat's run is in line for the test lock: it waits, silent, and is not stalled. */
   waitingForLock = false,
+  /**
+   * When the seat's run took the test lock; null when it holds none. Silence counts from then: the
+   * wait for the lock was not the seat's. A running Claude check writes a heartbeat every 30 s, so
+   * a holder that goes quiet after that is wedged. A Codex check writes nothing until it ends, so
+   * one past 10 minutes reads as stalled, as it did before.
+   */
+  lockHeldSince: number | null = null,
 ): HudState {
   if (row === null) return "idle";
   switch (row.state) {
     case "starting":
     case "running":
       if (waitingForLock) return "waiting";
-      return now - (lastOutputAt ?? row.updatedAt) >= STALL_MS ? "stalled" : "running";
+      return now - Math.max(lastOutputAt ?? row.updatedAt, lockHeldSince ?? 0) >= STALL_MS
+        ? "stalled"
+        : "running";
     case "idle":
       return "idle";
     case "parked":

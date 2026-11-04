@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CHECK_BASH_TIMEOUT_MS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type CloneState,
@@ -418,6 +419,75 @@ describe("why the recorder dropped a check call", () => {
     clock += 3_000;
     await r.end({ runId: "r1", toolUseId: "t2" }, false);
     expect(r.drops("r1")).toEqual([]);
+  });
+
+  describe("a check that runs past ten minutes", () => {
+    const LONG = 11 * 60_000;
+    const options = { timeoutMs: CHECK_BASH_TIMEOUT_MS };
+
+    it("counts it when it exits 0 on the clean commit it started on", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      await r.end(KEY, true);
+      expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true }]);
+      expect(r.drops("r1")).toEqual([]);
+    });
+
+    it("does not count a call the CLI stopped at the limit", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += CHECK_BASH_TIMEOUT_MS;
+      await r.end(KEY, false);
+      expect(rows).toMatchObject([{ ok: false, exitCode: null }]);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+    });
+
+    it("reads a longer timeout as the limit the CLI cuts it to", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], { timeoutMs: 2 * CHECK_BASH_TIMEOUT_MS });
+      clock += CHECK_BASH_TIMEOUT_MS;
+      await r.end(KEY, false);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+    });
+
+    it("does not count a real failure, and gives it no timeout reason", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      await r.end(KEY, false, 1);
+      expect(rows).toMatchObject([{ ok: false, exitCode: 1 }]);
+      expect(r.drops("r1")).toEqual([]);
+    });
+
+    it("does not count it when the head moved or the tree changed", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      state = { head: "b".repeat(40), clean: true };
+      await r.end(KEY, true);
+      expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+      state = { head: HEAD, clean: true };
+      await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
+      clock += LONG;
+      state = { head: HEAD, clean: false };
+      await r.end({ runId: "r1", toolUseId: "t2" }, true);
+      expect(reasons(r)).toContainEqual(["dirty-end", LINT, HEAD]);
+      expect(rows).toEqual([]);
+    });
+
+    it("does not count a background call or one whose end the hub never saw", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], { ...options, background: true });
+      clock += LONG;
+      await r.end(KEY, true);
+      expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
+      await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
+      clock += LONG;
+      r.dropRun("r1");
+      expect(reasons(r)).toContainEqual(["turn-ended", LINT, HEAD]);
+      expect(rows).toEqual([]);
+    });
   });
 
   it("says the clone could not be read", async () => {

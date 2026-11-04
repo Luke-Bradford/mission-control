@@ -20,6 +20,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  CHECK_BASH_TIMEOUT_MS,
   CODEX_SEAT_PROFILE,
   CREW_CLI_ENV,
   CREW_GIT_ENV,
@@ -305,6 +306,78 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
     },
     120_000,
   );
+  it("honours BASH_MAX_TIMEOUT_MS: the CLI gives a seat the check's limit, and stops a call at the limit", async () => {
+    const run = async (
+      command: string,
+      timeout: number,
+      extra: NodeJS.ProcessEnv,
+    ): Promise<FakeAnthropic> => {
+      const fake = await startFakeAnthropic(command, timeout);
+      api = fake;
+      const settings = crewSandboxSettings(
+        {
+          ...l,
+          tempRoot,
+          denyRead: [],
+          pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+        },
+        "writer",
+        { command: "/usr/bin/true", timeoutS: 5 },
+      );
+      const output = await runToEnd(
+        claudeCli as string,
+        [
+          "-p",
+          "run the probe",
+          "--output-format",
+          "json",
+          "--model",
+          "claude-fake",
+          ...CREW_ISOLATION_FLAGS,
+          "--tools",
+          "Bash",
+          "--settings",
+          settings,
+          "--allowedTools",
+          "Bash",
+        ],
+        {
+          cwd: l.cwd,
+          env: {
+            PATH: process.env.PATH,
+            HOME: l.home,
+            TMPDIR: tempRoot,
+            CLAUDE_CODE_TMPDIR: tempRoot,
+            ANTHROPIC_BASE_URL: fake.url,
+            ANTHROPIC_API_KEY: "sk-ant-fake",
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+            ...CREW_CLI_ENV,
+            ...CREW_PNPM_ENV,
+            ...CREW_GIT_ENV,
+            ...extra,
+          },
+        },
+        60_000,
+      );
+      expect(fake.bashCalls(), output).toBe(1);
+      return fake;
+    };
+    // the seat's own environment: the limit the model is told is the check's. A call that really
+    // runs past ten minutes is the controller's check on the ticket.
+    const seat = await run("echo ok", 5_000, {});
+    expect(seat.timeoutHelp()).toContain(`max ${CHECK_BASH_TIMEOUT_MS} `);
+    await seat.close();
+    // a small limit shows the CLI enforces the variable as well as reports it: the 15 s timeout is
+    // cut to 2 s, so the command never prints. The CLI keeps the limit at or above its default.
+    const cut = await run("sleep 20; echo finished", 15_000, {
+      BASH_DEFAULT_TIMEOUT_MS: "1000",
+      BASH_MAX_TIMEOUT_MS: "2000",
+    });
+    const result = cut.toolResults().join("\n");
+    expect(result).toContain("Command timed out after 2s");
+    expect(result).not.toContain("finished");
+  }, 120_000);
+
   it("removes fake provider credentials from a real Claude Bash subprocess", async () => {
     const command =
       // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash expands this probe inside the seat.

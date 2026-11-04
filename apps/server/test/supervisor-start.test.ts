@@ -24,6 +24,7 @@ import {
   AWAY_SETTING,
   type BoardItem,
   CANNOT_START,
+  CHECK_BASH_TIMEOUT_MS,
   CODEX_PNPM_STORES_DIR,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -854,6 +855,7 @@ describe("startRun", () => {
       "CLAUDE_CODE_TMPDIR",
       "SHELL",
       "TERM",
+      "BASH_MAX_TIMEOUT_MS",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
@@ -870,6 +872,7 @@ describe("startRun", () => {
       "PYTEST_ADDOPTS",
     ]);
     expect(env.DISABLE_AUTOUPDATER).toBe("1");
+    expect(env.BASH_MAX_TIMEOUT_MS).toBe(String(CHECK_BASH_TIMEOUT_MS));
     // macOS adds __CF_USER_TEXT_ENCODING to every process's environment
     const extra = Object.keys(env).filter(
       (k) => !allowed.has(k) && k !== "__CF_USER_TEXT_ENCODING",

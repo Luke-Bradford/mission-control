@@ -132,6 +132,10 @@ const AGENT_RUNS = 50;
 /** No lock: the default for callers that have none (a preview, a test). */
 export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
 
+/** When the seat's current run took the test lock; null when it does not hold it. */
+const lockHeldSince = (lock: TestLockState, row: SeatSessionRow | null): number | null =>
+  row?.runId != null && lock.holder?.runId === row.runId ? lock.holder.since : null;
+
 /** A transcript's mtime (whole ms), or null when the run has none or the file is gone. */
 export function transcriptMtime(path: string): number | null {
   if (path === "") return null;
@@ -238,7 +242,7 @@ function loopViews(
       : null;
     if (agent.kind === "crew") {
       const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
-      const hud = crewHudState(seatRow, lastOutput, now, waiting);
+      const hud = crewHudState(seatRow, lastOutput, now, waiting, lockHeldSince(lock, seatRow));
       const reason =
         seatUnavailable(agent.seat) ??
         (hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null));
@@ -655,6 +659,7 @@ function buildCrew(
               view.lastOutputAt,
               now,
               seatRow?.runId != null && lock.waiting.some((w) => w.runId === seatRow.runId),
+              lockHeldSince(lock, seatRow),
             )
           : hudState({
               state: view.state,

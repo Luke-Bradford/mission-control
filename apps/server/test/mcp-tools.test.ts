@@ -2751,7 +2751,7 @@ describe("push and draft_pr", () => {
         ran(LINT, sha, true);
         const r = await push(gated({ checkDrops: () => [] }));
         expect(r.text).toContain(`nothing recorded on ${sha.slice(0, 7)}: the hub saw no start`);
-        expect(r.text).toContain("Bash timeout parameter set to 600000");
+        expect(r.text).toContain("Bash timeout parameter set to 2700000");
       });
 
       it("refuses a check that failed, naming it", async () => {
