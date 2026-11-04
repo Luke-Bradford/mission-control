@@ -1314,8 +1314,9 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 
 ### FLIGHT's full access
 
-FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted`, a Bash
-sandbox or per-tool allow-lists; its guard hooks stay installed. Codex requests and verifies a
+FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted` or a Bash
+sandbox, and its tools are listed with no path or command limits; its guard hooks stay installed.
+The list is required: the credential scrub makes the CLI ignore `bypassPermissions`. Codex requests and verifies a
 `dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
 existing filesystem, network and tool restrictions.
 

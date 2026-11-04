@@ -2700,9 +2700,8 @@ describe("repo guidance at launch", () => {
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    for (const flag of ["--restricted", "--tools", "--allowedTools", "--disallowedTools"])
+    for (const flag of ["--restricted", "--tools", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
-    expect(argv).not.toContain("--permission-mode");
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
