@@ -336,6 +336,11 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
           if (!guard.pending()) close();
           return;
         }
+        // While a write is out every control is disabled, so there is nothing to Tab to: hold focus here.
+        if (e.key === "Tab" && guard.pending()) {
+          e.preventDefault();
+          return;
+        }
         trapTab(e);
       }}
     >

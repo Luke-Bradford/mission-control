@@ -397,6 +397,19 @@ describe("account editor: recoverable input", () => {
     expect(document.activeElement).toBe(again.opener);
   });
 
+  it("holds Tab and Shift+Tab on the dialog while a save is out", async () => {
+    const fetch = load();
+    const release = hold(fetch, "PUT", "/api/accounts/claude-main");
+    render(<Accounts config={CONFIG} />);
+    const { dialog } = await openEdit();
+    submit(dialog);
+    expect(fireEvent.keyDown(dialog, { key: "Tab" })).toBe(false);
+    expect(fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+    release(200, { account: {} });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("saves thresholds of a Codex account that has no profile", async () => {
     const fetch = load({ "PUT /api/accounts/codex-main": { account: {} } });
     render(<Accounts config={CONFIG} />);
@@ -413,7 +426,7 @@ describe("account editor: recoverable input", () => {
     });
   });
 
-  it("keeps Tab inside the modal even when focus is on the backdrop, and a late result cannot close another editor", async () => {
+  it("a late result cannot close another editor, and the backdrop is focusable", async () => {
     const fetch = load();
     const release = hold(fetch, "PUT", "/api/accounts/claude-main");
     render(<Accounts config={CONFIG} />);

@@ -72,12 +72,14 @@ async function render(
   width: number,
   height: number,
   colorScheme: "light" | "dark",
+  shell = false,
 ) {
   const page = await renderAt({
-    page: "test/setupBrowser.html",
+    // the real App shell, with FLIGHT's dock open, when `shell`
+    page: shell ? "test/agentV2Browser.html" : "test/setupBrowser.html",
     width,
     height,
-    search: `?tab=${form.tab}`,
+    search: shell ? `?dock=open&at=/setup/${form.tab}` : `?tab=${form.tab}`,
     colorScheme,
     api,
   });
@@ -306,6 +308,60 @@ describeRendered("Setup agent, session and account forms, rendered", () => {
           return rect.top >= 0 && rect.bottom <= window.innerHeight && save.contains(hit);
         }, null);
         expect(painted).toBe(true);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  // The value each form is typed with, and the field label it sits in.
+  const TYPED = {
+    F01: ["Call sign", "keep-me"],
+    F02: ["Model", "kept-model"],
+    F03: ["Repo", "/fictional/harbor"],
+    F04: ["Name", "kept-name"],
+    F05: ["Alert at", "61"],
+  } as const;
+  for (const form of FORMS) {
+    it(
+      `${form.id}: a typed value and the width cap survive collapsing FLIGHT's dock`,
+      async () => {
+        const page = await render(form, 1600, 1000, "dark", true);
+        const [label, value] = TYPED[form.id];
+        const read = (scope: string, text: string) =>
+          page.evaluate(
+            (arg) => {
+              const id = [
+                ...document.querySelectorAll<HTMLLabelElement>(`${arg.scope} label`),
+              ].find((l) => l.textContent === arg.text)?.htmlFor;
+              return id ? (document.getElementById(id) as HTMLInputElement | null)?.value : null;
+            },
+            { scope, text },
+          );
+        await page.evaluate(
+          (arg) => {
+            const id = [...document.querySelectorAll<HTMLLabelElement>(`${arg.scope} label`)].find(
+              (l) => l.textContent === arg.label,
+            )?.htmlFor;
+            const input = id ? (document.getElementById(id) as HTMLInputElement | null) : null;
+            if (!input) throw new Error(arg.label);
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+              input,
+              arg.value,
+            );
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          { scope: form.form, label, value },
+        );
+        // a scripted click: the account modal's backdrop covers the rail, which is part of what is kept
+        await page.evaluate(async () => {
+          document
+            .querySelector<HTMLElement>('button[title="Collapse FLIGHT to its rail"]')
+            ?.click();
+          await new Promise((r) => setTimeout(r, 200));
+        }, null);
+        expect(await read(form.form, label)).toBe(value);
+        expect((await page.box(form.form)).width).toBeLessThanOrEqual(form.cap + 1);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,
