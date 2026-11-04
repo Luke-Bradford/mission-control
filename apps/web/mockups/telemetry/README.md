@@ -2,7 +2,9 @@
 
 Open `index.html` directly in a desktop browser. No install or server is needed. Every number is fictional, shaped to the ranges in the data list below. Nothing here changes a live page.
 
-Query: `?tab=crew|cost|throughput|quality|machine`, `&state=normal|loading|empty|error|stale|disconnected`, `&view=charts|table`, `&theme=dark|light`.
+Query: `?tab=crew|cost|throughput|quality|machine`, `&state=normal|loading|empty|error|stale|disconnected`, `&view=charts|table`, `&theme=dark|light`, `&flight=open` (FLIGHT's 380 px dock beside the page, as in the real shell), `&data=worst` (a stopped quota so the verdict reads Needs attention with its cause, a 300-character ticket title, and 50 tickets and many rows in the tables).
+
+The shell follows the real one: page links on top, FLIGHT's 48 px rail on the right, key hints below. The layout reacts to the width of the work area, not the window, so opening the dock recomposes it.
 
 Approval: waiting for the operator.
 
@@ -27,7 +29,7 @@ Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetr
 | `tFlow` | Flow of work? | series.tickets | 2 lines | No: not cumulative flow; a level and a running total share one axis | Replaced by Throughput: Tickets in progress, step line |
 | `tCycleControl` | Is cycle time stable? | series.tickets | 2 lines | No: running percentile, no control limits | Replaced by Throughput: Cycle time per ticket, dots with p50 and p85 lines |
 | `tQualityTrend` | Quality trend? | series.quality | 3 plots | Form fits; the default 6h gives one point | Quality: CI green first push, First-pass review, Rounds per PR, on a fixed 14-day window |
-| `tCostMerged` | Cost per ticket? | totalCostUsd | line | No: joins unrelated tickets as a trend | Merged into Cost and tokens: Cost by ticket, ranked bars |
+| `tCostMerged` | Cost per ticket? | totalCostUsd | line | No: joins unrelated tickets as a trend | Merged into Cost and tokens: Cost by ticket, ranked bars (and a Cost by ticket table with the full titles) |
 | `tForecast` | Forecast? | series.throughput | line | No: no forecast exists; repeats `tThru` | Dropped; Merged per day replaces it |
 | `tTok` | Token rate by seat? | tokensPerMinute | stacked area | Weak: history spreads a run's total evenly over its wall time; 11 stacks | Cost and tokens: Tokens per minute, total, top 3 seats and Other |
 | `tUtil` | Seat time? | utilisation | 100% bars | Yes | Crew: Where agent time goes |
@@ -39,7 +41,7 @@ Source: `apps/web/src/pages/Telemetry.tsx`, `apps/web/src/telemetry/`, `telemetr
 | `tLock` | Lock runs? | lock history | table | Yes | Machine, Table view |
 | `tTicketBars` | Tokens by ticket? | tokensByTicket | bars | Yes | Cost and tokens: Cost by ticket |
 | `tStepBars` | Tokens by loop step? | tokensByStep | bars | Yes | Cost and tokens: Spend per hour, by step |
-| `tTotals` | Exact usage rows? | totals | table | Yes | Cost and tokens, Table view |
+| `tTotals` | Exact usage rows? | totals | table | Yes | Cost and tokens, Table view (Totals) |
 
 No pie charts are proposed. Charts share one cursor, mark events with dashed lines, and show gaps as line breaks, never zero.
 
@@ -132,7 +134,7 @@ Crew state lanes, Where agent time goes, the Crew summary row (with `tCapcom`), 
 
 ### Cost and tokens
 
-Spend per hour by step, Cost by ticket, Tokens per minute, Quota used and the Totals table. Agent, Account and Ticket filters. Coverage text states what is missing.
+Spend per hour by step, Cost by ticket, Tokens per minute, Quota used, and the Totals and Cost by ticket tables. Agent, Account and Ticket filters. Coverage text states what is missing.
 
 ### Throughput
 

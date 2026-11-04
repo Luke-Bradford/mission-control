@@ -16,7 +16,7 @@ const TABS = {
   machine: "Machine",
 } as const;
 const PANEL_COUNTS = { crew: 2, cost: 4, throughput: 4, quality: 4, machine: 3 } as const;
-const TABLE_COUNTS = { crew: 2, cost: 1, throughput: 1, quality: 1, machine: 1 } as const;
+const TABLE_COUNTS = { crew: 2, cost: 2, throughput: 1, quality: 1, machine: 1 } as const;
 const STATES = ["normal", "loading", "empty", "error", "stale", "disconnected"] as const;
 
 /** The 21 panel ids of the current page (apps/web/src/telemetry). */
@@ -326,6 +326,119 @@ describe("Telemetry mockup", () => {
     expect(retry).toBeTruthy();
     retry?.click();
     expect(wordsOf(document)).not.toContain("Telemetry did not load.");
+  });
+
+  it("marks every plotted gap: a note about missing days has a band and fewer points than buckets", () => {
+    for (const tab of Object.keys(TABS)) {
+      const document = render(`?tab=${tab}`);
+      for (const panel of document.querySelectorAll(".panel")) {
+        if (!/Collected since|No review recorded since/.test(panel.textContent ?? "")) continue;
+        const chart = panel.querySelector(".chart");
+        expect(
+          chart?.querySelectorAll(".gapband").length,
+          panel.getAttribute("data-panel") ?? "",
+        ).toBeGreaterThan(0);
+        const buckets = Number(chart?.getAttribute("data-n"));
+        const plotted = [...(chart?.querySelectorAll("path[data-v], rect[data-v]") ?? [])].map(
+          (mark) => (mark.getAttribute("data-v") ?? "").split(",").length,
+        );
+        expect(Math.min(...plotted), panel.getAttribute("data-panel") ?? "").toBeLessThan(buckets);
+      }
+    }
+  });
+
+  it("uses a seat colour only for a series that is a seat", () => {
+    const seats = [
+      "flight",
+      "dev-1",
+      "dev-2",
+      "dev-3",
+      "rev-1",
+      "rev-2",
+      "qa-1",
+      "plan-1",
+      "plan-2",
+      "ops-1",
+      "loop-1",
+    ];
+    for (const tab of Object.keys(TABS)) {
+      const document = render(`?tab=${tab}`);
+      for (const mark of document.querySelectorAll("[data-series]")) {
+        const paint = `${mark.getAttribute("fill")} ${mark.getAttribute("stroke")}`;
+        if (paint.includes("--seat-"))
+          expect(seats, `${tab} ${mark.getAttribute("data-series")}`).toContain(
+            mark.getAttribute("data-series"),
+          );
+      }
+      for (const item of document.querySelectorAll(".readout li")) {
+        const swatch = item.querySelector<HTMLElement>(".sw");
+        if (swatch?.getAttribute("style")?.includes("--seat-"))
+          expect(seats, tab).toContain(item.querySelector(".nm")?.textContent);
+      }
+      for (const el of document.querySelectorAll(
+        ".rows [style*='--seat-'], .panel i[style*='--seat-']",
+      ))
+        expect(el.closest(".seat, .readout"), `${tab} ${el.outerHTML}`).not.toBeNull();
+    }
+  });
+
+  it("gives every number in a chart list or table a drill", () => {
+    for (const tab of Object.keys(TABS)) {
+      for (const view of ["", "&view=table"]) {
+        const document = render(`?tab=${tab}${view}`);
+        const numbers = [...document.querySelectorAll(".rows .vl, td.num")];
+        // Escaped defects has no numeric column; Machine draws only line charts.
+        if (!(tab === "quality" && view) && !(tab === "machine" && !view))
+          expect(numbers.length, `${tab}${view}`).toBeGreaterThan(0);
+        for (const number of numbers)
+          expect(["exists", "needs-build"], `${tab}${view} ${number.textContent}`).toContain(
+            (number.matches("[data-drill]")
+              ? number
+              : number.querySelector("[data-drill]")
+            )?.getAttribute("data-drill"),
+          );
+      }
+    }
+  });
+
+  it("draws state with shapes in both seat panels, and lets a title be focused", () => {
+    const crew = render("?tab=crew");
+    for (const state of ["running", "waiting", "parked", "idle"])
+      expect(
+        crew.querySelector(`.lane .sp.${state}`) ?? crew.querySelector(`.sw.st-${state}`),
+        state,
+      ).not.toBeNull();
+    expect(crew.querySelector(".rows .tr i.s-waiting")).not.toBeNull();
+    const cost = render("?tab=cost");
+    const title = cost.querySelector<HTMLElement>('[data-panel="by-ticket"] .lb');
+    expect(title?.getAttribute("tabindex")).toBe("0");
+    expect(title?.getAttribute("data-tip")).toContain("demo#");
+  });
+
+  it("shows the worst case: a named Needs attention reason, 50 tickets and a 300-character title", () => {
+    const document = render("?tab=cost&data=worst");
+    expect(document.querySelector('[data-stat="health"] .stat-value')?.textContent).toMatch(
+      /^Needs attention/,
+    );
+    expect(document.querySelector('[data-stat="health"] .stat-sub')?.textContent).toContain(
+      "acct-a · 7d at stop level",
+    );
+    expect(
+      document.querySelector('[data-stat="health"] .stat-value')?.getAttribute("aria-label"),
+    ).toContain("acct-a · 7d at stop level");
+    expect(document.querySelectorAll('[data-panel="by-ticket"] .r').length).toBe(50);
+    expect(
+      document.querySelector('[data-panel="by-ticket"] .lb')?.getAttribute("data-tip")?.length,
+    ).toBeGreaterThan(300);
+  });
+
+  it("opens FLIGHT's dock beside the page", () => {
+    const document = render("?flight=open");
+    const window = document.defaultView as unknown as Window & typeof globalThis;
+    expect(document.querySelector(".app")?.classList.contains("flight-open")).toBe(true);
+    expect(document.querySelector<HTMLElement>("#dock")?.hidden).toBe(false);
+    document.body.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", bubbles: true }));
+    expect(document.querySelector<HTMLElement>("#dock")?.hidden).toBe(true);
   });
 
   it("uses no real repo names, paths or commands", () => {
