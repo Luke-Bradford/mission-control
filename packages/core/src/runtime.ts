@@ -27,7 +27,7 @@ export const ROLE_PROMPT_DIR = "roles";
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
 /** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
 export type CrewEffort = string;
-/** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run: no sandbox and listed tools with no path or command limits. */
 export const CREW_PROFILES = ["standard", "flight-full"] as const;
 export type CrewProfile = (typeof CREW_PROFILES)[number];
 /** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */
@@ -467,6 +467,27 @@ export const PROTECTED_FILES = [
 ] as const;
 
 /**
+ * The built-ins FLIGHT's role uses, with no path or command limits. Protected-path writes (`.git`,
+ * `.claude` and the like) stay refused: under `default` mode the CLI prompts for them, and a `-p`
+ * run has nobody to approve.
+ */
+export const FLIGHT_FULL_BUILTINS = [
+  "Bash",
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "TodoWrite",
+  "Skill",
+  "ToolSearch",
+  "Agent",
+  "WebFetch",
+  "WebSearch",
+] as const;
+
+/**
  * No git writes, no GitHub writes and no network from a crew process: commits, pushes and PRs go
  * through the mc tools. `git add` and `git commit` could only fail in the sandbox now; denying
  * them by name says so before they run.
@@ -827,7 +848,9 @@ export function protectedFileRules(
  *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
  *   command and `run_in_background` is refused before any hook;
  * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
- *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls;
+ *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls. It
+ *   also forces the permission mode to `default`, so a seat's tools must be listed with
+ *   `--allowedTools`; `bypassPermissions` has no effect;
  * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
  *   changes underneath it.
  */
@@ -1306,8 +1329,16 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // Keep the guard hooks; use the controller's tools and filesystem without per-tool grants.
-    args.splice(args.indexOf("--settings"), 0, "--permission-mode", "bypassPermissions");
+    // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+    // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`,
+    // so bypassPermissions would be ignored and FLIGHT's hub tools refused: list them.
+    args.splice(
+      args.indexOf("--append-system-prompt-file"),
+      0,
+      "--allowedTools",
+      ...FLIGHT_FULL_BUILTINS,
+      `mcp__${MC_MCP_SERVER}__*`,
+    );
     return args;
   }
   const settingsAt = args.indexOf("--settings");

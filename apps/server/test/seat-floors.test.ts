@@ -29,6 +29,7 @@ import {
   type CrewSandboxInput,
   crewPnpmStoreDir,
   crewSandboxSettings,
+  FLIGHT_FULL_BUILTINS,
   MC_TMP_DIR_NAME,
   PNPM_STORE_ENV,
 } from "@mc/core";
@@ -360,6 +361,66 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
     expect(api.bashCalls(), output).toBe(1);
     expect(api.toolResults().join("\n"), output).toMatch(
       /^marker=present anthropic= aws= npm= db=$/m,
+    );
+  }, 120_000);
+
+  it("runs FLIGHT's listed tools under the scrub, with its GitHub token and no operator token", async () => {
+    const command =
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash expands this probe inside the seat
+      'touch "$TMPDIR/flight-probe" && printf "marker=%s gh=%s operator=%s\\n" "$MC_ENV_PROBE_MARKER" "${GH_TOKEN}" "${MC_OPERATOR_TOKEN}"';
+    api = await startFakeAnthropic(command);
+    const input: CrewSandboxInput = {
+      ...l,
+      tempRoot,
+      denyRead: [],
+      pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+    };
+    const settings = crewSandboxSettings(
+      input,
+      "read-only",
+      { command: "/usr/bin/true", timeoutS: 5 },
+      "flight-full",
+    );
+    const output = await runToEnd(
+      claudeCli as string,
+      [
+        "-p",
+        "run the environment probe",
+        "--output-format",
+        "json",
+        "--model",
+        "claude-fake",
+        ...CREW_ISOLATION_FLAGS.filter((flag) => flag !== "--restricted"),
+        "--settings",
+        settings,
+        "--allowedTools",
+        ...FLIGHT_FULL_BUILTINS,
+        "mcp__mc__*",
+      ],
+      {
+        cwd: l.cwd,
+        // HOME is the layout's, so no operator settings file can grant the tool instead of the list.
+        env: {
+          PATH: process.env.PATH,
+          HOME: l.home,
+          TMPDIR: tempRoot,
+          CLAUDE_CODE_TMPDIR: tempRoot,
+          ANTHROPIC_BASE_URL: api.url,
+          ANTHROPIC_API_KEY: "sk-ant-fake",
+          GH_TOKEN: "fake-gh-token",
+          MC_OPERATOR_TOKEN: "fake-operator-token",
+          MC_ENV_PROBE_MARKER: "present",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          ...CREW_CLI_ENV,
+          ...CREW_PNPM_ENV,
+          ...CREW_GIT_ENV,
+        },
+      },
+      90_000,
+    );
+    expect(api.bashCalls(), output).toBe(1);
+    expect(api.toolResults().join("\n"), output).toMatch(
+      /^marker=present gh=fake-gh-token operator=$/m,
     );
   }, 120_000);
 });

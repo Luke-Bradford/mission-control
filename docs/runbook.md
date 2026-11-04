@@ -1314,15 +1314,23 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 
 ### FLIGHT's full access
 
-FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted`, a Bash
-sandbox or per-tool allow-lists; its guard hooks stay installed. Codex requests and verifies a
+FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted` or a Bash
+sandbox, and its tools are listed with no path or command limits; its guard hooks stay installed.
+The list is required: the credential scrub makes the CLI ignore `bypassPermissions`. It stays
+narrower than bypass: in a `-p` run, Edit and Write to protected paths are refused. User, project
+and local Claude settings also apply, since `--restricted` is off, so their allow, deny and ask
+rules can change what FLIGHT may run. Codex requests and verifies a
 `dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
 existing filesystem, network and tool restrictions.
 
-FLIGHT receives `GH_TOKEN`, `MC_HUB` and `MC_OPERATOR_TOKEN` in its process environment.
+FLIGHT receives `GH_TOKEN`, `MC_HUB` and `MC_OPERATOR_TOKEN` in its process environment. The scrub
+removes `MC_OPERATOR_TOKEN` from a Claude FLIGHT's Bash and keeps `GH_TOKEN`, so FLIGHT calls the
+operator API through `mc operator`. This hides the token from child processes and environment dumps.
+It does not stop a same-user read of the token file.
 Credential values pass through the keeper's inherited environment, never its spec file. The keeper
 redacts them before saving or replaying stdout and stderr. A credential revision hash makes a
-surviving FLIGHT run resume with fresh credentials after a hub restart; other keepers still attach
+surviving FLIGHT run resume with fresh credentials after a hub restart, and a changed
+`FLIGHT_RUNTIME_PROFILE` makes it resume with new launch arguments; other keepers still attach
 normally. The `mc` tools remain convenient shortcuts, with role authentication, repo/lane checks,
 merge gates and recorded operator holds. Per-repo power tiers do not withhold FLIGHT shortcuts.
 
@@ -1785,6 +1793,8 @@ copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=
 
 Every Claude crew CLI receives `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Claude strips recognized credentials
 from Bash, hooks and MCP subprocess environments. The parent CLI retains its authentication.
+The flag also forces the CLI's permission mode to `default`, so every seat's tools must be listed
+with `--allowedTools`.
 The supervisor also starts every seat with a minimal inherited environment, excluding operator
 provider and GitHub tokens. The real-CLI floor suite checks fake provider credentials against a
 local fake Messages API; it makes no paid provider calls. See the
