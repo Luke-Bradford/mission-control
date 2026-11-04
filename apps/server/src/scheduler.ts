@@ -29,7 +29,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { evaluateHolds, holds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -180,6 +180,10 @@ export const FLOW_FIRST_DELAY_MS = 7 * 60_000;
  * fire together every 15 s and would otherwise each make every page refetch (#26 A1).
  */
 export const EMIT_COALESCE_MS = 1000;
+/** A quiet loop tick repeats the ack and hold sweep at least this often. */
+export const SWEEP_REPEAT_MS = 60_000;
+/** The topic gate rebuilds a page's content at least this often, whatever the store did. */
+export const GATE_CLOCK_MS = 60_000;
 export { DIGEST_RETENTION_MS };
 /** Recorded HUD state changes are kept this long. */
 export const AGENT_EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -453,16 +457,27 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let emitTimer: NodeJS.Timeout | null = null;
 
   /** What each gated topic's page shows, hashed on each flush to tell a changed topic from a re-poll. */
-  const gate = new TopicGate({
-    agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
-    health: () => healthContent(store.status()),
-    // keys and owners only: an item's relative text changes every minute and is no news
-    attention: () =>
-      attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
-        i.key,
-        i.owner,
-      ]),
-  });
+  // The clock moves rows only by the minute (stall and wait thresholds), so a minute with no store
+  // write and the same lock has the content it had at the last check.
+  const clockBasis = (): string =>
+    JSON.stringify([
+      store.readVersion(),
+      Math.floor(now() / GATE_CLOCK_MS),
+      deps.lockState?.() ?? NO_LOCK,
+    ]);
+  const gate = new TopicGate(
+    {
+      agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
+      health: () => healthContent(store.status()),
+      // keys and owners only: an item's relative text changes every minute and is no news
+      attention: () =>
+        attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
+          i.key,
+          i.owner,
+        ]),
+    },
+    { agents: clockBasis, attention: clockBasis },
+  );
 
   /** Sends each queued topic once, and each gated topic that changed. Attention items are built from agents and escalations. */
   const flushEmits = () => {
@@ -572,8 +587,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const noViewClients = (): boolean => deps.hasViewClients?.() === false;
 
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
-  const sweepAcks = (rows?: CrewRow[]) => {
+  const sweepAcks = (rows?: CrewRow[], skippable = false) => {
     const at = now();
+    // A quiet tick finds what the last sweep found while nothing was written, no date hold has
+    // come due and under SWEEP_REPEAT_MS has passed: the clock-only rules re-run each minute, and
+    // the triage timer applies defaults when one falls due.
+    if (
+      skippable &&
+      lastSweep !== null &&
+      lastSweep.version === store.readVersion() &&
+      lastSweep.viewed === !noViewClients() &&
+      at >= lastSweep.at &&
+      at - lastSweep.at < SWEEP_REPEAT_MS &&
+      at < nextDateHold()
+    )
+      return;
     const lock = deps.lockState?.() ?? NO_LOCK;
     // Rows are read only if a hold needs them, and then without event timelines (the sweep keeps
     // none).
@@ -617,9 +645,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       emit("attention");
     void applyDefaults();
     // The ack sweep is housekeeping: a hub with no browser leaves it to the next poll with one.
-    if (noViewClients()) return;
-    store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
+    if (!noViewClients())
+      store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
+    lastSweep = { at, version: store.readVersion(), viewed: !noViewClients() };
   };
+  let lastSweep: { at: number; version: string; viewed: boolean } | null = null;
+  const nextDateHold = (): number =>
+    Math.min(
+      Infinity,
+      ...Object.values(holds(store)).flatMap((h) =>
+        h.releasedAt === undefined && h.condition.kind === "date" ? [h.condition.at] : [],
+      ),
+    );
 
   /**
    * Records each agent's change of HUD state when either side is notable (running <-> idle is
@@ -656,7 +693,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /** States that turn with the clock; the others turn only with the inputs `stateInputs` reads. */
   const TIMED_STATES: readonly HudState[] = ["running", "stalled", "waiting"];
   const afterLoopTick = () => {
-    const inputs = noViewClients() ? stateInputs(config, store) : null;
+    // a caller that cannot say who watches (a unit test) reads eagerly
+    const inputs = deps.hasViewClients !== undefined ? stateInputs(config, store) : null;
     // an agent no longer configured keeps its last event, and no row of it changes
     const configured = new Set(configuredAgents(config).map((a) => a.id));
     const quiet =
@@ -665,7 +703,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       !store.hasActiveRun() &&
       ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
     // nothing can change state: no crew read
-    if (quiet) return sweepAcks();
+    if (quiet) return sweepAcks(undefined, true);
     lastInputs = inputs;
     const at = now();
     // with no browser the rows are the summary: state changes need no event timelines

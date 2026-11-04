@@ -1893,6 +1893,23 @@ describe("Store", () => {
     expect(typeof gh?.at).toBe("number");
   });
 
+  it("leaves a status that only moved its time out of the read version, and counts a real change", () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1000);
+      store.setStatus("gh", true, null);
+      const first = store.readVersion();
+      now.mockReturnValue(2000);
+      store.setStatus("gh", true, null);
+      expect(store.readVersion()).toBe(first);
+      expect(store.status()[0]).toMatchObject({ at: 2000, lastOkAt: 2000 });
+      store.setStatus("gh", false, "boom");
+      expect(store.readVersion()).not.toBe(first);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("keeps lastOkAt and failingSince: a run of failures keeps its first time, ok clears it", () => {
     const now = vi.spyOn(Date, "now");
     try {

@@ -1,6 +1,6 @@
 import type { AttentionItem, BoardItem, PullRequestView, Run, RunDigest } from "@mc/core";
 import { CI_FAILED_EVENT_PREFIX, CI_PASSED_EVENT_PREFIX, NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { metricsView } from "../src/metrics.ts";
 import { type OverviewScope, overviewSummary } from "../src/overview.ts";
 import { Store } from "../src/store.ts";
@@ -557,4 +557,69 @@ it("uses a question's recorded answer time between overview reads", () => {
   });
   store.answerQuestions("seat", END - 2 * MIN);
   expect(summary().kpis.needsYou.series).toEqual([...Array(26).fill(0), 1, 0, 0, 0]);
+});
+
+const move = (issue: number, column: "Ready" | "In review" | "Done", at: number, state = "done") =>
+  store.addBoardMove({
+    runId: "run-1",
+    repoId: "repo",
+    issue,
+    column,
+    state: state as "done",
+    detail: null,
+    at,
+  });
+
+it("reads each card's latest done move before the window, and every done move inside it", () => {
+  const since = END - 30 * MIN;
+  move(1, "Ready", since - 5 * HOUR);
+  move(1, "In review", since - 2 * HOUR);
+  move(1, "Done", since - 1 * HOUR, "failed");
+  move(1, "Done", since + 5 * MIN);
+  move(2, "Ready", since - HOUR);
+  move(2, "In review", since - 10 * MIN, "pending");
+  move(3, "Ready", since - 3 * HOUR);
+  expect(store.doneBoardMovesFrom(since).map((m) => [m.issue, m.column, m.at - since])).toEqual(
+    [
+      [1, "In review", -2 * HOUR],
+      [3, "Ready", -3 * HOUR],
+      [2, "Ready", -HOUR],
+      [1, "Done", 5 * MIN],
+    ].sort((a, b) => (a[2] as number) - (b[2] as number)),
+  );
+});
+
+it("counts a card in review from its latest move before the window until it moves on", () => {
+  const since = END - 30 * MIN;
+  store.replaceBoard("repo", [card(1, "Done", { closed: false })]);
+  move(1, "Ready", since - 3 * HOUR);
+  move(1, "In review", since - 2 * HOUR);
+  move(1, "Done", END - 10 * MIN);
+  const series = summary().kpis.inFlight.series as number[];
+  expect(series.slice(0, 20)).toEqual(Array(20).fill(1));
+  expect(series.slice(20)).toEqual(Array(10).fill(0));
+});
+
+it("does not rewrite the needs history when nothing in it changed", () => {
+  const write = vi.spyOn(store, "setSetting");
+  const item = {
+    key: "ask:1",
+    kind: "question",
+    agentId: "seat",
+    repoId: "repo",
+    text: "?",
+    at: END - 4 * MIN,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    acked: false,
+  } as AttentionItem;
+  overviewSummary(store, NOW, { ...scope, attention: [item] });
+  expect(write).toHaveBeenCalledTimes(1);
+  overviewSummary(store, NOW, { ...scope, attention: [item] });
+  overviewSummary(store, NOW + 1_000, { ...scope, attention: [item] });
+  expect(write).toHaveBeenCalledTimes(1);
+  overviewSummary(store, NOW, { ...scope, attention: [] });
+  expect(write).toHaveBeenCalledTimes(2);
 });

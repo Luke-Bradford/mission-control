@@ -2991,3 +2991,54 @@ it("emits attention at the earliest triage deadline and cancels the timer on sto
   await vi.advanceTimersByTimeAsync(1000);
   expect(topics).toEqual([]);
 });
+
+describe("quiet loop ticks", () => {
+  const quiet = (hasViewClients: () => boolean) =>
+    createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients,
+    });
+  let clock = NOW;
+  beforeEach(() => {
+    clock = NOW;
+  });
+
+  it.each([false, true])(
+    "repeats no ack or hold sweep within a minute while nothing was written (browser: %s)",
+    async (viewed) => {
+      const crew = vi.spyOn(hud, "crew");
+      const attention = vi.spyOn(hud, "attentionItems");
+      const s = quiet(() => viewed);
+      for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+      const reads = crew.mock.calls.length + attention.mock.calls.length;
+      clock = NOW + 15_000;
+      await s.tick("studio");
+      clock = NOW + 30_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBe(reads);
+      clock = NOW + 61_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBeGreaterThan(reads);
+    },
+  );
+
+  it("sweeps again at once after a write, and when a date hold comes due", async () => {
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = quiet(() => false);
+    await s.tick("ta");
+    await s.tick("ta");
+    const quietReads = attention.mock.calls.length;
+    holdItem(store, "ask:soon", "Waiting", { kind: "date", at: NOW + 20_000 }, "operator", NOW);
+    clock = NOW + 15_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBeUndefined();
+    clock = NOW + 20_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBe(NOW + 20_000);
+    expect(attention.mock.calls.length).toBeGreaterThanOrEqual(quietReads);
+  });
+});

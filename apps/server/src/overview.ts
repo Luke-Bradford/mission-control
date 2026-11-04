@@ -1,5 +1,6 @@
 import {
   type AttentionItem,
+  type BoardItem,
   CI_PASSED_EVENT_PREFIX,
   hudColumnOf,
   isCiFailureEvent,
@@ -13,7 +14,7 @@ import {
 } from "@mc/core";
 import { parseTicket } from "./runview.ts";
 import { runSpend } from "./spend.ts";
-import type { Store } from "./store.ts";
+import type { BoardMove, Store } from "./store.ts";
 import { endOf } from "./views.ts";
 
 const MINUTE_MS = 60_000;
@@ -74,8 +75,6 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   );
   const linked = prs.filter(isLinked);
   const pipelineRepos = new Set(scope.pipelineRepoIds ?? scope.repoIds);
-  const pipeline = pipelineStages(store, now, { runs, prs, pipelineRepos, midnight });
-  const inFlight = inProgressOf(pipeline);
   const ci = scope.repoIds
     .flatMap((id) => store.loopEvents(since - DAY_MS, id))
     .filter((e) => e.at <= now);
@@ -87,14 +86,25 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   // session filter narrows it, so its history is one series whatever the scope.
   const needs = needsYouItems(scope.attention).filter((i) => i.at <= now);
   const minuteEnds = Array.from({ length: MINUTES }, (_, i) => since + (i + 1) * MINUTE_MS);
-  const moves = store.boardMoves(0).filter((m) => m.state === "done");
-  const boards = [...pipelineRepos].flatMap((repoId) => store.board(repoId));
+  // Indexed once: the series below looks a card's moves and a run's card up per minute.
+  const movesByCard = new Map<string, BoardMove[]>();
+  for (const m of store.doneBoardMovesFrom(since)) {
+    const key = `${m.repoId}#${m.issue}`;
+    const list = movesByCard.get(key);
+    if (list) list.push(m);
+    else movesByCard.set(key, [m]);
+  }
+  const boardOf = new Map([...pipelineRepos].map((repoId) => [repoId, store.boardView(repoId)]));
+  const boards = [...boardOf.values()].flat();
+  const cardOf = new Map(boards.map((b) => [`${b.repoId}#${b.issueNumber}`, b]));
+  const pipeline = pipelineStages(store, now, { runs, prs, pipelineRepos, midnight, boardOf });
+  const inFlight = inProgressOf(pipeline);
   const flightSeries = minuteEnds.map((end) => {
     const at = end - 1;
     const tickets = new Set<string>();
     for (const run of runs) {
       if (!pipelineRepos.has(run.repoId) || run.ticket === null || run.reviewId != null) continue;
-      const item = boards.find((b) => `${b.repoId}#${b.issueNumber}` === run.ticket);
+      const item = cardOf.get(run.ticket);
       if (item?.closed && item.updatedAt <= at) continue;
       if (
         run.startedAt <= at &&
@@ -106,9 +116,9 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     }
     for (const item of boards) {
       if (item.createdAt > at || (item.closed && item.updatedAt <= at)) continue;
-      const move = moves.findLast(
-        (m) => m.repoId === item.repoId && m.issue === item.issueNumber && m.at <= at,
-      );
+      const move = movesByCard
+        .get(`${item.repoId}#${item.issueNumber}`)
+        ?.findLast((m) => m.at <= at);
       const column = move?.column ?? (item.updatedAt <= at ? hudColumnOf(item) : null);
       if (column === "In review") tickets.add(`${item.repoId}#${item.issueNumber}`);
     }
@@ -124,7 +134,8 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   // Derived items have no common resolution event; absence is observed at this request time.
   type NeedEpisode = { key: string; openedAt: number; resolvedAt: number | null };
   const historyKey = "overview:needs";
-  const episodes: NeedEpisode[] = JSON.parse(store.getSetting(historyKey) ?? "[]");
+  const stored = store.getSetting(historyKey);
+  const episodes: NeedEpisode[] = JSON.parse(stored ?? "[]");
   const open = new Map(episodes.filter((e) => e.resolvedAt === null).map((e) => [e.key, e]));
   const present = new Set(needs.map((i) => i.key));
   for (const episode of open.values()) {
@@ -139,7 +150,8 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     if (!open.has(item.key)) episodes.push({ key: item.key, openedAt: item.at, resolvedAt: null });
   }
   const retained = episodes.filter((e) => e.resolvedAt === null || e.resolvedAt > since);
-  store.setSetting(historyKey, JSON.stringify(retained));
+  const kept = JSON.stringify(retained);
+  if (kept !== stored) store.setSetting(historyKey, kept);
   const needSeries = minuteEnds.map(
     (at) =>
       retained.filter((e) => e.openedAt < at && (e.resolvedAt === null || e.resolvedAt > at))
@@ -211,11 +223,14 @@ export function pipelineStages(
     prs,
     pipelineRepos,
     midnight,
+    boardOf,
   }: {
     runs: readonly Run[];
     prs: readonly PullRequestView[];
     pipelineRepos: ReadonlySet<string>;
     midnight: number;
+    /** Each repo's board when the caller already read it; read here otherwise. */
+    boardOf?: ReadonlyMap<string, readonly Readonly<BoardItem>[]>;
   },
 ): PipelineStage[] {
   const linked = prs.filter(isLinked);
@@ -247,7 +262,7 @@ export function pipelineStages(
     pr?.checks?.length ? pr.checks.map((c) => CI[c.state]) : pr?.ci ? [CI[pr.ci]] : [];
   for (const repoId of pipelineRepos) {
     const readyMoves = store.overviewReadyMoves(repoId);
-    const board = store.board(repoId);
+    const board = boardOf?.get(repoId) ?? store.boardView(repoId);
     const items = board.map((item) => ({ ...item, column: hudColumnOf(item) }));
     const missing = [...live.values()].flatMap((run) => {
       const ticket = run.ticket === null ? null : parseTicket(run.ticket);
