@@ -2285,7 +2285,7 @@ the pairs for its current head exist, so the reviewer always has them and a PR a
 draft cannot merge on a new head without them. Each pass that is held records a loop event naming
 the pages still missing; the run is not parked, and moves on at the next pass once the capture
 lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
-the hold then says `capture failed: <reason>`; the review is let through at that point, with a line
+the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`; the review is let through at that point, with a line
 in RETRO's brief saying no pairs were made, but mark-ready and merge keep waiting. A push makes a
 new head, which needs its own pairs.
 
