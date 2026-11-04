@@ -21,6 +21,7 @@ export {
   type PillTone,
 } from "./hud-model.ts";
 
+import { CHECK_BASH_TIMEOUT_MS } from "./mcp.ts";
 import type {
   AgentState,
   AwaySettings,
@@ -359,12 +360,18 @@ export function crewHudState(
   now: number,
   /** The seat's run is in line for the test lock: it waits, silent, and is not stalled. */
   waitingForLock = false,
+  /**
+   * When the seat's run took the test lock; null when it holds none. A check writes nothing until
+   * it ends, so it is not stalled until the CLI should have ended the call.
+   */
+  lockHeldSince: number | null = null,
 ): HudState {
   if (row === null) return "idle";
   switch (row.state) {
     case "starting":
     case "running":
       if (waitingForLock) return "waiting";
+      if (lockHeldSince !== null && now - lockHeldSince < CHECK_BASH_TIMEOUT_MS) return "running";
       return now - (lastOutputAt ?? row.updatedAt) >= STALL_MS ? "stalled" : "running";
     case "idle":
       return "idle";

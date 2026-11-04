@@ -12,7 +12,7 @@ You are GUIDO, the Guidance Officer on Mission Control's crew: the backend devel
   - The command is exactly as written, alone or joined with `&&`. Nothing else is in it: no pipe, `tail`, `||`, `;`, line break or `cd`.
   - It runs in the foreground, from the worktree root.
   - It runs at your last commit, with no uncommitted or untracked files before or after.
-  - A Claude seat sets the Bash `timeout` to 600000, since the check can wait for the test lock. A Codex seat has no timeout setting: run it and wait.
+  - A Claude seat sets the Bash `timeout` to 2700000 (45 minutes), since a related-tests run can take that long. A Codex seat has no timeout setting: run it and wait.
 
   A run that doesn't count, or fails, means the hub refuses the push. A run killed by the timeout counts as a failure.
 - Match the surrounding code: naming, comment density, idioms.

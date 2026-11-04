@@ -409,8 +409,15 @@ const CHECKS_ADVICE =
 
 /** Claude's Bash tool kills a call at this many ms when the call names no `timeout`. */
 export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
-/** The `timeout` a seat gives a check call: the lock wait and both checks fit well inside it. */
-export const CHECK_BASH_TIMEOUT_MS = 600_000;
+/**
+ * The `timeout` a seat gives a check call, and the most the CLI lets a call ask for
+ * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, and a
+ * branch that touches a widely imported file can never finish its related tests inside it (#1398).
+ * 45 minutes is above the 39.5 minutes CI's five test jobs add up to on c2bea393, setup included,
+ * and a hung check holds the test lock for no longer than that. A wait for the test lock does not
+ * count: it happens in the PreToolUse hook, before the CLI starts the command's clock.
+ */
+export const CHECK_BASH_TIMEOUT_MS = 45 * 60_000;
 /** Why the hub did not count a started check call. */
 export const CHECK_DROP_REASONS = [
   "not-plain",
@@ -452,14 +459,13 @@ export const checkDropText = (d: CheckDrop): string => {
     case "background":
       return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
     case "timeout":
-      return `the call ran past its Bash timeout and was killed (on ${sha7(d.head)}). Run it again with the Bash timeout parameter set to ${CHECK_BASH_TIMEOUT_MS}; a check can wait for the test lock before it runs.`;
+      return `the call ran past its Bash timeout and was killed (on ${sha7(d.head)}). Run it again with the Bash timeout parameter set to ${CHECK_BASH_TIMEOUT_MS}, the longest the hub allows.`;
     case "unreadable":
       return "the hub could not read the seat's clone when the call started, so it was not counted. Run the check again.";
   }
 };
 /** The line for a check the hub never saw start: the hub restarted, or the call never reached it. */
-export const CHECK_NO_START_TEXT =
-  "the hub saw no start of this check on this run (it may have restarted, or the call never reached it). Run it again in the foreground with the Bash timeout parameter set to 600000.";
+export const CHECK_NO_START_TEXT = `the hub saw no start of this check on this run (it may have restarted, or the call never reached it). Run it again in the foreground with the Bash timeout parameter set to ${CHECK_BASH_TIMEOUT_MS}.`;
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,

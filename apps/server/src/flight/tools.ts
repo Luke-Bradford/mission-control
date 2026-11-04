@@ -1786,7 +1786,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const parked = run.loop?.phase === "parked";
     if (!(onSeat || parked) || (!onSeat && !run.loop?.aside)) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
-    const stalled = onSeat && stalledSeats(config, store, at).has(seat);
+    // with the lock's word: a seat running a long check or waiting for the lock is working
+    const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
+    const stalled = onSeat && stalledSeats(config, store, at, rows).has(seat);
     const working = onSeat && !parked && !stalled;
     if (working) {
       if (held(run))

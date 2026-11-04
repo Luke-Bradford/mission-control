@@ -7,6 +7,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CHECK_BASH_TIMEOUT_DEFAULT_MS,
+  CHECK_BASH_TIMEOUT_MS,
   type CheckDrop,
   type CheckDropReason,
   type RepoRules,
@@ -186,7 +187,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           command,
           head: at.head,
           startedAt: now(),
-          timeoutMs: options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
+          // the CLI cuts a longer `timeout` down to its limit
+          timeoutMs: Math.min(
+            options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
+            CHECK_BASH_TIMEOUT_MS,
+          ),
         };
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);

@@ -2908,6 +2908,28 @@ describe("end_run", () => {
     expect((await call("end_run", E({ runId: "r-i" }))).isError).toBeUndefined();
   });
 
+  it("treats a silent seat that holds the test lock as working: it stops the turn first", async () => {
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    store.setRunLoop("r-g", NEW_LOOP);
+    store.setSeatSession({
+      ...row("guido-1", "r-g"),
+      state: "running",
+      updatedAt: NOW - 20 * 60_000,
+    });
+    busyNow = [{ seatId: "guido-1", state: "running" }];
+    lockNow = {
+      holder: {
+        runId: "r-g",
+        seatId: "guido-1",
+        command: "pnpm -s test:related",
+        since: NOW - 20 * 60_000,
+      },
+      waiting: [],
+    };
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(interruptCalls).toEqual(["guido-1"]);
+  });
+
   it("reads the files, interrupts a seat that is in a turn, reads again, then ends it", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-g");
@@ -5132,22 +5154,22 @@ describe("brief_item", () => {
   });
 
   it("includes the live test lock in triage and can brief it", async () => {
-    live("guido-1", "r-lock", { startedAt: NOW - 30 * 60_000 });
+    live("guido-1", "r-lock", { startedAt: NOW - 50 * 60_000 });
     store.setSeatSession({
       ...row("guido-1", "r-lock"),
       state: "running",
-      updatedAt: NOW - 30 * 60_000,
+      updatedAt: NOW - 50 * 60_000,
     });
     lockNow = {
       holder: {
         runId: "r-lock",
         seatId: "guido-1",
         command: "pnpm test",
-        since: NOW - 30 * 60_000,
+        since: NOW - 50 * 60_000,
       },
       waiting: [{ runId: "r-wait", seatId: "inco-1", command: "pnpm test", since: NOW }],
     };
-    const key = `lock:r-lock:${NOW - 30 * 60_000}`;
+    const key = `lock:r-lock:${NOW - 50 * 60_000}`;
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.items).toContainEqual(expect.objectContaining({ key, kind: "lock" }));
     expect((await call("brief_item", B({ key, for: "operator" }))).isError).toBeUndefined();
@@ -6348,7 +6370,9 @@ it("shows Stop only for the exact blocked hold, including after restart", () => 
   store.close();
   store = new Store(join(dir, "mc.sqlite"));
   const lock = { holder: hold, waiting: [{ ...hold, runId: "waiting-preview", seatId: "inco-1" }] };
-  const later = NOW + 20 * 60_000;
+  // a hold inside the check's Bash limit is a check still running: nothing to stop yet
+  expect(flightBriefView(cfg, store, lock, NOW + 20 * 60_000).watch).toEqual([]);
+  const later = NOW + 50 * 60_000;
   expect(flightBriefView(cfg, store, lock, later).watch).toHaveLength(1);
   expect(flightBriefView(cfg, store, { ...lock, waiting: [] }, later).watch).toEqual([]);
   expect(

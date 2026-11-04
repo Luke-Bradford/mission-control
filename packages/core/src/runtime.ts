@@ -13,7 +13,13 @@ export {
 } from "./runtime-model.ts";
 
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
-import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
+import {
+  CHECK_BASH_TIMEOUT_MS,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+  MC_TOOLS,
+  type McToolName,
+} from "./mcp.ts";
 import { ROLES } from "./roles.ts";
 import { TOOL_OUTPUT_DIR } from "./tool-trim.ts";
 import type { AgentId } from "./types.ts";
@@ -852,9 +858,12 @@ export function protectedFileRules(
  *   also forces the permission mode to `default`, so a seat's tools must be listed with
  *   `--allowedTools`; `bypassPermissions` has no effect;
  * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
- *   changes underneath it.
+ *   changes underneath it;
+ * - a higher Bash limit: the CLI cuts a call's `timeout` to 600 s unless this says otherwise, and a
+ *   long check needs more room (#1398). `seat-floors.test.ts` shows the real CLI reports and enforces it.
  */
 export const CREW_CLI_ENV = {
+  BASH_MAX_TIMEOUT_MS: String(CHECK_BASH_TIMEOUT_MS),
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",

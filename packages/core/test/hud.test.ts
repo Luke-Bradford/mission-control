@@ -57,6 +57,7 @@ import {
   USAGE_COLLECTOR_PREFIX,
   usageCollector,
 } from "../src/hud.ts";
+import { CHECK_BASH_TIMEOUT_MS } from "../src/mcp.ts";
 import type { SeatState } from "../src/runtime.ts";
 import type { AgentState, PullRequestView, SeatSessionRow } from "../src/types.ts";
 
@@ -561,6 +562,17 @@ describe("crewHudState", () => {
     expect(crewHudState(seat("running", "r1", now - STALL_MS + 1), null, now)).toBe("running");
     expect(crewHudState(seat("running", "r1", now - STALL_MS), null, now)).toBe("stalled");
     expect(crewHudState(seat("starting", "r1", now - STALL_MS), null, now)).toBe("stalled");
+  });
+  it("a seat that holds the test lock runs silent until its Bash limit", () => {
+    const silent = now - 30 * 60_000;
+    const since = (ms: number) => crewHudState(seat("running"), silent, now, false, now - ms);
+    expect(since(STALL_MS)).toBe("running");
+    expect(since(CHECK_BASH_TIMEOUT_MS - 1)).toBe("running");
+    expect(since(CHECK_BASH_TIMEOUT_MS)).toBe("stalled");
+    // no hold: the usual rule
+    expect(crewHudState(seat("running"), silent, now)).toBe("stalled");
+    // a hold says nothing about a seat that is not in a turn
+    expect(crewHudState(seat("parked"), silent, now, false, now)).toBe("parked");
   });
   it("maps idle, parked, stopped and error", () => {
     expect(crewHudState(seat("idle"), null, now)).toBe("idle");
