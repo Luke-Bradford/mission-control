@@ -148,9 +148,12 @@ describeRendered("Overview composition", () => {
         colorScheme: "dark",
         api: overviewDensityFixture(scenario).api,
       });
-      await page.evaluate(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-      }, undefined);
+      await page.evaluate(async (expected) => {
+        const status = () => document.querySelector(".overview-status")?.textContent ?? "";
+        const deadline = performance.now() + 20_000;
+        while (!status().includes(expected) && performance.now() < deadline)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }, words);
       const m = await page.evaluate(
         () => ({
           pageScroll: document.documentElement.scrollHeight - innerHeight,
