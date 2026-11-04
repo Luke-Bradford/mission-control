@@ -2,7 +2,7 @@
 .yaml {
   position: sticky;
   top: 0;
-  max-height: 70vh;
+  max-height: calc(70 * var(--vh));
   overflow: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

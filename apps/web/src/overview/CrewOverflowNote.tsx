@@ -29,7 +29,7 @@ export function CrewOverflowNote({
         vertical
           ? pending
             ? "Loading configured seats · scroll ↕ to see every row"
-            : `${count} seats · ${visible} fully visible · scroll ↕ to see every seat`
+            : `${count} agents · ${visible} fully visible · scroll ↕ to see every agent`
           : null,
         horizontal ? "Scroll ↔ to compare every column" : null,
       ]

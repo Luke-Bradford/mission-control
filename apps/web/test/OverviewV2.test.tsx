@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
-import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
+import { MacRow } from "../src/overview/MacRow.tsx";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
+import { TokensPanel } from "../src/overview/TokensPanel.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 import { CONFIG, HOUR, limit7d, NOW, OVERVIEW } from "./fixtures.ts";
 
@@ -264,17 +265,24 @@ it.each([
   const { container } = render(
     <>
       <MachinePanel />
-      <KpiStrip />
+      <MacRow />
+      <TokensPanel />
       <PipelinePanel />
     </>,
   );
   await settled(fetch, "/api/overview");
   expect(container.querySelector("#machP")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "Memory history" })).toBeNull();
-  expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
-    Array(8).fill("—"),
-  );
-  // Lanes with no cards collapse to their header; none holds a chip.
-  expect(container.querySelectorAll(".pipeline-stage:not(.empty)")).toHaveLength(0);
-  expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
+  // The Mac row has no reading (the lock is free), and the Board's head figures have no registry
+  // value: dashes.
+  expect(
+    [...container.querySelectorAll("#macP .mac-measure b")].map((el) => el.textContent),
+  ).toEqual(["—", "—", "—", "—", "free"]);
+  expect(
+    [...container.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent),
+  ).toEqual(["—", "—", "—"]);
+  // Stages with no cards hold none; the Board still shows all five.
+  expect(container.querySelectorAll(".board-stage")).toHaveLength(5);
+  expect(container.querySelectorAll(".board-card")).toHaveLength(0);
+  expect(container.querySelector(".token-spend")).toBeNull();
 });
