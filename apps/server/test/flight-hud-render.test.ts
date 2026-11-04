@@ -65,7 +65,7 @@ function fakePlaywright(
   const popupClose = vi.fn(async () => {});
   const pageEvents = new Map<string, Array<() => void>>();
   const page = {
-    click: vi.fn(async () => {
+    click: vi.fn(async (_selector: string) => {
       order.push("click");
     }),
     goto: vi.fn(async () => {
