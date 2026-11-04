@@ -6,6 +6,8 @@
 import {
   type AuditView,
   type CommsMessage,
+  type FlightPrFlowRow,
+  type FlightPrFlowView,
   LIVE_MINUTES,
   type MapSnapshot,
   type PipelineStage,
@@ -14,8 +16,12 @@ import {
 } from "@mc/core";
 import { shiftTimes } from "../src/demo/shift.ts";
 import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
+import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
+import { prFlowFixture } from "./prFlowFixture.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
+import { qaHistoryApi } from "./qaHistoryFixture.ts";
+import { testHealthFixture } from "./testHealthFixtures.ts";
 
 export const DEMO_REPO = "shop-app";
 
@@ -120,9 +126,17 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
   );
 }
 
+/** Tickets still being built that already have a PR open. */
+const BUILDING_WITH_PR: ReadonlySet<number> = new Set([103, 105, 106]);
+
 export function openPrs(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
   return tickets
-    .filter((t) => t.stage === "checks" || t.stage === "review")
+    .filter(
+      (t) =>
+        t.stage === "checks" ||
+        t.stage === "review" ||
+        (t.stage === "building" && BUILDING_WITH_PR.has(t.n)),
+    )
     .map((t) =>
       prView({
         repoId: DEMO_REPO,
@@ -534,6 +548,55 @@ function ticketItems(tickets: readonly DemoTicket[]): Record<string, unknown> {
   );
 }
 
+/** What FLIGHT remembers of each repo. */
+function memoryApi(): Record<string, unknown> {
+  const note = (topic: string, kind: string, body: string, ago: number) => ({
+    repoId: DEMO_REPO,
+    topic,
+    kind,
+    body,
+    source: "crew retrospective",
+    author: "flight",
+    updatedAt: NOW - ago,
+  });
+  return {
+    [`/api/flight/memory?repo=${DEMO_REPO}`]: {
+      notes: [
+        note(
+          "checkout cache",
+          "lesson",
+          "Cache invalidation on the quote total needs the cart version in the key.",
+          3 * HOUR,
+        ),
+        note(
+          "webhook retries",
+          "playbook",
+          "Three tries with backoff, then park the run and tell the operator.",
+          26 * HOUR,
+        ),
+        note(
+          "test lock",
+          "crew",
+          "Full-suite runs queue on one lock; build in small steps meanwhile.",
+          50 * HOUR,
+        ),
+      ],
+    },
+    "/api/flight/memory?repo=site-builder": { notes: [] },
+  };
+}
+
+/** The files each open PR changes, for the Map's PR focus. */
+function prFiles(tickets: readonly DemoTicket[]): Record<string, unknown> {
+  const tree = mapFiles();
+  return Object.fromEntries(
+    openPrs(tickets).map((pr, i) => [
+      `/api/repos/${DEMO_REPO}/prs/${pr.number}/files`,
+      { files: [0, 1, 2].map((k) => tree[(i * 5 + k * 7) % tree.length]?.path ?? "") },
+    ]),
+  );
+}
+
 function flightApi(): Record<string, unknown> {
   return {
     "/api/flight/orders?limit=1": { active: [], history: [], nextCursor: null },
@@ -616,13 +679,26 @@ export function demoPageAnswers(
   tickets: readonly DemoTicket[] = DEMO_TICKETS,
 ): Record<string, unknown> {
   const telemetry = telemetryView();
+  const clock = Date.now();
+  const ownRepo = (text: string) =>
+    text
+      .replaceAll("repo=sample", `repo=${DEMO_REPO}`)
+      .replaceAll('"repoId":"sample"', `"repoId":"${DEMO_REPO}"`);
   const health = Object.fromEntries(
-    Object.entries(
-      JSON.parse(JSON.stringify(codeHealthBrowserApi(NOW)).replaceAll("sample", DEMO_REPO)),
-    ).filter(([path]) => path.startsWith("/api/code-health")),
+    Object.entries({
+      ...codeHealthBrowserApi(NOW),
+      ...codeRiskFixture(NOW).api,
+      ...testHealthFixture(NOW).api,
+    })
+      .filter(([path]) => path.startsWith("/api/code-health"))
+      .map(([path, value]) => [ownRepo(path), JSON.parse(ownRepo(JSON.stringify(value)))]),
   );
+  const history = shiftTimes(qaHistoryApi(3), clock, NOW - clock);
   return {
     ...health,
+    ...history,
+    ...memoryApi(),
+    ...prFiles(tickets),
     ...commsApi(),
     ...setupApi(),
     ...flightApi(),
@@ -643,5 +719,51 @@ export function demoPageAnswers(
       SEAT_IDS.filter((id) => id !== "flight-1"),
       tickets,
     ),
+  };
+}
+
+/** The PR flow table, from the same tickets and seats as the rest of the crew. */
+export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): FlightPrFlowView {
+  const base = prFlowFixture(0);
+  const stageOf: Record<DemoTicket["stage"], FlightPrFlowRow["stage"]> = {
+    ready: "building",
+    building: "building",
+    checks: "CI",
+    review: "review",
+    merged: "merge",
+  };
+  const rows: FlightPrFlowRow[] = openPrs(tickets).map((pr, i) => {
+    const t = tickets.find((x) => `${DEMO_REPO}#${x.n}` === pr.ticket) as DemoTicket;
+    const seat = t.seat ?? "dev-1";
+    return {
+      pr: pr.number,
+      ticket: `${DEMO_REPO}#${t.n}`,
+      title: t.title,
+      owner: seat,
+      ownerKind: "seat",
+      seatId: seat,
+      stage: stageOf[t.stage],
+      stageSince: NOW - (i + 1) * 9 * MIN,
+      ownerSince: NOW - (i + 1) * 9 * MIN,
+      openSince: NOW - (i + 2) * 40 * MIN,
+      waitsOn:
+        t.stage === "checks" ? ["CI to finish"] : t.stage === "review" ? ["review by dev-9"] : [],
+      blocks: i === 0 ? [`${DEMO_REPO}#104`] : [],
+      lastAction: "pushed",
+      lastActor: seat,
+      lastActionAt: NOW - 4 * MIN,
+    };
+  });
+  return {
+    generatedAt: NOW,
+    repos: [
+      {
+        ...(base.repos[0] as FlightPrFlowView["repos"][number]),
+        repoId: DEMO_REPO,
+        generatedAt: NOW,
+        unowned: 0,
+        rows,
+      },
+    ],
   };
 }

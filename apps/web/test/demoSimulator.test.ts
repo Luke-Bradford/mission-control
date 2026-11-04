@@ -1,5 +1,6 @@
-import type { MapDelta } from "@mc/core";
+import type { CrewRow, MapDelta } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { activityValues } from "../src/overview/agentActivity.ts";
 import { NOW } from "./fixtures.ts";
 
 type Sim = typeof import("../src/demo/simulator.ts");
@@ -105,6 +106,26 @@ describe("the scene", () => {
     const seqs = events.filter((e) => e.type === "map").map((e) => (e.data as MapDelta).seq);
     expect(seqs.length).toBeGreaterThan(before);
     expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+    off();
+  });
+});
+
+describe("tokens burning", () => {
+  it("shows tokens in every working seat's last hour, even off a minute mark, and more as beats play", async () => {
+    vi.setSystemTime(NOW + 37_123);
+    const { sim } = await fresh();
+    const rows = () => (sim.getState().api["/api/crew?shape=summary"] as { rows: CrewRow[] }).rows;
+    const total = (row: CrewRow) =>
+      activityValues(row.digest, Date.now()).reduce((a, b) => a + b, 0);
+    expect(
+      rows()
+        .filter((r) => r.hudState === "running")
+        .every((r) => total(r) > 0),
+    ).toBe(true);
+    const off = sim.connect("/api/stream", () => {});
+    const before = total(rows().find((r) => r.id === "dev-1") as CrewRow);
+    await vi.advanceTimersByTimeAsync(sim.DEMO_BEAT_MS * 20);
+    expect(total(rows().find((r) => r.id === "dev-1") as CrewRow)).toBeGreaterThan(before);
     off();
   });
 });

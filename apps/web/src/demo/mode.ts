@@ -36,6 +36,12 @@ const CLOSED = 2;
 export const DEMO_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVEsAAAAASUVORK5CYII=";
 
+/** The words for a failed write: the demo refusal when that is what it was, else `fallback`. */
+export function writeFailure(error: unknown, fallback: string): string {
+  const body = (error as { body?: { error?: unknown } } | null)?.body;
+  return body?.error === DEMO_REFUSED ? DEMO_REFUSED : fallback;
+}
+
 export const demoRefusal = (): Response =>
   new Response(JSON.stringify({ error: DEMO_REFUSED }), {
     status: 403,

@@ -33,10 +33,33 @@ function activitySince(path: string): unknown {
   return rows.filter((r) => r.at >= since && r.at >= Date.now() - ACTIVITY_WINDOW_MS);
 }
 
+/** A telemetry read narrowed by seat, account or ticket answers with the range's own data. */
+function telemetryRange(path: string): string | undefined {
+  const m = /^\/api\/telemetry\?range=([^&]+)&/.exec(path);
+  return m ? `/api/telemetry?range=${m[1]}` : undefined;
+}
+
+/** A thread between two seats, from what the crew has said to each other. */
+function contactThread(path: string): unknown {
+  const m = /^\/api\/comms\/agents\/([^/?]+)\/contacts\/([^/?]+)$/.exec(path);
+  if (!m) return undefined;
+  const [, a, b] = m.map((x) => decodeURIComponent(x ?? ""));
+  const crew = getState().api["/api/comms/crew"] as { messages: { from: string }[] };
+  return {
+    messages: crew.messages.filter((x) => x.from === a || x.from === b).slice(-12),
+    hasEarlier: false,
+    unread: 0,
+  };
+}
+
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
   if (key in api) return json(api[key]);
+  const range = telemetryRange(path);
+  if (range !== undefined && range in api) return json(api[range]);
+  const thread = contactThread(path);
+  if (thread !== undefined) return json(thread);
   const delta = activitySince(path);
   if (delta !== undefined) return json(delta);
   if (/^\/api\/runs\/[^/]+\/handoff$/.test(path)) return json(null);

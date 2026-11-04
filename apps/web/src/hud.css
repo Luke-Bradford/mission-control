@@ -591,11 +591,6 @@ select {
   pointer-events: none;
 }
 
-.demo-switch {
-  min-height: 24px;
-  white-space: nowrap;
-}
-
 .tabs {
   display: flex;
   gap: 0;

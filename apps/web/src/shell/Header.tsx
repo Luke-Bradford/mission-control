@@ -19,6 +19,7 @@ import { hhmm, hms, MONTHS, percent, plural, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
+import { DemoSwitch } from "./DemoSwitch.tsx";
 import { LiveIndicator } from "./LiveIndicator.tsx";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
@@ -59,6 +60,7 @@ export function Header({ page }: { page: Page }) {
         <SessionSelect />
         <NeedsButton items={attention} />
         <AwayButton />
+        <DemoSwitch />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
         <DockButton page={page} waiting={attention.length} />

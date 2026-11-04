@@ -1,4 +1,3 @@
-import { DemoSwitch } from "./DemoSwitch.tsx";
 import { useBuildStatus } from "./overlays.ts";
 
 /** Build-status toggle and legend, then the key hints (catalogue §1.2; `s Setup` added, §7.6). */
@@ -6,7 +5,6 @@ export function Footer() {
   const [on, setOn] = useBuildStatus();
   return (
     <footer className="keys">
-      <DemoSwitch />
       <button
         type="button"
         className="sm"

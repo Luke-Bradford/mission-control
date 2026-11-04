@@ -135,7 +135,7 @@ describe("the header switch", () => {
     const toDemo = await screen.findByRole("button", {
       name: "Switch to Demo: a simulated crew. Nothing is sent to the hub.",
     });
-    expect(toDemo.textContent).toBe("Demo");
+    expect(toDemo.textContent).toBe("");
     expect(document.querySelector(".demo-marker")).toBeNull();
     await act(async () => {
       fireEvent.click(toDemo);
@@ -148,7 +148,7 @@ describe("the header switch", () => {
     const back = screen.getByRole("button", {
       name: "Switch back to Live: real data from the hub.",
     });
-    expect(back.textContent).toBe("Back to Live");
+    expect(back.getAttribute("title")).toBe("Switch back to Live: real data from the hub.");
     await act(async () => {
       fireEvent.click(back);
     });

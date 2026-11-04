@@ -6,7 +6,6 @@ import type {
   PipelineStage,
   RunDigest,
 } from "@mc/core";
-import { shiftTimes } from "../src/demo/shift.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import {
   boardColumnOf,
@@ -14,6 +13,7 @@ import {
   DEMO_TICKETS,
   demoPageAnswers,
   pipelineStages,
+  prFlowView,
 } from "./demoSeedPages.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import {
@@ -30,7 +30,6 @@ import {
   seatRow,
 } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
-import { FLOW_NOW, prFlowFixture } from "./prFlowFixture.ts";
 
 export type OverviewScenario =
   | "default"
@@ -587,7 +586,7 @@ export function demoSeed() {
     "/api/attention": attention,
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
-    "/api/prs/flow": shiftTimes(prFlowFixture(), FLOW_NOW, NOW - FLOW_NOW),
+    "/api/prs/flow": prFlowView(),
     "/api/flight/summary": flightSummary(),
     "/api/settings/away": {
       on: false,

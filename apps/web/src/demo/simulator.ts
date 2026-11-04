@@ -70,9 +70,12 @@ export function setBeatMs(ms: number): void {
   schedule();
 }
 
+const wholeMinutes = (ms: number): number => Math.round(ms / 60_000) * 60_000;
+
 function fresh(): DemoState {
   seed ??= demoSeed();
-  const api = shiftTimes(seed.api, NOW, Date.now() - NOW);
+  // A whole number of minutes, so the per-minute token buckets still start on minute marks.
+  const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));
   (api[MAP_PATH] as MapSnapshot).seq = mapSeq;
   return { api, tickets: DEMO_TICKETS.map((t) => ({ ...t })), beat: -1 };
 }
@@ -150,6 +153,11 @@ function work(s: DemoState, at: number) {
     row.digest.toolCalls += 1;
     row.digest.lastEventAt = at;
     row.digest.contextTokens = (row.digest.contextTokens ?? 80_000) + 600;
+    // The seat's tokens for this minute, which the crew table and its chart read.
+    const minute = Math.floor(at / 60_000) * 60_000;
+    const bucket = row.digest.minuteTokens.find(([start]) => start === minute);
+    if (bucket) bucket[1] += 900;
+    else row.digest.minuteTokens.push([minute, 900]);
   }
   if (row.run?.tokens) row.run.tokens.output += 900;
 }
@@ -182,7 +190,7 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   if (!ticket) return;
   ticket.stage = move.to;
   ticket.seat = move.seat ?? (move.to === "merged" ? null : ticket.seat);
-  const shift = Date.now() - NOW;
+  const shift = wholeMinutes(Date.now() - NOW);
   summaryOf(s).pipeline = pipelineStages(s.tickets).map((stage) => ({
     ...stage,
     oldestAt: stage.count ? at - 40 * 60_000 : null,
