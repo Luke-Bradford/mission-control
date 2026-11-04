@@ -176,6 +176,63 @@ describe("Dependencies mockup in jsdom", () => {
     expect(many.querySelector("[data-reason='demo#60'] a")).toBeNull();
   });
 
+  it("counts what a merge frees the same way on Board, FLIGHT and QA", () => {
+    const board = render("?view=board&state=normal");
+    expect(
+      text(board.querySelector("[data-ticket='demo#21'] [data-chip=unblocks]")),
+    ).toBe("Unblocks 2");
+    const row = render("?view=qa&pr=demo-21").querySelector("#queueP a.row.on");
+    expect(text(row)).toContain("unblocks 2");
+    expect(text(render("?view=qa&pr=demo-21").querySelector("[data-frees]"))).toContain(
+      "Merging this frees 2",
+    );
+    const flight = render("?view=flight&state=normal");
+    expect(
+      text(flight.querySelector("[data-ref='demo PR 21'] [role=cell]:last-child")),
+    ).toBe("2");
+  });
+
+  it("draws the Board's columns in their real order", () => {
+    const document = render("?view=board&state=normal");
+    expect(
+      [...document.querySelectorAll(".col .phead h2")].map((h2) => h2.firstChild?.textContent),
+    ).toEqual([
+      "Backlog",
+      "Refinement",
+      "Blocked",
+      "Ready",
+      "In progress",
+      "In review",
+      "Ready for QA",
+      "Done",
+    ]);
+    expect(document.querySelectorAll("#col-In-review .card").length).toBeGreaterThan(0);
+  });
+
+  it("draws the live Seats columns and keeps Seats and Blocked consistent", () => {
+    const document = render("?view=flight&state=normal");
+    expect([...document.querySelectorAll("#wifP [role=columnheader]")].map(text)).toEqual([
+      "Seat",
+      "Workstream",
+      "Stage",
+      "Stuck / waiting on",
+      "FLIGHT's next action",
+      "Last instruction",
+    ]);
+    const blocked = [
+      ...render("?view=board&state=normal").querySelectorAll("#col-Blocked .card"),
+    ].map((card) => card.getAttribute("data-ticket"));
+    const working = [...document.querySelectorAll("#wifP [data-seat-state=Working]")].map(text);
+    expect(working.length).toBeGreaterThan(0);
+    for (const row of working) for (const ticket of blocked) expect(row).not.toContain(`${ticket} `);
+  });
+
+  it("links an owner only when there is one", () => {
+    const document = render("?view=flight&state=normal");
+    expect(document.querySelector("[data-ref='PR 1189'] a[href^='/agent/']")).toBeNull();
+    expect(document.querySelector("[data-ref='demo PR 21'] a[href^='/agent/']")).not.toBeNull();
+  });
+
   it("puts every ticket back in Ready while the chains have not loaded", () => {
     const document = render("?view=board&state=loading");
     expect(document.querySelectorAll("#col-Blocked .card").length).toBe(0);

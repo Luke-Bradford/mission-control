@@ -49,7 +49,7 @@
       .nav a.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
       .conn { margin-left: auto; font: 12px/16px var(--mono); color: var(--fg-2); }
 
-      .banner { margin: 0; min-height: 32px; padding: 6px 24px; background: var(--warn-soft); color: var(--fg); border-bottom: 1px solid var(--line-2); font-size: 12px; line-height: 16px; display: flex; align-items: center; }
+      .banner { margin: 0; min-height: 32px; padding: 4px 24px; background: var(--warn-soft); color: var(--fg); border-bottom: 1px solid var(--line-2); font-size: 12px; line-height: 16px; display: flex; align-items: center; }
       .banner b { color: var(--warn); margin-right: 8px; font: 600 11px/16px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 
       .shell { display: grid; grid-template-columns: minmax(0, 1fr); min-height: calc(100 * var(--vh) - 85px); }
@@ -60,7 +60,7 @@
       .rail p { margin: 0 0 8px; color: var(--fg-2); }
 
       .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-      .phead { min-height: 36px; padding: 8px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+      .phead { min-height: 48px; padding: 8px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
       .phead h2 { margin: 0; font: 600 14px/20px var(--sans); white-space: nowrap; }
       .sub { color: var(--muted); font: 11px/16px var(--mono); }
       .phead .right { margin-left: auto; display: flex; gap: 12px; align-items: center; font: 12px/16px var(--mono); color: var(--fg-2); }
@@ -73,7 +73,7 @@
 
       .strip { margin: 0; padding: 4px 16px; min-height: 28px; display: flex; align-items: center; gap: 12px; font-size: 12px; line-height: 16px; border-bottom: 1px solid var(--line); background: var(--warn-soft); }
       .strip.crit { background: var(--crit-soft); color: var(--crit); }
-      .strip button, .btn { min-height: 24px; min-width: 24px; padding: 2px 12px; border: 1px solid var(--accent); border-radius: 2px; background: transparent; color: var(--accent); cursor: pointer; }
+      .strip button, .btn { min-height: 24px; min-width: 24px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 2px; background: transparent; color: var(--accent); cursor: pointer; }
       .btn.primary { background: var(--accent); color: var(--accent-ink); }
       .note { padding: 16px; color: var(--fg-2); }
 
@@ -84,7 +84,7 @@
       .tr.th .num, .tr .num { text-align: right; font-variant-numeric: tabular-nums; }
       .tr > * { min-width: 0; }
       .chains .tr { grid-template-columns: minmax(320px, 640px) 96px minmax(240px, 400px) 160px 88px 88px; }
-      .seats .tr { grid-template-columns: 120px 96px minmax(200px, 360px) 120px minmax(240px, 480px); }
+      .seats .tr { grid-template-columns: 120px minmax(200px, 320px) 104px minmax(200px, 320px) minmax(200px, 320px) minmax(160px, 240px); }
       .chains-scroll, .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: auto; }
       .ell { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .work { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -99,27 +99,34 @@
       .state.with-you { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
       .state.moving { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
       .state.unknown { color: var(--muted); }
-      .more-row button { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 2px 4px; min-height: 24px; }
+      .more-row button { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 4px; min-height: 24px; }
 
       /* Board */
       .board { grid-template-rows: auto minmax(0, 1fr); }
       .boardnote { margin: 0; padding: 4px 16px; min-height: 32px; display: flex; align-items: center; gap: 12px; background: var(--accent-soft); border: 1px solid var(--line); border-radius: 3px; font-size: 12px; line-height: 16px; }
-      .cols { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 12px; min-height: 0; }
+      .colscroll { display: grid; grid-template-rows: minmax(0, 1fr); overflow-x: auto; overflow-y: hidden; min-height: 0; }
+      .cols { display: grid; grid-template-columns: repeat(8, 257px); grid-template-rows: minmax(0, 1fr); gap: 12px; min-height: 0; }
       .col .phead h2 span { color: var(--muted); font: 12px var(--mono); margin-left: 4px; }
       .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
       .card { border: 1px solid var(--line-2); border-radius: 3px; background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .card .ctop { display: flex; justify-content: space-between; gap: 8px; font: 12px/16px var(--mono); color: var(--muted); }
       .card .ctitle { font-weight: 600; color: var(--fg); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       .card .cmeta { font: 12px/16px var(--mono); color: var(--fg-2); }
-      .chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 2px 8px; min-height: 24px; border-radius: 3px; font: 12px/16px var(--mono); border: 1px solid var(--line-2); max-width: 100%; overflow-wrap: anywhere; }
+      .chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 4px 8px; min-height: 24px; border-radius: 3px; font: 12px/16px var(--mono); border: 1px solid var(--line-2); max-width: 100%; overflow-wrap: anywhere; }
       .chip.waits { border-color: var(--warn); background: var(--warn-soft); }
+      /* Drill-through links meet the 24x24 px control minimum. */
+      .ref, .chip a, .reason a, .frees a, .seats a, .chains .tr a, .card a:not(.ctitle) { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
       .chip.unblocks { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
       .chip.read { color: var(--muted); }
 
       /* FLIGHT */
       /* Rows never squeeze Seats (max-content); a short window grows the page instead of clipping a panel. */
-      .flight { grid-template-rows: 36px max-content minmax(360px, 1fr); gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), calc(494px + 11 * var(--row))); }
-      .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
+/* Fixed rows only: Seats is capped at 361 px with its own scroll, as the live panel is, and Blocked chains takes what is left. */
+      .flight { grid-template-rows: 48px 36px 361px minmax(300px, 1fr) 30px; gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), 823px); }
+      .fstatus { display: flex; align-items: center; gap: 16px; padding: 0 16px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font-size: 13px; }
+      .fstatus .sub { margin-left: auto; }
+      .ffoot { display: flex; align-items: center; padding: 0 16px; color: var(--muted); font: 12px/16px var(--mono); }
+            .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
       .card .reason a { font-weight: 600; }
       .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
       .tabs a { padding: 4px 12px; min-height: 36px; display: inline-flex; align-items: center; color: var(--fg-2); }
@@ -402,7 +409,8 @@
         function unblocksChip(card) {
           const c = chains.find((x) => card.rootOf === x.root.ref);
           if (!c) return null;
-          const n = dependents(c).size;
+          const n = c.frees.length;
+          if (!n) return null;
           return h("a", { class: "chip unblocks", href: "/flight#chainsP", "data-chip": "unblocks" }, `Unblocks ${n}`);
         }
 
@@ -424,7 +432,9 @@
           { ref: "demo#32", repo: "demo", title: t("Export docs"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
           { ref: "demo#33", repo: "demo", title: t("Export telemetry"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
           { ref: "demo#34", repo: "demo", title: t("Settings migration"), col: "Ready", prio: "P3", meta: "Held for demo PR 22", dep: true },
-          { ref: "demo#21", repo: "demo", title: t("Add export button"), col: "In progress", prio: "P2", meta: "RETRO-1 checking", rootOf: "demo PR 21" },
+          { ref: "demo#21", repo: "demo", title: t("Add export button"), col: "In review", prio: "P2", meta: "RETRO-1 checking", rootOf: "demo PR 21" },
+          { ref: "#1210", repo: "mission-control", title: "Seat history export", col: "Backlog", prio: "P3", meta: "Not refined" },
+          { ref: "#1211", repo: "mission-control", title: "Idle seat reminder", col: "Refinement", prio: "P3", meta: "Needs a size" },
         ];
         if (state === "many") {
           for (let i = 0; i < 6; i += 1) BOARD.push({ ref: `demo#${70 + i}`, repo: "demo", title: `Follow-up ${70 + i}`, col: "Ready", prio: "P3", meta: "Depends on demo PR 44", dep: true });
@@ -438,7 +448,7 @@
           "demo#34": ["held for", "demo#22"], "demo#60": ["depends on", "legacy#7"], "demo#61": ["depends on", "demo#40"],
           ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`demo#${70 + i}`, ["depends on", "demo#44"]])),
         };
-        const COLUMNS = ["Ready", "In progress", "Blocked", "Ready for QA", "Done"];
+        const COLUMNS = ["Backlog", "Refinement", "Blocked", "Ready", "In progress", "In review", "Ready for QA", "Done"];
         const GRAPH_KNOWN = !["loading", "error"].includes(state);
 
         const columnOf = (card) =>
@@ -464,7 +474,7 @@
                 const chip = name === "Done" ? null : waitsChip(card);
                 const root = name === "Done" ? null : card.rootOf ? unblocksChip(card) : null;
                 const loadingChip = state === "loading" && card.dep ? h("span", { class: "chip read" }, "Reading what waits on what…") : null;
-                return h("article", { class: "card", "data-ref": card.ref.startsWith("#") ? `${card.repo}${card.ref}` : card.ref },
+                return h("article", { class: "card", "data-ticket": card.ref, "data-ref": card.ref.startsWith("#") ? `${card.repo}${card.ref}` : card.ref },
                   h("div", { class: "ctop" }, h("a", { href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}` }, `${card.repo}${card.ref.replace(/^[^#]*/, "")}`), h("span", null, card.prio)),
                   h("a", { class: "ctitle", href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}`, title: card.title }, card.title),
                   chip, root, loadingChip,
@@ -477,36 +487,39 @@
               h("div", { class: "phead" }, h("h2", null, name, h("span", { title: name === "Ready" ? "Tickets the engine can deal now." : "" }, String(cards.length)))),
               body);
           });
-          return h("main", { class: "board" }, h("div", null, note, strip), h("div", { class: "cols" }, colEls));
+          return h("main", { class: "board" }, h("div", null, note, strip), h("div", { class: "colscroll" }, h("div", { class: "cols" }, colEls)));
         }
 
         // ---- FLIGHT
+        // Workstream, Stage, "Stuck / waiting on", FLIGHT's next action, Last instruction: the live Seats columns.
         const SEATS = [
-          ["INCO-1", "Working", "#1139 Sort Seats by wait", "In progress", "Waiting on PR 1033 (you)", "free"],
-          ["INCO-2", "Working", "#1201 Show when a seat is idle", "In progress", "Nothing stops it", "ok"],
-          ["EECOM-1", "Working", "#1190 Audit filter by seat", "In progress", "Nothing stops it", "ok"],
-          ["EECOM-2", "Free", "—", "—", "No ticket queued", "free"],
-          ["GUIDO-CX", "Waiting", "#1180 Rework PR A", "Queued", "Behind PR 1189", "wait"],
-          ["GUIDO-2", "Free", "—", "—", "No ticket queued", "free"],
-          ["RETRO-1", "Working", "demo PR 21 review", "In review", "Checking the head", "ok"],
-          ["RETRO-2", "Working", "demo PR 44 review", "In review", "Checking the head", "ok"],
-          ["FIDO-1", "Waiting", "#1015 acceptance", "Ready for QA", "Waiting for you", "wait"],
-          ["SURGEON-1", "Free", "—", "—", "No ticket queued", "free"],
-          ["DEMO-1", "Working", "demo#32 Export docs", "Ready", "Nothing stops it", "ok"],
+          ["INCO-1", "Waiting", "#1139 Sort Seats by wait", "Blocked", "Waiting on PR 1033 (you)", "Nudge you to accept PR 1033", "Take #1201 meanwhile", "wait"],
+          ["INCO-2", "Working", "#1201 Show when a seat is idle", "In progress", "Nothing stops it", "Watch the next push", "Start #1201", "ok"],
+          ["EECOM-1", "Working", "#1190 Audit filter by seat", "In progress", "Nothing stops it", "Watch the next push", "Start #1190", "ok"],
+          ["EECOM-2", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["GUIDO-CX", "Waiting", "#1180 Rework PR A", "Ready", "Behind PR 1189", "Assign a reviewer to PR 1189", "Hold until PR 1189", "wait"],
+          ["GUIDO-2", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["RETRO-1", "Working", "demo PR 21 review", "In review", "Checking the head", "Wait for the report", "Review demo PR 21", "ok"],
+          ["RETRO-2", "Working", "demo PR 44 review", "In review", "Checking the head", "Wait for the report", "Review demo PR 44", "ok"],
+          ["FIDO-1", "Waiting", "#1015 acceptance", "Ready for QA", "Waiting for you", "Remind you after 4 h", "Hold for acceptance", "wait"],
+          ["SURGEON-1", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["DEMO-1", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
         ];
 
         function renderSeats() {
           return h("section", { class: "panel seats", id: "wifP" },
             h("div", { class: "phead" }, h("h2", null, "Seats"), h("span", { class: "sub" }, "LIVE · ticket, stage, what stops each seat and FLIGHT's next action")),
+            h("div", { class: "scroll" },
             h("div", { class: "tbl", role: "table", "aria-label": "Seats" },
-              h("div", { class: "tr th", role: "row" }, ["Seat", "State", "Ticket", "Stage", "What stops it"].map((c) => h("span", { role: "columnheader" }, c))),
-              SEATS.map(([seat, st, ticket, stage, stops, dot]) =>
-                h("div", { class: "tr", role: "row" },
-                  h("span", { role: "cell" }, seatEl(seat.toLowerCase(), seat)),
-                  h("span", { role: "cell" }, h("span", { class: `dot ${dot === "ok" ? "" : dot}` }), st),
-                  h("span", { role: "cell", class: "ell", title: ticket }, ticket),
+              h("div", { class: "tr th", role: "row" }, ["Seat", "Workstream", "Stage", "Stuck / waiting on", "FLIGHT's next action", "Last instruction"].map((c) => h("span", { role: "columnheader" }, c))),
+              SEATS.map(([seat, st, work, stage, stuck, next, last, dot]) =>
+                h("div", { class: "tr", role: "row", "data-seat-state": st },
+                  h("span", { role: "cell" }, h("span", { class: `dot ${dot === "ok" ? "" : dot}`, title: st }), seatEl(seat.toLowerCase(), seat)),
+                  h("span", { role: "cell", class: "ell", title: work }, work),
                   h("span", { role: "cell" }, stage),
-                  h("span", { role: "cell", class: "ell", title: stops }, stops)))));
+                  h("span", { role: "cell", class: "ell", title: stuck }, stuck),
+                  h("span", { role: "cell", class: "ell", title: next }, next),
+                  h("span", { role: "cell", class: "ell", title: last }, last))))));
         }
 
         function chainRows(c, open) {
@@ -520,7 +533,7 @@
               rootName ? h("span", { class: "ttl" }, rootName) : h("span", { class: "ttl", title: c.root.title }, c.root.title)),
             h("span", { role: "cell" }, h("span", { class: `state ${c.state}` }, STATE_MARK[c.state], STATE_MARK[c.state] ? " " : "", stateWord)),
             h("span", { role: "cell", class: "ell", title: c.reason }, c.reason),
-            h("span", { role: "cell", class: "ell" }, c.seatId && c.owner !== "You" ? seatEl(c.seatId, c.owner) : c.owner),
+            h("span", { role: "cell", class: "ell" }, c.seatId && c.owner !== "You" && c.owner !== "—" ? seatEl(c.seatId, c.owner) : c.owner),
             h("span", { role: "cell", class: "num" }, c.longestWaitMs === null ? h("span", { title: NO_START }, "—") : formatWait(c.longestWaitMs)),
             h("span", { role: "cell", class: "num" }, String(c.frees.length))));
           const flat = [];
@@ -596,17 +609,19 @@
 
         function renderFlight() {
           return h("main", { class: "flight" },
+            h("div", { class: "fstatus", role: "status" }, h("b", null, "FLIGHT"), "Running · 3 things need you", h("span", { class: "sub" }, "last action 2 min ago")),
             h("div", { class: "tabs", role: "tablist" },
               h("a", { href: "/flight#needs" }, "Needs you"), h("a", { href: "/flight#did" }, "What FLIGHT did"),
               h("a", { class: "on", href: "/flight#crew", "aria-current": "page" }, "Crew & board"), h("a", { href: "/flight#knows" }, "What FLIGHT knows")),
-            renderSeats(), renderChains());
+            renderSeats(), renderChains(),
+            h("p", { class: "ffoot" }, "Seats and chains refresh with the hub · fixture data"));
         }
 
         // ---- QA
         const QA_QUEUE = [
-          { key: "1033", repo: "mission-control", pr: "PR 1033", title: "Dependency edges in the board read", age: "3d 4h", unblocks: 3 },
-          { key: "1034", repo: "mission-control", pr: "PR 1034", title: "Comms thread keyboard order", age: "1d 6h", unblocks: 0 },
-          { key: "demo-21", repo: "demo", pr: "demo PR 21", title: "Add export button", age: "9h", unblocks: 2 },
+          { key: "1033", repo: "mission-control", pr: "PR 1033", title: "Dependency edges in the board read", age: "3d 4h" },
+          { key: "1034", repo: "mission-control", pr: "PR 1034", title: "Comms thread keyboard order", age: "1d 6h" },
+          { key: "demo-21", repo: "demo", pr: "demo PR 21", title: "Add export button", age: "9h" },
         ];
 
         function freesBlock(pr) {
@@ -630,7 +645,7 @@
           const queue = h("section", { class: "panel queue", id: "queueP" },
             h("div", { class: "phead" }, h("h2", null, "Waiting for you"), h("span", { class: "sub" }, `${QA_QUEUE.length} PRs`)),
             h("div", { class: "scroll" }, QA_QUEUE.map((p) => {
-              const n = !known || state === "empty" ? 0 : (chains.find((x) => x.root.ref === p.pr) ? dependents(chains.find((x) => x.root.ref === p.pr)).size : 0);
+              const n = !known || state === "empty" ? 0 : (chains.find((x) => x.root.ref === p.pr)?.frees.length ?? 0);
               return h("a", { class: `row${p.key === selected.key ? " on" : ""}`, href: `?view=qa&state=${state}&theme=${theme}&pr=${p.key}${rail ? "&rail=open" : ""}` },
                 h("span", { class: "t" }, p.title),
                 h("span", { class: "m" }, h("span", null, `${p.repo} · ${p.pr}`), h("span", null, n ? `unblocks ${n}` : "", n ? " · " : "", p.age)));

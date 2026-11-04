@@ -20,6 +20,33 @@ const VIEWPORTS: ReadonlyArray<readonly [number, number, boolean]> = [
   [1600, 700, true],
 ];
 
+/**
+ * Runs in the page, so it uses nothing from this file. `clipped` names panels whose content
+ * spills past their box (a scroller inside a panel is fine); `small` names text under 11 px.
+ */
+const measure = () => {
+  const root = document.scrollingElement ?? document.documentElement;
+  const panels = [...document.querySelectorAll<HTMLElement>(".panel")];
+  return {
+    panels: panels.length,
+    sideways: root.scrollWidth - root.clientWidth,
+    pageScroll: root.scrollHeight - root.clientHeight,
+    clipped: panels
+      .filter(
+        (panel) =>
+          panel.scrollWidth > panel.clientWidth + 1 || panel.scrollHeight > panel.clientHeight + 1,
+      )
+      .map((panel) => panel.id || panel.className),
+    small: [...document.querySelectorAll<HTMLElement>("main *")]
+      .filter(
+        (el) =>
+          [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()) &&
+          Number.parseFloat(getComputedStyle(el).fontSize) < 11,
+      )
+      .map((el) => el.className),
+  };
+};
+
 describeRendered("Dependencies mockup in a browser", () => {
   for (const view of VIEWS) {
     for (const theme of THEMES) {
@@ -37,22 +64,7 @@ describeRendered("Dependencies mockup in a browser", () => {
             const where = `${view} ${theme} ${width}x${height}`;
             await page.boxes(".view-ready");
             expect(page.errors(), `${where}: script errors`).toEqual([]);
-            const report = await page.evaluate(() => {
-              const root = document.scrollingElement ?? document.documentElement;
-              const panels = [...document.querySelectorAll<HTMLElement>(".panel")];
-              return {
-                sideways: root.scrollWidth - root.clientWidth,
-                pageScroll: root.scrollHeight - root.clientHeight,
-                panels: panels.length,
-                clipped: panels
-                  .filter(
-                    (panel) =>
-                      panel.scrollWidth > panel.clientWidth + 1 ||
-                      panel.scrollHeight > panel.clientHeight + 1,
-                  )
-                  .map((panel) => panel.id || panel.className),
-              };
-            }, null);
+            const report = await page.evaluate(measure, null);
             expect(report.panels, `${where}: panels`).toBeGreaterThan(0);
             expect(report.sideways, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
             expect(report.clipped, `${where}: clipped panels`).toEqual([]);
@@ -71,27 +83,24 @@ describeRendered("Dependencies mockup in a browser", () => {
     "recomposes every view with the FLIGHT rail open",
     async () => {
       for (const view of VIEWS) {
-        for (const [width, height] of [
-          [1920, 940],
-          [2560, 1145],
-        ]) {
+        for (const [width, height, theme] of [
+          [1920, 940, "dark"],
+          [2560, 1145, "dark"],
+          [1920, 940, "light"],
+          [2560, 1145, "light"],
+        ] as const) {
           const page = await renderAt({
             page: PAGE,
             width,
             height,
-            search: `?view=${view}&state=normal&theme=dark&rail=open`,
-            colorScheme: "dark",
+            search: `?view=${view}&state=normal&theme=${theme}&rail=open`,
+            colorScheme: theme,
           });
           await page.boxes(".rail");
-          const where = `${view} ${width}x${height} rail open`;
+          const where = `${view} ${width}x${height} ${theme} rail open`;
           expect(page.errors(), `${where}: script errors`).toEqual([]);
-          const report = await page.evaluate(() => {
-            const root = document.scrollingElement ?? document.documentElement;
-            return {
-              sideways: root.scrollWidth - root.clientWidth,
-              pageScroll: root.scrollHeight - root.clientHeight,
-            };
-          }, null);
+          const report = await page.evaluate(measure, null);
+          expect(report.clipped, `${where}: clipped panels`).toEqual([]);
           expect(report.sideways, `${where}: sideways`).toBeLessThanOrEqual(0);
           expect(report.pageScroll, `${where}: page scroll`).toBeLessThanOrEqual(0);
           await page.close();
@@ -145,28 +154,46 @@ describeRendered("Dependencies mockup in a browser", () => {
           await page.boxes(".view-ready");
           const where = `${view} ${state}`;
           expect(page.errors(), `${where}: script errors`).toEqual([]);
-          const report = await page.evaluate(() => {
-            const root = document.scrollingElement ?? document.documentElement;
-            return {
-              sideways: root.scrollWidth - root.clientWidth,
-              pageScroll: root.scrollHeight - root.clientHeight,
-              small: [...document.querySelectorAll<HTMLElement>("main *")]
-                .filter(
-                  (el) =>
-                    el.childNodes.length > 0 &&
-                    [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()) &&
-                    Number.parseFloat(getComputedStyle(el).fontSize) < 11,
-                )
-                .map((el) => el.className),
-            };
-          }, null);
+          const report = await page.evaluate(measure, null);
           expect(report.sideways, `${where}: sideways`).toBeLessThanOrEqual(0);
           expect(report.small, `${where}: text under 11px`).toEqual([]);
+          expect(report.clipped, `${where}: clipped panels`).toEqual([]);
           await page.close();
         }
       }
     },
     BROWSER_TEST_TIMEOUT_MS * 6,
+  );
+
+  it(
+    "makes every drill-through link at least 24x24 px",
+    async () => {
+      for (const view of VIEWS) {
+        const page = await renderAt({
+          page: PAGE,
+          width: 1920,
+          height: 940,
+          search: `?view=${view}&state=normal&theme=dark`,
+          colorScheme: "dark",
+        });
+        await page.boxes(".view-ready");
+        const small = await page.evaluate(
+          () =>
+            [
+              ...document.querySelectorAll<HTMLElement>(
+                "#chainsP a, #wifP a, [data-chip] a, .reason a, [data-frees] a, .card .ctop a",
+              ),
+            ]
+              .map((a) => ({ text: a.textContent, box: a.getBoundingClientRect() }))
+              .filter(({ box }) => box.width < 24 || box.height < 24)
+              .map(({ text }) => text),
+          null,
+        );
+        expect(small, `${view}: links under 24x24`).toEqual([]);
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 2,
   );
 
   it(

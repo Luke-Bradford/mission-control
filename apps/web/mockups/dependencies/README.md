@@ -36,13 +36,15 @@ Finding: views readable at 100 items put one mark on each row and leave structur
 
 A chain is an indented list. Real chains are wide and shallow: PR 1033 has 3 dependents, PR 1189 has 2. A list sorts by wait, keeps keyboard order and holds stable positions as data changes.
 
-"Frees" counts only dependents whose last wait this merge ends. A dependent with another open wait is counted separately, as `{m} more also wait on other work`.
+"Frees" counts only dependents whose last wait this merge ends. The Board's `Unblocks {n}`, FLIGHT's Merge frees column and QA's `unblocks {n}` all use that same number. A dependent with another open wait is counted separately, as `{m} more also wait on other work`.
 
 Drill-throughs: a ticket ref goes to `ticketPath`, a PR to the QA page's repo and PR query, a seat to `agentPath`, and a chip's `+{n}` to a new `chainsP` panel on the FLIGHT page.
 
-### What the views keep
+### What the views keep, and what gives way
 
-The Seats rows, the Board's card order and widths, and QA's decision controls are drawn as they are today. The mockup does not redraw the other Crew & board panels (FLIGHT's queue, Revisit triggers); they stay below Blocked chains, reached by scrolling the page, and are out of this proposal.
+- **Board:** the eight real columns in their real order (Backlog, Refinement, Blocked, Ready, In progress, In review, Ready for QA, Done), 257 px wide, with the Board's sideways scroll. Cards keep their 210 px minimum.
+- **FLIGHT, Crew & board:** the FLIGHT status strip, the tabs, the live Seats columns (Seat, Workstream, Stage, Stuck / waiting on, FLIGHT's next action, Last instruction) with 48 px panel heads, and a footer line. Seats is capped at 361 px and scrolls inside itself, as the live panel does. That is what gives way: Blocked chains takes the rest, 332 px at 1920×940, which is about 7 rows at 32 px, not the 9 first estimated. At 2560×1145 it has about 550 px, about 11 rows at 40 px. FLIGHT's queue and Revisit triggers are not redrawn; they stay below.
+- **QA:** the queue and the decision controls as they are, with one new line in the decision panel.
 
 ## Panel stats
 
