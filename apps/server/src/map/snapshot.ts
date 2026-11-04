@@ -25,14 +25,29 @@ export interface MapPersist {
 }
 
 /** The largest code file or manifest the Map opens for links; nothing else is ever opened. */
+/** The stored-tree kind; renamed when a tile's weight changed meaning, so old rows are not read. */
+export const MAP_TREE_KIND = "tree-weight";
 export const MAP_BLOB_MAX_BYTES = 1024 * 1024;
 /** A tile's weight is its bytes over this, so a file the Map never opens still gets a size. */
 export const MAP_BYTES_PER_TILE_UNIT = 32;
+/** The most blob bytes one tree read sends to git; links past it are left out, never the whole tree. */
+export const MAP_READ_BUDGET_BYTES = 48 * 1024 * 1024;
+/** A recorded run or a binary is a file to find, not area to give it: its tile weight stops here. */
+export const MAP_EVIDENCE_TILE_UNITS = 1;
 const MAP_PARSED_MAX = 20_000;
 const MAP_CODE = /\.[cm]?[jt]sx?$/;
+const MAP_EVIDENCE = /^docs\/evidence\//;
+const MAP_BINARY =
+  /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|tiff?|pdf|mp4|mov|webm|zip|gz|tgz|tar|7z|woff2?|ttf|otf|log|patch|diff|sqlite|db)$/i;
 
-export const mapTileSize = (bytes: number): number =>
-  bytes === 0 ? 0 : Math.max(1, Math.ceil(bytes / MAP_BYTES_PER_TILE_UNIT));
+/** A tile's weight: its bytes over a fixed unit, but evidence and binaries never outweigh code. */
+export const mapTileSize = (bytes: number, path = ""): number => {
+  if (bytes === 0) return 0;
+  const units = Math.max(1, Math.ceil(bytes / MAP_BYTES_PER_TILE_UNIT));
+  return MAP_EVIDENCE.test(path) || MAP_BINARY.test(path)
+    ? Math.min(units, MAP_EVIDENCE_TILE_UNITS)
+    : units;
+};
 
 /** What the links need from one blob, keyed by its sha so a new commit rereads only changed files. */
 interface ParsedBlob {
@@ -53,13 +68,16 @@ function parseBlob(content: string): ParsedBlob {
         ? ""
         : content.slice(Math.max(0, content.lastIndexOf("import", match.index)), match.index);
     const names = [...clause.matchAll(/\{([^}]+)\}/g)].flatMap((named) =>
-      (named[1] as string).split(",").map(
-        (part) =>
-          part
-            .trim()
-            .replace(/^type\s+/, "")
-            .split(/\s+as\s+/)[0] ?? "",
-      ),
+      (named[1] as string)
+        .split(",")
+        .map(
+          (part) =>
+            part
+              .trim()
+              .replace(/^type\s+/, "")
+              .split(/\s+as\s+/)[0] ?? "",
+        )
+        .filter(Boolean),
     );
     specs.push({ specifier: match[1] as string, names });
   }
@@ -128,6 +146,7 @@ export function mapTree(
   board: readonly BoardItem[] = [],
   at = Date.now(),
   persist?: MapPersist,
+  onBlobRead?: (shas: readonly string[]) => void,
 ): Promise<Tree> {
   const read = pending.then(async () => {
     const env = { ...gitEnv(process.env), GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" };
@@ -153,14 +172,25 @@ export function mapTree(
           : [];
       });
       // The tree and its tile sizes come from file metadata alone; only code and manifests are opened.
-      const tree = entries.map((e) => ({ path: e.path, lines: mapTileSize(e.size) }));
+      if (entries.length === 0) throw new Error("the checkout has no files at this commit");
+      const tree = entries.map((e) => ({ path: e.path, lines: mapTileSize(e.size, e.path) }));
       const wanted = entries.filter(
         (e) =>
           e.size <= MAP_BLOB_MAX_BYTES &&
           (MAP_CODE.test(e.path) || posix.basename(e.path) === "package.json"),
       );
-      const missing = [...new Set(wanted.map((e) => e.sha))].filter((sha) => !parsedBlobs.has(sha));
+      const missing: string[] = [];
+      const queued = new Set<string>();
+      let budget = MAP_READ_BUDGET_BYTES;
+      for (const e of wanted) {
+        if (parsedBlobs.has(e.sha) || queued.has(e.sha) || e.size > budget) continue;
+        budget -= e.size;
+        queued.add(e.sha);
+        missing.push(e.sha);
+      }
+      const local = new Map<string, ParsedBlob>();
       if (missing.length) {
+        onBlobRead?.(missing);
         const blobs = await new Promise<Buffer>((resolve, reject) => {
           const child = spawn("git", [...args, "cat-file", "--batch"], {
             env,
@@ -185,27 +215,30 @@ export function mapTree(
           const header = blobs.subarray(offset, end).toString().split(" ");
           if (header[1] === "missing") {
             offset = end + 1;
-            parsedBlobs.set(sha, { specs: [], exported: [], stars: [], exports: [] });
             continue;
           }
           const size = Number(header[2]);
           if (!Number.isSafeInteger(size)) throw new Error("invalid map blob");
           const bytes = blobs.subarray(end + 1, end + 1 + size);
           offset = end + size + 2;
-          parsedBlobs.set(sha, parseBlob(bytes.includes(0) ? "" : bytes.toString("utf8")));
+          const blob = parseBlob(bytes.includes(0) ? "" : bytes.toString("utf8"));
+          local.set(sha, blob);
+          parsedBlobs.set(sha, blob);
           if (parsedBlobs.size > MAP_PARSED_MAX)
             parsedBlobs.delete(parsedBlobs.keys().next().value as string);
         }
       }
       const parsed = (sha: string): ParsedBlob =>
+        local.get(sha) ??
         parsedBlobs.get(sha) ?? { specs: [], exported: [], stars: [], exports: [] };
       const sources = new Map<string, ParsedBlob>();
       const workspace = new Map<string, string>();
       for (const e of wanted) {
         const blob = parsed(e.sha);
         if (MAP_CODE.test(e.path)) sources.set(e.path, blob);
-        for (const [name, target] of blob.exports)
-          workspace.set(name, posix.join(posix.dirname(e.path), target));
+        if (posix.basename(e.path) === "package.json")
+          for (const [name, target] of blob.exports)
+            workspace.set(name, posix.join(posix.dirname(e.path), target));
       }
       const paths = new Set(tree.map((f) => f.path));
       const resolve = (base: string): string | null => {
@@ -255,7 +288,7 @@ export function mapTree(
     };
     let stored: Pick<Tree, "tree" | "imports"> | null = null;
     try {
-      const raw = persist?.get("tree", checkout, commit);
+      const raw = persist?.get(MAP_TREE_KIND, checkout, commit);
       const parsed: unknown = raw ? JSON.parse(raw) : null;
       if (
         parsed !== null &&
@@ -270,7 +303,7 @@ export function mapTree(
     const { tree, imports } = stored ?? (await readTree());
     if (!stored) {
       try {
-        persist?.put("tree", checkout, commit, JSON.stringify({ tree, imports }), true);
+        persist?.put(MAP_TREE_KIND, checkout, commit, JSON.stringify({ tree, imports }), true);
       } catch {
         // the store is a cache: a failed write only costs the next start
       }

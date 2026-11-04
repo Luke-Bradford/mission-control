@@ -1,10 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MapSnapshot, PullRequestView } from "@mc/core";
 import { afterEach, expect, it } from "vitest";
-import { MAP_HISTORY_WINDOW_MS, mapTileSize, mapTree } from "../src/map/snapshot.ts";
+import {
+  MAP_EVIDENCE_TILE_UNITS,
+  MAP_HISTORY_WINDOW_MS,
+  MAP_TREE_KIND,
+  mapTileSize,
+  mapTree,
+} from "../src/map/snapshot.ts";
 
 import { mapCheckout } from "./map-checkout.ts";
 
@@ -208,7 +214,9 @@ it("persists the tree, imports and each merge's files, and reuses them without r
   };
   const head = git(checkout, "rev-parse", "origin/HEAD");
   const first = await mapTree(checkout, "origin/HEAD", [storedPr(1, merge)], [], NOW, persist);
-  expect(JSON.parse(rows.get(`tree|${checkout}|${head}`) as string).tree).toEqual(first.tree);
+  expect(JSON.parse(rows.get(`${MAP_TREE_KIND}|${checkout}|${head}`) as string).tree).toEqual(
+    first.tree,
+  );
   expect(JSON.parse(rows.get(`merge||${merge}`) as string)).toEqual(["packages/core/src/map.ts"]);
 
   // a second checkout of the same history, as after a restart (the in-memory cache is empty for it)
@@ -218,7 +226,7 @@ it("persists the tree, imports and each merge's files, and reuses them without r
     git(checkout2, "branch", "-M", "main");
     const head2 = git(checkout2, "rev-parse", "origin/HEAD");
     const marker = { tree: [{ path: "stored.ts", lines: 3 }], imports: [] };
-    rows.set(`tree|${checkout2}|${head2}`, JSON.stringify(marker));
+    rows.set(`${MAP_TREE_KIND}|${checkout2}|${head2}`, JSON.stringify(marker));
     const again = await mapTree(checkout2, "origin/HEAD", [], [], NOW, persist);
     expect(again.tree).toEqual(marker.tree);
     // an unreadable stored row is recomputed, not trusted
@@ -226,7 +234,10 @@ it("persists the tree, imports and each merge's files, and reuses them without r
     try {
       const checkout3 = mapCheckout(third);
       git(checkout3, "branch", "-M", "main");
-      rows.set(`tree|${checkout3}|${git(checkout3, "rev-parse", "origin/HEAD")}`, "{not json");
+      rows.set(
+        `${MAP_TREE_KIND}|${checkout3}|${git(checkout3, "rev-parse", "origin/HEAD")}`,
+        "{not json",
+      );
       const cold = await mapTree(checkout3, "origin/HEAD", [], [], NOW, persist);
       expect(cold.tree.length).toBeGreaterThan(1);
     } finally {
@@ -247,22 +258,86 @@ it("reads a tree over 64 MiB from file metadata, opening only code and manifests
   writeFileSync(join(checkout, "shot.png"), Buffer.alloc(2 * 1024 * 1024, 1));
   writeFileSync(
     join(checkout, "generated.ts"),
-    `export const big = "${"y".repeat(2 * 1024 * 1024)}";\n`,
+    `import { Snapshot } from "./packages/core/src/types.ts";\nexport const big = "${"y".repeat(2 * 1024 * 1024)}";\n`,
+  );
+  writeFileSync(
+    join(checkout, "small.ts"),
+    'import { Snapshot } from "./packages/core/src/types.ts";\n',
   );
   git(checkout, "add", ".");
   git(checkout, "commit", "-qm", "big tree");
   git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
-  const data = await mapTree(checkout, "origin/main");
+  const read: string[] = [];
+  const data = await mapTree(checkout, "origin/main", [], [], NOW, undefined, (shas) =>
+    read.push(...shas),
+  );
   const size = (path: string) => data.tree.find((f) => f.path === path)?.lines;
-  expect(size("docs/evidence/run/out-0.log")).toBe(mapTileSize(20 * 1024 * 1024));
-  expect(size("shot.png")).toBe(mapTileSize(2 * 1024 * 1024));
-  expect(size("generated.ts")).toBeGreaterThan(0);
-  expect(data.imports).toContainEqual({
-    from: "packages/core/src/map.ts",
-    to: "packages/core/src/types.ts",
-  });
+  // evidence and images stay in the tree with a weight that never outweighs code
+  expect(size("docs/evidence/run/out-0.log")).toBe(MAP_EVIDENCE_TILE_UNITS);
+  expect(size("shot.png")).toBe(MAP_EVIDENCE_TILE_UNITS);
+  expect(size("generated.ts")).toBe(
+    mapTileSize(Buffer.byteLength(readFileSync(join(checkout, "generated.ts"))), "generated.ts"),
+  );
+  // only code and manifests are sent to cat-file; the oversized code file is not
+  const wanted = git(checkout, "ls-tree", "-r", "origin/main")
+    .split("\n")
+    .map((row) => /^\d+ blob (\w+)\t(.*)$/.exec(row))
+    .flatMap((m) => (m ? [{ sha: m[1] as string, path: m[2] as string }] : []));
+  const shaOf = (path: string) => wanted.find((w) => w.path === path)?.sha as string;
+  expect(read).toContain(shaOf("small.ts"));
+  expect(read).not.toContain(shaOf("generated.ts"));
+  expect(read).not.toContain(shaOf("shot.png"));
+  expect(read).not.toContain(shaOf("docs/evidence/run/out-0.log"));
+  expect(data.imports).toContainEqual({ from: "small.ts", to: "packages/core/src/types.ts" });
   expect(data.imports.some((i) => i.from === "generated.ts")).toBe(false);
 }, 60_000);
+
+it("leaves a tile's weight alone for code and gives evidence and binaries the floor", () => {
+  expect(mapTileSize(3200, "src/a.ts")).toBe(100);
+  expect(mapTileSize(3200, "docs/evidence/x/notes.md")).toBe(MAP_EVIDENCE_TILE_UNITS);
+  expect(mapTileSize(3200, "docs/shot.PNG")).toBe(MAP_EVIDENCE_TILE_UNITS);
+  expect(mapTileSize(0, "docs/shot.png")).toBe(0);
+});
+
+it("stops sending blobs past the read budget and still answers", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-budget-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  // 60 distinct 900 KiB code files: 52 MiB, past the 48 MiB budget
+  for (let i = 0; i < 60; i++)
+    writeFileSync(
+      join(checkout, `bulk-${i}.ts`),
+      `export const n${i} = "${`${i}`.repeat(900 * 1024)}";\n`,
+    );
+  git(checkout, "add", ".");
+  git(checkout, "commit", "-qm", "bulk");
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const read: string[] = [];
+  const data = await mapTree(checkout, "origin/main", [], [], NOW, undefined, (shas) =>
+    read.push(...shas),
+  );
+  expect(data.tree.filter((f) => f.path.startsWith("bulk-"))).toHaveLength(60);
+  // 48 MiB holds 54 files of 900 KiB; the other six stay in the tree unread
+  expect(read.length).toBeLessThanOrEqual(54);
+  expect(read.length).toBeGreaterThan(40);
+}, 60_000);
+
+it("does not cache a tree with no files", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-empty-"));
+  mkdirSync(dir, { recursive: true });
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "commit", "--allow-empty", "-qm", "empty");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const rows = new Map<string, string>();
+  const persist = {
+    get: () => null,
+    put: (kind: string, scope: string, key: string, value: string) => {
+      rows.set(`${kind}|${scope}|${key}`, value);
+    },
+  };
+  await expect(mapTree(dir, "origin/main", [], [], NOW, persist)).rejects.toThrow(/no files/);
+  expect(rows.size).toBe(0);
+});
 
 it("rereads only the blobs a new commit changed", async () => {
   dir = mkdtempSync(join(tmpdir(), "mc-map-sha-"));
