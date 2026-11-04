@@ -1,13 +1,24 @@
-import type { CliAccountStatus, ConfigView, LimitRow } from "@mc/core";
-import { Fragment, useState } from "react";
-import { apiDelete, apiPost, apiPut } from "../api.ts";
+import { type CliAccountStatus, type ConfigView, errorText, type LimitRow } from "@mc/core";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { copyText } from "../clipboard.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { percent, plural, rel, wkdTime } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { popOverlay, pushOverlay, trapTab, useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
+import {
+  ErrorSummary,
+  FieldError,
+  type FieldIssue,
+  fieldProps,
+  issueOf,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "./formSupport.tsx";
 
 type Account = ConfigView["accounts"][number];
 type Models = {
@@ -20,22 +31,22 @@ type Draft = {
   name: string;
   provider: "claude" | "codex";
   cliProfile: string;
-  alertAt: number;
-  stopAt: number;
+  alertAt: string;
+  stopAt: string;
 };
 const blank = (): Draft => ({
   name: "",
   provider: "codex",
   cliProfile: "",
-  alertAt: 80,
-  stopAt: 100,
+  alertAt: "80",
+  stopAt: "100",
 });
 const fromAccount = (account: Account): Draft => ({
   name: account.id,
   provider: account.vendor,
   cliProfile: account.cliProfile ?? "",
-  alertAt: account.alertAt,
-  stopAt: account.stopAt,
+  alertAt: String(account.alertAt),
+  stopAt: String(account.stopAt),
 });
 
 function signInCommand(account: Account): string {
@@ -173,21 +184,105 @@ function SignInPanel({ account }: { account: Account }) {
   );
 }
 
+const ACCOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+const PROFILE_MAX = 4096;
+const OVERLAY_ID = "account-editor";
+const FIELD = (key: string) => `account-${key}`;
+
+/** What the server's schema would refuse, found before sending; the server stays the judge. */
+function accountIssues(draft: Draft, edit: boolean, ids: Record<string, string>): FieldIssue[] {
+  const found: FieldIssue[] = [];
+  if (!edit && !ACCOUNT_NAME.test(draft.name))
+    found.push({
+      id: ids.name,
+      message: "Name must be 1–40 letters, digits, . _ or -, starting with a letter or digit.",
+    });
+  if (draft.provider === "codex") {
+    if (draft.cliProfile === "")
+      found.push({ id: ids.profile, message: "Login profile folder is required for Codex." });
+    else if (draft.cliProfile.length > PROFILE_MAX)
+      found.push({
+        id: ids.profile,
+        message: `Login profile folder can be at most ${PROFILE_MAX} characters.`,
+      });
+  }
+  if (edit) {
+    const whole = (text: string) => /^\d{1,3}$/.test(text) && Number(text) <= 100;
+    if (!whole(draft.alertAt))
+      found.push({ id: ids.alert, message: "Alert at must be a whole number from 0 to 100." });
+    if (!whole(draft.stopAt))
+      found.push({ id: ids.stop, message: "Stop at must be a whole number from 0 to 100." });
+    if (whole(draft.alertAt) && whole(draft.stopAt) && Number(draft.alertAt) > Number(draft.stopAt))
+      found.push({ id: ids.alert, message: "Alert at must not exceed Stop at." });
+  }
+  return found;
+}
+
+/**
+ * The add and edit account form, a modal on the shared overlay helpers. The draft is local: a
+ * refused or lost save, or a refreshed config, leaves what was typed. While a save is out the
+ * fields, Cancel and Escape are held, so nothing closes under it and nothing is sent twice.
+ */
 function AccountEditor({ account, close }: { account: Account | null; close: () => void }) {
   const [draft, setDraft] = useState<Draft>(() => (account ? fromAccount(account) : blank()));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ text: string; uncertain: boolean } | null>(null);
+  const [attempted, setAttempted] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
+  const guard = useSubmitGuard();
+  const alive = useRef(true);
+  const dialog = useRef<HTMLDivElement>(null);
+  const first = useRef<HTMLInputElement>(null);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const base = useId();
+  const ids = {
+    provider: `${base}-${FIELD("provider")}`,
+    name: `${base}-${FIELD("name")}`,
+    profile: `${base}-${FIELD("profile")}`,
+    alert: `${base}-${FIELD("alert")}`,
+    stop: `${base}-${FIELD("stop")}`,
+  };
   const edit = account !== null;
+  const issues = attempted ? accountIssues(draft, edit, ids) : [];
   const change = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }));
+
+  useReturnFocus(true);
+  useEffect(() => {
+    alive.current = true;
+    first.current?.focus();
+    // Esc (the shell's key handler) closes the topmost overlay; a save in flight keeps it open.
+    const onEscape = () => {
+      if (guard.pending()) pushOverlay(OVERLAY_ID, onEscape);
+      else closeRef.current();
+    };
+    pushOverlay(OVERLAY_ID, onEscape);
+    return () => {
+      alive.current = false;
+      popOverlay(OVERLAY_ID);
+    };
+  }, [guard]);
+
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (!guard.take()) return;
+    const found = accountIssues(draft, edit, ids);
+    setAttempted(true);
+    if (found.length > 0) {
+      guard.release();
+      setFailure(null);
+      setFocusKey((key) => key + 1);
+      return;
+    }
     setSaving(true);
-    setError(null);
+    setFailure(null);
     const body = {
       provider: draft.provider,
       ...(draft.provider === "codex" && draft.cliProfile ? { cliProfile: draft.cliProfile } : {}),
-      ...(edit ? { alertAt: draft.alertAt, stopAt: draft.stopAt } : { name: draft.name }),
+      ...(edit
+        ? { alertAt: Number(draft.alertAt), stopAt: Number(draft.stopAt) }
+        : { name: draft.name }),
     };
     try {
       if (edit) await apiPut(ACTIONS.account(account.id), body);
@@ -197,98 +292,169 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
       if (edit) hub.refetch(RESOURCES.accountModels(account.id).path);
       close();
     } catch (cause) {
-      setError((cause as Error).message);
+      const uncertain = isUncertain(cause instanceof ApiError ? cause.status : undefined);
+      if (uncertain) {
+        // The server may have saved before the answer was lost: read what is saved before a retry.
+        hub.refetch(RESOURCES.config.path);
+        hub.refetch(RESOURCES.accountStatus.path);
+      }
+      if (alive.current) {
+        setFailure({ text: errorText(cause), uncertain });
+        setFocusKey((key) => key + 1);
+      }
     } finally {
-      setSaving(false);
+      guard.release();
+      if (alive.current) setSaving(false);
     }
   }
+
+  const nameError = issueOf(issues, ids.name);
+  const profileError = issueOf(issues, ids.profile);
+  const alertError = issueOf(issues, ids.alert);
+  const stopError = issueOf(issues, ids.stop);
+  const title =
+    issues.length > 0 ? "Fix before saving" : failure?.uncertain ? "Result unknown" : "Not saved";
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop takes focus from a click, so Tab stays trapped
     <div
       className="account-editor"
-      role="dialog"
-      aria-modal="true"
-      aria-label={edit ? "Edit account" : "Add account"}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (!guard.pending()) close();
+          return;
+        }
+        trapTab(e);
+      }}
     >
-      <form className="seatform" onSubmit={(event) => void save(event)}>
-        <h2>{edit ? `Edit ${account.id}` : "Add account"}</h2>
-        <label>
-          Vendor
-          <select
-            value={draft.provider}
-            disabled={saving || edit}
-            onChange={(e) => change("provider", e.target.value as Draft["provider"])}
+      <div
+        ref={dialog}
+        className="account-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={edit ? "Edit account" : "Add account"}
+      >
+        <form className="fform" noValidate onSubmit={(event) => void save(event)}>
+          <h2>{edit ? `Edit ${account.id}` : "Add account"}</h2>
+          <fieldset className="fgroup">
+            <legend>Identity</legend>
+            <div className="fpair">
+              <div className="ffield">
+                <label htmlFor={ids.provider}>Vendor</label>
+                <select
+                  id={ids.provider}
+                  value={draft.provider}
+                  disabled={saving || edit}
+                  onChange={(e) => change("provider", e.target.value as Draft["provider"])}
+                >
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </div>
+              <div className="ffield">
+                <label htmlFor={ids.name}>Name</label>
+                <input
+                  {...fieldProps(ids.name, nameError, `${ids.name}-hint`)}
+                  ref={edit ? undefined : first}
+                  value={draft.name}
+                  disabled={saving || edit}
+                  maxLength={40}
+                  onChange={(e) => change("name", e.target.value)}
+                />
+                <FieldError id={ids.name} error={nameError} />
+              </div>
+            </div>
+            <p id={`${ids.name}-hint`} className="fhint muted xs">
+              {edit
+                ? "Vendor and name cannot change once the account exists: seats and loops refer to it."
+                : "1–40 letters, digits, . _ or -, starting with a letter or digit."}
+            </p>
+          </fieldset>
+          <fieldset className="fgroup">
+            <legend>Sign-in</legend>
+            {draft.provider === "codex" ? (
+              <div className="ffield">
+                <label htmlFor={ids.profile}>Login profile folder (absolute)</label>
+                <input
+                  {...fieldProps(ids.profile, profileError, `${ids.profile}-hint`)}
+                  value={draft.cliProfile}
+                  disabled={saving}
+                  placeholder="/Users/operator/.mc/profiles/codex-work"
+                  onChange={(e) => change("cliProfile", e.target.value)}
+                />
+                <span id={`${ids.profile}-hint`} className="fhint muted xs">
+                  Each Codex account has its own signed-in profile. Credentials are never shown or
+                  stored by Mission Control.
+                </span>
+                <FieldError id={ids.profile} error={profileError} />
+              </div>
+            ) : (
+              <p className="note s">
+                Claude uses this machine’s one CLI login; profile folders are not supported.
+              </p>
+            )}
+          </fieldset>
+          {edit && (
+            <fieldset className="fgroup">
+              <legend>Usage thresholds</legend>
+              <div className="fpair">
+                <div className="ffield">
+                  <label htmlFor={ids.alert}>Alert at</label>
+                  <input
+                    {...fieldProps(ids.alert, alertError, `${ids.alert}-hint`)}
+                    ref={first}
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={draft.alertAt}
+                    disabled={saving}
+                    onChange={(e) => change("alertAt", e.target.value)}
+                  />
+                  <FieldError id={ids.alert} error={alertError} />
+                </div>
+                <div className="ffield">
+                  <label htmlFor={ids.stop}>Stop at</label>
+                  <input
+                    {...fieldProps(ids.stop, stopError, `${ids.alert}-hint`)}
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={draft.stopAt}
+                    disabled={saving}
+                    onChange={(e) => change("stopAt", e.target.value)}
+                  />
+                  <FieldError id={ids.stop} error={stopError} />
+                </div>
+              </div>
+              <p id={`${ids.alert}-hint`} className="fhint muted xs">
+                Percent of a limit used. Usage bars turn to alert at the first value and to full at
+                the second. Whole numbers from 0 to 100; alert must not exceed stop.
+              </p>
+            </fieldset>
+          )}
+          <ErrorSummary
+            title={title}
+            issues={issues}
+            message={failure?.text ?? null}
+            focusKey={focusKey}
           >
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-          </select>
-        </label>
-        <label>
-          Name
-          <input
-            value={draft.name}
-            disabled={saving || edit}
-            required
-            maxLength={40}
-            pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,39}"
-            onChange={(e) => change("name", e.target.value)}
-          />
-        </label>
-        {draft.provider === "codex" && (
-          <label className="account-profile">
-            Login profile folder (absolute)
-            <input
-              value={draft.cliProfile}
-              required
-              placeholder="/Users/operator/.mc/profiles/codex-work"
-              onChange={(e) => change("cliProfile", e.target.value)}
-            />
-            <span className="muted xs">
-              Each Codex account has its own signed-in profile. Credentials are never shown or
-              stored by Mission Control.
-            </span>
-          </label>
-        )}
-        {edit && (
-          <>
-            <label>
-              Alert at{" "}
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={draft.alertAt}
-                onChange={(e) => change("alertAt", Number(e.target.value))}
-              />
-            </label>
-            <label>
-              Stop at{" "}
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={draft.stopAt}
-                onChange={(e) => change("stopAt", Number(e.target.value))}
-              />
-            </label>
-          </>
-        )}
-        {draft.provider === "claude" && (
-          <p className="note">
-            Claude uses this machine’s one CLI login; profile folders are not supported.
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="crit-t s">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={saving}>
-          {saving ? "Saving…" : "Save account"}
-        </button>{" "}
-        <button type="button" disabled={saving} onClick={close}>
-          Cancel
-        </button>
-      </form>
+            {failure?.uncertain && issues.length === 0 && <p className="s">{UNCERTAIN_TEXT}</p>}
+          </ErrorSummary>
+          {saving && (
+            <p role="status" className="fstatus s">
+              Saving account…
+            </p>
+          )}
+          <div className="fact">
+            <button type="submit" className="primary" disabled={saving}>
+              {saving ? "Saving…" : "Save account"}
+            </button>
+            <button type="button" disabled={saving} onClick={close}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -433,7 +599,11 @@ export function Accounts({ config }: { config: ConfigView }) {
         </footer>
       </Panel>
       {editor !== undefined && (
-        <AccountEditor account={editor} close={() => setEditor(undefined)} />
+        <AccountEditor
+          key={editor?.id ?? "new"}
+          account={editor}
+          close={() => setEditor(undefined)}
+        />
       )}
     </>
   );

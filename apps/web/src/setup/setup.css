@@ -133,35 +133,29 @@
   margin: 0;
 }
 
+/* The account editor: a modal over the page; the backdrop scrolls natively when the form is taller than the window. */
 .account-editor {
   position: fixed;
   z-index: 30;
-  inset: 0 0 0 auto;
-  width: min(430px, 100vw);
-  padding: var(--sp-4);
+  inset: 0;
+  display: flex;
+  padding: var(--sp-5);
   overflow: auto;
+  background: var(--scrim);
+}
+
+.account-dialog {
+  width: min(640px, 100%);
+  margin: auto;
+  padding: var(--sp-5);
   background: var(--panel);
-  border-left: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
   box-shadow: var(--shadow);
 }
 
-.account-editor .seatform {
-  display: grid;
-  gap: var(--sp-3);
-}
-
-.account-editor label {
-  display: grid;
-  gap: var(--sp-1);
-}
-
-.account-editor input,
-.account-editor select {
-  min-height: 32px;
-}
-
-.account-profile {
-  grid-column: 1 / -1;
+.account-dialog h2 {
+  margin: 0 0 var(--sp-4);
 }
 
 /* setup */
@@ -894,4 +888,126 @@
   display: grid;
   gap: var(--sp-2);
   align-content: start;
+}
+
+/* Grouped forms (opt-in: Setup's agent, session and account forms). Groups 16px apart inside, sections 24px. */
+.fform {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.fgroup {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fgroup > legend {
+  padding: 0;
+  margin-bottom: var(--sp-4);
+  color: var(--fg-2);
+  font-weight: 600;
+}
+
+.ffield {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.ffield > label {
+  color: var(--fg);
+}
+
+.ffield input:not([type="checkbox"]):not([type="radio"]),
+.ffield select {
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--sp-6);
+}
+
+.ffield .fhint {
+  color: var(--muted);
+}
+
+.ffield .ferr {
+  margin: 0;
+}
+
+.ffield-check {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 24px;
+}
+
+.fpair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.fpair-wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.fsum {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--crit);
+  border-radius: var(--r-s);
+  background: var(--crit-soft);
+  overflow-wrap: anywhere;
+  scroll-margin: var(--sp-5);
+}
+
+.fsum ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+
+.fsum-title {
+  margin: 0;
+  color: var(--fg);
+}
+
+.fform-agent {
+  max-width: 480px;
+}
+
+.fform-session {
+  max-width: 640px;
+}
+
+.fstatus {
+  overflow-wrap: anywhere;
+}
+
+.feffect {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  overflow-wrap: anywhere;
+}
+
+.fcontent {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
