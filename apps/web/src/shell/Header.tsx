@@ -14,14 +14,13 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { DEMO_MARKER_TEXT, setDemo, useDemo } from "../demo/mode.ts";
+import { DEMO_MARKER_TEXT, useDemo } from "../demo/mode.ts";
 import { hhmm, hms, MONTHS, percent, plural, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
-import { closeItem, openAway, useDock } from "./overlays.ts";
-import { resetSelection } from "./selection.ts";
+import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
@@ -60,7 +59,6 @@ export function Header({ page }: { page: Page }) {
         <SessionSelect />
         <NeedsButton items={attention} />
         <AwayButton />
-        <DemoSwitch demo={demo} page={page} />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
         <DockButton page={page} waiting={attention.length} />
@@ -73,9 +71,6 @@ export function Header({ page }: { page: Page }) {
   );
 }
 
-const DEMO_ON_TEXT = "Switch to Demo: a simulated crew. Nothing is sent to the hub.";
-const DEMO_OFF_TEXT = "Switch back to Live: real data from the hub.";
-
 /** Says on every page that the crew is simulated: the word, not only the colour. */
 function DemoMarker() {
   return (
@@ -87,33 +82,6 @@ function DemoMarker() {
     >
       DEMO
     </span>
-  );
-}
-
-/**
- * Live or Demo for the whole app. A seat or ticket in one world is absent from the other, so the
- * switch also clears what points into the old one and goes to the page's top level.
- */
-function DemoSwitch({ demo, page }: { demo: boolean; page: Page }) {
-  const text = demo ? DEMO_OFF_TEXT : DEMO_ON_TEXT;
-  return (
-    <button
-      type="button"
-      className={`ghost demo-switch${demo ? " on" : ""}`}
-      title={text}
-      aria-label={text}
-      onClick={() => {
-        const next = !demo;
-        setDemo(next);
-        closeItem();
-        resetSelection();
-        resetSession();
-        navigate(PAGE_PATHS[page], { replace: true });
-        toast(next ? "Demo on: this is a simulated crew." : "Back to Live.");
-      }}
-    >
-      {demo ? "Back to Live" : "Demo"}
-    </button>
   );
 }
 
