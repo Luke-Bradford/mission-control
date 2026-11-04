@@ -1,0 +1,335 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { JSDOM } from "jsdom";
+import { afterEach, describe, expect, it } from "vitest";
+
+const dir = join(import.meta.dirname, "../mockups/telemetry");
+const mockup = readFileSync(join(dir, "index.html"), "utf8");
+const readme = readFileSync(join(dir, "README.md"), "utf8");
+const doms: JSDOM[] = [];
+
+const TABS = {
+  crew: "Crew",
+  cost: "Cost and tokens",
+  throughput: "Throughput",
+  quality: "Quality",
+  machine: "Machine",
+} as const;
+const PANEL_COUNTS = { crew: 2, cost: 4, throughput: 4, quality: 4, machine: 3 } as const;
+const TABLE_COUNTS = { crew: 2, cost: 1, throughput: 1, quality: 1, machine: 1 } as const;
+const STATES = ["normal", "loading", "empty", "error", "stale", "disconnected"] as const;
+
+/** The 21 panel ids of the current page (apps/web/src/telemetry). */
+const CURRENT_PANELS = [
+  "tThru",
+  "tCycle",
+  "tQual",
+  "tCapcom",
+  "tCrewState",
+  "tFlow",
+  "tCycleControl",
+  "tQualityTrend",
+  "tCostMerged",
+  "tForecast",
+  "tTok",
+  "tUtil",
+  "tTurn",
+  "tLat",
+  "tSubs",
+  "tQuota",
+  "tMach",
+  "tLock",
+  "tTicketBars",
+  "tStepBars",
+  "tTotals",
+];
+/** The current KPI row, left to right. */
+const CURRENT_TILES = [
+  "Tokens",
+  "~Cost",
+  "Tool calls",
+  "Commits",
+  "Agents working",
+  "Merged",
+  "Lock wait",
+  "Your response",
+  "Guard",
+  "Test lock",
+];
+/** The data list: every measure the proposed page shows. */
+const MEASURES = [
+  "Seats running",
+  "Seats waiting on you",
+  "Median response",
+  "Slowest 10% response",
+  "Runs stopped",
+  "Agent time by state",
+  "Crew state",
+  "Tool latency",
+  "Subagents",
+  "Tool calls",
+  "~Cost",
+  "Tokens",
+  "Cache hit",
+  "Tokens per minute",
+  "Cost by ticket",
+  "Spend by step",
+  "Cost coverage",
+  "Tokens coverage",
+  "Quota used",
+  "PRs merged",
+  "Cycle time",
+  "Tickets in progress",
+  "Commits per run",
+  "CI first push",
+  "First-pass review",
+  "Review rounds per PR",
+  "RETRO findings per PR",
+  "Human review wait",
+  "PRs sent back",
+  "Escaped defects",
+  "Guard blocks",
+  "Test attempts",
+  "CPU",
+  "Memory free",
+  "Memory pressure",
+  "Swap used",
+  "Agent and test-run memory",
+  "Test lock",
+  "Lock wait",
+];
+
+/** The page's visible words: the document text without the script that draws it. */
+const wordsOf = (document: Document) => {
+  const body = document.body.cloneNode(true) as HTMLElement;
+  for (const script of body.querySelectorAll("script")) script.remove();
+  return body.textContent ?? "";
+};
+
+const render = (search = "") => {
+  const dom = new JSDOM(mockup, {
+    runScripts: "dangerously",
+    url: `http://localhost/telemetry${search}`,
+  });
+  doms.push(dom);
+  return dom.window.document;
+};
+
+afterEach(() => {
+  doms.splice(0).forEach((dom) => {
+    dom.window.close();
+  });
+});
+
+describe("Telemetry mockup README", () => {
+  it("lists every current panel and measure", () => {
+    expect(readme).toMatch(/\|\s*KPI band\s*\|/);
+    for (const tile of CURRENT_TILES) expect(readme, tile).toContain(`\`${tile}\``);
+    for (const id of CURRENT_PANELS) expect(readme, id).toMatch(new RegExp(`\\|\\s*\`${id}\``));
+    for (const measure of MEASURES)
+      expect(readme, measure).toMatch(
+        new RegExp(`\\|\\s*${measure.replace(/[~.]/g, "\\$&")}\\s*\\|`),
+      );
+  });
+
+  it("states that it is a fictional proposal", () => {
+    expect(readme).toContain("Approval: waiting for the operator.");
+    const banner = "Proposal mockup. Every number is fictional, shaped to the hub's real ranges.";
+    expect(render().querySelector(".banner")?.textContent).toBe(banner);
+  });
+
+  it("outlines one build ticket per tab", () => {
+    const section = readme.split(/^## Build tickets$/m)[1] ?? "";
+    const headings = [...section.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+    expect(headings).toEqual(Object.values(TABS));
+  });
+});
+
+describe("Telemetry mockup", () => {
+  it("shows the health band above five tabs, named as the plan says", () => {
+    const document = render();
+    expect(
+      [...document.querySelectorAll(".band .stat .stat-label")].map((e) => e.textContent),
+    ).toEqual([
+      "Crew health",
+      "Your response",
+      "~Cost",
+      "Merged",
+      "CI first push",
+      "First-pass review",
+      "Tightest quota",
+      "Machine",
+    ]);
+    expect([...document.querySelectorAll('[role="tab"]')].map((e) => e.textContent)).toEqual(
+      Object.values(TABS),
+    );
+    const band = document.querySelector(".band");
+    const tabs = document.querySelector('[role="tablist"]');
+    expect(band && tabs && band.compareDocumentPosition(tabs) & 4).toBeTruthy();
+  });
+
+  it("gives Crew health the verdict the rules produce", () => {
+    const verdict = render().querySelector('[data-stat="health"] .stat-value');
+    expect(verdict?.textContent).toMatch(/^Watch/);
+  });
+
+  for (const tab of Object.keys(TABS)) {
+    it(`draws ${tab} with at most four charts, five stat fields and a drill on every number`, () => {
+      const document = render(`?tab=${tab}`);
+      expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+        TABS[tab as keyof typeof TABS],
+      );
+      expect(document.querySelectorAll(".panel .chart").length).toBeLessThanOrEqual(4);
+      expect(document.querySelectorAll(".panel").length).toBe(
+        PANEL_COUNTS[tab as keyof typeof PANEL_COUNTS],
+      );
+      expect(document.querySelectorAll(".panel table").length).toBe(0);
+      const stats = [...document.querySelectorAll(".stat")];
+      expect(stats.length).toBeGreaterThanOrEqual(8 + 4);
+      for (const stat of stats) {
+        for (const field of ["label", "value", "unit", "window", "def"])
+          expect(stat.querySelector(`.stat-${field}`), `${stat.className} ${field}`).not.toBeNull();
+        const number = stat.querySelector("[data-drill]");
+        expect(["exists", "needs-build"]).toContain(number?.getAttribute("data-drill"));
+      }
+    });
+  }
+
+  it("keeps gaps as breaks and never plots a zero in one", () => {
+    for (const tab of Object.keys(TABS)) {
+      const document = render(`?tab=${tab}`);
+      for (const chart of document.querySelectorAll(".chart[data-gaps]")) {
+        expect(chart.querySelectorAll(".gapband").length).toBeGreaterThan(0);
+        for (const mark of chart.querySelectorAll("[data-v]")) {
+          const values = (mark.getAttribute("data-v") ?? "").split(",");
+          expect(values, `${tab} ${mark.getAttribute("class")}`).not.toContain("0");
+          expect(values).not.toContain("");
+        }
+      }
+    }
+  });
+
+  it("says what is missing, word for word", () => {
+    const text = (tab: string) => wordsOf(render(`?tab=${tab}`));
+    expect(text("cost")).toMatch(
+      /Cost covers \d+% of runs; the rest reported none\. Not counted as \$0\./,
+    );
+    expect(text("cost")).toMatch(
+      /Tokens cover \d+% of runs; the rest reported none\. Not counted as 0\./,
+    );
+    expect(text("quality")).toContain(
+      "No review recorded since 1 Nov. The line stops there; it does not mean zero.",
+    );
+    expect(text("quality")).toContain(
+      "Not collected yet: test attempts. Nothing is stored for this measure.",
+    );
+    expect(text("quality")).toMatch(/Collected since \d+ \w+\. Earlier days are blank, not zero\./);
+    expect(text("throughput")).toMatch(
+      /Collected since \d+ \w+\. Earlier days are blank, not zero\./,
+    );
+  });
+
+  it("offers every range but holds 24h only", () => {
+    const buttons = [...render().querySelectorAll<HTMLButtonElement>("[data-range]")];
+    expect(buttons.map((b) => b.textContent)).toEqual(["1h", "6h", "24h", "7d"]);
+    expect(buttons.filter((b) => b.getAttribute("aria-pressed") === "true")).toHaveLength(1);
+    for (const b of buttons.filter((x) => x.textContent !== "24h")) {
+      expect(b.disabled).toBe(true);
+      expect(b.title).toBe("Mockup shows 24h");
+    }
+  });
+
+  it("shows filters only where they apply", () => {
+    const filters = (tab: string) =>
+      [...render(`?tab=${tab}`).querySelectorAll(".filters select")]
+        .filter((s) => !s.closest("[hidden]"))
+        .map((s) => s.getAttribute("data-filter"));
+    expect(filters("cost")).toEqual(["agent", "account", "ticket"]);
+    expect(filters("crew")).toEqual(["agent"]);
+    for (const tab of ["throughput", "quality", "machine"]) expect(filters(tab)).toEqual([]);
+  });
+
+  it("names a fixed 14-day window on Throughput and Quality", () => {
+    for (const tab of ["throughput", "quality"])
+      expect(render(`?tab=${tab}`).querySelector(".summary")?.textContent).toContain(
+        "Last 14 days",
+      );
+  });
+
+  it("moves between tabs with the arrow keys and keeps the tab in the query", () => {
+    const document = render("?tab=crew");
+    const window = document.defaultView as unknown as Window & typeof globalThis;
+    const tab = document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    tab?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+      "Cost and tokens",
+    );
+    expect(window.location.search).toContain("tab=cost");
+    document
+      .querySelector('[role="tab"][aria-selected="true"]')
+      ?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(window.location.search).toContain("tab=crew");
+  });
+
+  it("swaps the charts for the tab's tables in place", () => {
+    for (const tab of Object.keys(TABS)) {
+      const document = render(`?tab=${tab}&view=table`);
+      expect(document.querySelectorAll(".panel table").length).toBe(
+        TABLE_COUNTS[tab as keyof typeof TABLE_COUNTS],
+      );
+      expect(document.querySelectorAll(".panel .chart").length).toBe(0);
+    }
+  });
+
+  it("opens the runs dialog from a number that needs a build, and returns focus", () => {
+    const document = render();
+    const window = document.defaultView as unknown as Window & typeof globalThis;
+    const number = document.querySelector<HTMLElement>('.band [data-drill="needs-build"]');
+    number?.focus();
+    number?.click();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.hidden).toBe(false);
+    expect(dialog?.textContent).toContain("Runs behind this number");
+    expect(document.querySelector('[role="status"]')?.textContent).toMatch(/needs build/i);
+    dialog?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(dialog?.hidden).toBe(true);
+    expect(document.activeElement).toBe(number);
+  });
+
+  it("names the target of a number that already has a page", () => {
+    const document = render();
+    document.querySelector<HTMLElement>('.band [data-drill="exists"]')?.click();
+    expect(document.querySelector('[role="status"]')?.textContent).toMatch(/^Opens /);
+    expect(document.querySelector<HTMLElement>('[role="dialog"]')?.hidden).toBe(true);
+  });
+
+  const STATE_TEXT: Record<string, RegExp> = {
+    loading: /Loading…/,
+    empty: /Nothing ran in the last 24h\./,
+    error: /Telemetry did not load\./,
+    stale: /Figures are \d+ min old\./,
+    disconnected: /Not connected to the hub\. These figures are from \d\d:\d\d\./,
+  };
+  for (const state of STATES.filter((s) => s !== "normal")) {
+    it(`words the ${state} state`, () => {
+      const document = render(`?tab=crew&state=${state}`);
+      expect(wordsOf(document)).toMatch(STATE_TEXT[state]);
+      expect(wordsOf(document)).not.toMatch(/No data/i);
+    });
+  }
+
+  it("recovers from the error state with Try again", () => {
+    const document = render("?state=error");
+    const retry = [...document.querySelectorAll("button")].find(
+      (b) => b.textContent === "Try again",
+    );
+    expect(retry).toBeTruthy();
+    retry?.click();
+    expect(wordsOf(document)).not.toContain("Telemetry did not load.");
+  });
+
+  it("uses no real repo names, paths or commands", () => {
+    expect(mockup).not.toMatch(/mission-control|Luke-Bradford|\/Users\/|C:\\|git push|pnpm/i);
+    expect(mockup).toContain("demo");
+  });
+});
