@@ -35,7 +35,6 @@ import {
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
-import { capabilityBlocked } from "./sandbox-gaps.ts";
 
 const authReads = vi.hoisted(() => [] as string[]);
 vi.mock("node:fs", async (importOriginal) => {
@@ -465,11 +464,9 @@ let tmpRoot: string;
 beforeAll(() => {
   tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), "mc-sv-")));
 });
-// every test is skipped there (sandbox-gaps.ts), and `ps` is denied
-const crewRunBlocked = await capabilityBlocked("crew-run");
 afterAll(async () => {
   try {
-    if (!crewRunBlocked) await expectNoLeftovers(tmpRoot);
+    await expectNoLeftovers(tmpRoot);
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
   }

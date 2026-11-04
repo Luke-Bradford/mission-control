@@ -1231,30 +1231,31 @@ describe("POST /api/guard/check", () => {
     ]);
   });
 
-  it("records fail when a Post event carries a non-zero exit code (#1411)", async () => {
+  it("ends the lock row by what the hook reports, and never as pass for a wrapped call (#1411)", async () => {
     lock = new TestLock({ now: () => NOW, holds: store });
     await app.close();
-    const ends: boolean[] = [];
-    app = await build({
-      checks: {
-        begin: async () => {},
-        end: async (_key, ok) => {
-          ends.push(ok);
-        },
-        lockedBy: async () => null,
-        dropRun: () => {},
-        drops: () => [],
-      },
-    });
-    await check(tokA, bash("a1", "pnpm -s test"));
-    await check(tokA, { ...post("a1", "PostToolUse"), exit_code: 1 });
-    await check(tokB, bash("b1", "pnpm -s test"));
-    await check(tokB, { ...post("b1", "PostToolUse"), exit_code: 0 });
-    expect(store.lockRuns(0).map((r) => [r.runId, r.outcome])).toEqual([
-      ["run-b", "pass"],
-      ["run-a", "fail"],
-    ]);
-    expect(ends).toEqual([false, true]);
+    app = await build();
+    // the bodies the real hook posts: PostToolUse carries exit_code 0, a failure carries "Exit code N"
+    const run = async (
+      tok: string,
+      id: string,
+      command: string,
+      event: "PostToolUse" | "PostToolUseFailure",
+    ) => {
+      await check(tok, bash(id, command));
+      await check(tok, {
+        ...post(id, event),
+        tool_input: { command },
+        exit_code: event === "PostToolUse" ? 0 : 1,
+      });
+      const row = store.lockRuns(0).find((r) => r.runId === (tok === tokA ? "run-a" : "run-b"));
+      return row?.outcome;
+    };
+    expect(await run(tokA, "a1", "pnpm -s test", "PostToolUse")).toBe("pass");
+    expect(await run(tokB, "b1", "pnpm -s test", "PostToolUseFailure")).toBe("fail");
+    // the seat saw exit 1 from `pnpm -s test`, but the call ended with echo's status
+    expect(await run(tokA, "a2", "pnpm -s test; echo exit=$?", "PostToolUse")).toBe("done");
+    expect(await run(tokB, "b2", "pnpm -s test | tail -5", "PostToolUse")).toBe("done");
   });
 
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {

@@ -1,3 +1,4 @@
+import { CREW_CLI_ENV, SEAT_SANDBOX_ENV } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { capabilityBlocked, inSeatSandbox } from "./sandbox-gaps.ts";
 
@@ -6,6 +7,10 @@ const failing = async () => false;
 const working = async () => true;
 
 describe("sandbox gaps (#1411)", () => {
+  it("the hub puts the marker in every seat's environment", () => {
+    expect(CREW_CLI_ENV[SEAT_SANDBOX_ENV]).toBe("1");
+  });
+
   it("skips only inside a seat's sandbox whose probe fails", async () => {
     expect(await capabilityBlocked("install", { env: SEAT, probe: failing })).toBe(true);
   });
@@ -28,5 +33,8 @@ describe("sandbox gaps (#1411)", () => {
     expect(inSeatSandbox({ SANDBOX_RUNTIME: "1" })).toBe(true);
     expect(inSeatSandbox({ SANDBOX_RUNTIME: "0" })).toBe(false);
     expect(inSeatSandbox({})).toBe(false);
+    // a Codex seat has no Claude marker: the hub's own marks every seat
+    expect(inSeatSandbox({ [SEAT_SANDBOX_ENV]: "1" })).toBe(true);
+    expect(inSeatSandbox({ [SEAT_SANDBOX_ENV]: "0" })).toBe(false);
   });
 });

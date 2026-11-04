@@ -286,7 +286,7 @@ import {
   useApproval,
 } from "./flight-approvals.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
-import type { CheckRecorder } from "./guard/check-runs.ts";
+import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
@@ -2319,11 +2319,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            // a Post event can say success while the command's exit code says otherwise (#1411)
-            const exited = typeof body.data.exit_code === "number" && body.data.exit_code !== 0;
-            lock?.release(key, failed || exited);
-            await checks?.end(key, !(failed || exited));
             const command = body.data.tool_input?.command;
+            // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
+            // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
+            const wrapped = typeof command === "string" && !plainCall(command);
+            lock?.release(key, failed ? true : wrapped ? undefined : false);
+            await checks?.end(key, !failed);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (
               fullAccess &&

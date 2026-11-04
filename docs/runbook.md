@@ -2374,9 +2374,19 @@ marker and runs every test. Where the sandbox allows the capability, the test ru
 failure still fails. Each skip is named on stderr (`sandbox-gaps: skipping ...`). Mark a new test of
 this kind with `blockedHere("listen" | "seatbelt" | "install" | "crew-run")`.
 
-The test-lock row's outcome follows the command's exit code: a Post hook event that carries a
-non-zero `exit_code` records `fail` even when the event name says success, and a Codex command that
-did not succeed releases as `fail`.
+The seat is told by `MC_SEAT_SANDBOX=1`, which the hub puts in every crew seat's environment
+(Claude and Codex), or by the Claude sandbox's `SANDBOX_RUNTIME=1`. The shared rule and the
+`listen`, `seatbelt`, `ps` and `git-hooks` probes are in `packages/core/test/sandbox-gaps.ts` (no
+server imports, so agentcomms tests use it too); `install` and `crew-run` are in
+`apps/server/test/sandbox-gaps.ts`. Whether Codex's own sandbox passes the variable on to its shell
+commands is not verified.
+
+The test-lock row's outcome: `fail` when the hook reports a failed call, `pass` for a plain call
+that succeeded, and `done` (never `pass`) for a call that pipes or chains past the check, such as
+`pnpm -s test; echo exit=$?` or `... | tail`, because its status is the last step's. That is the
+path that fits the 4 Nov report (lock `pass`, the seat saw exit 1, no check record, since a chain
+with `;` or `|` is never counted as a check). A Codex command releases as `fail` when it did not
+succeed.
 
 
 ### Durable QA reports

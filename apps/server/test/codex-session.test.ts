@@ -28,6 +28,9 @@ import {
   startCodexSession,
 } from "../src/runtime/codex-session.ts";
 import { attachSession, type CrewSession } from "../src/runtime/session.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));

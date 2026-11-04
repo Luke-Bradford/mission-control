@@ -22,6 +22,9 @@ import type { Store } from "../store.ts";
 /** A command that chains, pipes, or runs on after a failure can pass without the check passing. */
 const NOT_PLAIN = /[|;\n\r]/;
 
+/** A command with no pipe, `||`, `;` or line break: its exit status is its last step's own. */
+export const plainCall = (command: string): boolean => !NOT_PLAIN.test(command);
+
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
  * EVERY trimmed segment is a configured check. Anything else in the chain (`cd x`, `exit 0`, a

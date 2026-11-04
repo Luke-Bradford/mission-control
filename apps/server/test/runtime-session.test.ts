@@ -12,6 +12,9 @@ import {
   startSession,
 } from "../src/runtime/session.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
