@@ -166,7 +166,7 @@ describeRendered("Overview composition", () => {
       );
       expect(page.errors()).toEqual([]);
       expect(m.pageScroll).toBeLessThanOrEqual(0);
-      expect(m.status, "status text 20 s after opening").toContain(words);
+      expect(m.status, "status text after waiting up to 20 s for it").toContain(words);
     },
     60_000,
   );
