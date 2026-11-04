@@ -1,6 +1,6 @@
 import type { AttentionItem, CrewRow, LimitRow, RunDigest } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as crewModule from "../src/crew.ts";
 import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
@@ -1136,4 +1136,38 @@ it("keeps a parked FLIGHT reason in the Overview state tooltip", async () => {
   const row = container.querySelector(".flight") as HTMLElement;
   await within(row).findByText("Held");
   expect(row.querySelector(".state-cell")?.getAttribute("title")).toBe("Needs operator approval");
+});
+
+describe("the Work line of an idle seat with an open run", () => {
+  const work = async (over: Parameters<typeof seatRow>[0]) => {
+    stub([seatRow({ id: "guido-cx", hudState: "idle", ...over })], true, []);
+    const { container } = render(<AgentsPanel />);
+    await screen.findByText("guido-cx");
+    return (rowsIn(container)[1] as HTMLElement).querySelector(".ticket-cell")?.textContent ?? "";
+  };
+  const open = { phase: "working", text: "Working on it", prNumber: null, parked: null } as const;
+
+  it("says the run is open rather than working on the ticket", async () => {
+    const text = await work({ loop: open });
+    expect(text).toContain("Run open, not in a turn");
+    expect(text).not.toContain("Working on it");
+  });
+
+  it("keeps a crew-paused seat's reason", async () => {
+    const crewPause = { seats: "all", reason: "Account at its stop line", at: 0, by: "operator" };
+    const text = await work({ loop: open, crewPause } as Parameters<typeof seatRow>[0]);
+    expect(text).not.toContain("Run open");
+  });
+
+  it("keeps FLIGHT's own line while it idles between checks", async () => {
+    const flight = seatRow({ id: "flight-1", role: "FLIGHT", hudState: "idle", loop: open });
+    stub([flight], true, []);
+    const { container } = render(<AgentsPanel />);
+    await waitFor(() => expect(container.querySelector(".trow.flight")).toBeTruthy());
+    expect(container.querySelector(".trow.flight")?.textContent).not.toContain("Run open");
+  });
+
+  it("keeps the idle line of a seat with no loop", async () => {
+    expect(await work({ loop: null })).not.toContain("Run open");
+  });
 });

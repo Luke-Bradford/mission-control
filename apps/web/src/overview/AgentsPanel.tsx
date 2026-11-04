@@ -138,7 +138,16 @@ function WorkCell({
   }
   if (!current) {
     // An open run on an idle session isn't in a turn, so it must not read as working on the ticket.
-    const line = row?.hudState === "idle" && hasActiveRun(row) ? OPEN_RUN_LINE : doing;
+    // FLIGHT idling between checks and a paused seat's reason are not this case.
+    const line =
+      row?.hudState === "idle" &&
+      hasActiveRun(row) &&
+      row.loop &&
+      row.role !== "FLIGHT" &&
+      !row.crewPause &&
+      !row.paused
+        ? OPEN_RUN_LINE
+        : doing;
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
       .filter(Boolean)
       .join(" · ");
