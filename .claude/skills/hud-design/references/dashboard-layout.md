@@ -52,7 +52,7 @@ Then write the vertical budget at each viewport: header + gutters + panels + gap
 
 Record the reference CSS viewport, browser zoom, OS scaling, FLIGHT rail state and app chrome before building. If the operator's exact setup is unknown, state your assumption first. Don't choose a convenient reference after rendering, and don't swap in a different height for a named viewport.
 
-**Worked example.** On the approved Overview, Crew's fixed columns add up to 660 px before gaps: state 88, seat 168, step 104, lane 168, then 44, 40 and 48 for numbers. Work takes the rest. Beside it, one-line rows and 3:1 plots set the right column at 560 px at 1920 wide and 640 px at 2560. Crew's 40 px rows don't gain from spare height, so it stays content height and scrolls past 60% of the viewport.
+**Worked example.** On the approved Overview at 1920 wide, Crew's fixed columns add up to 660 px before gaps: state 88, seat 168, step 104, lane 168, then 44, 40 and 48 for numbers. Work takes the rest. From 1440 px of Crew width, as at 2560, the lane grows to 224 and more number columns appear, so the fixed columns reach 888 px. Beside it, one-line rows and 3:1 plots set the right column at 560 px at 1920 wide and 640 px at 2560. Crew's 40 px rows don't gain from spare height, so it stays content height and its row list scrolls past 60% of the viewport height.
 
 ## Defaults by form
 
@@ -60,7 +60,7 @@ Record the reference CSS viewport, browser zoom, OS scaling, FLIGHT rail state a
 | --- | --- | --- |
 | Table | Identity, state and number columns get their longest realistic value and no more. One text column takes the rest, up to a readable limit. Past that limit, add the next most useful column | Keeps related values together; a status at the far side of a wide cell reads as a separate column |
 | Numbers in a table | Each measure gets its own column with a bare number. The header carries the label, unit and window | "Used 12k of 200k" in a cell is slow to scan and can't line up |
-| Board | One column per workflow stage, in order; the title row shows the count; each stage scrolls its own cards. Cards show id, title, size, priority and CI. Use the wide column and give it spare height | More height shows more cards. PR 1402's review caught a squeezed stage, so check the smallest width |
+| Board | One column per workflow stage, in order; the title row shows the count; each stage scrolls its own cards. Cards show id, title, size, priority and CI. Use the wide column and give it spare height | More height shows more cards. A squeezed stage has been a review finding here, so check the smallest width |
 | Log or long list | One-line rows, in whichever column has room. Give it spare height | It gains from every extra row and fills holes |
 | Needs-attention list | One row per item, content height, cap the rows and link to the rest | It must stay above the fold |
 | Sparkline | 16–32 px tall inside a row | A trend cue only |
@@ -109,7 +109,7 @@ Also check 1920×1080, 2560×1440, 1280 and 1600 wide, 1600×700, a 1920×1080 v
 
 **Show scrollbars in renders.** Playwright's headless Chromium hides them, which hides the width they take and any overflow. Launch with `ignoreDefaultArgs: ["--hide-scrollbars"]`.
 
-**From 3300 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. The app sets `zoom: 1.5` on the root, so the page composes like its 2560 layout. Add panels only if they answer a further question. Check outside margins and holes between regions; more rows and cards are options, not proof of useful adaptation.
+**From 3300 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. The app sets `zoom: 1.5` on the root, so at 3840 wide the page composes like its 2560 layout. Add panels only if they answer a further question. Check outside margins and holes between regions; more rows and cards are options, not proof of useful adaptation.
 
 Zoom multiplies viewport units, so size with `--vh` and `--dvh`, which divide by the zoom. `getBoundingClientRect` returns zoomed pixels, so code that measures and then writes pixels must use client sizes.
 
