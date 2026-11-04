@@ -24,6 +24,7 @@ import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { OwnershipLens } from "../lenses/lenses.tsx";
+import { useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
 import { CALL_SIGN, CALL_SIGN_HINT } from "./Sessions.tsx";
@@ -389,8 +390,15 @@ function SeatEditor({
   const [focusKey, setFocusKey] = useState(0);
   const guard = useSubmitGuard();
   const alive = useRef(true);
+  const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     alive.current = true;
+    // Opens at its first control, scrolled into view.
+    const first = formRef.current?.querySelector<HTMLElement>(
+      "input:not(:disabled), select:not(:disabled)",
+    );
+    first?.focus();
+    first?.scrollIntoView?.({ block: "nearest" });
     return () => {
       alive.current = false;
     };
@@ -454,6 +462,7 @@ function SeatEditor({
     issues.length > 0 ? "Fix before saving" : failure?.uncertain ? "Result unknown" : "Not saved";
   return (
     <form
+      ref={formRef}
       className="fform fform-640"
       noValidate
       aria-label={seat ? `Edit ${seat.id}` : "Add seat"}
@@ -596,6 +605,21 @@ function Seats({
   ).data;
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // Where focus goes when the form closes: the button that opened it, or the add button if that went.
+  const addButton = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const restore = useRef(false);
+  const closeForm = () => {
+    restore.current = true;
+    setEditing(null);
+    setAdding(false);
+  };
+  useEffect(() => {
+    if (adding || editing || !restore.current) return;
+    restore.current = false;
+    const target = opener.current?.isConnected ? opener.current : addButton.current;
+    target?.focus();
+  }, [adding, editing]);
   const base =
     changes?.sessions.find((item) => item.id === session.id)?.seats ?? session.seats.map(inputOf);
   /** Writes the seat list; rejects with the failure so a form can show it where the operator is. */
@@ -606,8 +630,7 @@ function Seats({
         seats,
       });
       toast(`Seats saved. Backup: ${result.backup}.`);
-      setEditing(null);
-      setAdding(false);
+      closeForm();
       hub.refetch(RESOURCES.config.path);
       hub.refetch(RESOURCES.crewChanges.path);
     } catch (error) {
@@ -658,7 +681,8 @@ function Seats({
                 <button
                   type="button"
                   className="sm"
-                  onClick={() => {
+                  onClick={(event) => {
+                    opener.current = event.currentTarget;
                     setEditing(seat.id);
                     setAdding(false);
                   }}
@@ -684,10 +708,7 @@ function Seats({
           taken={base.map((item) => item.id)}
           config={config}
           defaultAccount={defaultAccount}
-          onCancel={() => {
-            setEditing(null);
-            setAdding(false);
-          }}
+          onCancel={closeForm}
           onSave={(seat) =>
             write(
               editing ? base.map((item) => (item.id === editing ? seat : item)) : [...base, seat],
@@ -696,7 +717,15 @@ function Seats({
         />
       )}
       {!adding && !editing && (
-        <button type="button" className="sm" onClick={() => setAdding(true)}>
+        <button
+          ref={addButton}
+          type="button"
+          className="sm"
+          onClick={(event) => {
+            opener.current = event.currentTarget;
+            setAdding(true);
+          }}
+        >
           + Add seat to this repo
         </button>
       )}
@@ -740,7 +769,7 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
   const latest = useRef(0);
   const guard = useSubmitGuard();
   const alive = useRef(true);
-  const panel = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const base = useId();
   const ids = {
     github: `${base}-github`,
@@ -757,12 +786,16 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
       alive.current = false;
     };
   }, []);
+  // Focus goes back to the opener when this closes, if it was lost with the form.
+  useReturnFocus(true);
   // Each step starts at its first control (or its action), so the keyboard continues where the eyes are.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the step changes
   useEffect(() => {
-    panel.current
-      ?.querySelector<HTMLElement>("input:not(:disabled), select:not(:disabled), button.primary")
-      ?.focus();
+    const target = formRef.current?.querySelector<HTMLElement>(
+      "input:not(:disabled), select:not(:disabled), button.primary:not(:disabled)",
+    );
+    target?.focus();
+    target?.scrollIntoView?.({ block: "nearest" });
   }, [step]);
   const stepIssues = (at: number): FieldIssue[] => {
     const found: FieldIssue[] = [];
@@ -926,6 +959,7 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
   const accountError = issueOf(issues, ids.account);
   return (
     <form
+      ref={formRef}
       className="fform fform-800 repo-stepper"
       noValidate
       aria-label={repo ? `Convert ${repo.id} to crew repo` : "Add repo"}
@@ -957,7 +991,7 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
           )}
         </p>
       )}
-      <div ref={panel} className="fcontent">
+      <div className="fcontent">
         {step === 1 && (
           <fieldset className="fgroup">
             <legend>Repo</legend>

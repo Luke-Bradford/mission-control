@@ -1803,6 +1803,28 @@ describe("Setup › Repos & seats: the add-repo steps", () => {
     await screen.findByText(/Project board verified/);
   };
 
+  it("keyboard focus follows each step, and Cancel returns to the opener", async () => {
+    load({ "POST /api/repos/preview": PREVIEW, "POST /api/repos/checkout-preview": { ok: true } });
+    at("repos");
+    const opener = await screen.findByRole("button", { name: "+ Add repo" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(within(form()).getByLabelText("GitHub repo"));
+    type("GitHub repo", "octo-org/mission");
+    type("Project number", "4");
+    type("Repo id", "mission");
+    fireEvent.submit(form());
+    expect(document.activeElement).toBe(within(form()).getByLabelText("Checkout folder"));
+    type("Checkout folder", "/work/mission");
+    fireEvent.submit(form());
+    await within(form()).findByRole("list", { name: "Live check results" });
+    expect(document.activeElement).toBe(
+      within(form()).getByRole("button", { name: "Run live checks" }),
+    );
+    press("Cancel");
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
   it("an invalid Next explains what to fix instead of staying silent", async () => {
     load();
     at("repos");
@@ -1964,6 +1986,17 @@ describe("Setup › Repos & seats: the seat form", () => {
   }
   const fill = (form: HTMLElement, id: string) =>
     fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: id } });
+
+  it("the seat form opens at its first control and Cancel returns to the add button", async () => {
+    const form = await openForm();
+    expect(document.activeElement).toBe(within(form).getByLabelText("Call sign"));
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "+ Add seat to this repo" }),
+      ),
+    );
+  });
 
   it("invalid seat submit explains itself", async () => {
     const form = await openForm();

@@ -133,7 +133,10 @@ const FORMS = [
     id: "F06",
     form: 'form[aria-label="Switch account"]',
     cap: 480,
-    steps: [["click", "Switch account"]],
+    steps: [
+      ["css", ".agent-v2-actions details summary"],
+      ["click", "Switch account"],
+    ],
   },
   {
     id: "F07",
@@ -224,7 +227,7 @@ const drive = (page: RenderedPage, steps: readonly Step[]) =>
 
 interface RenderOpts {
   kind?: World;
-  state?: "loading" | "error" | "disconnected";
+  state?: "loading" | "error" | "status-loading" | "disconnected";
   width: number;
   height: number;
   colorScheme?: "light" | "dark";
@@ -243,7 +246,11 @@ async function open(form: Form, o: RenderOpts) {
     api: { ...world(o.kind ?? "one"), ...writes(o.checkoutPasses ?? true) },
   });
   await page.box("#page-setup, main");
-  if (o.state === "loading" || o.state === "error") return page;
+  if (o.state === "loading" || o.state === "error") {
+    // the account switch lives in the More menu, which is where its load state shows
+    if (form.id === "F06") await drive(page, form.steps.slice(0, 1));
+    return page;
+  }
   await drive(page, form.steps);
   await page.box(form.form);
   return page;
@@ -420,10 +427,9 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
         }
         // the first stop was focused by script, which need not show a ring; every Tab stop must
         for (const stop of stops.slice(1)) expect(stop.outline).toBe(true);
-        // Tab scrolls each stop into view; the account switch's action is disabled until a choice
-        // is made, so Tab skips it there.
+        // Tab scrolls each stop into view, and reaches the final action
         for (const stop of stops) expect(stop.inView).toBe(true);
-        if (form.id !== "F06") expect(stops.find((stop) => stop.submit)?.inView).toBe(true);
+        expect(stops.find((stop) => stop.submit)?.inView).toBe(true);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,
@@ -433,7 +439,7 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
   // An explained failure at the shortest window: the summary is focused and in view, and the final
   // action can still be reached and is not painted over.
   const FAIL: Record<Form["id"], { steps: readonly Step[]; checkoutPasses?: boolean }> = {
-    F06: { steps: [] },
+    F06: { steps: [["click", "Transfer account"]] },
     F07: { steps: [["click", "Next: checkout"]] },
     F08: {
       steps: [
@@ -456,11 +462,7 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
           height: 700,
           checkoutPasses: fail.checkoutPasses,
         });
-        if (form.id === "F06")
-          await page.evaluate((selector) => {
-            document.querySelector<HTMLFormElement>(selector)?.requestSubmit();
-          }, form.form);
-        else if (form.id === "F12")
+        if (form.id === "F12")
           await page.evaluate(async (selector) => {
             const model = [
               ...document.querySelectorAll<HTMLSelectElement>(`${selector} select`),
@@ -503,6 +505,41 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
       },
       BROWSER_TEST_TIMEOUT_MS,
     );
+  }
+
+  // The account switch inside the Agent page's More menu: the menu grows to hold the 480px form.
+  for (const [width, height] of [
+    [1280, 900],
+    [1600, 700],
+  ] as const) {
+    for (const state of [undefined, "status-loading"] as const) {
+      it(
+        `F06 fills most of its 480px cap inside the More menu at ${width}x${height}${state ? " while accounts load" : ""}`,
+        async () => {
+          const page = await open(FORMS[0], { width, height, state });
+          const seen = await page.evaluate((selector) => {
+            const form = document.querySelector(selector)?.getBoundingClientRect();
+            const menu = document.querySelector(".agent-v2-menu")?.getBoundingClientRect();
+            return {
+              form: form?.width ?? 0,
+              left: menu?.left ?? -1,
+              right: menu?.right ?? Number.POSITIVE_INFINITY,
+              top: menu?.top ?? -1,
+              viewport: window.innerWidth,
+              loading: document.body.textContent?.includes("Loading accounts…") ?? false,
+            };
+          }, FORMS[0].form);
+          expect(seen.form).toBeGreaterThanOrEqual(400);
+          expect(seen.form).toBeLessThanOrEqual(481);
+          expect(seen.left).toBeGreaterThanOrEqual(0);
+          expect(seen.right).toBeLessThanOrEqual(seen.viewport);
+          expect(seen.top).toBeGreaterThanOrEqual(0);
+          if (state) expect(seen.loading).toBe(true);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
   }
 
   // Inside the real shell: the rail (FLIGHT folded) and FLIGHT's dock expanded, for the widest form.

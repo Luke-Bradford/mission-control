@@ -433,7 +433,7 @@ function SwitchAccount({ row }: { row: CrewRow }) {
             </p>
           )}
           <div className="fact">
-            <button type="submit" className="primary" disabled={busy || !available}>
+            <button type="submit" className="primary" disabled={busy}>
               Transfer account
             </button>
             <button type="button" disabled={busy || checking} onClick={close}>
