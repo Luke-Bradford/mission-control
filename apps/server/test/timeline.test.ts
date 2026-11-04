@@ -97,7 +97,12 @@ it("keeps empty lanes in crew order in an empty window", () => {
   expect(view()).toEqual({
     from: FROM,
     to: NOW,
-    lanes: ["loop", "dev", "retro"].map((agentId) => ({ agentId, spans: [], ticks: [] })),
+    lanes: ["loop", "dev", "retro"].map((agentId) => ({
+      agentId,
+      spans: [],
+      ticks: [],
+      tokens: [],
+    })),
   });
 });
 
@@ -155,6 +160,19 @@ it("clips both edges and preserves an open span, including a turn begun before t
     { kind: "turn", from: FROM, to: null },
     { kind: "lock", from: FROM, to: NOW },
     { kind: "checks", from: FROM, to: NOW },
+  ]);
+});
+
+it("sums a seat's tokens per minute across every run in the window", () => {
+  const minute = Math.floor(NOW / 60_000) * 60_000;
+  const base = foldTranscript(null, [], NOW).digest;
+  store.upsertRun(run({ id: "older", endedAt: NOW - 10 * 60_000 }));
+  store.upsertRun(run({ id: "latest", endedAt: null }));
+  store.setDigest("older", { ...base, minuteTokens: [[minute - 20 * 60_000, 100]] });
+  store.setDigest("latest", { ...base, minuteTokens: [[minute - 60_000, 7]] });
+  expect(view().lanes[1]?.tokens).toEqual([
+    [minute - 20 * 60_000, 100],
+    [minute - 60_000, 7],
   ]);
 });
 

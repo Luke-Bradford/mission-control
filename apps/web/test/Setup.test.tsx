@@ -1116,15 +1116,16 @@ describe("Setup tabs", () => {
       });
     });
 
-    it("a bad call sign disables Save", async () => {
+    it("a bad call sign is explained and blocks the save", async () => {
       const p = await seats();
       const form = await open(p);
       fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: "Bad Name" } });
       expect(form.textContent).toContain("lower-case letters, digits and -");
-      expect(within(form).getByRole("button", { name: "Add agent" })).toHaveProperty(
-        "disabled",
-        true,
-      );
+      const submit = within(form).getByRole("button", { name: "Add agent" });
+      expect(submit).toHaveProperty("disabled", false);
+      fireEvent.click(submit);
+      expect(within(form).getByRole("region", { name: "Fix before saving" })).toBeTruthy();
+      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
     });
 
     it("Edit", async () => {
@@ -1201,7 +1202,7 @@ describe("Setup tabs", () => {
       expect(within(form).getByLabelText(SCRATCH_LABEL)).toHaveProperty("checked", true);
     });
 
-    it("a role change to a read-only role clears Area and resets Model; empty Model disables Save", async () => {
+    it("a role change to a read-only role clears Area and resets Model; empty Model is explained and blocks the save", async () => {
       const p = await seats();
       const form = await open(p);
       fireEvent.click(within(p).getByRole("button", { name: /apps\// }));
@@ -1210,10 +1211,9 @@ describe("Setup tabs", () => {
       expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "");
       expect(within(form).getByLabelText("Model")).toHaveProperty("value", "opus");
       fireEvent.change(within(form).getByLabelText("Model"), { target: { value: " " } });
-      expect(within(form).getByRole("button", { name: "Add agent" })).toHaveProperty(
-        "disabled",
-        true,
-      );
+      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
+      expect(within(form).getByRole("link", { name: "Model is required." })).toBeTruthy();
+      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
     });
 
     it("adds Codex seats and resets the model only when the account provider changes", async () => {
@@ -1336,7 +1336,7 @@ describe("Setup tabs", () => {
       });
     });
 
-    it("no accounts: the Account select is empty and Save is disabled", async () => {
+    it("no accounts: the Account select is empty and Save explains why it cannot save", async () => {
       const p = await seats({
         "/api/config": {
           ...SESSIONS_CFG,
@@ -1345,10 +1345,9 @@ describe("Setup tabs", () => {
       });
       const form = await open(p);
       expect(within(form).getByLabelText("Account")).toHaveProperty("options.length", 0);
-      expect(within(form).getByRole("button", { name: "Add agent" })).toHaveProperty(
-        "disabled",
-        true,
-      );
+      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
+      expect(within(form).getByRole("link", { name: /Account: none is configured/ })).toBeTruthy();
+      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
     });
 
     it("every save, remove and reload button is disabled while a post is out", async () => {
