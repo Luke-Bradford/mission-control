@@ -27,7 +27,7 @@ export const ROLE_PROMPT_DIR = "roles";
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
 /** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
 export type CrewEffort = string;
-/** The controller-equivalent execution profile reserved for FLIGHT's watch run: open except the hub's data folder. */
+/** The controller-equivalent execution profile reserved for FLIGHT's watch run: no sandbox and listed tools with no path or command limits. */
 export const CREW_PROFILES = ["standard", "flight-full"] as const;
 export type CrewProfile = (typeof CREW_PROFILES)[number];
 /** The profile a seat runs under: only FLIGHT's watch run has the controller-equivalent one. */

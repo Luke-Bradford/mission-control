@@ -367,7 +367,7 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
   it("runs FLIGHT's listed tools under the scrub, with its GitHub token and no operator token", async () => {
     const command =
       // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash expands this probe inside the seat
-      'printf "marker=%s gh=%s operator=%s\\n" "$MC_ENV_PROBE_MARKER" "${GH_TOKEN}" "${MC_OPERATOR_TOKEN}"';
+      'touch "$TMPDIR/flight-probe" && printf "marker=%s gh=%s operator=%s\\n" "$MC_ENV_PROBE_MARKER" "${GH_TOKEN}" "${MC_OPERATOR_TOKEN}"';
     api = await startFakeAnthropic(command);
     const input: CrewSandboxInput = {
       ...l,
