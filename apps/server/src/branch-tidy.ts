@@ -4,6 +4,9 @@
  * open PR, no live run and no commit for a day (`sweep`). It also drops the local branches of the
  * seat clones that are merged or whose remote is gone (`pruneLocal`).
  *
+ * Only a branch one of this hub's own runs created is ever deleted: a second hub on the same repo
+ * has runs this store cannot see, so a branch with no run here is not proven unused.
+ *
  * The one GitHub write is `DELETE /git/refs/heads/<branch>`. A branch is deleted only after
  * reads that all succeeded: a failed read skips the repo, never guesses.
  */
@@ -207,8 +210,11 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
           continue;
         }
         const live = liveBranches(repo.id);
+        // another hub on this repo has runs this store cannot see: only a branch our own run made is ours
+        const ours = deps.store.runBranches(repo.id);
         for (const b of listed.branches) {
           if (
+            !ours.has(b.name) ||
             isKept(b.name, listed.defaultBranch, repo.keepBranches ?? []) ||
             open.has(b.name) ||
             live.has(b.name) ||

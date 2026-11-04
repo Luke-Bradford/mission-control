@@ -115,6 +115,8 @@ const tidyWith = (gh: GhRunner, keep: string[] = []) =>
 const ref = (b: string) => `repos/o/mc/git/refs/heads/${b}`;
 
 it("closing a crew PR unmerged deletes its branch; an archive branch and a kept one survive", async () => {
+  for (const [i, b] of ["feature/1-closed", "archive/feature/2-closed", "feature/4-kept"].entries())
+    store.upsertRun(run(`done${i}`, b, { endedAt: NOW - HOUR, status: "ok" }));
   store.upsertPullRequests(
     "mc",
     [
@@ -158,6 +160,7 @@ it("keeps a closed PR's branch while another PR is open on it or a run is live o
 it("the sweep deletes an orphan older than 24 hours and keeps open-PR, live-run, young, kept and stacked-on branches", async () => {
   store.upsertRun(run("live", "feature/live", {}));
   store.upsertRun(run("ended", "feature/ended", { endedAt: NOW - HOUR, status: "ok" }));
+  store.upsertRun(run("orphan", "feature/orphan", { endedAt: NOW - 30 * HOUR, status: "ok" }));
   const { gh, deleted } = fakeGh(
     {
       main: 500,
@@ -248,6 +251,8 @@ it("drops a seat clone's merged and remote-gone branches, and keeps a live run's
 
 it("tidies nothing in a repo with an observed loop or no crew session", async () => {
   const { gh, deleted } = fakeGh({ "feature/9-loop-work": 30, "operator/wip": 72 }, []);
+  store.upsertRun(run("old", "feature/9-loop-work", { endedAt: NOW - 30 * HOUR, status: "ok" }));
+  store.upsertRun(run("old1", "feature/1-closed", { endedAt: NOW - 30 * HOUR, status: "ok" }));
   store.upsertPullRequests("mc", [pr(1, "feature/1-closed", "closed")], NOW);
   for (const cfg of [
     {
@@ -295,4 +300,27 @@ it("a run parked on a closed PR does not hold its branch, a live one does", asyn
   const { gh, deleted } = fakeGh({ "feature/1-a": 1, "feature/2-b": 1 }, []);
   expect(await tidyWith(gh).closedPass()).toEqual(["mc:feature/1-a"]);
   expect(deleted).toEqual([ref("feature/1-a")]);
+});
+
+it("a closed PR's branch that no run in this hub's store made is not deleted", async () => {
+  store.upsertPullRequests("mc", [pr(1, "feature/1-other-hub", "closed")], NOW);
+  const { gh, deleted } = fakeGh({ "feature/1-other-hub": 1 }, []);
+  expect(await tidyWith(gh).closedPass()).toEqual([]);
+  expect(deleted).toEqual([]);
+});
+
+it("the sweep leaves an old branch this hub did not create", async () => {
+  store.upsertRun(run("mine", "feature/mine", { endedAt: NOW - 40 * HOUR, status: "ok" }));
+  const { gh, deleted } = fakeGh({ "feature/mine": 48, "docs/theirs": 48 }, []);
+  expect(await tidyWith(gh).sweep()).toEqual(["mc:feature/mine"]);
+  expect(deleted).toEqual([ref("feature/mine")]);
+});
+
+it("a branch a review run touched, not made, is not this hub's to delete", async () => {
+  store.upsertRun(
+    run("rev", "feature/reviewed", { endedAt: NOW - 40 * HOUR, status: "ok", reviewId: "r1" }),
+  );
+  const { gh, deleted } = fakeGh({ "feature/reviewed": 48 }, []);
+  expect(await tidyWith(gh).sweep()).toEqual([]);
+  expect(deleted).toEqual([]);
 });
