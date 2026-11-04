@@ -35,7 +35,7 @@ import {
   seatStatus,
   waitText,
 } from "../crew.ts";
-import { RESOURCES, useResource, useResources, useReviewPrs } from "../data.ts";
+import { RESOURCES, streamStatus, useResource, useResources, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
 import { cutText, elapsed, kTokens, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -49,6 +49,7 @@ import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { openDockChat } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { useStore } from "../shell/store.ts";
 import { AgentCost } from "./AgentActivity.tsx";
 import { ContextCapacity } from "./ContextCapacity.tsx";
 import { CrewLane, LANE_KINDS, laneTokens } from "./CrewLane.tsx";
@@ -440,7 +441,8 @@ type Lane = OverviewTimeline["lanes"][number];
 
 /** Where the run is in its loop, or what the seat is when it has no run. */
 function StepCell({ row, idle }: { row: Crew["rows"][number] | null; idle: string }) {
-  if (row?.loop && hasActiveRun(row))
+  // The same test the Work cell uses, so the two can't disagree about whether the seat is on it.
+  if (row?.loop && hasActiveRun(row) && isCurrentWork(row))
     return (
       <span role="cell" className="step-cell">
         <LoopStep compact loop={row.loop} hudState={row.hudState} wait={null} />
@@ -472,7 +474,11 @@ function RowMeasures({
     ? laneTokens(row.digest, now, lane).reduce((sum, value) => sum + value, 0)
     : null;
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
-  const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
+  const connection = useStore(streamStatus);
+  const stopped = timeline.error || (!connection.connected && connection.reconnecting);
+  const openEnd = stopped && timeline.data ? Math.min(now, timeline.data.to) : now;
+  // A later run's tokens are output too; `lastOutputAt` only knows the seat's latest run.
+  const lastOutput = Math.max(row?.lastOutputAt ?? 0, lane?.tokens?.at(-1)?.[0] ?? 0);
   const run = row?.run;
   return (
     <>
@@ -504,7 +510,7 @@ function RowMeasures({
       <ContextCapacity row={row} />
       <AgentCost row={row} />
       <span role="cell" className="num xs" title="Time since the seat's last output">
-        {row?.lastOutputAt ? elapsed(now - row.lastOutputAt) : DASH}
+        {lastOutput > 0 ? elapsed(Math.max(0, now - lastOutput)) : DASH}
       </span>
     </>
   );
@@ -751,7 +757,7 @@ export function AgentsPanel() {
   const metrics = useMetrics();
   const working = metrics.readings.agentsWorking;
 
-  // Crew seats make the roster; observed loops sit in the Loops strip beneath it.
+  // Crew seats and observed loops share the roster, in attention order.
   const seatRows = rows?.filter((r) => r.kind === "crew") ?? null;
   const loopRows = rows?.filter((r) => r.kind === "loop") ?? [];
   const seatCount = (seatRows?.length ?? 0) + (flight ? 1 : 0);

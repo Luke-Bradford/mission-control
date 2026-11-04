@@ -42,6 +42,7 @@ import {
   toggleDock,
   trapTab,
   useDock,
+  useOverlay,
   useReturnFocus,
 } from "./overlays.ts";
 import "./Dock.css";
@@ -398,6 +399,8 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
 
 export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
+  // Esc folds the cover from anywhere on the page, and the page behind stays usable.
+  useOverlay("overview-flight", coversPage, () => setDockCollapsed(true));
   const hide = useRef<HTMLButtonElement>(null);
   const rail = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -470,19 +473,7 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
         id="dock"
         aria-label="FLIGHT"
         hidden={!visible}
-        onKeyDown={
-          drawer
-            ? trapTab
-            : coversPage
-              ? (event) => {
-                  // The page behind stays usable, so the cover needs only a quick way to fold.
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setDockCollapsed(true);
-                  }
-                }
-              : undefined
-        }
+        onKeyDown={drawer ? trapTab : undefined}
       >
         <div className="panel">
           <div className="dockrail" hidden={!collapsed}>

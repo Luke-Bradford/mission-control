@@ -132,9 +132,14 @@ describeRendered("Overview composition", () => {
     expect(await page.reachable("#tokensP")).toEqual([true]);
   }, 60_000);
 
-  it.each(["error", "stale", "disconnected", "loading"] as const)(
-    "the %s state says so in words, without breaking the page",
-    async (scenario) => {
+  it.each([
+    ["error", "Refresh failed"],
+    ["stale", "Stale snapshot"],
+    ["disconnected", "Disconnected"],
+    ["loading", "Loading current work"],
+  ] as const)(
+    "the %s state says %s without breaking the page",
+    async (scenario, words) => {
       const page = await renderAt({
         page: "test/overviewDensityBrowser.html",
         width: 1920,
@@ -146,16 +151,32 @@ describeRendered("Overview composition", () => {
       await page.evaluate(async () => {
         await new Promise((resolve) => setTimeout(resolve, 800));
       }, undefined);
-      const m = await page.evaluate(() => {
-        const doc = document.documentElement;
-        return {
-          pageScroll: doc.scrollHeight - innerHeight,
-          words: document.querySelector("#page-overview")?.textContent ?? "",
-        };
-      }, undefined);
+      const m = await page.evaluate(
+        () => ({
+          pageScroll: document.documentElement.scrollHeight - innerHeight,
+          status: document.querySelector(".overview-status")?.textContent ?? "",
+        }),
+        undefined,
+      );
       expect(page.errors()).toEqual([]);
       expect(m.pageScroll).toBeLessThanOrEqual(0);
-      expect(m.words.length).toBeGreaterThan(0);
+      expect(m.status).toContain(words);
+    },
+    60_000,
+  );
+
+  it.each([1280, 1366, 1500, 1505, 1512, 1536, 1600, 1700])(
+    "keeps Crew and the side column apart at %i wide",
+    async (width) => {
+      const page = await open("mixed", width, 900);
+      await settled(page);
+      const overlap = await page.evaluate(() => {
+        const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
+        const side = document.querySelector("#overviewNextP")?.getBoundingClientRect();
+        if (!crew || !side) return true;
+        return !(crew.right <= side.left || side.right <= crew.left || crew.bottom <= side.top);
+      }, undefined);
+      expect(overlap).toBe(false);
     },
     60_000,
   );
@@ -193,7 +214,15 @@ describeRendered("Overview composition", () => {
     await page.evaluate(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }, undefined);
-    expect(await page.evaluate(() => location.search + location.pathname, undefined)).not.toBe("");
+    const opened = await page.evaluate(
+      () => ({
+        search: location.search,
+        hash: location.hash,
+        flyout: !!document.querySelector(".flyout"),
+      }),
+      undefined,
+    );
+    expect(opened.flyout || opened.search.includes("item") || opened.hash !== "").toBe(true);
     expect(page.errors()).toEqual([]);
   }, 60_000);
 
@@ -216,8 +245,16 @@ describeRendered("Overview composition", () => {
       };
     }, undefined);
     expect(covered).toEqual({ overlapsCrew: false, crewReachable: true, inert: [] });
+    // Nothing focusable is left under the cover.
+    expect(
+      await page.evaluate(() => {
+        const side = document.querySelector<HTMLElement>(".overview-secondary");
+        return side ? getComputedStyle(side).visibility : "missing";
+      }, undefined),
+    ).toBe("hidden");
+    // Esc folds it from the page behind too.
     await page.evaluate(
-      () => document.querySelector<HTMLElement>("#dockHeading")?.focus(),
+      () => document.querySelector<HTMLElement>("#agentsList .rowlink")?.focus(),
       undefined,
     );
     await page.press("Escape");

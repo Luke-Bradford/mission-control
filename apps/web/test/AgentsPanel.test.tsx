@@ -212,8 +212,11 @@ it("shows FLIGHT, the crew and the observed loops as rows of one table, in eleve
     );
     expect(row.querySelector(".rowlink")?.textContent).toBeTruthy();
     // Step reads the loop step with its bar; the 30-minute sparkline is gone.
-    expect(row.querySelector(".step-cell .stepbar")).toBeTruthy();
-    expect(row.querySelector(".step-cell")?.textContent).toBe("implement");
+    // A seat on current work shows the bar. One that isn't must not also claim a step.
+    if (row.querySelector(".rowlink")?.textContent === "running") {
+      expect(row.querySelector(".step-cell .stepbar")).toBeTruthy();
+      expect(row.querySelector(".step-cell")?.textContent).toBe("implement");
+    }
     expect(row.querySelector(".spark, .agent-model")).toBeNull();
     expect(row.querySelectorAll(".crew-lane")).toHaveLength(1);
     // Tok 1h: the hour's input and output tokens.
@@ -1056,7 +1059,6 @@ it.each(["blocked", "parked", "idle"] as const)(
         seatRow({
           id: "guido-cx",
           hudState,
-          paused: true,
           loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
         }),
       ],

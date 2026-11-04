@@ -32,18 +32,19 @@ function paceVerdict(
   tz: string | null,
   stale: boolean,
 ) {
+  if (five && five.used >= row.stopAt)
+    return { text: "5h at its stop line · new runs refused", tone: "crit-t" };
   if (row.resetAt <= now) return { text: "Reading is from before the last reset", tone: "warn-t" };
   if (row.used >= row.stopAt)
     return { text: "At its stop line · new runs refused", tone: "crit-t" };
-  if (five && five.used >= row.stopAt)
-    return { text: "5h at its stop line · new runs refused", tone: "crit-t" };
   const last = stale ? "Last reading: " : "";
-  if (row.used >= row.alertAt) return { text: `${last}Past its alert line`, tone: "warn-t" };
+  // How long is left matters most once it is close, so the forecast comes before the alert line.
   if (row.stopForecast !== null && row.stopForecast < row.resetAt)
     return {
       text: `${last}Stops about ${tz ? resetWhen({ ...row, resetAt: row.stopForecast }, now, tz) : "soon"}`,
       tone: "warn-t",
     };
+  if (row.used >= row.alertAt) return { text: `${last}Past its alert line`, tone: "warn-t" };
   if (row.projected === null) return { text: `${last}Too few readings to project`, tone: "muted" };
   if (row.projected >= row.alertAt)
     return { text: `${last}Will pass its alert line`, tone: "warn-t" };
@@ -62,7 +63,7 @@ function BurnUp({ row, now, tz }: { row: WeekRow; now: number; tz: string | null
   const line = points.map((point) => `${x(point.at).toFixed(2)},${y(point.pct).toFixed(2)}`);
   const nowX = x(now);
   const end =
-    row.projected === null
+    row.projected === null || row.resetAt <= now
       ? null
       : row.fullAt !== null && row.fullAt < row.resetAt
         ? { at: row.fullAt, pct: 100 }
@@ -242,7 +243,8 @@ export function TokensPanel() {
           isStale(
             week,
             now,
-            !!health.find((row) => row.collector === usageCollector(account))?.error,
+            // A healthy collector can carry a note, so only a failed read makes a reading stale.
+            health.find((row) => row.collector === usageCollector(account))?.ok === false,
           );
         const verdict = week ? paceVerdict(week, five, now, tz, stale) : null;
         const setup = setupPath("accounts");

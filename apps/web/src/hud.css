@@ -1116,8 +1116,18 @@ kbd {
     top: var(--shell-gutter);
     right: var(--shell-gutter);
     bottom: var(--shell-gutter);
-    width: 380px;
+    /* The side column, the rail and the gap between them. */
+    width: 620px;
     z-index: 30;
     box-shadow: var(--shadow);
+  }
+  /* Hidden, not just covered, so keyboard focus can't land under the cover. */
+  .app.overview-flight-overlay .overview-secondary {
+    visibility: hidden;
+  }
+}
+@media (min-width: 1200px) and (max-width: 1699px) {
+  .app.overview-flight-overlay .dock {
+    width: 540px;
   }
 }

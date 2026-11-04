@@ -178,3 +178,43 @@ describe("CrewLane", () => {
     expect(svg.getAttribute("aria-label")).toBe("GUIDO-1, last hour: 0 tokens · no recorded work");
   });
 });
+
+describe("CrewLane: what it may not claim", () => {
+  it.each(["blocked", "idle", "stopped"] as const)(
+    "does not paint an open turn as work on a %s seat",
+    (hudState) => {
+      const open = lane([{ kind: "turn", from: NOW - 30 * MIN, to: null }]);
+      const { container } = render(
+        <CrewLane row={rowWith([], { hudState })} name="s" lane={open} now={NOW} max={10} />,
+      );
+      expect(container.querySelectorAll("rect")).toHaveLength(0);
+    },
+  );
+
+  it("stops an open span at the last good reading when the feed has failed", () => {
+    const open = lane([{ kind: "turn", from: NOW - 30 * MIN, to: null }]);
+    const width = (openEnd: number) => {
+      const { container, unmount } = render(
+        <CrewLane
+          row={rowWith([], { hudState: "running" })}
+          name="s"
+          lane={open}
+          now={NOW}
+          max={10}
+          openEnd={openEnd}
+        />,
+      );
+      const value = Number(container.querySelector("rect")?.getAttribute("width"));
+      unmount();
+      return value;
+    };
+    expect(width(NOW - 20 * MIN)).toBeLessThan(width(NOW));
+  });
+
+  it("says work is not known while the feed has not loaded", () => {
+    const { container } = render(
+      <CrewLane row={rowWith([])} name="s" lane={undefined} now={NOW} max={10} known={false} />,
+    );
+    expect(container.querySelector("svg")?.getAttribute("aria-label")).toContain("work not known");
+  });
+});

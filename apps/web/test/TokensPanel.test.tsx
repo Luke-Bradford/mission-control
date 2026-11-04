@@ -230,6 +230,44 @@ describe("TokensPanel accounts", () => {
   });
 });
 
+describe("TokensPanel verdict: the hub's own rules", () => {
+  const verdict = async (limits: ReturnType<typeof limit7d>[], extra = {}) => {
+    const { container } = show(limits, extra);
+    await waitFor(() => expect(container.querySelector(".token-verdict")).toBeTruthy());
+    return container.querySelector(".token-verdict")?.textContent;
+  };
+
+  it("keeps the stop forecast showing once past the alert line", async () => {
+    const forecast = NOW + 2 * 60 * MIN;
+    expect(await verdict([week({ used: 88, stopForecast: forecast })])).toMatch(/^Stops about/);
+  });
+
+  it("says past its alert line when no stop is forecast", async () => {
+    expect(await verdict([week({ used: 88, stopForecast: null })])).toBe("Past its alert line");
+  });
+
+  it("does not call a fresh reading stale because a healthy collector left a note", async () => {
+    const healthy = {
+      collector: "usage:claude-main",
+      ok: true,
+      error: "no usable 5h reading",
+      at: NOW,
+      lastOkAt: NOW,
+    };
+    const text = await verdict(
+      [week({ used: 10, projected: 20, stopForecast: null, sampledAt: NOW })],
+      { "/api/health": [healthy] },
+    );
+    expect(text).toBe("On pace");
+  });
+
+  it("says a reading is from before the last reset once its reset has passed", async () => {
+    expect(await verdict([week({ used: 90, resetAt: NOW - MIN })])).toBe(
+      "Reading is from before the last reset",
+    );
+  });
+});
+
 describe("TokensPanel head", () => {
   it("links the title to Telemetry and shows today's spend", async () => {
     const { container } = show([week()], { "/api/metrics": METRICS_VIEW });
