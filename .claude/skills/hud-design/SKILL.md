@@ -32,7 +32,7 @@ Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-q
 ## Check
 
 - [ ] Empty, one, 50 rows, long content.
-- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9). Dashboards: use the [composition viewports](references/dashboard-layout.md#viewports-use-the-real-ones) instead.
+- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9). Dashboards: [composition viewports](references/dashboard-layout.md#viewports-use-the-real-ones) first.
 - [ ] [Table QA](../../../docs/runbooks/table-qa.md): inspect settled application context and focused details.
 
 ## Review
