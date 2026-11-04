@@ -23,6 +23,7 @@ import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, commsAgentPath, commsFlightPath, followLink, itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { ACTIVITY_FILTER_KEY, readKey, writeKey } from "../storage.ts";
 import { logLine } from "./logLine.ts";
 
 type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
@@ -47,14 +48,9 @@ const SUB: Record<Filter, string> = {
   all: "every event",
 };
 const SHOWN = 120;
-const FILTER_KEY = "overview.live-log.filter";
 function rememberedFilter(): Filter {
-  try {
-    const value = localStorage.getItem(FILTER_KEY);
-    return FILTERS.find((f) => f.value === value)?.value ?? "steps";
-  } catch {
-    return "steps";
-  }
+  const value = readKey(ACTIVITY_FILTER_KEY);
+  return FILTERS.find((f) => f.value === value)?.value ?? "steps";
 }
 
 const FALLBACK_GLYPH = "◆";
@@ -338,11 +334,7 @@ export function ActivityPanel() {
               setFilter(value);
               setFrozen(null);
               setReading(null);
-              try {
-                localStorage.setItem(FILTER_KEY, value);
-              } catch {
-                /* Storage can be unavailable. */
-              }
+              writeKey(ACTIVITY_FILTER_KEY, value);
             }}
           />
           <button

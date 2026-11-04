@@ -6,8 +6,18 @@ import type {
   PipelineStage,
   RunDigest,
 } from "@mc/core";
+import { shiftTimes } from "../src/demo/shift.ts";
 import { agentView } from "./agentV2Fixture.ts";
+import {
+  boardColumnOf,
+  DEMO_REPO,
+  DEMO_TICKETS,
+  demoPageAnswers,
+  pipelineStages,
+} from "./demoSeedPages.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
+import { FLOW_NOW, prFlowFixture } from "./prFlowFixture.ts";
 import {
   CONFIG,
   CREW_CONFIG,
@@ -514,4 +524,92 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
     })),
   };
   return { api, rows, config, attention, timeline, summary };
+}
+
+/**
+ * The busy crew Demo plays and the tests render: the Overview's "default" scenario with every seat
+ * working, the pipeline built from one ticket list, and an answer for every other page. All of it
+ * is fictional, fixed at `NOW`; Demo moves it to the present.
+ */
+export function demoSeed() {
+  const base = overviewDensityFixture("default");
+  const rows = base.rows.map((row, index): CrewRow => {
+    const ticket = DEMO_TICKETS.find((t) => t.seat === row.id);
+    const blocked = row.id === "dev-4";
+    return {
+      ...row,
+      hudState: blocked ? "blocked" : "running",
+      paused: false,
+      stop: null,
+      queuedReview: null,
+      note: blocked ? "Waiting for the breakpoint decision." : null,
+      role: row.id === "dev-9" ? "RETRO" : row.id === "flight-1" ? "FLIGHT" : "GUIDO",
+      mode: row.id === "dev-9" ? "read-only" : "writer",
+      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+      ticketTitle: ticket?.title ?? null,
+      run: { ...seatRow().run!, id: `demo-run-${index}`, status: "running", endedAt: null },
+    };
+  });
+  const attention = base.attention.map((entry, i) => ({
+    ...entry,
+    ticket: i === 0 ? `${DEMO_REPO}#104` : entry.ticket,
+    agentId: i === 0 ? "dev-4" : entry.agentId,
+    text: [
+      "Which breakpoint should the address form use: 600 or 720 pixels?",
+      "Confirm the import scope for the order export.",
+      "Choose the retry policy for failed payment webhooks.",
+    ][i] as string,
+  }));
+  const summary: OverviewSummary = {
+    ...base.summary,
+    pipeline: pipelineStages(DEMO_TICKETS),
+    kpis: {
+      ...base.summary.kpis,
+      inFlight: { ...base.summary.kpis.inFlight, count: 9 },
+      needsYou: { ...base.summary.kpis.needsYou, count: attention.length },
+    },
+  };
+  const api: Record<string, unknown> = {
+    ...base.api,
+    ...demoPageAnswers(),
+    ...Object.fromEntries(
+      rows.flatMap((row) => [
+        [`/api/agents/${row.id}`, agentView(row)],
+        [`/api/crew/${row.id}`, agentView(row).row],
+      ]),
+    ),
+    "/api/crew?shape=summary": { rows, firstRunToday: NOW - 3 * 60 * MIN },
+    "/api/attention": attention,
+    "/api/overview": summary,
+    "/api/overview?session=demo": summary,
+    "/api/prs/flow": shiftTimes(prFlowFixture(), FLOW_NOW, NOW - FLOW_NOW),
+    "/api/flight/summary": flightSummary(),
+    "/api/settings/away": {
+      on: false,
+      until: "",
+      may: { pickUp: true, research: false, check: true, status: true, safePr: false },
+    },
+  };
+  for (const t of DEMO_TICKETS)
+    api[`/api/tickets/${DEMO_REPO}/${t.n}`] = {
+      repoId: DEMO_REPO,
+      number: t.n,
+      url: `https://github.com/octo-org/shop-app/issues/${t.n}`,
+      title: t.title,
+      state: t.stage === "merged" ? "closed" : "open",
+      status: boardColumnOf(t.stage),
+      priority: "P1",
+      size: "M",
+      labels: [],
+      outcome: t.title,
+      doneWhen: [],
+      body: t.title,
+      bodyTruncated: false,
+      githubError: null,
+      runs: [],
+      prs: [],
+      timeline: [],
+      nextBefore: null,
+    };
+  return { ...base, rows, attention, summary, api };
 }
