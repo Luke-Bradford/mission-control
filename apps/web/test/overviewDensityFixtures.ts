@@ -16,8 +16,6 @@ import {
   pipelineStages,
 } from "./demoSeedPages.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { flightSummary } from "./flightSummaryFixture.ts";
-import { FLOW_NOW, prFlowFixture } from "./prFlowFixture.ts";
 import {
   CONFIG,
   CREW_CONFIG,
@@ -31,6 +29,8 @@ import {
   OVERVIEW,
   seatRow,
 } from "./fixtures.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
+import { FLOW_NOW, prFlowFixture } from "./prFlowFixture.ts";
 
 export type OverviewScenario =
   | "default"
@@ -547,7 +547,12 @@ export function demoSeed() {
       mode: row.id === "dev-9" ? "read-only" : "writer",
       ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
       ticketTitle: ticket?.title ?? null,
-      run: { ...seatRow().run!, id: `demo-run-${index}`, status: "running", endedAt: null },
+      run: {
+        ...(seatRow().run as NonNullable<CrewRow["run"]>),
+        id: `demo-run-${index}`,
+        status: "running",
+        endedAt: null,
+      },
     };
   });
   const attention = base.attention.map((entry, i) => ({

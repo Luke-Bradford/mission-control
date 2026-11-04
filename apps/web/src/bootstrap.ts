@@ -1,6 +1,6 @@
 import { loadOperatorToken } from "./api.ts";
-import { demoMode, isDemo } from "./demo/mode.ts";
 import { hub, startStream } from "./data.ts";
+import { demoMode, isDemo } from "./demo/mode.ts";
 
 /** Reserve the stream connection before bootstrap and the first render's resource requests. */
 export function startClient(render: () => void): () => void {

@@ -5,17 +5,17 @@
  */
 import {
   type AuditView,
-  type PipelineStage,
   type CommsMessage,
   LIVE_MINUTES,
   type MapSnapshot,
+  type PipelineStage,
   TELEMETRY_POINTS,
   type Telemetry,
 } from "@mc/core";
 import { shiftTimes } from "../src/demo/shift.ts";
 import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
-import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
+import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 
 export const DEMO_REPO = "shop-app";
 

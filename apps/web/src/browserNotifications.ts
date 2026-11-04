@@ -1,7 +1,7 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
 import { createElement, useEffect, useRef } from "react";
-import { useDemo } from "./demo/mode.ts";
 import { hub, RESOURCES, useResource, useResourceSettled } from "./data.ts";
+import { useDemo } from "./demo/mode.ts";
 import { hhmm } from "./fmt.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";

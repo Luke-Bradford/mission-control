@@ -3,8 +3,8 @@
  * stream. The simulator and the seed load as separate chunks, only once Demo is on.
  */
 import type { StreamSource } from "../api.ts";
-import { readSessionBool, setKeyScope, DEMO_KEY, writeSessionBool } from "../storage.ts";
 import { type Store, store, useStore } from "../shell/store.ts";
+import { DEMO_KEY, readSessionBool, setKeyScope, writeSessionBool } from "../storage.ts";
 
 export const DEMO_REFUSED = "Demo mode: nothing was sent to the hub. Switch to Live to do this.";
 export const DEMO_UNAVAILABLE = "Demo data could not load. Switch to Live or reload the page.";
