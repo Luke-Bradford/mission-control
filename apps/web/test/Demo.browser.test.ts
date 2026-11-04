@@ -230,12 +230,7 @@ describeRendered("Demo, rendered", () => {
       expect(inDemo.some((r) => /\/simulator-[^/]*\.js$/.test(r.path))).toBe(true);
 
       const backAt = page.requests().length;
-      expect(
-        await page.evaluate(
-          () => document.querySelector(".demo-switch")?.getAttribute("title"),
-          undefined,
-        ),
-      ).toContain("Switch back to Live");
+      expect(await text(page, ".demo-switch")).toBe("Back to Live");
       await page.click(".demo-switch");
       await eventually(
         page,
