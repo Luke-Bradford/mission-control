@@ -113,6 +113,7 @@ import {
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -143,6 +144,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -2755,9 +2758,6 @@ process.env.FAKE_CODEX_RECORD = ${JSON.stringify(recordFile)};
 process.env.FAKE_CODEX_SCENARIO = ${JSON.stringify(JSON.stringify(scenario))};
 process.env.FAKE_CODEX_VERSION = ${JSON.stringify(version)};
 import(${JSON.stringify(fixture)});
-import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
-
-skipTestsIf(await blockedHere("crew-run"));
 `,
       { mode: 0o700 },
     );
