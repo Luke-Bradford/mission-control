@@ -117,7 +117,10 @@
       .chip.read { color: var(--muted); }
 
       /* FLIGHT */
-      .flight { grid-template-rows: 36px auto minmax(360px, 1fr); gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+      /* Rows never squeeze Seats (max-content); a short window grows the page instead of clipping a panel. */
+      .flight { grid-template-rows: 36px max-content minmax(360px, 1fr); gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), calc(494px + 11 * var(--row))); }
+      .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
+      .card .reason a { font-weight: 600; }
       .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
       .tabs a { padding: 4px 12px; min-height: 36px; display: inline-flex; align-items: center; color: var(--fg-2); }
       .tabs a.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
@@ -428,6 +431,13 @@
           BOARD.push({ ref: "demo#60", repo: "demo", title: "Importer cleanup", col: "Ready", prio: "P3", meta: "Depends on legacy#7", dep: true });
           BOARD.push({ ref: "demo#61", repo: "demo", title: "Notifications copy", col: "Ready", prio: "P3", meta: "Depends on demo PR 40", dep: true });
         }
+        /** The ticket each Blocked card depends on: the block reason, linked. */
+        const REASON = {
+          "#1139": ["depends on", "#1015"], "#1142": ["depends on", "#1015"], "#1138": ["stacked on", "#1015"],
+          "demo#31": ["depends on", "demo#21"], "demo#32": ["depends on", "demo#21"], "demo#33": ["depends on", "demo#21"],
+          "demo#34": ["held for", "demo#22"], "demo#60": ["depends on", "legacy#7"], "demo#61": ["depends on", "demo#40"],
+          ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`demo#${70 + i}`, ["depends on", "demo#44"]])),
+        };
         const COLUMNS = ["Ready", "In progress", "Blocked", "Ready for QA", "Done"];
         const GRAPH_KNOWN = !["loading", "error"].includes(state);
 
@@ -458,7 +468,9 @@
                   h("div", { class: "ctop" }, h("a", { href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}` }, `${card.repo}${card.ref.replace(/^[^#]*/, "")}`), h("span", null, card.prio)),
                   h("a", { class: "ctitle", href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}`, title: card.title }, card.title),
                   chip, root, loadingChip,
-                  h("div", { class: "cmeta" }, card.meta));
+                  name === "Blocked" && REASON[card.ref]
+                    ? h("div", { class: "reason", "data-reason": card.ref }, "Blocked: ", REASON[card.ref][0], " ", refEl(REASON[card.ref][1], card.repo))
+                    : h("div", { class: "cmeta" }, card.meta));
               }),
               cards.length ? null : h("p", { class: "note" }, name === "Blocked" ? "Nothing is blocked." : "Nothing here."));
             return h("section", { class: "panel col", id: `col-${name.replace(/\W+/g, "-")}` },

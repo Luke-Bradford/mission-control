@@ -159,6 +159,23 @@ describe("Dependencies mockup in jsdom", () => {
     expect(document.querySelectorAll("#col-Done [data-chip]").length).toBe(0);
   });
 
+  it("gives each Blocked card its reason as a link to the ticket it depends on", () => {
+    const document = render("?view=board&state=normal");
+    const link = (ref: string) =>
+      document.querySelector(`#col-Blocked [data-reason='${ref}'] a`)?.getAttribute("href");
+    expect(link("#1139")).toBe("/tickets/mission-control/1015");
+    expect(link("demo#34")).toBe("/tickets/demo/22");
+    expect(text(document.querySelector("#col-Blocked [data-reason='#1138']"))).toBe(
+      "Blocked: stacked on #1015",
+    );
+    expect(document.querySelectorAll("#col-Blocked .card").length).toBe(
+      document.querySelectorAll("#col-Blocked [data-reason]").length,
+    );
+    // an untracked repo's ticket is text, not a link
+    const many = render("?view=board&state=many");
+    expect(many.querySelector("[data-reason='demo#60'] a")).toBeNull();
+  });
+
   it("puts every ticket back in Ready while the chains have not loaded", () => {
     const document = render("?view=board&state=loading");
     expect(document.querySelectorAll("#col-Blocked .card").length).toBe(0);

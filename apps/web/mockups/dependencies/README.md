@@ -66,7 +66,7 @@ All four are now, not over a window. Hover a stat in the mockup for its definiti
 
 ## Board build outline
 
-A Ready ticket with `Depends on` moves to the Blocked column, as a GitHub blocked-by link already does, because the engine will not deal it. The operator approved this on 4 November 2026. The Ready count then falls: in the mockup it drops from 11 to 4, and the note above the Board says so. While chains have not loaded, every ticket stays where its Status puts it and the note says that too.
+A Ready ticket with `Depends on` moves to the Blocked column, as a GitHub blocked-by link already does, because the engine will not deal it. The operator approved this on 4 November 2026. The Ready count then falls: in the mockup it drops from 11 to 4, and the note above the Board says so. A card in Blocked shows its reason as a link to the ticket it depends on ("Blocked: depends on #1015"), the operator's request of 4 November 2026: quick and clear, one click to the blocker. The `Waits on` chip beside it names the PR and the wait. While chains have not loaded, every ticket stays where its Status puts it and the note says that too.
 
 ## Build tickets
 
@@ -94,6 +94,7 @@ Change `apps/web/src/board/Card.tsx`, `apps/web/src/board/cards.ts` and `apps/we
 
 Done when:
 - A card shows `Waits on {ref} · {stage} · {wait}` with ` +{n}` for more, and the root's card shows `Unblocks {n}`.
+- A card in Blocked shows `Blocked: depends on {ticket}` with the ticket linked (text if its repo is untracked).
 - A Ready ticket with `Depends on` is in Blocked and not counted in Ready; the Board note says how many moved.
 - A Done card has no chip; an untracked ref is text; the loading, error, stale and disconnected states are worded.
 - Component tests cover each state; a browser test covers 210 px cards without clipping.
