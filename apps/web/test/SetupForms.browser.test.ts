@@ -124,7 +124,9 @@ const pairsAligned = (page: RenderedPage, scope: string) =>
       );
       return (
         controls.length > 0 &&
-        controls.every((c) => Math.abs(c.height - 32) < 0.5 && Math.abs(c.top - controls[0].top) < 0.5)
+        controls.every(
+          (c) => Math.abs(c.height - 32) < 0.5 && Math.abs(c.top - controls[0].top) < 0.5,
+        )
       );
     });
   }, scope);
@@ -143,7 +145,10 @@ const attempt = (page: RenderedPage, form: (typeof FORMS)[number]) =>
       const set = (label: string, value: string) => {
         const input = field(label);
         if (!input) return;
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+          input,
+          value,
+        );
         input.dispatchEvent(new Event("input", { bubbles: true }));
       };
       if (arg.id === "F01") set("Call sign", "Bad Name");
@@ -191,7 +196,9 @@ describeRendered("Setup agent, session and account forms, rendered", () => {
             expect(await pairsAligned(page, form.form)).toBe(true);
             if (form.form === ".account-dialog") {
               const opaque = await page.evaluate(
-                () => getComputedStyle(document.querySelector(".account-dialog") as Element).backgroundColor,
+                () =>
+                  getComputedStyle(document.querySelector(".account-dialog") as Element)
+                    .backgroundColor,
                 null,
               );
               expect(opaque).not.toBe("rgba(0, 0, 0, 0)");
@@ -223,7 +230,10 @@ describeRendered("Setup agent, session and account forms, rendered", () => {
             action?.scrollIntoView({ block: "nearest" });
             const rect = action?.getBoundingClientRect();
             if (!action || !rect) return false;
-            const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+            const hit = document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
             return rect.top >= 0 && rect.bottom <= window.innerHeight && action.contains(hit);
           }, form.form);
           expect(painted).toBe(true);
