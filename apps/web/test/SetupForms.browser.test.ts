@@ -89,7 +89,11 @@ async function render(
         const button = [...document.querySelectorAll("button")].find(
           (b) => b.textContent === label && !b.disabled,
         );
-        if (button) return void button.click();
+        if (button) {
+          // A real click focuses the button; a scripted one does not, and the opener is what focus returns to.
+          button.focus();
+          return void button.click();
+        }
         await wait(50);
       }
     })();
