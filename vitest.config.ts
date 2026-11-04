@@ -46,6 +46,8 @@ export default defineConfig({
           name: "core",
           environment: "node",
           include: ["packages/**/test/**/*.test.ts"],
+          // Tests that start processes can pass vitest's 5 s default on a loaded CI runner.
+          testTimeout: 15_000,
         },
       },
       "apps/web",

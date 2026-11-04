@@ -57,6 +57,7 @@ describe("CI", () => {
         name: "core",
         environment: "node",
         include: ["packages/**/test/**/*.test.ts"],
+        testTimeout: 15_000,
       },
     });
   });
