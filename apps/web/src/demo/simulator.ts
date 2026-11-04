@@ -287,7 +287,16 @@ export const DEMO_SCENE: readonly DemoBeat[] = Array.from({ length: SCENE_BEATS 
 
 // ---- The timer ---------------------------------------------------------------------------------
 
-const hidden = (): boolean => document.visibilityState === "hidden";
+// Reached through `globalThis`, as data.ts does: the server's type check reads this file too.
+type PageDocument = {
+  visibilityState: string;
+  addEventListener(type: "visibilitychange", listener: () => void): void;
+  removeEventListener(type: "visibilitychange", listener: () => void): void;
+};
+const pageDocument = (): PageDocument | undefined =>
+  (globalThis as { document?: PageDocument }).document;
+
+const hidden = (): boolean => pageDocument()?.visibilityState === "hidden";
 const EVERY_TOPIC: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 
 function tell(topics: readonly Topic[], deltas: readonly MapDelta[]) {
@@ -338,7 +347,7 @@ export function connect(path: string, emit: Emit): () => void {
   const subscriber: Subscriber = { repo, emit };
   if (subscribers.size === 0) {
     getState();
-    document.addEventListener("visibilitychange", onVisibility);
+    pageDocument()?.addEventListener("visibilitychange", onVisibility);
   }
   subscribers.add(subscriber);
   schedule();
@@ -347,7 +356,7 @@ export function connect(path: string, emit: Emit): () => void {
     if (subscribers.size > 0) return;
     clearTimeout(timer);
     timer = undefined;
-    document.removeEventListener("visibilitychange", onVisibility);
+    pageDocument()?.removeEventListener("visibilitychange", onVisibility);
     state = undefined;
   };
 }
