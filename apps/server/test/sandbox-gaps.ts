@@ -9,13 +9,15 @@
  * where a real failure still fails. Each skip is named on stderr so it is never silent.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { beforeEach } from "vitest";
 import { INSTALL_ARGS, installEnv } from "../src/runtime/checkouts.ts";
+import { crewTempRoot } from "../src/runtime/supervisor.ts";
 
-export type Capability = "listen" | "seatbelt" | "install";
+export type Capability = "listen" | "seatbelt" | "install" | "crew-run";
 
 /** Set by the seat sandbox runtime on every command run inside it. */
 const SANDBOX_MARKER = "SANDBOX_RUNTIME";
@@ -39,6 +41,20 @@ const probes: Record<Capability, () => Promise<boolean>> = {
     spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], {
       stdio: "ignore",
     }).status === 0,
+  // a crew run keeps its files in a temp folder the seat's sandbox does not own, and the process
+  // suites list processes with `ps`, which it denies
+  "crew-run": async () => {
+    const path = crewTempRoot("sandbox-gaps-probe", "run", process.getuid?.() ?? 0);
+    if (spawnSync("ps", ["-o", "pid="], { stdio: "ignore" }).status !== 0) return false;
+    try {
+      mkdirSync(dirname(path), { mode: 0o700, recursive: true });
+      mkdirSync(path, { mode: 0o700 });
+      rmdirSync(path);
+      return true;
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code === "EEXIST";
+    }
+  },
   install: async () => {
     // the install the checkout step runs, on an empty project: same arguments, same environment
     const dir = mkdtempSync(join(tmpdir(), "mc-probe-install-"));
@@ -85,4 +101,9 @@ export async function blockedHere(cap: Capability): Promise<boolean> {
       `sandbox-gaps: skipping tests that need "${cap}": this seat's sandbox denies it; CI runs them.\n`,
     );
   return blocked;
+}
+
+/** Skips every test of the file when `blocked` (use as `skipTestsIf(await blockedHere(cap))`). */
+export function skipTestsIf(blocked: boolean): void {
+  if (blocked) beforeEach(({ skip }) => skip());
 }

@@ -2366,13 +2366,13 @@ unchanged; this check gates seat-authored pushes and does not certify that separ
 ### Tests a seat's sandbox cannot run (#1411)
 
 Some tests need what a seat's sandbox denies: `sandbox-exec`, listening on a port, or
-`pnpm install` with a store. A change to a widely imported file selects them all, and in a seat
+`pnpm install` with a store, or starting a crew run (its temp folder, and `ps`). A change to a widely imported file selects them all, and in a seat
 they could only fail (the installs run to their timeouts), so `test:related` could never pass.
 `apps/server/test/sandbox-gaps.ts` skips such a test only when both hold: the process runs under a
 seat's sandbox (`SANDBOX_RUNTIME=1`) and a probe of that capability fails there. CI sets no such
 marker and runs every test. Where the sandbox allows the capability, the test runs and a real
 failure still fails. Each skip is named on stderr (`sandbox-gaps: skipping ...`). Mark a new test of
-this kind with `blockedHere("listen" | "seatbelt" | "install")`.
+this kind with `blockedHere("listen" | "seatbelt" | "install" | "crew-run")`.
 
 The test-lock row's outcome follows the command's exit code: a Post hook event that carries a
 non-zero `exit_code` records `fail` even when the event name says success, and a Codex command that

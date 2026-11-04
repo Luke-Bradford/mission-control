@@ -4,7 +4,10 @@ import "./supervisor-harness.ts";
 import { describe, expect, it } from "vitest";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { seatState, until } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const spy = () => {
   const calls: unknown[][] = [];

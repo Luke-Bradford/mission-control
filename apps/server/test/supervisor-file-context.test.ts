@@ -2,7 +2,10 @@ import "./supervisor-harness.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { dir, make, TICKET, until, userLines } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("planner file context wiring", () => {
   it.each([

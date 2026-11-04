@@ -2755,6 +2755,9 @@ process.env.FAKE_CODEX_RECORD = ${JSON.stringify(recordFile)};
 process.env.FAKE_CODEX_SCENARIO = ${JSON.stringify(JSON.stringify(scenario))};
 process.env.FAKE_CODEX_VERSION = ${JSON.stringify(version)};
 import(${JSON.stringify(fixture)});
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 `,
       { mode: 0o700 },
     );
