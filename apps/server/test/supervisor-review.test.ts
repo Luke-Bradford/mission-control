@@ -484,6 +484,27 @@ describe("startWatch", () => {
     expect(readFileSync(join(worktree, "kept-work.txt"), "utf8")).toBe("unfinished work");
   });
 
+  it("relaunches a surviving FLIGHT run started under an older profile", async () => {
+    const first = flightMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(userLines()).toHaveLength(1));
+    await first.sup.stopAll();
+    // A run from before FLIGHT's tools were listed still holds the old launch arguments.
+    store.setSetting(`flight-runtime-profile:${runId}`, "controller-v1");
+    const next = flightMake();
+    next.sup.start();
+    await until(() =>
+      expect(recorded().filter((line) => Array.isArray(line.argv))).toHaveLength(2),
+    );
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.seatSession("flight-1")?.runId).toBe(runId);
+    const argv = recorded().filter((line) => Array.isArray(line.argv))[1].argv as string[];
+    expect(argv).toContain("--resume");
+    expect(argv).toContain("mcp__mc__*");
+    expect(store.getSetting(`flight-runtime-profile:${runId}`)).not.toBe("controller-v1");
+  });
+
   it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
     const { sup, cfg } = flightMake();
     sup.start();
