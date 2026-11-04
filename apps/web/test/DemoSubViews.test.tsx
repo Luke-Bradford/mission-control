@@ -195,6 +195,77 @@ describe("Demo choices end in data", () => {
   });
 });
 
+describe("Demo findings from round 3", () => {
+  it("the Agent page's Queue and Files tabs, and the Setup update log", async () => {
+    await at("/agent/dev-1");
+    await clickText(/^queue$/i);
+    clean();
+    await clickText(/^files$/i);
+    clean();
+    document.body.innerHTML = "";
+    await at("/setup");
+    await clickText(/update log/i);
+    clean();
+    expect(document.body.textContent).not.toContain("Could not read update.log");
+  });
+
+  it("Comms opens on traffic for the 3 messages beside it, and every seat has contacts", async () => {
+    await at("/comms");
+    const panel = document.querySelector(".comms-traffic-panel") as HTMLElement;
+    expect(document.body.textContent).not.toContain("No messages in FLIGHT");
+    expect(panel.textContent).not.toMatch(/\b0\s*msg/);
+    const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
+      Number(e.textContent),
+    );
+    expect(counts.some((n) => n > 0)).toBe(true);
+  });
+
+  it("the seats hold at least four roles and none holds more than four seats", async () => {
+    const { rows } = (await import("./overviewDensityFixtures.ts")).demoSeed();
+    const roles = new Map<string, number>();
+    for (const row of rows) roles.set(row.role ?? "", (roles.get(row.role ?? "") ?? 0) + 1);
+    expect(roles.size).toBeGreaterThanOrEqual(4);
+    expect(
+      Math.max(...[...roles].filter(([r]) => r !== "FLIGHT").map(([, n]) => n)),
+    ).toBeLessThanOrEqual(4);
+  });
+
+  it("Telemetry draws its charts and fills its tiles", async () => {
+    await at("/telemetry");
+    const text = document.querySelector("main")?.textContent ?? "";
+    expect(text).not.toMatch(/data is not available/);
+    expect((text.match(/not tracked yet/g) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("a ticket that moved shows where it is on every page", async () => {
+    play(44);
+    await at("/tickets/shop-app/201");
+    expect(document.body.textContent).not.toContain("has not touched this ticket");
+    expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
+    document.body.innerHTML = "";
+    await at("/qa");
+    expect(document.body.textContent).not.toContain("PR #1107");
+    expect(document.body.textContent).toContain("PR #1101");
+    document.body.innerHTML = "";
+    await at("/");
+    expect(document.body.textContent).toMatch(/dev-7.*#201/i);
+  });
+
+  it("seats change state and the Step column fills", async () => {
+    play(20);
+    await at("/");
+    const rows = [...document.querySelectorAll("#agentsList .trow:not(.head)")];
+    const text = rows.map((r) => r.textContent ?? "");
+    expect(text.some((t) => /build|checks|review/i.test(t))).toBe(true);
+    const states = new Set(
+      (getState().api["/api/crew?shape=summary"] as { rows: { hudState: string }[] }).rows.map(
+        (r) => r.hudState,
+      ),
+    );
+    expect(states.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe("Demo Comms writes", () => {
   it("a refused decision hold says it is a demo", async () => {
     await at("/comms");

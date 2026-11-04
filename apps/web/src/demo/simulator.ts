@@ -24,6 +24,8 @@ import {
   openPrs,
   pipelineStages,
   prFlowView,
+  qaQueue,
+  ticketHistory,
 } from "../../test/demoSeedPages.ts";
 import { NOW } from "../../test/fixtures.ts";
 import { demoSeed } from "../../test/overviewDensityFixtures.ts";
@@ -90,6 +92,23 @@ export function getState(): DemoState {
 }
 
 // ---- The scene -----------------------------------------------------------------------------
+
+interface SeatPhase {
+  state: CrewRow["hudState"];
+  phase: NonNullable<CrewRow["loop"]>["phase"];
+  step: string | null;
+  text: string;
+  wait: NonNullable<CrewRow["loop"]>["wait"];
+}
+/** One seat's turn through its loop; the scene walks each seat along it. */
+const PHASES: readonly SeatPhase[] = [
+  { state: "running", phase: "working", step: "build", text: "Building", wait: null },
+  { state: "running", phase: "working", step: "build", text: "Building", wait: null },
+  { state: "running", phase: "ci", step: "checks", text: "Checks running", wait: "ci" },
+  { state: "waiting", phase: "review", step: "review", text: "In review", wait: "retro" },
+  { state: "parked", phase: "parked", step: null, text: "Waiting for the test lock", wait: "lock" },
+  { state: "running", phase: "working", step: "build", text: "Building", wait: null },
+];
 
 const WORKERS = ["dev-1", "dev-2", "dev-3", "dev-5", "dev-6", "dev-7", "dev-8", "dev-10"] as const;
 const TOOLS = ["Read", "Edit", "Bash", "Grep", "Write"] as const;
@@ -172,6 +191,17 @@ function bumpLink(s: DemoState, from: string, at: number, text: string, id: stri
   const link = links.find((l) => l.from === from) ?? links[0];
   if (!link) return;
   link.count += 1;
+  // The Comms nav counts each seat's contacts from the same pairs.
+  for (const [seat, other] of [
+    [link.from, link.to],
+    [link.to, link.from],
+  ] as const)
+    for (const key of [`/api/comms/agents/${seat}`, `/api/comms/agents/${seat}?summary=1`]) {
+      const body = s.api[key] as { contacts?: { id: string; count: number }[] } | undefined;
+      const contact = body?.contacts?.find((c) => c.id === other);
+      if (contact) contact.count += 1;
+      else body?.contacts?.push({ id: other, count: 1, unread: 0, lastMessage: null } as never);
+    }
   link.lastAt = at;
   link.lastText = text;
   link.lastId = id;
@@ -182,8 +212,27 @@ function work(s: DemoState, at: number) {
   const tool = TOOLS[s.beat % TOOLS.length] ?? "Read";
   const row = rowsOf(s).find((r) => r.id === seat);
   if (!row) return;
-  row.hudState = "running";
-  row.stateSince = at;
+  // The seat moves through its loop: build, checks, review, a wait for the test lock, build again.
+  const phase = PHASES[
+    Math.floor(s.beat / WORKERS.length + WORKERS.indexOf(seat)) % PHASES.length
+  ] as SeatPhase;
+  if (row.hudState !== phase.state || row.loop?.phase !== phase.phase) row.stateSince = at;
+  row.hudState = phase.state;
+  if (row.loop)
+    row.loop = {
+      ...row.loop,
+      phase: phase.phase,
+      text: phase.text,
+      step: phase.step,
+      parked: phase.phase === "parked" ? phase.text : null,
+      wait: phase.wait,
+      tries:
+        phase.step === "review"
+          ? { n: 2, max: 3 }
+          : phase.step === "checks"
+            ? { n: 1, max: 3 }
+            : { n: 1, max: 3 },
+    };
   row.lastOutputAt = at;
   if (row.digest) {
     row.digest.liveTool = { name: tool, since: at, detail: `src/${seat}/work.ts` };
@@ -259,6 +308,20 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   s.api[`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`] = prs;
   s.api[`/api/repos/${DEMO_REPO}/prs`] = prs;
   s.api["/api/prs/flow"] = shiftTimes(prFlowView(s.tickets), NOW, shift);
+  // The ticket's own page, the QA queue and the seat that took it all follow the move.
+  s.api[`/api/tickets/${DEMO_REPO}/${ticket.n}`] = shiftTimes(ticketHistory(ticket), NOW, shift);
+  s.api["/api/qa/queue"] = shiftTimes(qaQueue(s.tickets), NOW, shift);
+  if (move.to === "building" && move.seat) {
+    for (const row of [
+      rowsOf(s).find((r) => r.id === move.seat),
+      s.api[`/api/crew/${move.seat}`] as CrewRow | undefined,
+    ])
+      if (row) {
+        row.ticket = `${DEMO_REPO}#${ticket.n}`;
+        row.ticketTitle = ticket.title;
+        row.stateSince = at;
+      }
+  }
   logActivity(
     s,
     at,

@@ -230,7 +230,21 @@ export function commsLinks() {
       },
       { from, to: "flight-1", count: 2 + (i % 4), tokens: 400 + i * 60 },
     ])
-    .filter((link) => link.from !== link.to);
+    .filter((link) => link.from !== link.to)
+    .concat([
+      { from: "CAPCOM", to: "flight-1", count: 5, tokens: 700 },
+      { from: "flight-1", to: "CAPCOM", count: 6, tokens: 1500 },
+    ]);
+}
+
+/** A seat's contacts, counted from the same links the graph draws. */
+export function contactsOf(id: string) {
+  const counts = new Map<string, number>();
+  for (const link of commsLinks()) {
+    if (link.from === id) counts.set(link.to, (counts.get(link.to) ?? 0) + link.count);
+    else if (link.to === id) counts.set(link.from, (counts.get(link.from) ?? 0) + link.count);
+  }
+  return [...counts].map(([other, count]) => ({ id: other, lastMessage: null, count, unread: 0 }));
 }
 
 function commsApi(): Record<string, unknown> {
@@ -260,7 +274,7 @@ function commsApi(): Record<string, unknown> {
         const body = {
           messages: mine,
           inbox: [],
-          contacts: [],
+          contacts: contactsOf(id),
           unread: 0,
           inboxUnread: 0,
           directUnread: 0,
@@ -282,8 +296,85 @@ const wave = (n: number, base: number, swing: number): number[] =>
 
 export function telemetryView(): Telemetry {
   const ids = SEAT_IDS.slice(0, 6);
+  const states = ["running", "running", "waiting", "running", "idle"] as const;
   const day = (back: number) => new Date(NOW - back * 24 * HOUR).toISOString().slice(0, 10);
   return {
+    series: {
+      stateSpans: ids.flatMap((agentId, i) =>
+        Array.from({ length: 5 }, (_, k) => ({
+          agentId,
+          state: states[(k + i) % states.length] ?? "running",
+          startedAt: NOW - (5 - k) * HOUR,
+          endedAt: NOW - (4 - k) * HOUR,
+        })),
+      ),
+      quota: [
+        {
+          accountId: "claude-main",
+          window: "5h" as const,
+          alertAt: 85,
+          stopAt: 95,
+          points: Array.from({ length: 12 }, (_, k) => ({
+            at: NOW - (12 - k) * 25 * MIN,
+            pct: 8 + k * 3,
+          })),
+          burn: Array.from({ length: 12 }, (_, k) => ({
+            at: NOW - (12 - k) * 25 * MIN,
+            spendPct: 3,
+          })),
+          projectedExhaustionAt: NOW + 6 * HOUR,
+          resets: [],
+        },
+        {
+          accountId: "codex-main",
+          window: "7d" as const,
+          alertAt: 70,
+          stopAt: 80,
+          points: Array.from({ length: 12 }, (_, k) => ({
+            at: NOW - (12 - k) * 25 * MIN,
+            pct: 5 + k,
+          })),
+          burn: Array.from({ length: 12 }, (_, k) => ({
+            at: NOW - (12 - k) * 25 * MIN,
+            spendPct: 1,
+          })),
+          projectedExhaustionAt: null,
+          resets: [],
+        },
+      ],
+      tickets: DEMO_TICKETS.map((t, i) => ({
+        ticket: `${DEMO_REPO}#${t.n}`,
+        readyAt: NOW - (30 + i * 3) * HOUR,
+        startedAt: NOW - (28 + i * 3) * HOUR,
+        mergedAt: t.stage === "merged" ? NOW - (i + 1) * HOUR : null,
+        doneAt: t.stage === "merged" ? NOW - (i + 1) * HOUR : null,
+      })),
+      throughput: Array.from({ length: 14 }, (_, k) => ({
+        at: NOW - (14 - k) * 24 * HOUR,
+        merged: 2 + (k % 5),
+      })),
+      quality: Array.from({ length: 14 }, (_, k) => ({
+        at: NOW - (14 - k) * 24 * HOUR,
+        ciGreenFirstPushPct: 80 + (k % 6) * 3,
+        reviewRoundsPerPr: 1.2 + (k % 4) / 10,
+        firstPassReviewPct: 60 + (k % 5) * 5,
+      })),
+      annotations: [
+        {
+          at: NOW - 8 * HOUR,
+          kind: "hub-update" as const,
+          cause: "Hub updated to the latest build.",
+        },
+      ],
+    },
+    capcom: {
+      answered: 9,
+      medianMs: 6 * MIN,
+      p90Ms: 18 * MIN,
+      stopped: 1,
+      longest: { agentId: "dev-4", ms: 31 * MIN },
+      agentWaitMs: 54 * MIN,
+    },
     today: {
       commits: 31,
       tokens: 2_840_000,
@@ -306,7 +397,17 @@ export function telemetryView(): Telemetry {
       ],
       excluded: 1,
     },
-    quality: { ciGreenFirstPushPct: 88, prs: 27 },
+    quality: {
+      ciGreenFirstPushPct: 88,
+      prs: 27,
+      retroFindingsPerPr: 1.8,
+      sentBackPrs: 6,
+      humanReviewWaitMs: 22 * MIN,
+      reviewRoundsPerPr: 1.4,
+      firstPassReviewPct: 64,
+      reviewedPrs: 24,
+      commitsPerRun: 3.2,
+    },
     tokensPerMinute: ids.map((agentId, i) => ({
       agentId,
       points: wave(TELEMETRY_POINTS, 900 + i * 120, 400),
@@ -452,6 +553,54 @@ const awayDigest = () => ({
 
 // ---- Setup, FLIGHT and QA ----------------------------------------------------------------------
 
+/** Per-seat reads a seat's page makes on its Queue and Files tabs. */
+function seatApi(): Record<string, unknown> {
+  return Object.fromEntries(
+    SEAT_IDS.flatMap((id) => {
+      const focus = "Finish the ticket in hand, then take the next Ready one.";
+      return [
+        [`/api/seats/${id}/focus`, { focus, effectiveFocus: focus, focusInstructionId: null }],
+        [
+          `/api/seats/${id}/instructions?limit=1`,
+          {
+            active: [],
+            history: [],
+            nextCursor: null,
+            effectiveFocus: focus,
+            focusInstructionId: null,
+          },
+        ],
+        [
+          `/api/seats/${id}/instructions?limit=50`,
+          {
+            active: [],
+            history: [],
+            nextCursor: null,
+            effectiveFocus: focus,
+            focusInstructionId: null,
+          },
+        ],
+        [
+          `/api/agents/${id}/files`,
+          {
+            files: mapFiles()
+              .slice(0, 3)
+              .map((f, i) => ({
+                path: f.path,
+                add: 12 + i * 5,
+                del: 2 + i,
+                state: i === 2 ? "uncommitted" : "committed",
+                commitSha: i === 2 ? null : "a".repeat(40),
+              })),
+            note: null,
+            sha: null,
+          },
+        ],
+      ];
+    }),
+  );
+}
+
 function setupApi(): Record<string, unknown> {
   return {
     "/api/crew/changes": {
@@ -480,6 +629,9 @@ function setupApi(): Record<string, unknown> {
     "/api/guard/hits?days=7": { hits: [], counts: {} },
     "/api/test-lock/history": { runs: [], today: { runs: 0, waitMs: 0 }, usualMs: {} },
     "/api/repos/profiles": [],
+    "/api/update/log": {
+      text: "Checking for updates\nAlready up to date at demo000.\nNothing to do.",
+    },
     "/api/accounts/status": [],
     "/api/accounts/models": ["claude-main", "codex-main"].map((accountId) =>
       accountModels(accountId),
@@ -499,7 +651,7 @@ function setupApi(): Record<string, unknown> {
 }
 
 /** The QA queue: the open PRs, newest first. */
-function qaQueue(tickets: readonly DemoTicket[]) {
+export function qaQueue(tickets: readonly DemoTicket[]) {
   const sha = "a".repeat(40);
   return {
     prs: openPrs(tickets).map((pr, i) => ({
@@ -743,6 +895,7 @@ export function demoPageAnswers(
     ...health,
     ...history,
     ...memoryApi(),
+    ...seatApi(),
     ...prFiles(tickets),
     ...commsApi(),
     ...setupApi(),
@@ -812,3 +965,107 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
     ],
   };
 }
+
+/** What Mission Control knows of one ticket: the page for it, from the ticket's place in the pipeline. */
+export function ticketHistory(t: DemoTicket, at = NOW) {
+  const merged = t.stage === "merged";
+  const sha = "a".repeat(40);
+  const runId = `demo-run-${t.seat ?? t.n}`;
+  return {
+    repoId: DEMO_REPO,
+    number: t.n,
+    url: `https://github.com/octo-org/shop-app/issues/${t.n}`,
+    title: t.title,
+    state: merged ? "closed" : "open",
+    status: COLUMN_STATUS[t.stage],
+    priority: "P1",
+    size: "M",
+    labels: [],
+    outcome: t.title,
+    doneWhen: [],
+    body: t.title,
+    bodyTruncated: false,
+    githubError: null,
+    runs:
+      t.seat || merged
+        ? [
+            {
+              id: runId,
+              seat: t.seat ?? "dev-1",
+              status: merged ? "ok" : "running",
+              phase: merged ? "done" : "build",
+              startedAt: at - 3 * HOUR,
+              endedAt: merged ? at - 20 * MIN : null,
+              tokens: { input: 12_000, output: 3_400, cacheRead: 1_200_000, cacheCreate: 40_000 },
+              costUsd: 2.47,
+            },
+          ]
+        : [],
+    prs:
+      t.stage === "ready"
+        ? []
+        : [
+            {
+              number: t.n + 1000,
+              title: t.title,
+              url: `https://github.com/octo-org/shop-app/pull/${t.n + 1000}`,
+              branch: `feature/${t.n}-demo`,
+              state: merged ? "merged" : "open",
+              isDraft: false,
+              headSha: sha,
+              createdAt: at - 2 * HOUR,
+              mergedAt: merged ? at - 20 * MIN : null,
+              rounds: [],
+              ci: [
+                {
+                  sha,
+                  at: at - 30 * MIN,
+                  checks: [{ name: "test", conclusion: "success", state: "passing", url: null }],
+                },
+              ],
+            },
+          ],
+    timeline:
+      t.stage === "ready"
+        ? []
+        : [
+            {
+              key: `c:${t.n}`,
+              at: at - 6 * MIN,
+              kind: "comms",
+              id: `comms:${t.n}`,
+              from: t.seat ?? "flight-1",
+              to: "crew",
+              label: null,
+              text: merged
+                ? "Merged. Moving to the next ticket."
+                : "Tests pass locally; pushing the branch now.",
+            },
+            {
+              key: `r:${t.n}`,
+              at: at - 3 * HOUR,
+              kind: "run",
+              runId,
+              seat: t.seat ?? "dev-1",
+              status: merged ? "ok" : "running",
+              phase: merged ? "done" : "build",
+            },
+          ],
+    nextBefore: null,
+  };
+}
+
+/** The roles Demo's seats hold, spread so the Comms graph can place them apart. */
+export const SEAT_ROLES: Record<string, string> = {
+  "flight-1": "FLIGHT",
+  "dev-1": "GUIDO",
+  "dev-2": "GUIDO",
+  "dev-3": "GUIDO",
+  "dev-4": "INCO",
+  "dev-5": "INCO",
+  "dev-6": "INCO",
+  "dev-7": "FAO",
+  "dev-8": "FAO",
+  "dev-9": "RETRO",
+  "dev-10": "GUIDO",
+};

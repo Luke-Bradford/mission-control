@@ -8,12 +8,13 @@ import type {
 } from "@mc/core";
 import { agentView } from "./agentV2Fixture.ts";
 import {
-  boardColumnOf,
   DEMO_REPO,
   DEMO_TICKETS,
   demoPageAnswers,
   pipelineStages,
   prFlowView,
+  SEAT_ROLES,
+  ticketHistory,
 } from "./demoSeedPages.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import {
@@ -542,10 +543,11 @@ export function demoSeed() {
       stop: null,
       queuedReview: null,
       note: blocked ? "Waiting for the breakpoint decision." : null,
-      role: row.id === "dev-9" ? "RETRO" : row.id === "flight-1" ? "FLIGHT" : "GUIDO",
+      role: SEAT_ROLES[row.id] ?? "GUIDO",
       mode: row.id === "dev-9" ? "read-only" : "writer",
       ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
       ticketTitle: ticket?.title ?? null,
+      loop: ticket ? demoLoop() : null,
       run: {
         ...(seatRow().run as NonNullable<CrewRow["run"]>),
         id: `demo-run-${index}`,
@@ -554,6 +556,9 @@ export function demoSeed() {
       },
     };
   });
+  const config = structuredClone(base.config);
+  for (const session of config.crew?.sessions ?? [])
+    for (const seat of session.seats) seat.role = SEAT_ROLES[seat.id] ?? seat.role;
   const attention = base.attention.map((entry, i) => ({
     ...entry,
     ticket: i === 0 ? `${DEMO_REPO}#104` : entry.ticket,
@@ -588,6 +593,7 @@ export function demoSeed() {
     ),
     "/api/crew?shape=summary": { rows, firstRunToday: NOW - 3 * 60 * MIN },
     "/api/attention": attention,
+    "/api/config": config,
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
     "/api/prs/flow": prFlowView(),
@@ -598,30 +604,8 @@ export function demoSeed() {
       may: { pickUp: true, research: false, check: true, status: true, safePr: false },
     },
   };
-  for (const t of DEMO_TICKETS) {
-    const seat = t.seat;
-    api[`/api/tickets/${DEMO_REPO}/${t.n}`] = {
-      repoId: DEMO_REPO,
-      number: t.n,
-      url: `https://github.com/octo-org/shop-app/issues/${t.n}`,
-      title: t.title,
-      state: t.stage === "merged" ? "closed" : "open",
-      status: boardColumnOf(t.stage),
-      priority: "P1",
-      size: "M",
-      labels: [],
-      outcome: t.title,
-      doneWhen: [],
-      body: t.title,
-      bodyTruncated: false,
-      githubError: null,
-      runs: seat ? [demoRun(seat, rows)] : [],
-      prs: [],
-      timeline: seat ? demoTimeline(t.n, seat) : [],
-      nextBefore: null,
-    };
-  }
-  return { ...base, rows, attention, summary, api };
+  for (const t of DEMO_TICKETS) api[`/api/tickets/${DEMO_REPO}/${t.n}`] = ticketHistory(t);
+  return { ...base, rows, attention, config, summary, api };
 }
 
 const DEMO_TOOLS = ["Read", "Edit", "Bash", "Grep", "Write"] as const;
@@ -700,40 +684,23 @@ function demoStream(row: CrewRow, index: number) {
   };
 }
 
-function demoRun(seat: string, rows: readonly CrewRow[]) {
-  const run = rows.find((r) => r.id === seat)?.run;
+/** A running seat's loop: where it is in plan, build, checks and review. */
+export function demoLoop() {
   return {
-    id: run?.id ?? `demo-run-${seat}`,
-    seat,
-    status: "running" as const,
-    phase: "build",
-    startedAt: NOW - 25 * MIN,
-    endedAt: null,
-    tokens: { input: 12_000, output: 3_400, cacheRead: 1_200_000, cacheCreate: 40_000 },
-    costUsd: 2.47,
+    phase: "working" as const,
+    text: "Building",
+    prNumber: null,
+    parked: null,
+    profile: "feature",
+    step: "build",
+    steps: [
+      { name: "plan", phase: null },
+      { name: "build", phase: "working" as const },
+      { name: "checks", phase: "ci" as const },
+      { name: "review", phase: "review" as const },
+    ],
+    planned: true,
+    tries: { n: 1, max: 3 },
+    wait: null,
   };
-}
-
-function demoTimeline(n: number, seat: string) {
-  return [
-    {
-      key: `c:${n}`,
-      at: NOW - 6 * MIN,
-      kind: "comms" as const,
-      id: `comms:${n}`,
-      from: seat,
-      to: "crew",
-      label: null,
-      text: "Tests pass locally; pushing the branch now.",
-    },
-    {
-      key: `r:${n}`,
-      at: NOW - 25 * MIN,
-      kind: "run" as const,
-      runId: `demo-run-${seat}`,
-      seat,
-      status: "running" as const,
-      phase: "build",
-    },
-  ];
 }

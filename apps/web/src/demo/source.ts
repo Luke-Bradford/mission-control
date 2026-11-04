@@ -84,10 +84,26 @@ function history(path: string): unknown {
   return repo ? { ...page, entries: page.entries.filter((e) => e.repoId === repo) } : page;
 }
 
+/** One listed file's diff: a few changed lines. */
+function fileDiff(path: string): unknown {
+  const m = /^\/api\/agents\/[^/]+\/files\/diff\?path=(.+)$/.exec(path);
+  if (!m) return undefined;
+  const file = decodeURIComponent(m[1] ?? "");
+  return {
+    path: file,
+    text: `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,3 +1,4 @@\n const total = quote.total;\n-return total;\n+const cached = cache.get(total);\n+return cached ?? total;\n`,
+    truncated: false,
+    binary: false,
+    sha: null,
+  };
+}
+
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
   if (key in api) return json(api[key]);
+  const diff = fileDiff(path);
+  if (diff !== undefined) return json(diff);
   if (path === "/api/comms/traffic") return json(traffic());
   const filtered = history(path);
   if (filtered !== undefined) return json(filtered);
