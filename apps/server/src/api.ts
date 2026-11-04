@@ -4988,7 +4988,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+          store.hasUnfinishedBuildRun(repoId, pr.branch)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;

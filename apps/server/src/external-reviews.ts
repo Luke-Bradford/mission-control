@@ -121,7 +121,7 @@ export function createExternalReviews(deps: {
       pr?.state === "open" &&
       !pr.isDraft &&
       pr.headSha === row.sha &&
-      !store.runsOnBranch(row.repoId, pr.branch).some((run) => run.reviewId == null)
+      !store.hasUnfinishedBuildRun(row.repoId, pr.branch)
     );
   }
 
@@ -253,8 +253,7 @@ export function createExternalReviews(deps: {
           if (repo.autonomy !== "merge") continue;
           for (const pr of store.pullRequests(repo.id)) {
             if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
-            if (store.runsOnBranch(repo.id, pr.branch).some((run) => run.reviewId == null))
-              continue;
+            if (store.hasUnfinishedBuildRun(repo.id, pr.branch)) continue;
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);

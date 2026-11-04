@@ -2325,6 +2325,13 @@ export class Store {
     ).map(toRun);
   }
 
+  /** A build run on the branch that has not ended (live or parked). Ended ones no longer own the PR. */
+  hasUnfinishedBuildRun(repoId: RepoId, branch: string): boolean {
+    return this.runsOnBranch(repoId, branch).some(
+      (run) => run.reviewId == null && run.endedAt === null,
+    );
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db

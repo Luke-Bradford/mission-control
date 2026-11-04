@@ -138,7 +138,7 @@ describe("external PR review subjects", () => {
     },
   );
 
-  it("does not review a crew-owned branch, even when its run ended", async () => {
+  const buildRun = (patch: Record<string, unknown>) =>
     store.upsertRun({
       id: "builder:old",
       agentId: "builder",
@@ -156,7 +156,21 @@ describe("external PR review subjects", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
+      ...patch,
     });
+
+  it("reviews a PR whose only build run has ended", async () => {
+    buildRun({ endedAt: 2 });
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    expect(store.reviewsIn(["queued"])).toHaveLength(1);
+    expect(h.writes).toHaveLength(1);
+    expect(service.wanted(store.reviewsOfRun(externalReviewKey("sample", 7))[0]!)).toBe(true);
+  });
+
+  it("does not review a branch whose build run is still unfinished", async () => {
+    buildRun({ endedAt: null, status: "parked" });
     const h = harness();
     await createExternalReviews(h.deps).sync();
     expect(store.reviewsIn(["queued"])).toHaveLength(0);

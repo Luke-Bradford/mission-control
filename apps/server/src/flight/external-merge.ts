@@ -43,7 +43,7 @@ export async function mergeExternalPr(i: {
   const sha = cached?.headSha;
   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
-  if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+  if (store.hasUnfinishedBuildRun(repo.id, cached.branch))
     return fail("This branch belongs to a crew run; use its normal merge path.");
   let rules: RepoRules;
   try {
@@ -285,7 +285,7 @@ export async function mergeExternalPr(i: {
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
       store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
-      store.runsOnBranch(repo.id, finalSubject.branch).some((run) => run.reviewId == null)
+      store.hasUnfinishedBuildRun(repo.id, finalSubject.branch)
     )
       return fail("The PR head, checks, ownership or hold changed before merge.");
     const merged = await i.gh(

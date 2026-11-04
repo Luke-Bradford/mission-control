@@ -492,10 +492,7 @@ export async function main(): Promise<void> {
       );
       if (!subject) return null;
       const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
-      if (
-        pr?.headSha !== review.sha ||
-        store.runsOnBranch(repo.id, subject.branch).some((run) => run.reviewId == null)
-      )
+      if (pr?.headSha !== review.sha || store.hasUnfinishedBuildRun(repo.id, subject.branch))
         return null;
       const linked = pr?.ticket?.startsWith(`${repo.id}#`)
         ? Number(pr.ticket.slice(repo.id.length + 1))

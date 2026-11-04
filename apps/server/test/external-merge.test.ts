@@ -172,6 +172,54 @@ describe("external PR controller merge", () => {
     expect(store.run(externalReviewKey("sample", 7))).toBeNull();
   });
 
+  const buildRun = (endedAt: number | null) =>
+    store.upsertRun({
+      id: "builder:old",
+      agentId: "builder",
+      repoId: "sample",
+      seq: 1,
+      startedAt: 1,
+      endedAt,
+      status: "ok",
+      model: null,
+      sessionId: null,
+      branch: pr.branch,
+      ticket: "sample#1",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+
+  it("merges a PR whose build run ended, and still refuses one whose run is unfinished", async () => {
+    const h = harness();
+    buildRun(null);
+    expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
+    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("clears a hard-rule PR with an ended run only on a controller's approval for the head", async () => {
+    const h = harness();
+    buildRun(2);
+    h.state.files = [{ filename: "docs/hard/x.md", status: "modified" }];
+    h.state.rules = {
+      ...h.state.rules,
+      hardRules: ["docs/hard/**"],
+      hardRulesBy: "operator" as const,
+    };
+    expect((await mergeExternalPr(h.deps)).text).toContain("requires controller approval");
+    grantApproval(
+      store,
+      { rule: "merge-floor", scope: mergeFloorScope(7, SHA), until: 150, reason: "Reviewed." },
+      90,
+    );
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
   it("respects a real external mc/review sign-off without inventing a scratch report", async () => {
     store.close();
     store = new Store(":memory:");
