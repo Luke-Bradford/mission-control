@@ -178,18 +178,16 @@ describe("Dependencies mockup in jsdom", () => {
 
   it("counts what a merge frees the same way on Board, FLIGHT and QA", () => {
     const board = render("?view=board&state=normal");
-    expect(
-      text(board.querySelector("[data-ticket='demo#21'] [data-chip=unblocks]")),
-    ).toBe("Unblocks 2");
+    expect(text(board.querySelector("[data-ticket='demo#21'] [data-chip=unblocks]"))).toBe(
+      "Unblocks 2",
+    );
     const row = render("?view=qa&pr=demo-21").querySelector("#queueP a.row.on");
     expect(text(row)).toContain("unblocks 2");
     expect(text(render("?view=qa&pr=demo-21").querySelector("[data-frees]"))).toContain(
       "Merging this frees 2",
     );
     const flight = render("?view=flight&state=normal");
-    expect(
-      text(flight.querySelector("[data-ref='demo PR 21'] [role=cell]:last-child")),
-    ).toBe("2");
+    expect(text(flight.querySelector("[data-ref='demo PR 21'] [role=cell]:last-child"))).toBe("2");
   });
 
   it("draws the Board's columns in their real order", () => {
@@ -224,7 +222,8 @@ describe("Dependencies mockup in jsdom", () => {
     ].map((card) => card.getAttribute("data-ticket"));
     const working = [...document.querySelectorAll("#wifP [data-seat-state=Working]")].map(text);
     expect(working.length).toBeGreaterThan(0);
-    for (const row of working) for (const ticket of blocked) expect(row).not.toContain(`${ticket} `);
+    for (const row of working)
+      for (const ticket of blocked) expect(row).not.toContain(`${ticket} `);
   });
 
   it("links an owner only when there is one", () => {
