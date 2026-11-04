@@ -125,14 +125,19 @@ function cachedHeadlessShells(): string[] {
       ? join(homedir(), "Library/Caches/ms-playwright")
       : join(homedir(), ".cache/ms-playwright");
   if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .filter((name) => name.startsWith("chromium_headless_shell-"))
-    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-    .flatMap((name) =>
-      readdirSync(join(root, name))
-        .filter((dir) => dir.startsWith("chrome-headless-shell"))
-        .map((dir) => join(root, name, dir, "chrome-headless-shell")),
-    );
+  try {
+    return readdirSync(root)
+      .filter((name) => name.startsWith("chromium_headless_shell-"))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .flatMap((name) =>
+        readdirSync(join(root, name))
+          .filter((dir) => dir.startsWith("chrome-headless-shell"))
+          .map((dir) => join(root, name, dir, "chrome-headless-shell")),
+      );
+  } catch {
+    // A sandbox that cannot read the cache has no cached shell; the other candidates still apply.
+    return [];
+  }
 }
 
 const BROWSER = [
@@ -147,7 +152,7 @@ const BROWSER = [
 
 /** Without a browser a local run skips; CI fails, so a layout check can never pass unrendered. */
 const MUST_RUN = Boolean(process.env.CI);
-const SKIP = !BROWSER && !MUST_RUN;
+const NO_BROWSER = !BROWSER && !MUST_RUN;
 
 /** `describe` for rendered tests: skipped locally when no browser is installed, never on CI. */
 export const describeRendered = (name: string, body: () => void) =>
@@ -164,6 +169,21 @@ async function launch(executablePath: string): Promise<Browser> {
     return chromium.launch({ executablePath, headless: true, args: SANDBOX_FALLBACK_ARGS });
   }
 }
+
+/**
+ * A browser that is installed but cannot start (a seat's sandbox forbids Chrome's profile and
+ * crash database) skips a local run like a missing one; on CI it still fails loudly.
+ */
+async function startable(): Promise<boolean> {
+  if (!BROWSER) return false;
+  try {
+    await (await launch(BROWSER)).close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+const SKIP = NO_BROWSER || (!MUST_RUN && !(await startable()));
 
 /** Builds the harness pages once. */
 async function buildHarness(outDir: string): Promise<void> {
