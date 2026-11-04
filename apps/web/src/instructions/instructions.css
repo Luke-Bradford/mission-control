@@ -92,5 +92,5 @@
 }
 /* The Seats panel is shorter than Knows or Agent; its named reader must fit its visible body. */
 .flight-crew .instruction-manager > .instruction-list {
-  max-height: min(320px, 24vh);
+  max-height: min(320px, calc(24 * var(--vh)));
 }

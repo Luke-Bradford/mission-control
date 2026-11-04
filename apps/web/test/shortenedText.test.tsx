@@ -106,7 +106,7 @@ it("bounds expanded prose and allows narrow HUD rows to shrink", () => {
     /\.expandable \{[^}]*min-width: 0;[^}]*max-width: 100%;[^}]*overflow-wrap: anywhere;/,
   );
   expect(css).toMatch(
-    /\.expandable.open \.expandable-content \{[^}]*max-height: min\(50vh, 24rem\);[^}]*overflow: auto;/,
+    /\.expandable.open \.expandable-content \{[^}]*max-height: min\(calc\(50 \* var\(--vh\)\), 24rem\);[^}]*overflow: auto;/,
   );
   expect(css).toMatch(/#cHandled \.nrow > div \{[^}]*grid-column: 1 \/ -1;[^}]*min-width: 0;/);
 });

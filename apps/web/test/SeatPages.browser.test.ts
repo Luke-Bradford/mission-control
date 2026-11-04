@@ -25,10 +25,13 @@ describeRendered("A seat across Overview, Agent, Comms and Map in a browser", ()
           });
           await page.box(".map-light");
           const colours = await page.evaluate(() => {
-            const rgb = (el: Element | null, prop: "backgroundColor" | "stopColor") =>
+            const rgb = (el: Element | null, prop: "backgroundColor" | "fill") =>
               el ? getComputedStyle(el)[prop] : "missing";
             return {
-              overview: rgb(document.querySelector("[data-surface=overview] stop"), "stopColor"),
+              overview: rgb(
+                document.querySelector("[data-surface=overview] .crew-lane-bar"),
+                "fill",
+              ),
               agent: rgb(document.querySelector("[data-surface=agent] .ag i"), "backgroundColor"),
               comms: rgb(
                 document.querySelector("[data-surface=comms] .comms-nav-row i"),

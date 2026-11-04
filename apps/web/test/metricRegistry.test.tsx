@@ -3,7 +3,6 @@ import {
   type MetricId,
   type MetricsView,
   metricHover,
-  metricLabel,
   type Telemetry as TelemetryData,
 } from "@mc/core";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -87,7 +86,7 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   {
     name: "Overview",
     page: () => <Overview />,
-    shows: ["agentsWorking", "cost", "inProgress", "merged", "cycleTime", "needsYou"],
+    shows: ["agentsWorking", "inProgress", "merged", "cycleTime"],
   },
   // Only the open tab is mounted, so each tab that shows a figure is opened by its link.
   {
@@ -214,22 +213,21 @@ describe("the metric registry across pages", () => {
     },
   );
 
-  it("labels carry the registry's window and hover carries its definition", async () => {
+  it("the Overview's registry figures carry the registry's definition on hover", async () => {
     stubFetch({ ...LEGACY, ...REGISTRY_ROUTES, "/api/config": CONFIG });
     const { container } = render(<Overview />);
     await waitFor(() => expect(shown(container).get("merged")).toEqual(["6"]));
-    for (const id of [
-      "agentsWorking",
-      "cost",
-      "inProgress",
-      "merged",
-      "cycleTime",
-      "needsYou",
-    ] as const) {
-      const label = [...container.querySelectorAll(".overview-kpi .lbl")].find(
-        (el) => el.textContent === metricLabel(id),
-      );
-      expect(label?.getAttribute("title"), id).toBe(metricHover(id));
+    for (const id of ["agentsWorking", "inProgress", "merged", "cycleTime"] as const) {
+      const figure = container.querySelector<HTMLElement>(`[data-metric="${id}"]`);
+      expect(figure?.closest("[title]")?.getAttribute("title"), id).toBe(metricHover(id));
     }
+  });
+
+  it("the Overview's spend today is the registry's cost, not the old summary's", async () => {
+    stubFetch({ ...LEGACY, ...REGISTRY_ROUTES, "/api/config": CONFIG });
+    const { container } = render(<Overview />);
+    await waitFor(() => expect(shown(container).get("merged")).toEqual(["6"]));
+    expect(container.querySelector("#tokensP .token-spend")?.textContent).toBe("~$24.31 today");
+    expect(shown(container).get("cost")).toEqual(["~$24.31"]);
   });
 });

@@ -76,6 +76,7 @@
   --lh: 20px;
   --lh-s: 16px;
   --lh-micro: 16px;
+  --lh-axis: 14px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -85,15 +86,26 @@
   --sp-7: 48px;
   --r: 3px;
   --r-s: 2px;
-  --shell-gutter: var(--sp-4);
+  --shell-gutter: var(--sp-3);
   --table-row: var(--sp-6);
   --table-cell-y: 0px;
   --panel-head-y: var(--sp-2);
 }
 
-@media (min-width: 1600px) {
+/* From 3300 CSS px, which zooms to the 2200 px layout, the interface scales instead of stretching:
+   a true 4K screen at 100% composes like the 2560 layout. Viewport units are zoomed too (100vh paints 150% of the screen),
+   so every height taken from the viewport goes through --vh and --dvh. */
+:root {
+  --vh: 1vh;
+  --dvh: 1dvh;
+}
+@media (min-width: 3300px) {
+  html {
+    zoom: 1.5;
+  }
   :root {
-    --shell-gutter: var(--sp-5);
+    --vh: calc(1vh / 1.5);
+    --dvh: calc(1dvh / 1.5);
   }
 }
 
@@ -1087,5 +1099,35 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .live-indicator.fresh i {
     animation: none;
+  }
+}
+
+/* Overview keeps its canvas intact while the conversation temporarily covers it below the roomy
+   breakpoint. Other pages retain their dock geometry and session-only fold choice. */
+@media (min-width: 1200px) {
+  .app.overview-shell .shell {
+    position: relative;
+  }
+  .app.overview-flight-overlay .shell {
+    grid-template-columns: minmax(0, 1fr) var(--sp-7);
+  }
+  .app.overview-flight-overlay .dock {
+    position: absolute;
+    top: var(--shell-gutter);
+    right: var(--shell-gutter);
+    bottom: var(--shell-gutter);
+    /* The side column, the rail and the gap between them. */
+    width: 620px;
+    z-index: 30;
+    box-shadow: var(--shadow);
+  }
+  /* Hidden, not just covered, so keyboard focus can't land under the cover. */
+  .app.overview-flight-overlay .overview-secondary {
+    visibility: hidden;
+  }
+}
+@media (min-width: 1200px) and (max-width: 1699px) {
+  .app.overview-flight-overlay .dock {
+    width: 540px;
   }
 }
