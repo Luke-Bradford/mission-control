@@ -2319,8 +2319,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            lock?.release(key, failed);
-            await checks?.end(key, !failed);
+            // a Post event can say success while the command's exit code says otherwise (#1411)
+            const exited = typeof body.data.exit_code === "number" && body.data.exit_code !== 0;
+            lock?.release(key, failed || exited);
+            await checks?.end(key, !(failed || exited));
             const command = body.data.tool_input?.command;
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (

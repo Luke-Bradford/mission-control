@@ -1231,6 +1231,32 @@ describe("POST /api/guard/check", () => {
     ]);
   });
 
+  it("records fail when a Post event carries a non-zero exit code (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: boolean[] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        end: async (_key, ok) => {
+          ends.push(ok);
+        },
+        lockedBy: async () => null,
+        dropRun: () => {},
+        drops: () => [],
+      },
+    });
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, { ...post("a1", "PostToolUse"), exit_code: 1 });
+    await check(tokB, bash("b1", "pnpm -s test"));
+    await check(tokB, { ...post("b1", "PostToolUse"), exit_code: 0 });
+    expect(store.lockRuns(0).map((r) => [r.runId, r.outcome])).toEqual([
+      ["run-b", "pass"],
+      ["run-a", "fail"],
+    ]);
+    expect(ends).toEqual([false, true]);
+  });
+
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
     const b = check(tokB, bash("b1", "pnpm -s test"));

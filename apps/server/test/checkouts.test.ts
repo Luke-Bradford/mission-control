@@ -51,6 +51,7 @@ import {
   uvInstallEnv,
   writeReviewInputs,
 } from "../src/runtime/checkouts.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 let dir: string;
 let origin: string;
@@ -209,6 +210,8 @@ esac
   process.env.PATH = `${shim}:${savedGitPath}`;
 }
 
+const installBlocked = await blockedHere("install");
+const itInstall = it.skipIf(installBlocked);
 const EMPTY_LOCK = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
 const PKG = '{"name":"x","version":"1.0.0","private":true}\n';
 
@@ -598,7 +601,7 @@ describe("prepareCheckout", () => {
       await refused("has no pyproject.toml");
     });
 
-    it("runs pnpm then uv when both lockfiles are there", async () => {
+    itInstall("runs pnpm then uv when both lockfiles are there", async () => {
       push({ "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
       const commands: string[] = [];
       await prepareCheckout(input(), (command, args, options) => {
@@ -714,7 +717,7 @@ describe("prepareCheckout", () => {
     expect(git(first.path, "rev-parse", "HEAD")).toBe(tip);
   });
 
-  it.each(["installed", "unsafe", "failed"])(
+  it.each(installBlocked ? ["unsafe", "failed"] : ["installed", "unsafe", "failed"])(
     "checks changed install inputs after a sync: %s",
     async (outcome) => {
       const first = await prepareCheckout(input());
@@ -903,7 +906,7 @@ describe("prepareCheckout", () => {
     expect(existsSync(root)).toBe(false);
   });
 
-  it("installs dependencies in a new worktree that has a pnpm lockfile", async () => {
+  itInstall("installs dependencies in a new worktree that has a pnpm lockfile", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
     await prepareCheckout(input());
@@ -935,56 +938,59 @@ describe("prepareCheckout", () => {
     expect(existsSync(wtPath())).toBe(false);
   });
 
-  it("relinks a reused worktree from its old pnpm store before its scripts run", async () => {
-    const scriptPackage = `${JSON.stringify({
-      name: "x",
-      version: "1.0.0",
-      private: true,
-      scripts: { check: 'node -e ""' },
-      dependencies: { dep: "file:vendor/dep" },
-    })}\n`;
-    const depPackage = '{"name":"dep","version":"1.0.0"}\n';
-    writeFileSync(join(seed, "package.json"), scriptPackage);
-    mkdirSync(join(seed, "vendor", "dep"), { recursive: true });
-    writeFileSync(join(seed, "vendor", "dep", "package.json"), depPackage);
-    execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
-      cwd: seed,
-      env: installEnv(seed),
-    });
-    commit(seed, {
-      "package.json": scriptPackage,
-      "pnpm-lock.yaml": readFileSync(join(seed, "pnpm-lock.yaml"), "utf8"),
-      "vendor/dep/package.json": depPackage,
-    });
-    git(seed, "push", "-q", "origin", "main");
-    const first = await prepareCheckout(input());
-    const oldStore = join(dir, "pre-upgrade-pnpm-store");
-    const modulesPath = join(first.path, "node_modules", ".modules.yaml");
-    const modules = JSON.parse(readFileSync(modulesPath, "utf8")) as { storeDir: string };
-    modules.storeDir = join(oldStore, basename(modules.storeDir));
-    mkdirSync(modules.storeDir, { recursive: true });
-    writeFileSync(modulesPath, `${JSON.stringify(modules, null, 2)}\n`);
-    expect(readFileSync(modulesPath, "utf8")).toContain(oldStore);
-
-    const reused = await prepareCheckout(input());
-    expect(reused).toMatchObject({ path: first.path, created: false });
-    expectSharedPnpmStore();
-    expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
-      sharedPnpmStore(),
-    );
-    expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
-    for (let n = 0; n < 2; n++)
-      execFileSync("pnpm", ["-s", "check"], {
-        cwd: reused.path,
-        env: installEnv(reused.path, sharedPnpmStore()),
+  itInstall(
+    "relinks a reused worktree from its old pnpm store before its scripts run",
+    async () => {
+      const scriptPackage = `${JSON.stringify({
+        name: "x",
+        version: "1.0.0",
+        private: true,
+        scripts: { check: 'node -e ""' },
+        dependencies: { dep: "file:vendor/dep" },
+      })}\n`;
+      const depPackage = '{"name":"dep","version":"1.0.0"}\n';
+      writeFileSync(join(seed, "package.json"), scriptPackage);
+      mkdirSync(join(seed, "vendor", "dep"), { recursive: true });
+      writeFileSync(join(seed, "vendor", "dep", "package.json"), depPackage);
+      execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
+        cwd: seed,
+        env: installEnv(seed),
       });
+      commit(seed, {
+        "package.json": scriptPackage,
+        "pnpm-lock.yaml": readFileSync(join(seed, "pnpm-lock.yaml"), "utf8"),
+        "vendor/dep/package.json": depPackage,
+      });
+      git(seed, "push", "-q", "origin", "main");
+      const first = await prepareCheckout(input());
+      const oldStore = join(dir, "pre-upgrade-pnpm-store");
+      const modulesPath = join(first.path, "node_modules", ".modules.yaml");
+      const modules = JSON.parse(readFileSync(modulesPath, "utf8")) as { storeDir: string };
+      modules.storeDir = join(oldStore, basename(modules.storeDir));
+      mkdirSync(modules.storeDir, { recursive: true });
+      writeFileSync(modulesPath, `${JSON.stringify(modules, null, 2)}\n`);
+      expect(readFileSync(modulesPath, "utf8")).toContain(oldStore);
 
-    const fresh = await prepareCheckout({ ...input(), issue: 43 });
-    expectSharedPnpmStore();
-    expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
-  });
+      const reused = await prepareCheckout(input());
+      expect(reused).toMatchObject({ path: first.path, created: false });
+      expectSharedPnpmStore();
+      expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
+        sharedPnpmStore(),
+      );
+      expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+      for (let n = 0; n < 2; n++)
+        execFileSync("pnpm", ["-s", "check"], {
+          cwd: reused.path,
+          env: installEnv(reused.path, sharedPnpmStore()),
+        });
 
-  it("verifies a reused manifest before clearing node_modules", async () => {
+      const fresh = await prepareCheckout({ ...input(), issue: 43 });
+      expectSharedPnpmStore();
+      expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+    },
+  );
+
+  itInstall("verifies a reused manifest before clearing node_modules", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
     const first = await prepareCheckout(input());
@@ -1015,7 +1021,7 @@ describe("prepareCheckout", () => {
       git(seed, "push", "-q", "origin", "main");
     });
 
-    it("clears ignored package node_modules before reinstalling", async () => {
+    itInstall("clears ignored package node_modules before reinstalling", async () => {
       const first = await prepareCheckout(input());
       const modules = join(first.path, "apps", "relay", "node_modules");
       mkdirSync(modules);
@@ -1025,7 +1031,7 @@ describe("prepareCheckout", () => {
       expect(existsSync(join(modules, "from-earlier-install"))).toBe(false);
     });
 
-    it("refuses a tracked package node_modules", async () => {
+    itInstall("refuses a tracked package node_modules", async () => {
       const first = await prepareCheckout(input());
       const tracked = join(first.path, "apps", "relay", "node_modules", "dep", "index.js");
       mkdirSync(dirname(tracked), { recursive: true });
@@ -1040,22 +1046,25 @@ describe("prepareCheckout", () => {
       );
     });
 
-    it("refuses and preserves node_modules from a project outside the workspace", async () => {
-      const first = await prepareCheckout(input());
-      const modules = join(first.path, "examples", "standalone", "node_modules");
-      mkdirSync(modules);
-      const preserved = join(modules, "separate-project-dependency");
-      writeFileSync(preserved, "keep\n");
+    itInstall(
+      "refuses and preserves node_modules from a project outside the workspace",
+      async () => {
+        const first = await prepareCheckout(input());
+        const modules = join(first.path, "examples", "standalone", "node_modules");
+        mkdirSync(modules);
+        const preserved = join(modules, "separate-project-dependency");
+        writeFileSync(preserved, "keep\n");
 
-      const e = await fail(prepareCheckout(input()));
-      expect(e.code).toBe("protected");
-      expect(e.message).toBe(
-        `branch ${BRANCH} has examples/standalone/node_modules; Mission Control won't install from it`,
-      );
-      expect(readFileSync(preserved, "utf8")).toBe("keep\n");
-    });
+        const e = await fail(prepareCheckout(input()));
+        expect(e.code).toBe("protected");
+        expect(e.message).toBe(
+          `branch ${BRANCH} has examples/standalone/node_modules; Mission Control won't install from it`,
+        );
+        expect(readFileSync(preserved, "utf8")).toBe("keep\n");
+      },
+    );
 
-    it("refuses a symlinked package node_modules", async () => {
+    itInstall("refuses a symlinked package node_modules", async () => {
       const first = await prepareCheckout(input());
       const outside = join(dir, "outside");
       mkdirSync(outside);
@@ -1068,7 +1077,7 @@ describe("prepareCheckout", () => {
       );
     });
 
-    it("refuses a package node_modules file", async () => {
+    itInstall("refuses a package node_modules file", async () => {
       const first = await prepareCheckout(input());
       writeFileSync(join(first.path, "apps", "relay", "node_modules"), "not a directory\n");
 
@@ -1080,7 +1089,7 @@ describe("prepareCheckout", () => {
     });
   });
 
-  it("installs when a base lockfile is over the 4 MiB default read", async () => {
+  itInstall("installs when a base lockfile is over the 4 MiB default read", async () => {
     commit(seed, {
       "package.json": PKG,
       "pnpm-lock.yaml": `${EMPTY_LOCK}${"# padding padding padding padding\n".repeat(160_000)}`,
@@ -1293,7 +1302,7 @@ describe("prepareCheckout", () => {
       expect(existsSync(wtPath())).toBe(false);
     });
 
-    it("installs when every install input matches the base", async () => {
+    itInstall("installs when every install input matches the base", async () => {
       await prepareCheckout(input());
       expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
     });
@@ -1423,7 +1432,7 @@ describe("prepareCheckout", () => {
       expect(git(clone, "rev-parse", `refs/heads/${BRANCH}`)).toBe(tip);
     });
 
-    it("installs when the branch changes other files only", async () => {
+    itInstall("installs when the branch changes other files only", async () => {
       commit(clone, { "src/a.ts": "a\n" });
       git(clone, "checkout", "-q", "main");
       await prepareCheckout(input());
@@ -1553,7 +1562,7 @@ describe("ticket checkout recovery", () => {
     expect(readFileSync(join(wtPath(), "wip.txt"), "utf8")).toBe("wip");
   });
 
-  it("keeps the record when the start fails, and the next start clears it", async () => {
+  itInstall("keeps the record when the start fails, and the next start clears it", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage\n" });
     git(seed, "push", "-q", "origin", "main");
     const { s, pending } = pendingSet();
@@ -1650,7 +1659,7 @@ describe("prepareReadOnlyCheckout", () => {
     expect(hasBranch(BRANCH)).toBe(false);
   });
 
-  it("checks install inputs on the ticket branch", async () => {
+  itInstall("checks install inputs on the ticket branch", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
     await prepareCheckout(input());
@@ -1816,7 +1825,7 @@ describe("review scratch checkouts", () => {
     expect(existsSync(join(scratchPath(), "x"))).toBe(true);
   });
 
-  it("install inputs are judged at the merge base", async () => {
+  itInstall("install inputs are judged at the merge base", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
     const { head } = pr({ "a.txt": "a\n" });

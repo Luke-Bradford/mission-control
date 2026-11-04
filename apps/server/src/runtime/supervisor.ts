@@ -1262,7 +1262,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           }
         }
         // the call has ended, however it ended: its hold goes (a Post hook may never come)
-        deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
+        deps.lock.release(
+          { runId: l.run.id, toolUseId: e.toolUseId },
+          e.ok === undefined ? undefined : !e.ok,
+        );
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
