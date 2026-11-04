@@ -1,8 +1,9 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_PROFILES, type Profile } from "@mc/core";
+import { DEFAULT_PROFILES, type LoopDef, loopOf, type Profile, standardLoop } from "@mc/core";
 import { describe, expect, it } from "vitest";
+import { stringify } from "yaml";
 import { chooseRunProfile, loadProfiles, ProfilesError, profileHash } from "../src/profiles.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "mc-profiles-"));
@@ -163,8 +164,8 @@ describe("chooseRunProfile", () => {
 });
 
 describe("template descriptions", () => {
-  it("exposes seven templates without routing orchestration into a build", () => {
-    expect(DEFAULT_PROFILES).toHaveLength(7);
+  it("exposes eight templates without routing orchestration into a build", () => {
+    expect(DEFAULT_PROFILES).toHaveLength(8);
     expect(DEFAULT_PROFILES.find((p) => p.name === "watch")).toMatchObject({
       orchestrationOnly: true,
       rounds: 0,
@@ -219,6 +220,61 @@ describe("template descriptions", () => {
   });
 });
 
+describe("loops in the file", () => {
+  const std = (name: string, labels: string[], plan: boolean): LoopDef =>
+    standardLoop({ name, labels, planRequired: plan, tries: 2, rounds: 2 });
+  const withLoop = (loop: LoopDef, extra: Record<string, unknown> = {}): string => {
+    const base = {
+      steps: [{ name: "do", phase: "working" }],
+      reviewer: { role: "RETRO", depth: "light" },
+    };
+    return stringify({
+      profiles: [
+        { name: "small-change", ...base, plan_required: false, tries: 2, rounds: 2 },
+        { name: "feature", ...base, loop: std("feature", [], true), ...extra },
+        { name: "extra", ...base, loop: { ...loop, name: "extra" } },
+      ],
+    });
+  };
+
+  it("takes tries, rounds, plan_required and labels from the loop", () => {
+    const loop = { ...std("extra", ["x"], false) };
+    const ps = loadProfiles(file(withLoop(loop))) as Profile[];
+    expect(ps).not.toBeInstanceOf(ProfilesError);
+    expect(ps[2]).toMatchObject({ labels: ["x"], planRequired: false, tries: 2, rounds: 2 });
+    expect(loopOf(ps[2] as Profile)?.name).toBe("extra");
+    expect(ps[1]?.planRequired).toBe(true);
+  });
+
+  it("a file with a capless return path refuses starts", () => {
+    const loop = std("extra", [], false);
+    const bad = {
+      ...loop,
+      returns: loop.returns.map((r) => (r.id === "ci-fail" ? { ...r, cap: undefined } : r)),
+    };
+    const ps = loadProfiles(file(withLoop(bad as LoopDef)));
+    expect(ps).toBeInstanceOf(ProfilesError);
+    expect((ps as ProfilesError).message).toBe(
+      "profiles.2.loop: loop extra: return path ci-fail has no cap",
+    );
+    expect(chooseRunProfile(ps, [], "S", null)).toHaveProperty("refusal");
+  });
+
+  it("refuses given fields that disagree with the loop", () => {
+    const ps = loadProfiles(file(withLoop(std("extra", [], false), { tries: 3 })));
+    expect((ps as ProfilesError).message).toBe(
+      "profiles.1.loop: tries does not match the cap of ci-fail",
+    );
+  });
+
+  it("the hash changes with the loop and not without one", () => {
+    const f = DEFAULT_PROFILES[0] as Profile;
+    const l = { ...f, loop: standardLoop(f) };
+    expect(profileHash(l)).not.toBe(profileHash(f));
+    expect(profileHash({ ...f })).toBe(profileHash(f));
+  });
+});
+
 describe("profile creation", () => {
   const input = {
     name: "custom",
@@ -267,8 +323,8 @@ describe("profile creation", () => {
     await createProfile(path, input, profilesVersion(loadProfiles(path) as Profile[]), 1);
     const ps = loadProfiles(path) as Profile[];
     expect(ps.map((p) => p.name)).toContain("custom");
-    expect(ps.slice(0, 7)).toEqual(DEFAULT_PROFILES);
-    expect(ps[7]?.steps[0]?.checks).toHaveLength(5);
+    expect(ps.slice(0, 8)).toEqual(DEFAULT_PROFILES);
+    expect(ps[8]?.steps[0]?.checks).toHaveLength(5);
     expect(profileHash(snapshot)).toBe(hash);
     expect(snapshot).toEqual(DEFAULT_PROFILES[0]);
   });

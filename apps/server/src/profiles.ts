@@ -12,6 +12,14 @@ import {
   type ChosenProfile,
   type ConfigView,
   DEFAULT_PROFILES,
+  LOOP_PROMPT_MAX,
+  LOOP_REPORT_TOOLS,
+  LOOP_RETURN_IDS,
+  LOOP_RUNNERS,
+  LOOP_STEP_IDS,
+  type LoopDef,
+  loopLimits,
+  loopOf,
   overrideProfile,
   PROFILE_CHECK_KINDS,
   PROFILE_NAME,
@@ -23,6 +31,7 @@ import {
   routeProfile,
   startNoProfilesText,
   unknownProfileText,
+  validateLoop,
 } from "@mc/core";
 import { parseDocument, parse as parseYaml, stringify } from "yaml";
 import { z } from "zod";
@@ -35,6 +44,41 @@ export class ProfilesError extends Error {}
 
 const CHECKLIST_MAX = 4000;
 const LIMIT = z.number().int().min(1).max(10);
+
+const loopStep = z.strictObject({
+  id: z.enum(LOOP_STEP_IDS),
+  name: z.string().min(1).max(100),
+  runner: z.enum(LOOP_RUNNERS),
+  gate: z.string().min(1).max(300),
+  next: z.enum(LOOP_STEP_IDS).nullable(),
+  report: z.enum(LOOP_REPORT_TOOLS).optional(),
+  sizes: z.array(z.string().min(1)).optional(),
+  model: z.string().min(1).optional(),
+  effort: z.string().min(1).optional(),
+  prompt: z.string().max(LOOP_PROMPT_MAX).optional(),
+});
+
+// A return path without a cap loads, so `validateLoop` can refuse it with its own text.
+const fileLoop = z.strictObject({
+  name: z.string().min(1),
+  trigger: z.strictObject({
+    labels: z.array(z.string().min(1)),
+    sizes: z.array(z.string().min(1)),
+    fallback: z.boolean().optional(),
+  }),
+  steps: z.array(loopStep).min(1).max(LOOP_STEP_IDS.length),
+  returns: z
+    .array(
+      z.strictObject({
+        id: z.enum(LOOP_RETURN_IDS),
+        label: z.string().min(1).max(100),
+        from: z.enum(LOOP_STEP_IDS),
+        to: z.enum(LOOP_STEP_IDS),
+        cap: z.number().optional(),
+      }),
+    )
+    .max(LOOP_RETURN_IDS.length),
+});
 
 const fileStep = z.strictObject({
   name: z.string().min(1),
@@ -59,44 +103,73 @@ export const fileProfile = z
     name: z
       .string()
       .regex(PROFILE_NAME, "must be a lowercase name of up to 32 letters, digits and -"),
-    labels: z.array(z.string().min(1)).default([]),
+    labels: z.array(z.string().min(1)).optional(),
     steps: z.array(fileStep).min(1),
     checklist: z.string().max(CHECKLIST_MAX).default(""),
-    plan_required: z.boolean(),
+    plan_required: z.boolean().optional(),
     reviewer: z.strictObject({
       role: z.string().regex(ROLE_NAME, "must be a role name"),
       depth: z.enum(REVIEW_DEPTHS),
     }),
     checks: z.array(z.string().min(1)).default([]),
-    tries: LIMIT,
-    rounds: z.number().int().min(0).max(10),
+    tries: LIMIT.optional(),
+    rounds: z.number().int().min(0).max(10).optional(),
+    loop: fileLoop.optional(),
   })
   .superRefine((p, ctx) => {
     const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+    if (p.loop === undefined) {
+      // Without a loop these stay required, as they always were.
+      for (const k of ["plan_required", "tries", "rounds"] as const) {
+        if (p[k] === undefined)
+          ctx.addIssue({ code: "custom", path: [k], message: "Invalid input: required" });
+      }
+    } else if (p.orchestration_only) fail("orchestration-only templates carry no loop");
     if (p.rounds === 0 && !(p.name === "watch" && p.orchestration_only))
       fail("only watch may have unlimited rounds");
     if (p.orchestration_only && p.steps.some((s) => s.phase != null))
       fail("orchestration-only templates cannot have execution phases");
   });
 
-const toProfile = (f: z.infer<typeof fileProfile>): Profile => ({
-  name: f.name,
-  labels: f.labels,
-  steps: f.steps.map((s) => ({ ...s, phase: s.phase ?? null })),
-  ...(f.trigger === undefined ? {} : { trigger: f.trigger }),
-  ...(f.budget === undefined ? {} : { budget: f.budget }),
-  ...(f.budget_usd === undefined ? {} : { budgetUsd: f.budget_usd }),
-  ...(f.orchestration_only === undefined ? {} : { orchestrationOnly: f.orchestration_only }),
-  ...(f.nodes === undefined
-    ? {}
-    : { nodes: f.nodes.map((s) => ({ ...s, phase: s.phase ?? null })) }),
-  checklist: f.checklist,
-  planRequired: f.plan_required,
-  reviewer: { role: f.reviewer.role, depth: f.reviewer.depth },
-  checks: f.checks,
-  tries: f.tries,
-  rounds: f.rounds,
-});
+/** Fields a loop sets must agree with the profile's own when both are given. */
+function loopMismatch(f: z.infer<typeof fileProfile>, loop: LoopDef): string | null {
+  const limits = loopLimits(loop);
+  const same = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((x, i) => x === b[i]);
+  if (f.labels !== undefined && !same(f.labels, loop.trigger.labels))
+    return "labels do not match the loop's trigger labels";
+  if (f.plan_required !== undefined && f.plan_required !== (loop.steps[0]?.id === "plan"))
+    return "plan_required does not match the loop's plan step";
+  if (f.tries !== undefined && f.tries !== limits.tries)
+    return "tries does not match the cap of ci-fail";
+  if (f.rounds !== undefined && f.rounds !== limits.rounds)
+    return "rounds does not match the cap of review-changes";
+  return null;
+}
+
+const toProfile = (f: z.infer<typeof fileProfile>): Profile => {
+  const loop = f.loop as LoopDef | undefined;
+  const limits = loop === undefined ? null : loopLimits(loop);
+  return {
+    name: f.name,
+    labels: loop?.trigger.labels ?? f.labels ?? [],
+    steps: f.steps.map((s) => ({ ...s, phase: s.phase ?? null })),
+    ...(f.trigger === undefined ? {} : { trigger: f.trigger }),
+    ...(f.budget === undefined ? {} : { budget: f.budget }),
+    ...(f.budget_usd === undefined ? {} : { budgetUsd: f.budget_usd }),
+    ...(f.orchestration_only === undefined ? {} : { orchestrationOnly: f.orchestration_only }),
+    ...(f.nodes === undefined
+      ? {}
+      : { nodes: f.nodes.map((s) => ({ ...s, phase: s.phase ?? null })) }),
+    checklist: f.checklist,
+    planRequired: loop === undefined ? (f.plan_required ?? false) : loop.steps[0]?.id === "plan",
+    reviewer: { role: f.reviewer.role, depth: f.reviewer.depth },
+    checks: f.checks,
+    tries: limits?.tries ?? f.tries ?? 0,
+    rounds: limits?.rounds ?? f.rounds ?? 0,
+    ...(loop === undefined ? {} : { loop }),
+  };
+};
 
 const FALLBACKS: [string, string][] = [
   ["small-change", "Size XS or S with no template label needs it"],
@@ -131,6 +204,12 @@ export function loadProfiles(path: string): readonly Profile[] | ProfilesError {
     const at = ["profiles", ...(i?.path ?? [])].join(".");
     return new ProfilesError(`${at}: ${i?.message ?? "invalid"}`);
   }
+  for (const [i, f] of parsed.data.entries()) {
+    if (f.loop === undefined) continue;
+    const loop = f.loop as LoopDef;
+    const why = validateLoop(loop) ?? loopMismatch(f, loop);
+    if (why !== null) return new ProfilesError(`profiles.${i}.loop: ${why}`);
+  }
   const ps = parsed.data.map(toProfile);
   const seen = new Set<string>();
   for (const p of ps) {
@@ -141,6 +220,8 @@ export function loadProfiles(path: string): readonly Profile[] | ProfilesError {
     if (!ps.some((p) => p.name === name && !p.orchestrationOnly))
       return new ProfilesError(`profiles: no profile named "${name}" (${why})`);
   }
+  if (!ps.some((p) => loopOf(p)?.trigger.fallback === true))
+    return new ProfilesError("profiles: no loop is the fallback for tickets of any other Size");
   return ps;
 }
 
@@ -221,6 +302,7 @@ export function profileHash(p: Profile): string {
     checks: p.checks,
     tries: p.tries,
     rounds: p.rounds,
+    loop: p.loop,
   };
   return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
 }
@@ -268,6 +350,7 @@ const fileValue = (p: Profile) => ({
   budget_usd: p.budgetUsd,
   orchestration_only: p.orchestrationOnly,
   nodes: p.nodes,
+  loop: p.loop,
 });
 
 // Creation limits must not prevent previously valid profiles from loading or being preserved.
