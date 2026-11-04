@@ -3200,7 +3200,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               { reason: e instanceof Error ? e.message : String(e) },
               "map snapshot unavailable",
             );
-            return reply.code(503).send({ error: "map snapshot unavailable" });
+            const reason = e instanceof Error ? e.message : "";
+            return reply.code(503).send({
+              error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
+            });
           }
         };
 

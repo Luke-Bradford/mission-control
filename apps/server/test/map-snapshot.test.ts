@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MapSnapshot, PullRequestView } from "@mc/core";
@@ -236,3 +236,31 @@ it("persists the tree, imports and each merge's files, and reuses them without r
     rmSync(other, { recursive: true, force: true });
   }
 });
+
+it("reads a tree over 64 MiB by skipping evidence, images and oversized blobs", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-big-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  mkdirSync(join(checkout, "docs/evidence/run"), { recursive: true });
+  for (let i = 0; i < 4; i++)
+    writeFileSync(join(checkout, `docs/evidence/run/out-${i}.log`), "x".repeat(20 * 1024 * 1024));
+  writeFileSync(join(checkout, "shot.png"), Buffer.alloc(2 * 1024 * 1024, 1));
+  writeFileSync(
+    join(checkout, "generated.ts"),
+    `export const big = "${"y".repeat(2 * 1024 * 1024)}";\n`,
+  );
+  git(checkout, "add", ".");
+  git(checkout, "commit", "-qm", "big tree");
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const data = await mapTree(checkout, "origin/main");
+  const paths = data.tree.map((f) => f.path);
+  expect(paths).toContain("packages/core/src/map.ts");
+  expect(paths.some((p) => p.startsWith("docs/evidence/"))).toBe(false);
+  expect(paths).not.toContain("shot.png");
+  expect(paths).toContain("generated.ts");
+  expect(data.tree.find((f) => f.path === "generated.ts")?.lines).toBe(0);
+  expect(data.imports).toContainEqual({
+    from: "packages/core/src/map.ts",
+    to: "packages/core/src/types.ts",
+  });
+}, 60_000);

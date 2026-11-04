@@ -24,6 +24,18 @@ export interface MapPersist {
   put(kind: string, scope: string, key: string, value: string, exclusive: boolean): void;
 }
 
+/** The largest single file the Map reads, and the most it reads from one tree. */
+export const MAP_BLOB_MAX_BYTES = 1024 * 1024;
+export const MAP_TREE_BUDGET_BYTES = 48 * 1024 * 1024;
+
+/** Evidence, images and other generated records are not part of the Map's graph. */
+export function mapReadable(path: string): boolean {
+  return (
+    !/^docs\/evidence\//.test(path) &&
+    !/\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|woff2?|ttf|mp4|mov|log|patch)$/i.test(path)
+  );
+}
+
 /** The History lens's deliberately bounded view of merged work. */
 export const MAP_HISTORY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -73,34 +85,42 @@ export function mapTree(
     if (found) return structuredClone(found);
     const readTree = async (): Promise<Pick<Tree, "tree" | "imports">> => {
       const treeSha = (await git("rev-parse", "--verify", `${commit}^{tree}`)).trim();
-      const entries = (await git("ls-tree", "-rz", treeSha)).split("\0").flatMap((row) => {
-        const match = /^(?:100[0-7]{3}|120000) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(row);
-        return match ? [{ sha: match[1] as string, path: match[2] as string }] : [];
+      const listed = (await git("ls-tree", "-rzl", treeSha)).split("\0").flatMap((row) => {
+        const match = /^(?:100[0-7]{3}|120000) blob ([a-f0-9]+) +(\d+)\t([\s\S]+)$/.exec(row);
+        return match && mapReadable(match[3] as string)
+          ? [{ sha: match[1] as string, size: Number(match[2]), path: match[3] as string }]
+          : [];
       });
+      // A blob over the per-file cap, or past the total budget, stays in the tree unread (0 lines).
+      let budget = MAP_TREE_BUDGET_BYTES;
+      const entries = listed.map((entry) => {
+        const read = entry.size <= MAP_BLOB_MAX_BYTES && entry.size <= budget;
+        if (read) budget -= entry.size;
+        return { ...entry, read };
+      });
+      const toRead = entries.filter((e) => e.read);
       const blobs = await new Promise<Buffer>((resolve, reject) => {
         const child = spawn("git", [...args, "cat-file", "--batch"], {
           env,
           timeout: GIT_TIMEOUT_MS,
         });
         const chunks: Buffer[] = [];
-        let size = 0;
-        child.stdout.on("data", (chunk: Buffer) => {
-          size += chunk.length;
-          if (size > 64 * 1024 * 1024) child.kill();
-          else chunks.push(chunk);
-        });
+        child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
         child.stderr.resume();
         child.on("error", reject);
         child.stdin.on("error", reject);
         child.on("close", (code) =>
-          code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error("map tree unavailable")),
+          code === 0
+            ? resolve(Buffer.concat(chunks))
+            : reject(new Error("git could not read the files")),
         );
-        child.stdin.end(`${entries.map((e) => e.sha).join("\n")}\n`);
+        child.stdin.end(toRead.length ? `${toRead.map((e) => e.sha).join("\n")}\n` : "");
       });
       let offset = 0;
       const sources = new Map<string, string>();
       const workspace = new Map<string, string>();
       const tree = entries.map((entry) => {
+        if (!entry.read) return { path: entry.path, lines: 0 };
         const end = blobs.indexOf(10, offset);
         const size = Number(blobs.subarray(offset, end).toString().split(" ")[2]);
         if (end < 0 || !Number.isSafeInteger(size)) throw new Error("invalid map blob");
@@ -143,6 +163,22 @@ export function mapTree(
         ];
         return candidates.find((p) => paths.has(p)) ?? null;
       };
+      // Each file's exported names, found once: a per-name regex over every source was the slow part.
+      const exported = new Map<string, Set<string>>();
+      const exportNames = (path: string): Set<string> => {
+        const known = exported.get(path);
+        if (known) return known;
+        const names = new Set<string>();
+        const content = sources.get(path) ?? "";
+        for (const m of content.matchAll(
+          /\bexport\s+(?:declare\s+)?(?:type\s+)?(?:const|let|var|class|function|interface|enum|namespace|type)\s+([\w$]+)/g,
+        ))
+          names.add(m[1] as string);
+        for (const m of content.matchAll(/\bexport\s*{([^}]*)}/g))
+          for (const id of (m[1] as string).matchAll(/[\w$]+/g)) names.add(id[0]);
+        exported.set(path, names);
+        return names;
+      };
       const exportedFrom = (
         path: string,
         name: string,
@@ -152,14 +188,7 @@ export function mapTree(
         seen.add(path);
         const content = sources.get(path);
         if (!content) return null;
-        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        if (
-          new RegExp(
-            `\\bexport\\s+(?:declare\\s+)?(?:type\\s+)?(?:const|let|var|class|function|interface|enum|namespace|type)\\s+${escaped}\\b`,
-          ).test(content) ||
-          new RegExp(`\\bexport\\s*{[^}]*\\b${escaped}(?:\\s+as\\s+\\w+)?[^}]*}`).test(content)
-        )
-          return path;
+        if (exportNames(path).has(name)) return path;
         for (const star of content.matchAll(/\bexport\s*\*\s+from\s*["']([^"']+)["']/g)) {
           const specifier = star[1] as string;
           const next = specifier.startsWith(".")
