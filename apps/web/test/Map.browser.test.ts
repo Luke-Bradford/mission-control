@@ -72,6 +72,29 @@ describeRendered("Map in a browser", () => {
     60_000,
   );
 
+  it("keeps every tile inside the map when a 4K screen scales the page", async () => {
+    const page = await renderAt({ page: "test/mapBrowser.html", width: 3840, height: 2160 });
+    try {
+      await page.evaluate(async () => {
+        const deadline = performance.now() + 5000;
+        while (!document.querySelector(".map-treemap-tile") && performance.now() < deadline)
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+      }, undefined);
+      const outside = await page.evaluate(() => {
+        const tiles = [...document.querySelectorAll(".map-treemap-tile")];
+        const host = tiles[0]?.parentElement?.getBoundingClientRect();
+        if (!host) return -1;
+        return tiles.filter((tile) => {
+          const box = tile.getBoundingClientRect();
+          return box.right > host.right + 1 || box.bottom > host.bottom + 1;
+        }).length;
+      }, undefined);
+      expect(outside).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("selects a window when a timeline tick is clicked with the mouse", async () => {
     const page = await renderAt({ page: "test/mapBrowser.html", width: 1600, height: 900 });
     await page.boxes(".map-timeline-tick");

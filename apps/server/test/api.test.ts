@@ -4029,6 +4029,7 @@ describe("limits", () => {
       stale: false,
       source: "rollout",
       sampledAt: NOW - 10 * 60e3,
+      history: current.map(({ at, pct }) => ({ at, pct })),
     });
     const fiveH = rows.find((r) => r.accountId === "codex-main" && r.window === "5h");
     // A 5h row has no projection or stop forecast, only the time to full at the window's pace.

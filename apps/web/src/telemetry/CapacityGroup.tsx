@@ -18,6 +18,9 @@ import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { MachinePanel } from "../overview/MachinePanel.tsx";
+import { QuotaPanel } from "../overview/QuotaPanel.tsx";
+import "../overview/overview.css";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
 import { MachineReadout } from "./MachineReadout.tsx";
@@ -188,6 +191,9 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
 
   return (
     <div className="tgrid">
+      {/* The complete readers the Overview summarises in its Tokens panel and Mac row. */}
+      <QuotaPanel />
+      <MachinePanel />
       <Panel id="tQuota" title="Quota used" sub="each account window, 100% is the limit">
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>

@@ -234,6 +234,23 @@ describe("PrEvidence capture", () => {
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
   });
+
+  it("names the page, scheme and side of a render that times out, in the log and the gate", async () => {
+    const lines: string[] = [];
+    const t = setup({
+      log: (line) => lines.push(line),
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && scheme === "dark")
+          throw new Error("HUD screenshot timed out: the 30000 ms deadline expired.");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const expected =
+      "board page, dark scheme, head side: HUD screenshot timed out: the 30000 ms deadline expired.";
+    expect(lines.join("\n")).toContain(expected);
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain(expected);
+  });
 });
 
 describe("PrEvidence gate", () => {
@@ -354,7 +371,7 @@ describe("PrEvidence gate", () => {
     await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     const text = t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     expect(text).toContain("board");
-    expect(text).toContain("capture failed: page did not render");
+    expect(text).toContain("main side: page did not render");
     // another head has no failure to report
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: NEXT, paths: WEB })).not.toContain(
       "capture failed",

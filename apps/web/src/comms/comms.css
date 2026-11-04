@@ -873,7 +873,7 @@
     overflow: visible;
   }
   #convo {
-    max-height: 60vh;
+    max-height: calc(60 * var(--vh));
   }
 }
 
