@@ -489,6 +489,7 @@ function SeatEditor({
           <label htmlFor={ids.role}>Role</label>
           <select
             {...fieldProps(ids.role, roleError)}
+            title={roleLabel(config, form.role)}
             value={form.role}
             disabled={saving}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -509,6 +510,11 @@ function SeatEditor({
             <label htmlFor={ids.account}>Account</label>
             <select
               {...fieldProps(ids.account, accountError)}
+              title={
+                form.accountId === defaultAccount
+                  ? `${form.accountId} (repo default)`
+                  : form.accountId
+              }
               value={form.accountId}
               disabled={saving}
               onChange={(e) =>
@@ -527,6 +533,7 @@ function SeatEditor({
             <label htmlFor={ids.model}>Model</label>
             <select
               {...fieldProps(ids.model, modelError)}
+              title={form.model || "No discovered models"}
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value, effort: undefined })}
               disabled={saving || models.length === 0}

@@ -35,6 +35,7 @@
 .ffield input:not([type="checkbox"]):not([type="radio"]),
 .ffield select,
 .ffield textarea {
+  text-overflow: ellipsis;
   width: 100%;
   max-width: 100%;
   min-height: var(--sp-6);

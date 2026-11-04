@@ -52,6 +52,11 @@ function world(kind: World) {
     accounts,
     crew: {
       ...crew,
+      // the live labels are sentences: long enough to clip a select that is too narrow
+      roles: crew.roles?.map((role) => ({
+        ...role,
+        here: `${role.name.toLowerCase()}: writes each ticket's plan for the developers`,
+      })),
       sessions: crew.sessions.map((session, i) =>
         i === 0
           ? { ...session, seats: seats.map((seat) => ({ ...seat, mode: "writer" })) }
@@ -547,34 +552,44 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
     }
   }
 
-  // A selected option's text must fit its select: native selects clip without an ellipsis.
+  // A selected option's text must fit its select; a long name that cannot is cut with an ellipsis
+  // and keeps its full text in a title. With the usual data nothing may be cut at all, so Role in
+  // a narrow pair would fail here.
   for (const form of [FORMS[5], FORMS[6]]) {
-    it(
-      `${form.id}: every select shows its chosen text whole at 1600x1000`,
-      async () => {
-        const page = await open(form, { width: 1600, height: 1000 });
-        const clipped = await page.evaluate((selector) => {
-          const canvas = document.createElement("canvas").getContext("2d");
-          if (!canvas) throw new Error("no canvas");
-          return [...document.querySelectorAll<HTMLSelectElement>(`${selector} select`)]
-            .map((select) => {
-              const style = getComputedStyle(select);
-              canvas.font = style.font;
-              const text = select.selectedOptions[0]?.textContent ?? "";
-              const room =
-                select.clientWidth -
-                Number.parseFloat(style.paddingLeft) -
-                Number.parseFloat(style.paddingRight) -
-                24; // the arrow
-              return { id: select.id, text, need: canvas.measureText(text).width, room };
-            })
-            .filter((s) => s.need > s.room);
-        }, form.form);
-        expect(clipped).toEqual([]);
-        await page.close();
-      },
-      BROWSER_TEST_TIMEOUT_MS,
-    );
+    for (const kind of ["one", "long"] as const) {
+      it(
+        `${form.id}: every select shows its chosen text whole, or ellipsised with a title, with ${kind} data`,
+        async () => {
+          const page = await open(form, { kind, width: 1600, height: 1000 });
+          const clipped = await page.evaluate(
+            (arg) => {
+              const canvas = document.createElement("canvas").getContext("2d");
+              if (!canvas) throw new Error("no canvas");
+              return [...document.querySelectorAll<HTMLSelectElement>(`${arg.selector} select`)]
+                .map((select) => {
+                  const style = getComputedStyle(select);
+                  canvas.font = style.font;
+                  const text = select.selectedOptions[0]?.textContent ?? "";
+                  const room =
+                    select.clientWidth -
+                    Number.parseFloat(style.paddingLeft) -
+                    Number.parseFloat(style.paddingRight) -
+                    24; // the arrow
+                  const need = canvas.measureText(text).width;
+                  const excused =
+                    arg.allowEllipsis && style.textOverflow === "ellipsis" && select.title === text;
+                  return { id: select.id, text, need, room, excused };
+                })
+                .filter((s) => s.need > s.room && !s.excused);
+            },
+            { selector: form.form, allowEllipsis: kind === "long" },
+          );
+          expect(clipped).toEqual([]);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
   }
 
   // Inside the real shell: the rail (FLIGHT folded) and FLIGHT's dock expanded, for the widest form.

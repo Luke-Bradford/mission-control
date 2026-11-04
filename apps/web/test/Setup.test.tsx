@@ -1998,6 +1998,15 @@ describe("Setup › Repos & seats: the seat form", () => {
     );
   });
 
+  it("the long selects carry their full chosen text as a title", async () => {
+    const form = await openForm();
+    for (const label of ["Role", "Account", "Model"]) {
+      const select = within(form).getByLabelText(label) as HTMLSelectElement;
+      expect(select.title).toBe(select.selectedOptions[0]?.textContent);
+      expect(select.title).not.toBe("");
+    }
+  });
+
   it("invalid seat submit explains itself", async () => {
     const form = await openForm();
     fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
