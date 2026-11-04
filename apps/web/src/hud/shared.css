@@ -544,7 +544,7 @@ td.wrap {
 
 .modal .panel {
   width: min(720px, 100%);
-  max-height: 86vh;
+  max-height: calc(86 * var(--vh));
 }
 
 .modal pre {
@@ -581,7 +581,7 @@ td.wrap {
     max-height: 460px;
   }
   #stream {
-    max-height: 60vh;
+    max-height: calc(60 * var(--vh));
   }
 }
 
@@ -701,7 +701,7 @@ details.guard > summary {
 }
 
 #discuss .panel {
-  max-height: 86vh;
+  max-height: calc(86 * var(--vh));
   overflow: hidden;
 }
 

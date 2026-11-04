@@ -41,6 +41,7 @@ import {
   toggleDock,
   trapTab,
   useDock,
+  useOverlay,
   useReturnFocus,
 } from "./overlays.ts";
 import "./Dock.css";
@@ -379,8 +380,29 @@ function DockMeta({ flight }: { flight: FlightView | undefined }) {
  * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
  * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
  */
-export function Dock() {
+/** The widths with two columns and no room for FLIGHT beside them. Below, the Overview stacks. */
+const OVERVIEW_COVER_QUERY = "(min-width: 1500px) and (max-width: 2199px)";
+
+/** At those widths, FLIGHT on the Overview covers the side column so Crew keeps its width. */
+export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeof useDock>) {
+  const [covers, setCovers] = useState(
+    () => typeof matchMedia !== "undefined" && matchMedia(OVERVIEW_COVER_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const media = matchMedia(OVERVIEW_COVER_QUERY),
+      update = () => setCovers(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return overview && dock.wide && dock.visible && !dock.collapsed && covers;
+}
+
+export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
+  // Esc folds the cover from anywhere on the page, and the page behind stays usable.
+  useOverlay("overview-flight", coversPage, () => setDockCollapsed(true));
   const hide = useRef<HTMLButtonElement>(null);
   const rail = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);

@@ -89,7 +89,9 @@ it("lets phone users scroll every Crew column while keeping the agent pinned", (
 
 it("constrains the crew pause portal to the viewport with scrolling", () => {
   expect(css).toMatch(/\.crew-pause-form \{[^}]*position: fixed/);
-  expect(css).toMatch(/\.crew-pause-form \{[^}]*max-height: calc\(100dvh - 32px\)/);
+  expect(css).toMatch(
+    /\.crew-pause-form \{[^}]*max-height: calc\(calc\(100 \* var\(--dvh\)\) - 32px\)/,
+  );
   expect(css).toMatch(/\.crew-pause-form \{[^}]*overflow-y: auto/);
 });
 
