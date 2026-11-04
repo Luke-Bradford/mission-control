@@ -1088,7 +1088,7 @@ describe("POST /api/guard/check", () => {
     expect(r.statusCode).toBe(200);
     expect(reason(r.body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
     expect(reason(r.body)).toBe(
-      "The test lock is busy: GUIDO-1 is running pnpm -s test. Run the same command with a test file path, or the full suite later.",
+      "The test lock is busy: GUIDO-1 is running pnpm -s test. Run the same command with a test file path, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.",
     );
     expect(lock.state()).toMatchObject({ holder: { runId: "run-a" }, waiting: [] });
     expect(store.guardHits(0)).toEqual([]);

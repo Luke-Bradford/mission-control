@@ -12,6 +12,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 ## Stuck and failed runs
 
+- **A long check holding the test lock:** a check may run for 45 minutes, and seats behind it are refused after 10. A Claude check writes a heartbeat, so "stalled" on a holder means it is wedged: `mc end_run` or `mc operator POST /api/seats/:id/interrupt` frees the lock. Nothing alerts you to a long hold that still has a heartbeat, so look at the lock when seats report it busy.
 - **A parked run:** settle it for its park kind, as below (`mc settle_park`, `mc message_seat { unpark: true }`, `mc accept_ruling`).
 - **An open PR from a crew run that ended or crashed:** its `prs[].seat` is empty. A crew seat worked its ticket (your start decision, or the seat's activity).
   - Resume the preserved run through `mc operator POST /api/runs/:id/resume`.
