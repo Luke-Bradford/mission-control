@@ -2222,8 +2222,8 @@ touched.
 - **Only its own branches.** The hub deletes only a branch that one of its own work runs created
   (a review run does not count). A second hub on the same repo has runs this hub cannot see, so a
   branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
-- **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
-  branch) that closed without merging. The PR page keeps its commits.
+- **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
+  merging; the agents decide what to do with it.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
   branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
   its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any

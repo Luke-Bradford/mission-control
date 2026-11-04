@@ -1,6 +1,6 @@
 /**
  * Branch tidying. GitHub's delete-on-merge removes a branch only when its PR merges, so the hub
- * removes the rest: a crew branch whose PR closed unmerged (`closedPass`), and any branch with no
+ * removes the rest: a branch with no
  * open PR, no live run and no commit for a day (`sweep`). It also drops the local branches of the
  * seat clones that are merged or whose remote is gone (`pruneLocal`).
  *
@@ -14,7 +14,6 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { CcConfig } from "./config.ts";
 import type { GhRunner } from "./mcp/gh.ts";
-import { RUN_BRANCH } from "./mcp/tools.ts";
 import { CREW_GIT_SLOW_MS } from "./runtime/checkouts.ts";
 import { crewGit } from "./runtime/git.ts";
 import { crewDir, type Store } from "./store.ts";
@@ -23,7 +22,7 @@ import { crewDir, type Store } from "./store.ts";
 export const SWEEP_MIN_AGE_MS = 24 * 60 * 60_000;
 /** The sweep runs this often. */
 export const SWEEP_EVERY_MS = 24 * 60 * 60_000;
-/** The closed-PR pass and the local prune run this often. */
+/** The local prune runs this often. */
 export const TIDY_EVERY_MS = 10 * 60_000;
 /** Branches under this prefix are never touched. */
 export const KEEP_PREFIX = "archive/";
@@ -61,8 +60,6 @@ export interface BranchTidyDeps {
 }
 
 export interface BranchTidy {
-  /** Deletes the branches of crew PRs that closed unmerged; the branches deleted, as `repo:branch`. */
-  closedPass(): Promise<string[]>;
   /** Deletes every branch with no open PR, no live run, no commit for 24 hours and a merged tip. */
   sweep(): Promise<string[]>;
   /** Fetches each seat clone and drops its local branches that are merged or gone. */
@@ -293,21 +290,6 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
   }
 
   return {
-    async closedPass() {
-      const closed = new Map<string, Set<string>>();
-      for (const repo of deps.config.repos) {
-        const set = new Set<string>();
-        for (const pr of deps.store.pullRequests(repo.id)) {
-          if (pr.state === "closed" && RUN_BRANCH.test(pr.branch)) set.add(pr.branch);
-        }
-        closed.set(repo.id, set);
-      }
-      return tidy(
-        (b, repoId) => closed.get(repoId)?.has(b.name) === true,
-        "its PR closed unmerged",
-      );
-    },
-
     async sweep() {
       const cutoff = now() - SWEEP_MIN_AGE_MS;
       // a branch's tip is merged only when a merged PR of that branch had this very commit as its head:
