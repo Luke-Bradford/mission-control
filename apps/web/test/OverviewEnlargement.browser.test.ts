@@ -288,7 +288,7 @@ describeRendered("Overview Crew at normal text keeps its accepted widths", () =>
       expect(m.pageScrollX).toBeLessThanOrEqual(0);
       expect(m.cuts).toEqual({ head: 0, state: 0, pill: 0, numbers: 0 });
       // Compact rows: nothing at normal text makes a row grow past two lines.
-      expect(m.tallest).toBeLessThanOrEqual(64);
+      expect(m.tallest / zoom).toBeLessThanOrEqual(64);
     },
     90_000,
   );
