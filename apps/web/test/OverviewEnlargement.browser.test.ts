@@ -99,6 +99,25 @@ const measure = (page: RenderedPage) =>
       headTop: head?.getBoundingClientRect().top ?? Number.NaN,
       regionTop: region.getBoundingClientRect().top,
       tallest: Math.max(...heights),
+      tableRow: Number.parseFloat(
+        getComputedStyle(
+          document.querySelector("#page-overview") ?? document.body,
+        ).getPropertyValue("--table-row"),
+      ),
+      minHeights: body.map((row) => Number.parseFloat(getComputedStyle(row).minHeight)),
+      // No reserved scrollbar gutter: the table is as wide inside as outside, and rows fill it.
+      gutter: region.offsetWidth - region.clientWidth,
+      rowWidths: body.map((row) => row.offsetWidth - region.clientWidth),
+      noteText: document.querySelector(".crew-scroll-note")?.textContent ?? "",
+      flight: (() => {
+        const row = region.querySelector<HTMLElement>(".trow.flight");
+        if (!row) return null;
+        const tint = getComputedStyle(row).backgroundColor;
+        const held = [...row.children]
+          .slice(0, 2)
+          .map((cell) => getComputedStyle(cell).backgroundImage);
+        return { tint, held };
+      })(),
       scrollsSideways: region.scrollWidth - region.clientWidth,
       overflowX: getComputedStyle(region).overflowX,
       crewRight: document.querySelector("#agentsP")?.getBoundingClientRect().right ?? Number.NaN,
@@ -144,6 +163,8 @@ describeRendered("Overview Crew with enlarged text", () => {
       expect(m.crewRight).toBeLessThanOrEqual(m.viewRight + 1);
       expect(m.scrollsSideways).toBeGreaterThan(0);
       expect(m.overflowX).toBe("auto");
+      // The "Scroll ↔" note tells a person the table moves sideways.
+      expect(m.noteText).toContain("Scroll ↔");
       await shot(page, `crew-text200-${scenario}-${dark ? "dark" : "light"}-1920x1080`);
     },
     90_000,
@@ -263,6 +284,108 @@ describeRendered("Overview Crew with enlarged text", () => {
   }, 90_000);
 });
 
+describeRendered("Overview Crew held cells and keyboard at enlarged text", () => {
+  it("covers the whole row beside and above the held cells while the table is scrolled", async () => {
+    const page = await open("mixed", 1920, 1080, false, true);
+    const m = await page.evaluate(async () => {
+      const region = document.querySelector<HTMLElement>("#agentsList");
+      const row = region?.querySelector<HTMLElement>(".trow:not(.head)");
+      if (!region || !row) throw Error("no Crew table");
+      region.scrollTop = 0;
+      region.scrollLeft = 300;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const view = region.getBoundingClientRect();
+      const box = row.getBoundingClientRect();
+      const cellAt = (x: number, y: number) => {
+        const hit = document.elementFromPoint(x, y);
+        return [...row.children].findIndex((cell) => !!hit && cell.contains(hit));
+      };
+      const seat = row.children[1]?.getBoundingClientRect();
+      return {
+        scrolled: region.scrollLeft,
+        // The table's own left edge, mid-row and at the top and bottom of the row.
+        left: cellAt(view.left + 4, box.top + box.height / 2),
+        leftTop: cellAt(view.left + 4, box.top + 3),
+        leftBottom: cellAt(view.left + 4, box.bottom - 3),
+        seatTop: seat ? cellAt(seat.left + seat.width / 2, box.top + 3) : -2,
+        seatBottom: seat ? cellAt(seat.left + seat.width / 2, box.bottom - 3) : -2,
+      };
+    }, undefined);
+    expect(m.scrolled).toBeGreaterThan(0);
+    expect(m).toMatchObject({ left: 0, leftTop: 0, leftBottom: 0, seatTop: 1, seatBottom: 1 });
+  }, 90_000);
+
+  it("tabs to the last control, then back up, keeping each in view and clear of the held cells", async () => {
+    const page = await open("mixed", 1920, 1080, false, true);
+    const found = await page.evaluate(() => {
+      const region = document.querySelector<HTMLElement>("#agentsList");
+      const controls = [
+        ...document.querySelectorAll<HTMLElement>(
+          "#agentsList .trow:not(.head) :is(a[href], button)",
+        ),
+      ];
+      const last = controls.at(-1);
+      last?.setAttribute("data-last-control", "");
+      region?.focus();
+      return { count: controls.length, focusedRegion: document.activeElement === region };
+    }, undefined);
+    expect(found.count).toBeGreaterThan(0);
+    expect(found.focusedRegion).toBe(true);
+    const state = () =>
+      page.evaluate(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const region = document.querySelector<HTMLElement>("#agentsList");
+        const control = document.activeElement as HTMLElement | null;
+        const row = control?.closest<HTMLElement>(".trow") ?? null;
+        if (!region || !control || !row) return null;
+        const view = region.getBoundingClientRect();
+        const box = control.getBoundingClientRect();
+        const head = region.querySelector(".trow.head")?.getBoundingClientRect().bottom ?? 0;
+        const held = [...row.children].slice(0, 2);
+        const inHeld = held.some((cell) => cell.contains(control));
+        const heldRight = Math.max(...held.map((cell) => cell.getBoundingClientRect().right));
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return {
+          isLast: control.hasAttribute("data-last-control"),
+          rowIndex: [...region.querySelectorAll(".trow")].indexOf(row),
+          insideRight: box.right <= view.right + 1,
+          clearOfHeld: inHeld || box.left >= heldRight - 1,
+          belowHeader: box.top >= head - 1,
+          aboveBottom: box.bottom <= view.bottom + 1,
+          painted: !!hit && control.contains(hit),
+        };
+      }, undefined);
+    let last: Awaited<ReturnType<typeof state>> = null;
+    for (let i = 0; i < 300 && !last?.isLast; i++) {
+      await page.press("Tab");
+      last = await state();
+    }
+    expect(last).toMatchObject({
+      isLast: true,
+      insideRight: true,
+      clearOfHeld: true,
+      belowHeader: true,
+      aboveBottom: true,
+      painted: true,
+    });
+    const lastRow = last?.rowIndex ?? -1;
+    let back: Awaited<ReturnType<typeof state>> = null;
+    for (let i = 0; i < 300 && (back === null || back.rowIndex === lastRow); i++) {
+      await page.press("Shift+Tab");
+      back = await state();
+    }
+    expect(back?.rowIndex).toBeLessThan(lastRow);
+    expect(back).toMatchObject({
+      insideRight: true,
+      clearOfHeld: true,
+      belowHeader: true,
+      aboveBottom: true,
+      painted: true,
+    });
+  }, 90_000);
+});
+
 describeRendered("Overview Crew at normal text keeps its accepted widths", () => {
   const NARROW = [88, 168, 168, 44, 40, 48];
   const WIDE = [88, 168, 224, 52, 52, 52, 40, 60, 48];
@@ -281,14 +404,25 @@ describeRendered("Overview Crew at normal text keeps its accepted widths", () =>
       const zoom = width >= 3300 ? 1.5 : 1;
       const tracks = m.tracks.map((px) => Math.round(px / zoom));
       expect(tracks.length === 8 || tracks.length === 11).toBe(true);
+      // State reaches 12px left over the row padding and 8px right over the gap to hold its place.
+      tracks[0] = (tracks[0] ?? 0) - 20;
       const fixed = tracks.filter((_, i) => i !== 2 && i !== 3);
       expect(fixed).toEqual(tracks.length === 8 ? NARROW : WIDE);
       expect(tracks[3]).toBe(104);
       expect(m.scrollsSideways).toBeLessThanOrEqual(0);
       expect(m.pageScrollX).toBeLessThanOrEqual(0);
       expect(m.cuts).toEqual({ head: 0, state: 0, pill: 0, numbers: 0 });
-      // Compact rows: nothing at normal text makes a row grow past two lines.
-      expect(m.tallest / zoom).toBeLessThanOrEqual(64);
+      // The accepted Overview row is its 40px --table-row plus a 1px border; 32px is the compact
+      // token this page does not use. The FLIGHT row, two lines tall, is the tallest at 49px.
+      expect(m.tableRow).toBe(40);
+      expect(m.minHeights.every((h) => h === m.tableRow)).toBe(true);
+      expect(m.tallest / zoom).toBeLessThanOrEqual(49.5);
+      // No reserved scrollbar gutter takes width from Crew while it has no vertical overflow.
+      expect(m.gutter).toBe(0);
+      expect(m.rowWidths.every((w) => w === 0)).toBe(true);
+      // The FLIGHT row's held cells paint the row's own tint, not a stronger one.
+      expect(m.flight?.held.length).toBe(2);
+      for (const image of m.flight?.held ?? []) expect(image).toContain(m.flight?.tint ?? "none");
     },
     90_000,
   );

@@ -2750,7 +2750,6 @@ button.quota-details {
 }
 #agentsList {
   overflow-x: auto;
-  scrollbar-gutter: stable;
 }
 #agentsList .trow {
   /* Head and body rows share one em, so their tracks line up whatever the text size. */
@@ -2783,35 +2782,60 @@ button.quota-details {
   overflow: visible;
   text-overflow: clip;
 }
-#agentsList .trow > :first-child {
+/* The held cells fill their row and reach the table's left edge, so scrolled content never shows
+   beside, above or below them. Their padding keeps the words where they were. */
+#agentsList .trow > :first-child,
+#agentsList .trow > :nth-child(2) {
   position: sticky;
-  left: var(--sp-3);
   z-index: 1;
+  align-self: stretch;
+  justify-content: center;
+  background: var(--surface);
+}
+#agentsList .trow > :first-child {
+  left: 0;
+  margin-left: calc(-1 * var(--sp-3));
+  padding-left: var(--sp-3);
   /* Reach over the column gap so nothing scrolls into view between State and Seat. */
   margin-right: calc(-1 * var(--sp-2));
   padding-right: var(--sp-2);
-  background: var(--surface);
 }
-#agentsList .trow.flight > :first-child {
-  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+/* The row's own tint is translucent: paint the same tint over an opaque surface. */
+#agentsList .trow.flight > :first-child,
+#agentsList .trow.flight > :nth-child(2) {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--accent-soft) 45%, transparent),
+      color-mix(in srgb, var(--accent-soft) 45%, transparent)
+    ),
+    var(--surface);
 }
 #agentsList .trow:not(.head):hover > :first-child,
-#agentsList .trow.sel > :first-child {
+#agentsList .trow:not(.head):hover > :nth-child(2),
+#agentsList .trow.sel > :first-child,
+#agentsList .trow.sel > :nth-child(2) {
   background: var(--surface-2);
+}
+#agentsList .trow.needs::before,
+#agentsList .trow.going::before {
+  z-index: 2;
+}
+/* Below 640px the Seat scrolls with the rest and only State is held. */
+@container agents (max-width: 639px) {
+  #agentsList .trow > :nth-child(2) {
+    position: static;
+    align-self: center;
+    background: none;
+  }
+  #agentsList .trow.flight > :nth-child(2),
+  #agentsList .trow:not(.head):hover > :nth-child(2),
+  #agentsList .trow.sel > :nth-child(2) {
+    background: none;
+  }
 }
 @container agents (min-width: 640px) {
   /* The seat stays beside its State. */
   #agentsList .trow > :nth-child(2) {
-    position: sticky;
     left: calc(var(--sp-3) + var(--crew-state-w) + var(--sp-2));
-    z-index: 1;
-    background: var(--surface);
-  }
-  #agentsList .trow.flight > :nth-child(2) {
-    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
-  }
-  #agentsList .trow:not(.head):hover > :nth-child(2),
-  #agentsList .trow.sel > :nth-child(2) {
-    background: var(--surface-2);
   }
 }

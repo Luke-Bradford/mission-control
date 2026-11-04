@@ -112,7 +112,20 @@ it("grows Crew columns with the text, scrolls them sideways and holds State and 
   expect(css).toMatch(/#agentsList \.trow\.head \{\s*height: auto/);
   expect(css).toMatch(/#agentsList \.state-cell \.pill > span \{\s*overflow: visible/);
   expect(css).toMatch(
-    /#agentsList \.trow > :first-child \{\s*position: sticky;\s*left: var\(--sp-3\)/,
+    /#agentsList \.trow > :first-child,\s*#agentsList \.trow > :nth-child\(2\) \{\s*position: sticky/,
   );
-  expect(css).toMatch(/#agentsList \.trow > :nth-child\(2\) \{\s*position: sticky/);
+});
+
+it("keeps the accepted scrollbar gutter, holds cells over their whole row, and keeps the FLIGHT tint", () => {
+  const from = css.indexOf("/* Crew under enlarged text.");
+  const block = css.slice(from, css.indexOf("The seat stays beside its State.", from) + 200);
+  expect(block).not.toContain("scrollbar-gutter");
+  expect(block).toMatch(/align-self: stretch/);
+  expect(block).toMatch(
+    /#agentsList \.trow > :first-child \{\s*left: 0;\s*margin-left: calc\(-1 \* var\(--sp-3\)\)/,
+  );
+  expect(block).toMatch(
+    /#agentsList \.trow\.flight > :first-child,[^{]*\{[^}]*color-mix\(in srgb, var\(--accent-soft\) 45%, transparent\)/,
+  );
+  expect(block).toMatch(/#agentsList \.trow\.needs::before,[^{]*\{\s*z-index: 2/);
 });
