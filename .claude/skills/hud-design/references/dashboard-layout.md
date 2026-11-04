@@ -1,6 +1,74 @@
 # Dashboard composition and responsive fit
 
-Read this for an Overview, operational dashboard, or a substantial panel-layout change. Use the existing HUD tokens and accessibility rules. This reference adds composition judgment; counting tests is not a design verdict.
+Read this for an Overview, operational dashboard, or a substantial panel-layout change. Use the existing HUD tokens and accessibility rules.
+
+Your job is to arrive with one reasoned design, so the operator doesn't have to direct the layout. Published guidance gives principles but no widths, so the defaults below come from this operator's requests and from renders of this app. Depart from a default when you can say why. Counting tests is not a design verdict.
+
+## What this operator asked for
+
+Treat these as the brief. Later operator steering overrides them.
+
+- "I want to get to a point where you or claude is telling me how it should look and its better than I imagined."
+- "The page needs to be scrolled to see everything, so not really an overview."
+- "we don't have to drop content, we just need to make it fit better, which needs a redesign."
+- "I still don't think some of the graphs are detailed enough." Earlier work was also corrected for removing time axes and peak values, and for dropping token capacity and the activity log.
+- "the seat should be about 2/3 of the page width" and "We should have more info in the seats than the forms on the right."
+- "why is everything the same width for visuals that don't need to be that wide?" and "Forms should be the right size, adequate."
+- 4K and 1080p must both work in the same view: "needs to ideally accomodate both renders."
+- The seats' column spacing is accepted. Don't trade it away for a layout template.
+
+## Compose in this order
+
+1. **Name the question and the reader.** Overview: what is running, what is stuck, what is limiting us and what should happen next.
+2. **Rank every visual: primary, supporting or drill-down.** One primary. Carbon's rule applies: the most important data should "occupy the largest area". Drill-down stays one click away.
+3. **Allocate space by rank**, using the defaults below, before styling anything.
+4. **Sketch it at the real viewports** with rough real text, not boxes. Reject any shape where a supporting panel outranks the primary.
+5. **Render it busy.** Use a normal working crew, long ticket titles and active charts. An idle render hides both crowded columns and columns that stay empty.
+6. **Look at the whole page first and ask what the operator would still have to explain.** Fix that, then measure.
+
+## Allocation defaults
+
+| Region | Default | Why |
+| --- | --- | --- |
+| Primary table | 60–70% of the canvas width | It carries the most fields and answers the page's main question |
+| Supporting column | The rest, one column; panels sized to their content | Compact status doesn't improve by getting wider |
+| Summary strip | One row, at most 96 px | It should be scanned in one pass; shrink the tiles before adding a second row |
+| Log or long list | The one region that flexes vertically, showing as many one-line rows as fit | It gains from every extra row, and it prevents a hole at the bottom of the page |
+| Everything else | Height set by content | Stretched panels create empty boxes and flat charts |
+
+**Fit by condensing, not removing.** Moving a figure or chart detail off the page counts as dropping it unless the operator has agreed. Merge duplicates, shorten labels and tighten panels first. If something still has to move, propose it and say why.
+
+One region in each column absorbs leftover height. Without one, the column leaves a hole on tall screens. Align both columns' bottom edges.
+
+**Tables.** Give identity, state and number columns their longest realistic value and no more. One text column takes the remaining width, up to a readable limit. When the table is wider than that, add the next most useful column instead of widening the text. Keep related values next to each other: a status at the far side of a wide cell reads as a separate column.
+
+**Charts.** A sparkline is 16–32 px tall inside a row. A labelled plot needs 320–720 px of width at roughly 3:1 to 5:1, with labels that don't touch the neighbouring plot. Past 720 px, show more series or comparisons rather than a longer line.
+
+**Repeated controls.** If six tiles each say "History →", make each tile the link. Repeated words are the first thing to remove when a page feels crowded.
+
+## Viewports: use the real ones
+
+A viewport is what the page actually gets, after browser toolbars, tabs and the taskbar. A 1080p monitor gives roughly 1920×940, less with a bookmarks bar, so rendering "1920×1080" tests a window nobody has. On 4 November 2026 a build that fitted 1920×1080 scrolled by 137 px at 1920×940, the likely reason the operator kept having to scroll after checks passed.
+
+| Case | CSS viewport | Must hold |
+| --- | --- | --- |
+| Operator's usual desktop (4K at 150%, measured from their screenshots) | 2560×1145 to 2560×1250 | All primary and supporting panels without page scrolling |
+| 1080p monitor | 1920×940 | Primary, next action and capacity without page scrolling |
+| True 4K at 100% | 3840×2160 | Scale up first, see below |
+| FLIGHT open | Each of the above less the rail | Recompose; a drawer is acceptable if panels would be crushed |
+
+Keep the ticket's smaller and short views too. Ask the operator for `innerWidth` and `innerHeight` if these look out of date.
+
+**Above about 3200 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. Prefer scaling the interface so the page composes like its 2560 layout, and add panels only if they answer a further question. On 4 November `zoom: 1.5` on the root reproduced the 2560 composition, but the lower panels overflowed and clipped, so heights must account for the scale. Re-render whichever method you use.
+
+## What has already failed here
+
+- Primary capped at 1200 px beside an unbounded secondary column: at 4K the secondary reached 2508 px and Crew 33.8% of the canvas.
+- Every panel the same width, whatever it held.
+- Machine stacked about 800 px tall, pushing Pipeline off the screen.
+- Pipeline promoted above seats without anyone asking.
+- Passing on geometry, then the operator rejecting the composition, more than once.
+- A branch with 4,147 added lines of product code and 86,450 added lines of evidence. Keep evidence small enough that someone will read it, and spend the effort on the page.
 
 ## Start with decisions and data
 
@@ -14,7 +82,7 @@ Record the reference CSS viewport, browser zoom, OS scaling, dock state and actu
 
 For the supported views, write a vertical budget: header + gutters + summary strip + main operational regions + gaps + footer. Identify exactly which panels and normal rows belong above the fold. Default operational status should not require searching a long page. Large histories and exceptional fifty-row lists can have named, visible internal scrolling; their availability is not proof that the overview itself fits.
 
-For Mission Control, explicitly examine 1920×1080, 2560×1440 and 3840×2160 CSS viewports, folded/expanded FLIGHT, plus a 1920×1080 viewport at device scale 2. Keep required smaller/short views from the ticket. Do not substitute a different height for a named acceptance viewport.
+For Mission Control, examine the real viewports above with FLIGHT folded and expanded, plus 1920×1080, 2560×1440 and a 1920×1080 viewport at device scale 2 as nominal sizes. Keep required smaller/short views from the ticket. Do not substitute a different height for a named acceptance viewport.
 
 ## Size by purpose
 
@@ -48,8 +116,9 @@ Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry th
 rendered review and saved report. A whole-page composition verdict must explain useful allocation,
 not merely confirm that panels fit.
 
-Primary references, checked 3 November 2026; these inform judgment rather than replace the local brief:
+Primary references, checked 4 November 2026; these inform judgment rather than replace the local brief. Those we could read give no grid widths or wide-screen rules, and the third-party agent skill we could read in full was tokens and a checklist, so the defaults above are ours:
 
 - [Carbon: Dashboards](https://www.carbondesignsystem.com/building-blocks/data-visualization/dashboards)
 - [Microsoft: dashboard design](https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips)
 - [Grafana: dashboard best practices](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/best-practices/)
+- [MDN: `zoom`](https://developer.mozilla.org/en-US/docs/Web/CSS/zoom)
