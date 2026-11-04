@@ -430,9 +430,11 @@ function MentionsBell({
     const el = panel.current;
     if (!open || !el) return;
     const fit = () => {
-      const top = el.getBoundingClientRect().top;
+      const box = el.getBoundingClientRect();
       const host = el.closest("#chatP")?.getBoundingClientRect().bottom ?? window.innerHeight;
-      const room = Math.min(host, window.innerHeight) - top - MENTIONS_GAP_PX;
+      // The rects are zoomed and the height this sets gets zoomed again.
+      const zoom = box.height > 0 && el.offsetHeight > 0 ? box.height / el.offsetHeight : 1;
+      const room = (Math.min(host, window.innerHeight) - box.top) / zoom - MENTIONS_GAP_PX;
       el.style.setProperty("--mentions-room", `${Math.max(MENTIONS_MIN_PX, Math.floor(room))}px`);
     };
     fit();

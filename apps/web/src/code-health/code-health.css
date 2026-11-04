@@ -176,7 +176,7 @@
 }
 .ch-dialog {
   width: min(960px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(calc(100 * var(--vh)) - 48px);
   display: flex;
   flex-direction: column;
 }

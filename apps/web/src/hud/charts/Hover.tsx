@@ -48,7 +48,8 @@ export function useChartWidth(fallback: number): [RefObject<HTMLDivElement | nul
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const read = () => {
-      const px = Math.round(el.getBoundingClientRect().width);
+      // Layout pixels, so the root zoom scales a chart and its tooltip once.
+      const px = Math.round(el.clientWidth);
       if (px > 0) setW(px);
     };
     read();

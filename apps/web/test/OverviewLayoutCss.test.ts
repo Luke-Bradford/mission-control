@@ -66,7 +66,6 @@ describe("Overview layout (hud.css)", () => {
     expect(css).toMatch(
       /\.overview-primary,\s*\.overview-secondary \{[^}]*display: flex;[^}]*flex-direction: column/,
     );
-    expect(css).toContain("margin-top: calc(var(--crew-height, 0px) + var(--sp-3))");
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: auto");
     expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");

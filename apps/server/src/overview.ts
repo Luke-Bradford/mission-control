@@ -70,11 +70,16 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   }
 
   const prs = scope.repoIds.flatMap((id) =>
-    store.overviewPullRequests(id, Math.min(midnight, since)),
+    store.overviewPullRequests(id, Math.min(midnight, since, now - DAY_MS)),
   );
   const linked = prs.filter(isLinked);
   const pipelineRepos = new Set(scope.pipelineRepoIds ?? scope.repoIds);
-  const pipeline = pipelineStages(store, now, { runs, prs, pipelineRepos, midnight });
+  const pipeline = pipelineStages(store, now, {
+    runs,
+    prs,
+    pipelineRepos,
+    doneSince: now - DAY_MS,
+  });
   const inFlight = inProgressOf(pipeline);
   const ci = scope.repoIds
     .flatMap((id) => store.loopEvents(since - DAY_MS, id))
@@ -200,8 +205,8 @@ const isLinked = (p: PullRequestView): boolean =>
 
 /**
  * The delivery pipeline: each open ticket's stage from its live run, PR and board column, plus
- * tickets merged since `midnight`. `runs` must include every open run; `prs` every open PR and
- * those merged since `midnight`.
+ * tickets merged since `doneSince`. `runs` must include every open run; `prs` every open PR and
+ * those merged since `doneSince`.
  */
 export function pipelineStages(
   store: Store,
@@ -210,12 +215,12 @@ export function pipelineStages(
     runs,
     prs,
     pipelineRepos,
-    midnight,
+    doneSince,
   }: {
     runs: readonly Run[];
     prs: readonly PullRequestView[];
     pipelineRepos: ReadonlySet<string>;
-    midnight: number;
+    doneSince: number;
   },
 ): PipelineStage[] {
   const linked = prs.filter(isLinked);
@@ -264,6 +269,8 @@ export function pipelineStages(
           closed: false,
           updatedAt: run.startedAt,
           column: null,
+          priority: null,
+          size: null,
         },
       ];
     });
@@ -302,12 +309,14 @@ export function pipelineStages(
             ? (readyMoves.get(item.issueNumber) ?? item.updatedAt)
             : (run?.loop?.pushStartedAt ?? run?.startedAt ?? item.updatedAt),
         who: run?.agentId ?? null,
+        priority: item.priority,
+        size: item.size,
       });
     }
   }
   for (const pr of linked) {
     if (!pipelineRepos.has(pr.repoId)) continue;
-    if (pr.mergedAt === null || pr.mergedAt < midnight || pr.mergedAt > now) continue;
+    if (pr.mergedAt === null || pr.mergedAt < doneSince || pr.mergedAt > now) continue;
     const ticket = pr.ticket === null ? pr.closingIssues?.[0] : parseTicket(pr.ticket)?.number;
     if (ticket === undefined) continue;
     cards.get("merged")?.push({

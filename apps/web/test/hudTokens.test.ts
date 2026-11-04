@@ -25,6 +25,7 @@ const LINE_TOKENS = {
   "--lh": "20px",
   "--lh-s": "16px",
   "--lh-micro": "16px",
+  "--lh-axis": "14px",
 } as const;
 const SPACING_TOKENS = {
   "--sp-1": "4px",

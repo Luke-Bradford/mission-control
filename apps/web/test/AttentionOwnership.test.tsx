@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { NeedBanner } from "../src/agent/NeedBanner.tsx";
 import { hub } from "../src/data.ts";
@@ -37,9 +37,16 @@ it("names the loop owner in Overview and Agent, with one reachable action for fi
       <NeedBanner row={row} items={items} />
     </>,
   );
-  const loops = await screen.findByRole("navigation", { name: "Loops" });
-  expect(loops.textContent).toContain("has an item to resolve");
-  expect(loops.textContent).not.toContain("needs you");
+  // The observed loop is a row of the Crew table; its need names the loop and the count.
+  const need = await waitFor(() => {
+    const el = container.querySelector<HTMLElement>("#agentsList .trow.needs .need");
+    expect(el).toBeTruthy();
+    return el as HTMLElement;
+  });
+  expect(need.textContent).toContain("Decision for studio · 50 items");
+  expect(need.textContent).not.toContain("needs you");
+  expect(within(need).getAllByRole("button")).toHaveLength(1);
+  expect(within(need).queryByRole("button", { name: "Answer" })).toBeNull();
   const banner = container.querySelector("#needBanner");
   expect(banner?.textContent).toContain("studio has an item to resolve.");
   expect(banner?.textContent).toContain("50 items");

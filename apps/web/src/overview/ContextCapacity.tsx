@@ -1,7 +1,9 @@
-// biome-ignore-all lint/a11y/useSemanticElements: this cell belongs to the existing ARIA grid-table roster.
+// biome-ignore-all lint/a11y/useSemanticElements: these cells belong to the existing ARIA grid-table roster.
 import type { CrewRow } from "@mc/core";
 import { kTokens, percent } from "../fmt.ts";
 import { meterLevel } from "../hud/Meter.tsx";
+
+const DASH = "—";
 
 /** Last reported context, distinct from throughput and the provider's account allowance. */
 export function contextCapacity(row: CrewRow | null) {
@@ -17,10 +19,11 @@ export function contextCapacity(row: CrewRow | null) {
   };
 }
 
+/** Context as number columns: used and limit where the table has room, and always the percent. */
 export function ContextCapacity({ row }: { row: CrewRow | null }) {
   const value = contextCapacity(row);
-  const used = value.used === null ? "—" : kTokens(value.used);
-  const window = value.window === null ? "—" : kTokens(value.window);
+  const used = value.used === null ? DASH : kTokens(value.used);
+  const limit = value.window === null ? DASH : kTokens(value.window);
   const left =
     value.remaining === null
       ? value.window === null
@@ -29,19 +32,18 @@ export function ContextCapacity({ row }: { row: CrewRow | null }) {
       : value.over
         ? `${kTokens(value.over)} over`
         : `${kTokens(value.remaining)} left`;
+  const title = `Last reported context: ${used} used of ${limit} · ${left}`;
   return (
-    <span
-      role="cell"
-      className={`context-capacity num${meterLevel(value.pct)}`}
-      title={`Last reported context: ${value.used ?? "unknown"} used / ${value.window ?? "unknown"} window tokens · ${value.remaining ?? "unknown"} remaining · ${percent(value.pct)} used. Not provider allowance or token rate.`}
-    >
-      <span>
-        {used} / {window} · {left}
-        {value.pct === null ? "" : ` · ${percent(value.pct)}`}
+    <>
+      <span role="cell" className="num xs crew-wide" title={title}>
+        {used}
       </span>
-      <span className="context-track" aria-hidden="true">
-        {value.pct !== null && <i style={{ width: `${Math.min(100, Math.max(0, value.pct))}%` }} />}
+      <span role="cell" className="num xs muted crew-wide" title={title}>
+        {limit}
       </span>
-    </span>
+      <span role="cell" className={`num xs context-pct${meterLevel(value.pct)}`} title={title}>
+        {value.pct === null ? DASH : percent(value.pct)}
+      </span>
+    </>
   );
 }

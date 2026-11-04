@@ -7,8 +7,9 @@ import { AgentNavRow } from "../src/comms/CommsNav.tsx";
 import { hub } from "../src/data.ts";
 import { AgentTag } from "../src/hud/AgentTag.tsx";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { AgentActivity } from "../src/overview/AgentActivity.tsx";
+import { CrewLane } from "../src/overview/CrewLane.tsx";
 import { crewRow } from "./fixtures.ts";
+import { observedContextDigest } from "./overviewDensityFixtures.ts";
 
 const SRC = join(__dirname, "../src");
 const hudCss = readFileSync(join(SRC, "hud.css"), "utf8");
@@ -23,7 +24,12 @@ function resolve(token: string | null | undefined): string {
 }
 
 const SEAT_INDEX = 3;
-const row = crewRow({ id: "GUIDO-1", index: SEAT_INDEX });
+const NOW = Date.UTC(2026, 10, 4, 12, 30);
+const row = crewRow({
+  id: "GUIDO-1",
+  index: SEAT_INDEX,
+  digest: observedContextDigest(null, null, [[NOW - 60_000, 100]]),
+});
 
 beforeEach(() => {
   vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
@@ -36,9 +42,11 @@ afterEach(() => {
 
 describe("a seat is one colour on every page", () => {
   it("renders the same hex on Overview, Agent, Comms and Map", () => {
-    // Overview: the agent's activity trace
-    const overview = render(<AgentActivity row={row} now={Date.now()} max={10} />);
-    const trace = overview.container.querySelector("stop")?.getAttribute("stop-color");
+    // Overview: the agent's activity lane
+    const overview = render(
+      <CrewLane row={row} name="GUIDO-1" lane={undefined} now={NOW} max={10} />,
+    );
+    const trace = overview.container.querySelector(".crew-lane-bar")?.getAttribute("fill");
     overview.unmount();
     // Agent: the seat's tag
     const agent = render(<AgentTag id="GUIDO-1" index={SEAT_INDEX} />);

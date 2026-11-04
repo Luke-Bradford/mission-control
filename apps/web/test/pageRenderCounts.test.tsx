@@ -46,7 +46,8 @@ const PAGES = [
   ["Agent", "/agent", "page-agent", 0],
   ["Map", "/map/sample", "page-map", 0],
   ["Comms", "/comms", "page-comms", 0],
-  ["Telemetry", "/telemetry", "page-telemetry", 61],
+  // The complete allowance and machine readers moved here from the Overview, with their clocks.
+  ["Telemetry", "/telemetry", "page-telemetry", 74],
   ["Setup", "/setup/loops", "page-setup", 12],
 ] as const;
 

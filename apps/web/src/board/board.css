@@ -138,7 +138,7 @@
 }
 
 .board-placeholder {
-  min-height: 70vh;
+  min-height: calc(70 * var(--vh));
 }
 
 .kcard {
@@ -247,7 +247,7 @@
 
 @media (max-width: 999px), (max-height: 559px) {
   .kanban {
-    height: 70vh;
+    height: calc(70 * var(--vh));
   }
 }
 
