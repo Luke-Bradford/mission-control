@@ -2606,8 +2606,10 @@ button.quota-details {
   position: absolute;
   top: 0;
 }
+/* Past the plot's end, in the column that holds the limit labels. */
 .burnup-axis > .burnup-reset {
-  right: 0;
+  left: 100%;
+  padding-left: var(--sp-1);
 }
 .plot-axis {
   display: flex;
@@ -2731,8 +2733,9 @@ button.quota-details {
   min-height: var(--sp-5);
 }
 @container overview-canvas (min-width: 2000px) {
-  .board-stage.merging {
-    max-height: 40%;
-    overflow-y: auto;
+  /* Rarely more than a ticket or two, so a long lane scrolls and In review keeps its room. */
+  .board-stage.merging .board-cards {
+    flex: none;
+    max-height: calc(3 * var(--sp-7));
   }
 }
