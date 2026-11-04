@@ -171,21 +171,24 @@ describeRendered("Overview composition", () => {
     60_000,
   );
 
-  it.each([1280, 1366, 1500, 1505, 1512, 1536, 1600, 1700])(
-    "keeps Crew and the side column apart at %i wide",
-    async (width) => {
-      const page = await open("mixed", width, 900);
-      await settled(page);
-      const overlap = await page.evaluate(() => {
+  // One browser resized, not one per width: eight launches here slowed the tests beside this file.
+  it("keeps Crew and the side column apart at every narrower width", async () => {
+    const page = await open("mixed", 1280, 900);
+    await settled(page);
+    const overlapping: number[] = [];
+    for (const width of [1280, 1366, 1500, 1505, 1512, 1536, 1600, 1700]) {
+      await page.resize(width, 900);
+      const overlap = await page.evaluate(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
         const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
         const side = document.querySelector("#overviewNextP")?.getBoundingClientRect();
         if (!crew || !side) return true;
         return !(crew.right <= side.left || side.right <= crew.left || crew.bottom <= side.top);
       }, undefined);
-      expect(overlap).toBe(false);
-    },
-    60_000,
-  );
+      if (overlap) overlapping.push(width);
+    }
+    expect(overlapping).toEqual([]);
+  }, 60_000);
 
   it("keeps every row's controls and links reachable at the reference size", async () => {
     const page = await open("mixed", 1920, 940);

@@ -14,7 +14,8 @@ const children: ChildProcess[] = [];
 const cli = (home: string, ...args: string[]) =>
   exec(shim, args, {
     env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
-    timeout: 10000,
+    // One CLI call takes about 0.3 s here, but a browser test beside it on CI can slow it badly.
+    timeout: 30_000,
   });
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "comms-cli-"));
@@ -136,4 +137,4 @@ it("creates, invites, joins, approves, exchanges, and rotates on removal", async
       expect.objectContaining({ msg: expect.objectContaining({ body: "after removal" }) }),
     ]),
   );
-}, 30000);
+}, 60_000);
