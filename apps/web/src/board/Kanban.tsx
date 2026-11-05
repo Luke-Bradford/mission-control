@@ -12,6 +12,7 @@ import { agoDays, plural } from "../fmt.ts";
 import { reviewStateProps } from "../hud/ReviewState.tsx";
 import { Card, type CardProps } from "./Card.tsx";
 import {
+  type CardRework,
   cardAgent,
   cardColumn,
   cardNeeds,
@@ -22,6 +23,7 @@ import {
   cardYou,
   daysAgo,
   doneOutcome,
+  reworkLabel,
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
@@ -29,6 +31,7 @@ import {
 import { usePhone } from "./phone.ts";
 
 const NO_PRS: PullRequestView[] = [];
+const NO_REWORK: ReadonlyMap<string, CardRework> = new Map();
 export interface KanbanColumnMetric {
   label: string;
   count: string;
@@ -48,6 +51,8 @@ interface CardCtx {
   now: number;
   tz: string | null;
   todayStart: number | null;
+  /** The server's rework facts per ticket ref. */
+  rework: ReadonlyMap<string, CardRework>;
 }
 
 /**
@@ -65,6 +70,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
   const pr = cardPr(item, prs);
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
   const check = pr?.check ? reviewStateProps(pr.check) : null;
+  const facts = ctx.rework.get(ticketRef(item));
   return {
     item,
     showRepo: ctx.showRepo,
@@ -84,6 +90,14 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     when,
     statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
     you: cardYou(needs, ctx.now),
+    rework:
+      facts && col !== "Done"
+        ? reworkLabel(facts, {
+            ready: col === "Ready",
+            onTicket: agent !== null && agent.id === facts.seat,
+            pr: pr?.number ?? null,
+          })
+        : null,
   };
 }
 
@@ -100,6 +114,7 @@ export function Kanban({
   now,
   tz,
   todayStart,
+  rework = NO_REWORK,
   columns = HUD_COLUMNS,
   notIn,
   metrics = {},
@@ -114,6 +129,8 @@ export function Kanban({
   now: number;
   tz: string | null;
   todayStart: number | null;
+  /** The server's rework facts per ticket ref (the Overview pipeline's). */
+  rework?: ReadonlyMap<string, CardRework>;
   /** The columns to draw, in order; default all eight. */
   columns?: readonly HudColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
@@ -140,6 +157,7 @@ export function Kanban({
     now,
     tz,
     todayStart,
+    rework,
   };
   const phone = usePhone();
   const uid = useId();

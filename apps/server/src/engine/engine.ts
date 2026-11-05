@@ -189,6 +189,15 @@ import { overrunText, tickLogOf } from "./ticks.ts";
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
 
+/** The Comms copy of the seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
+export function ciSeatText(intro: string, excerpt: string): string {
+  const shortened = "\n[CI output shortened; inspect the CI log.]";
+  const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+  return Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+    ? intro + excerpt
+    : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
+}
+
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
 const NOT_EXCERPTS = [NO_FAILED_RUN, CI_LOG_UNREADABLE, EMPTY_LOG];
 
@@ -1433,14 +1442,10 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
-        const shortened = "\n[CI output shortened; inspect the CI log.]";
-        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
-        const text =
-          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
-            ? intro + excerpt
-            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
-        const sent = await send(run.id, a.key, text);
-        if (sent === "sent") handOff(COMMS_MC, text);
+        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); only the Comms
+        // copy is held to a Comms message
+        const sent = await send(run.id, a.key, intro + excerpt);
+        if (sent === "sent") handOff(COMMS_MC, ciSeatText(intro, excerpt));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
@@ -1572,7 +1577,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const waitsOnPerson = asked !== undefined;
         cur.aside = {
           worktree,
-          wake: cur.phase === "working" && !waitsOnPerson,
+          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
+          ...(a.displaced ? { displaced: true as const } : {}),
           ...(asked ? { ask: asked.id } : {}),
         };
         store.setRunLoop(run.id, cur);
@@ -1588,7 +1594,7 @@ export function createEngine(deps: EngineDeps): Engine {
           run.id,
           waitsOnPerson
             ? asideForAnswerEventText(call)
-            : cur.phase === "working"
+            : cur.phase === "working" || a.displaced
               ? asideForReworkEventText(call)
               : cur.phase === "ci"
                 ? asideInCiEventText(call)

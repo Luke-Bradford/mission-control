@@ -4,12 +4,14 @@ import {
   type CrewRow,
   type HudColumn,
   hudColumnOf,
+  type PipelineCard,
   type PipelineStage,
   type PrCheck,
   type PullRequestView,
   priorityRank,
   REVIEW_STATUS_CONTEXT,
   type RunLoopView,
+  seatCallSign,
   startOfLocalDay,
 } from "@mc/core";
 import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
@@ -76,7 +78,10 @@ export function cardPr(item: BoardItem, prs: PullRequestView[]): PullRequestView
 }
 
 /** The agent whose run is still going on this ticket; a finished run never marks a card. */
-export function cardAgent(item: BoardItem, crew: CrewRow[]): CrewRow | null {
+export function cardAgent(
+  item: Pick<BoardItem, "repoId" | "issueNumber">,
+  crew: readonly CrewRow[],
+): CrewRow | null {
   const ref = ticketRef(item);
   return crew.find((r) => r.run?.status === "running" && r.ticket === ref) ?? null;
 }
@@ -276,4 +281,23 @@ export function pipelineStage(
   if (loop?.phase === "ci") return "checks";
   if (loop?.phase === "review" || column === "In review") return "review";
   return column === "Ready" && !agent ? "ready" : fallback;
+}
+
+/** What the server says of a card whose review found blocking problems (`PipelineCard.rework`). */
+export type CardRework = NonNullable<PipelineCard["rework"]>;
+
+/**
+ * The card's rework line. A Ready card (its run ended) says it was reviewed, with its PR; a card
+ * being built says the round, blockers and seat. `onTicket`: the seat is running this ticket now,
+ * so being busy is the work itself; a seat busy on something else has the rework queued.
+ */
+export function reworkLabel(
+  rework: CardRework,
+  at: { ready: boolean; onTicket: boolean; pr: number | null },
+): string {
+  const blockers = plural(rework.blockers, "blocker");
+  if (at.ready) return `Reviewed · ${blockers}${at.pr === null ? "" : ` · PR ${at.pr}`}`;
+  const seat = rework.seat === null ? null : seatCallSign(rework.seat);
+  if (seat !== null && rework.seatBusy && !at.onTicket) return `Rework · queued for ${seat}`;
+  return ["Rework", `round ${rework.round}`, blockers, seat].filter(Boolean).join(" · ");
 }

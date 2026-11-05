@@ -43,9 +43,13 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   );
 }
 
-/** A run set aside while it was still being built (never pushed), to make way for rework. */
+/**
+ * A run set aside to make way for rework: one still being built (never pushed), or one that
+ * pushed and holds a refused newer commit.
+ */
 const isDisplaced = (store: Store, run: Run): boolean =>
-  run.loop?.phase === "working" && store.runPush(run.id) === null;
+  run.loop?.aside?.displaced === true ||
+  (run.loop?.phase === "working" && store.runPush(run.id) === null);
 
 /** Only a run eligible under its own pause state may displace or hold up another run. */
 function unpausedAsideRuns(store: Store, seatId: string): Run[] {
