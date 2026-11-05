@@ -1488,8 +1488,9 @@ describe("answer_question", () => {
     const id = ask();
     expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
     expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "unpassed" }],
+      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "none" }],
     ]);
+    expect(store.question(id)?.answeredAt).toBe(NOW);
     expect(decisions()).toEqual([
       {
         id: 1,
@@ -1701,11 +1702,33 @@ describe("answer_question", () => {
       at: NOW,
     });
     await call("answer_question", A(other));
-    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
-    // what the supervisor does with that option
-    store.answerQuestions("guido-1", NOW, true);
+    expect(messageCalls.at(-1)).toEqual([
+      "guido-1",
+      "FLIGHT answers: Lane 2",
+      { interrupt: false, questions: "none" },
+    ]);
     expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(passed)?.passedAt).not.toBeNull();
     expect(store.question(other)?.answeredAt).toBe(NOW);
+  });
+
+  it("closes only the question it answers; the seat's other question stays open for FLIGHT", async () => {
+    const first = ask();
+    const second = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which branch?",
+      at: NOW + 4,
+    });
+    expect(await call("answer_question", A(first))).toEqual({ text: "Answered GUIDO-1." });
+    expect(store.question(first)?.answeredAt).toBe(NOW);
+    expect(store.question(second)?.answeredAt).toBeNull();
+    expect(store.openQuestions().map((q) => q.id)).toEqual([second]);
+    expect(await call("answer_question", A(second, { answer: "main" }))).toEqual({
+      text: "Answered GUIDO-1.",
+    });
+    expect(store.question(second)?.answeredAt).toBe(NOW);
+    expect(messageCalls.map((m) => m[1])).toEqual(["FLIGHT answers: Lane 2", "FLIGHT answers: main"]);
   });
 
   it("refuses FLIGHT's own question", async () => {

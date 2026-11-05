@@ -1256,14 +1256,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
-        questions: "unpassed",
+        questions: "none",
       });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
-    // Passed without a brief (before #758): the message closed unpassed questions only, so hand
-    // this one back and close it too, once the answer is delivered.
-    if (q.passedAt !== null && store.unpassQuestion(id)) store.answerQuestion(id, at);
+    // The message closes no question: only this one, once the answer is delivered, so the seat's
+    // other open questions wait for their own answers. One passed without a brief (before #758)
+    // is handed back first.
+    if (q.passedAt !== null) store.unpassQuestion(id);
+    store.answerQuestion(id, at);
     store.addComms({
       at,
       from: ctx.seatId,
