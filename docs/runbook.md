@@ -2363,6 +2363,39 @@ branch ref rather than changing the required command. The hub never executes the
 code in the server process. Its existing exception for engine-only clean merges of main is
 unchanged; this check gates seat-authored pushes and does not certify that separate publish path.
 
+### Tests a seat's sandbox cannot run (#1411)
+
+Some tests need what a seat's sandbox denies: `sandbox-exec`, listening on a port, or
+`pnpm install` with a store, or starting a crew run (its temp folder, and `ps`). A change to a widely imported file selects them all, and in a seat
+they could only fail (the installs run to their timeouts), so `test:related` could never pass.
+`apps/server/test/sandbox-gaps.ts` skips such a test only when both hold: the process runs under a
+seat's sandbox (`SANDBOX_RUNTIME=1`) and a probe of that capability fails there. CI sets no such
+marker and runs every test. Where the sandbox allows the capability, the test runs and a real
+failure still fails. Each skip is named on stderr (`sandbox-gaps: skipping ...`). Mark a new test of
+this kind with `blockedHere("listen" | "seatbelt" | "install" | "crew-run")`.
+
+The seat is told by `MC_SEAT_SANDBOX=1`, which the hub puts in every crew seat's environment
+(Claude and Codex), or by the Claude sandbox's `SANDBOX_RUNTIME=1`. The shared rule and the
+`listen`, `seatbelt`, `ps` and `git-hooks` probes are in `packages/core/test/sandbox-gaps.ts` (no
+server imports, so agentcomms tests use it too); `install` and `crew-run` are in
+`apps/server/test/sandbox-gaps.ts`. Whether Codex's own sandbox passes the variable on to its shell
+commands is not verified.
+
+The test-lock row's outcome: `fail` when the hook reports a failed call, `pass` for a plain call
+that succeeded, and `done` (never `pass`) for a call that pipes or chains past the check, such as
+`pnpm -s test; echo exit=$?` or `... | tail`, because its status is the last step's. That is the
+path that fits the 4 Nov report (lock `pass`, the seat saw exit 1, no check record, since a chain
+with `;` or `|` is never counted as a check). A Codex command releases as `fail` when it did not
+succeed, and as `done` when it succeeded but piped or chained past the check. A Post whose hook
+exit code is null (interrupted or background) is unknown: the lock row ends `done` and the check
+recorder stores not-ok, so it never counts toward the push gate. A review run's `done` locked call
+still shows in the QA report as a hub receipt, with no pass claimed.
+
+Not covered by a test in a seat: the Codex release outcome (`supervisor-checks.test.ts`, which
+needs a crew run and so skips in a seat; CI runs it), and whether Codex's own sandbox passes
+`MC_SEAT_SANDBOX` on to its shell commands. A Codex seat that shows tests failing on `listen`,
+`ps` or `sandbox-exec` instead of skipping is the sign it does not; report it.
+
 
 ### Durable QA reports
 
