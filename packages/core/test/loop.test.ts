@@ -2042,7 +2042,11 @@ describe("review decisions", () => {
     const clean = reconcile(inReview(withReview([fact({ id: 5, blocking: 0 })])));
     expect(kinds(clean.actions, "move-card")).toEqual([]);
     // once per state: the mark is set, so the next pass leaves the card alone
-    const done = inReview(withReview([fact({ id: 5, blocking: 2 })], [finding]), {}, { cardFor: "rework:0" });
+    const done = inReview(
+      withReview([fact({ id: 5, blocking: 2 })], [finding]),
+      {},
+      { cardFor: "rework:0" },
+    );
     expect(kinds(reconcile(done).actions, "move-card")).toEqual([]);
   });
 

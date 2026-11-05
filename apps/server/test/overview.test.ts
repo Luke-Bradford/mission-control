@@ -573,7 +573,13 @@ it("uses a question's recorded answer time between overview reads", () => {
 });
 
 /** A reported review of PR `prNumber`'s `sha`: round `round`, `blocking` blocking findings. */
-const reported = (runId: string, prNumber: number, sha: string, round: number, blocking: number) => {
+const reported = (
+  runId: string,
+  prNumber: number,
+  sha: string,
+  round: number,
+  blocking: number,
+) => {
   const id = store.requestReview({
     authorRunId: runId,
     repoId: "repo",
@@ -622,7 +628,11 @@ it("keeps a card In review when its newest review is clean or its head has moved
   store.replaceBoard("repo", [card(4, "In review"), card(5, "In review")]);
   for (const n of [4, 5])
     store.upsertRun(run(n, { loop: { ...NEW_LOOP, phase: "review", prNumber: 100 + n } }));
-  store.replacePullRequests("repo", [pr(4, { headSha: SHA }), pr(5, { headSha: "b".repeat(40) })], NOW);
+  store.replacePullRequests(
+    "repo",
+    [pr(4, { headSha: SHA }), pr(5, { headSha: "b".repeat(40) })],
+    NOW,
+  );
   reported("run-4", 104, SHA, 1, 0);
   reported("run-5", 105, SHA, 1, 2);
   const result = summary();

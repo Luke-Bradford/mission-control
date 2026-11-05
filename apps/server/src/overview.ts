@@ -1,8 +1,8 @@
 import {
   type AttentionItem,
   CI_PASSED_EVENT_PREFIX,
-  hudColumnOf,
   type HudState,
+  hudColumnOf,
   isCiFailureEvent,
   needsYouItems,
   type OverviewSummary,
