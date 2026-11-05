@@ -365,10 +365,7 @@ export async function main(): Promise<void> {
           port: DESIGN_PREVIEW_PORT,
           hubPort: port,
           // the newest PR of the branch decides: a closed one takes its preview with it
-          prOf: (branch) => {
-            const row = store.pullRequests(previewRepoId).find((pr) => pr.branch === branch);
-            return row === undefined ? null : { number: row.number, state: row.state };
-          },
+          prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
           log: (line) => log(line),
         })
       : undefined;

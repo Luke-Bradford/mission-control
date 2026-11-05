@@ -186,6 +186,28 @@ describe("DesignPreviews", () => {
     expect(DESIGN_PREVIEW_IDLE_MS).toBe(3_600_000);
   });
 
+  it("serving files looks up no PR: only the sweep, open and list do", async () => {
+    let lookups = 0;
+    const p = new DesignPreviews({
+      root: join(dir, "store"),
+      port: PORT,
+      hubPort: 7420,
+      prOf: () => {
+        lookups++;
+        return null;
+      },
+      now: () => clock,
+    });
+    await p.publish(input(1, worktree("w1", "one")));
+    lookups = 0;
+    for (const url of ["/", "/assets/app-1.js", "/mc-preview-boot", "/some/route"]) {
+      await get(p, url);
+    }
+    expect(lookups).toBe(0);
+    await p.sweep();
+    expect(lookups).toBe(1);
+  });
+
   it("a republish replaces that ticket's build", async () => {
     const p = newPreviews();
     await p.publish(input(1, worktree("w1", "old")));

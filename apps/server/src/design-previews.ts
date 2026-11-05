@@ -157,6 +157,13 @@ export class DesignPreviews {
     return rm(join(this.deps.root, String(ticket)), { recursive: true, force: true });
   }
 
+  /** The slot's idle rule: a clock read and nothing else, so every request can apply it. */
+  private expireIdle(): void {
+    if (this.running !== null && this.now() - this.running.usedAt > DESIGN_PREVIEW_IDLE_MS) {
+      this.running = null;
+    }
+  }
+
   /** The rules `sweep` runs, applied before every list, open and request too. */
   private apply(): Promise<void>[] {
     const now = this.now();
@@ -171,9 +178,7 @@ export class DesignPreviews {
         deletions.push(this.drop(m.ticket));
       }
     }
-    if (this.running !== null && now - this.running.usedAt > DESIGN_PREVIEW_IDLE_MS) {
-      this.running = null;
-    }
+    this.expireIdle();
     return deletions;
   }
 
@@ -269,7 +274,8 @@ export class DesignPreviews {
         .send(PREVIEW_BOOT_SCRIPT),
     );
     app.setNotFoundHandler(async (req, reply) => {
-      await this.sweep();
+      // no PR lookup per file: the 60 s sweep and open() apply those rules
+      this.expireIdle();
       const slot = this.running;
       const m = slot === null ? undefined : this.stored.get(slot.ticket);
       if (slot === null || m === undefined) {

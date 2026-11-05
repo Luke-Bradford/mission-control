@@ -120,14 +120,19 @@ describe("design previews in a real browser", () => {
       bus: new ChangeBus(),
       operatorToken: TOKEN,
     });
-    const seen: Array<{ method: string; url: string; status: number | null }> = [];
+    // every request that arrives, counted at the HTTP server before any of the hub's guards
+    // can refuse it; and the status each one was answered with
+    const arrived: string[] = [];
+    const answered: Array<{ method: string; url: string; status: number }> = [];
+    hub.server.on("request", (req) => {
+      if (req.url?.startsWith("/api/")) arrived.push(`${req.method} ${req.url}`);
+    });
+    hub.server.on("upgrade", (req) => {
+      if (req.url?.startsWith("/api/")) arrived.push(`UPGRADE ${req.url}`);
+    });
     hub.addHook("onResponse", async (req, reply) => {
       if (req.url.startsWith("/api/"))
-        seen.push({ method: req.method, url: req.url, status: reply.statusCode });
-    });
-    hub.addHook("onRequest", async (req) => {
-      if (req.url.startsWith("/api/"))
-        seen.push({ method: req.method, url: req.url, status: null });
+        answered.push({ method: req.method, url: req.url, status: reply.statusCode });
     });
     await hub.listen({ host: "127.0.0.1", port: 0 });
     const hubPort = (hub.server.address() as { port: number }).port;
@@ -202,13 +207,14 @@ Promise.allSettled(tries.map((t, i) => t().then((v) => note("try" + i, "ok " + v
 
       // with the preview's own CSP the browser stops every request before it leaves
       const guarded = await run(`http://127.0.0.1:${port}/`);
-      expect(seen.filter((s) => s.status === null)).toEqual([]);
+      expect(arrived).toEqual([]);
+      expect(answered).toEqual([]);
       expect(guarded).not.toContain(TOKEN);
 
       // with no CSP, every request that reaches the hub is refused: it is same-site, not same-origin
       const ungated = await run(`http://127.0.0.1:${noCspPort}/`);
       expect(ungated).not.toContain(TOKEN);
-      const answered = seen.filter((s) => s.status !== null);
+      expect(arrived.length).toBeGreaterThan(0);
       expect(answered.length).toBeGreaterThan(0);
       for (const s of answered) expect(s.status, `${s.method} ${s.url}`).toBe(403);
     } finally {
