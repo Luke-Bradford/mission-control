@@ -192,10 +192,13 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
 export function FlightChat({
   where,
   active = true,
+  needsBeside = false,
   prefill,
   onPrefillConsumed,
 }: {
   where: ChatPlace;
+  /** The page beside the chat already lists what waits on you. */
+  needsBeside?: boolean;
   active?: boolean;
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
@@ -277,6 +280,7 @@ export function FlightChat({
           attention={attentionResource}
           crew={crew}
           canMessage={seat?.live === true}
+          hideWaiting={needsBeside}
         />
       )}
       {where !== "dock" && asks.length > 0 && (
@@ -399,7 +403,14 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
-export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
+export function Dock({
+  coversPage = false,
+  needsBeside = false,
+}: {
+  coversPage?: boolean;
+  /** The Overview shows beside the dock, so its Needs you panel is already in view. */
+  needsBeside?: boolean;
+} = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
   // Esc folds the cover from anywhere on the page, and the page behind stays usable.
   useOverlay("overview-flight", coversPage, () => setDockCollapsed(true));
@@ -546,7 +557,7 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
             </p>
           )}
           <div className="dockbody" id="dockBody">
-            <FlightChat where="dock" active={looking} />
+            <FlightChat where="dock" active={looking} needsBeside={needsBeside} />
           </div>
         </div>
       </aside>

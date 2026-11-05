@@ -88,6 +88,16 @@ describe("Dock content", () => {
     expect(container.querySelector("#dockHead .rt")?.textContent).toBe(" · Head agent");
   });
 
+  it("drops its Waiting on you list when the page beside it lists what waits, and keeps the summary", async () => {
+    const { container } = render(<Dock needsBeside />);
+    await waitFor(() =>
+      expect(dockEl(container)?.querySelector(".meta")?.textContent).toBe(FLIGHT_NO_SEAT),
+    );
+    expect(container.querySelector('[aria-label="FLIGHT summary"]')).toBeTruthy();
+    expect(container.querySelector("#dockWaiting")).toBeNull();
+    expect(container.textContent).not.toContain("Waiting on you");
+  });
+
   it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {
     const { container } = render(<Dock />);
     const dock = dockEl(container) as HTMLElement;

@@ -2221,6 +2221,17 @@ button.quota-details {
   height: var(--sp-5);
   min-height: var(--sp-5);
 }
+/* The folded free seats: one row, a button and the names beside it. */
+#agentsList .trow.free-seats {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  min-height: var(--table-row);
+}
+#agentsList .trow.free-seats > :last-child {
+  min-width: 0;
+  flex: 1;
+}
 .crew-wide {
   display: none;
 }
@@ -2300,7 +2311,9 @@ button.quota-details {
 .board-stages {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* An empty stage is only as wide as its head; the busy ones share the rest (set by the Board). */
+  grid-template-columns: var(--board-cols, repeat(5, minmax(0, 1fr)));
+  grid-template-rows: minmax(0, 1fr);
   border-top: 1px solid var(--line);
   min-height: 0;
 }
@@ -2318,13 +2331,20 @@ button.quota-details {
   display: flex;
   flex: none;
   gap: var(--sp-2);
+  flex-wrap: wrap;
   align-items: baseline;
   margin: 0;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: 1px solid var(--line);
   font-size: var(--fs);
   font-weight: 600;
+}
+/* The label and count never break; "oldest" drops to its own line when the column is too narrow. */
+.board-stage h3 > * {
   white-space: nowrap;
+}
+.board-stage.empty h3 {
+  border-bottom: 0;
 }
 .board-oldest {
   margin-left: auto;
@@ -2332,10 +2352,11 @@ button.quota-details {
   font-weight: 400;
   color: var(--muted);
 }
+/* Whole cards only: the Board trims the list to the cards that fit, so nothing here scrolls or clips. */
 .board-cards {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .board-card {
   display: block;
@@ -2385,10 +2406,12 @@ button.quota-details {
 .board-age {
   margin-left: auto;
 }
-.board-empty,
 .board-more {
   display: block;
   padding: var(--sp-2) var(--sp-3);
+}
+.board-more.measuring {
+  visibility: hidden;
 }
 .ci-marks {
   display: inline-flex;
@@ -2413,7 +2436,7 @@ button.quota-details {
 }
 @container overview-canvas (min-width: 2000px) {
   .board-stages {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: var(--board-cols-wide, repeat(4, minmax(0, 1fr)));
     grid-template-rows: minmax(0, 1fr) auto;
   }
   .board-stage.ready,

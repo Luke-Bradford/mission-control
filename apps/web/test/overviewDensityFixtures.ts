@@ -35,6 +35,7 @@ import { flightSummary } from "./flightSummaryFixture.ts";
 export type OverviewScenario =
   | "default"
   | "mixed"
+  | "busy"
   | "empty"
   | "one"
   | "many"
@@ -324,7 +325,9 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
       title:
         scenario === "long"
           ? "Long fictional pipeline title with an inspectable recovery condition. ".repeat(5)
-          : `Recorded ticket ${offset + i}`,
+          : scenario === "busy" && i % 3 === 0
+            ? `Recorded ticket ${offset + i} with a longer title that wraps onto a second line`
+            : `Recorded ticket ${offset + i}`,
       pr: null,
       ci: [],
       since: NOW - 20 * MIN,
@@ -369,14 +372,25 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           ciPassRate24h: { pct: null, runs: 0, redNow: 0 },
           needsYou: { count: 0, overHour: 0 },
         },
-    pipeline: [
-      stage("ready", count ? 2 : 0, 201),
-      stage("building", count ? 3 : 0, 211),
-      stage("checks", count ? 1 : 0, 221),
-      stage("review", count ? 1 : 0, 231),
-      stage("merging", 0, 241),
-      stage("merged", count ? 4 : 0, 251),
-    ],
+    pipeline:
+      scenario === "busy"
+        ? [
+            stage("ready", 7, 201),
+            stage("building", 5, 211),
+            stage("checks", 3, 221),
+            stage("review", 8, 231),
+            stage("merging", 0, 241),
+            // Ticket 231's pull request merged while the ticket stays open: it is in review too.
+            stage("merged", 6, 231),
+          ]
+        : [
+            stage("ready", count ? 2 : 0, 201),
+            stage("building", count ? 3 : 0, 211),
+            stage("checks", count ? 1 : 0, 221),
+            stage("review", count ? 1 : 0, 231),
+            stage("merging", 0, 241),
+            stage("merged", count ? 4 : 0, 251),
+          ],
     machine: {
       cpu: count ? machineHistory.cpu : [],
       mem: count ? machineHistory.mem : [],
