@@ -462,7 +462,7 @@ describe("followPrs", () => {
 
   /** A reported review of PR 91's head `sha` with `blocking` Important findings. */
   function reported(sha: string, blocking: number): void {
-    store.upsertRun(run({ endedAt: 2000, status: "done" }));
+    store.upsertRun(run({ endedAt: 2000, status: "ok" }));
     const id = store.requestReview({
       authorRunId: "r1",
       repoId: "mc",

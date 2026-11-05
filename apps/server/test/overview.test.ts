@@ -643,7 +643,7 @@ it("keeps a card In review when its newest review is clean or its head has moved
 it("a Ready card whose run ended keeps the reviewed facts and the PR", () => {
   store.replaceBoard("repo", [card(4, "Ready")]);
   store.upsertRun(
-    run(4, { endedAt: NOW - 10 * MIN, status: "done", loop: { ...NEW_LOOP, prNumber: 104 } }),
+    run(4, { endedAt: NOW - 10 * MIN, status: "ok", loop: { ...NEW_LOOP, prNumber: 104 } }),
   );
   store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
   reported("run-4", 104, SHA, 2, 1);
