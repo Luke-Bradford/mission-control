@@ -100,7 +100,11 @@ import {
 } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
-import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
+import {
+  evidenceSideStarter,
+  removeStaleEvidenceWork,
+  runEvidenceCommand,
+} from "./pr-evidence/hubs.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
@@ -542,6 +546,23 @@ export async function main(): Promise<void> {
   const early: string[] = [];
   let log: (line: string) => void = (line) => void early.push(line);
   const gh = createGh(ghCommand(process.env, preview, (line) => log(line)));
+  // A hub that died mid-capture left database copies, checkouts and git worktree registrations in
+  // the work folder. Nothing else uses it yet (no capture starts before the engine does), so clear it.
+  if (prEvidence !== undefined && evidenceCheckout !== undefined) {
+    try {
+      const removed = await removeStaleEvidenceWork({
+        workDir: join(dirname(dbPath), "pr-evidence-work"),
+        checkout: evidenceCheckout,
+        run: runEvidenceCommand,
+      });
+      if (removed.length > 0)
+        log(`removed ${removed.length} stale screenshot capture folder(s): ${removed.join(", ")}`);
+    } catch (e) {
+      log(
+        `could not clear stale screenshot capture folders: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
   const qaReports = createQaReports({
     store,
     config,

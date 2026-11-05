@@ -1757,8 +1757,12 @@ scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
 FLIGHT's `screenshot_hud` tool renders one HUD page at 1600×1000 in the
 system Chrome. The render runs in an owned helper process in its own process group with a minimal
-environment (no tokens); the hub kills the whole group when the render ends or its 30 s deadline
-passes, so no Chrome outlives a call. Chrome is started with `launch()` (a private pipe, no control
+environment (no tokens); when the render ends, is stopped or its 30 s deadline passes, the hub sends SIGTERM to
+the helper's group. Chrome runs in a group of its own, so the helper must close it: it exits half a
+second later, and Playwright's exit handler kills Chrome and removes its profile folder. The hub
+sends SIGKILL to the helper's group after one second as a backstop for a stuck helper, and the call
+settles only after that, so the helper and, unless the helper was stuck, its Chrome are gone when a call returns. A render that times out names the selector it was
+waiting for. Chrome is started with `launch()` (a private pipe, no control
 socket) and every request it makes, loopback included, goes through a loopback-only proxy that
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
@@ -2330,9 +2334,12 @@ the pairs for its current head exist, so the reviewer always has them and a PR a
 draft cannot merge on a new head without them. Each pass that is held records a loop event naming
 the pages still missing; the run is not parked, and moves on at the next pass once the capture
 lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
-the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`; the review is let through at that point, with a line
-in RETRO's brief saying no pairs were made, but mark-ready and merge keep waiting. A push makes a
+the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
 new head, which needs its own pairs.
+
+**After a restart.** A hub that stops in the middle of a capture leaves database copies in `capture-*` folders and side checkouts (with their git worktree registrations) under `pr-evidence-work/` in the data dir. At start the live hub deletes both, runs `git worktree prune` on its checkout, and logs what it removed; nothing else uses that folder. To see what a capture would store without a PR, run `node --experimental-strip-types apps/server/src/pr-evidence/probe.ts http://127.0.0.1:<port> [out dir]` against a preview hub: it saves `<page>-<scheme>.png` for every page.
+
+**Audit tabs.** The Readiness and Hotspots shots click the page's own controls, found by the labels in `mc/core` (`QA_VIEW_LABEL`, `QA_DISCLOSURE_LABEL`, `QA_TAB_LABELS`). `apps/server/test/qa-labels.test.ts` reads the web source and fails when either side renames one. Once the tab has loaded, the shot scrolls the section that holds the QA control to the top of the viewport (the control itself on an older baseline), so the tab's content is not cropped by the 1600×1000 viewport.
 
 **Limits.** Anything on a page that depends on the clock (relative times, live counts) differs
 between the two renders and shows as a changed region; read the regions against the diff. A PR
