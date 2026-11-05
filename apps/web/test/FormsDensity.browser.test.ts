@@ -1,6 +1,8 @@
 // @vitest-environment node
 
-import type { ConfigView, CrewChanges } from "@mc/core";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { BoardItem, ConfigView, CrewChanges } from "@mc/core";
 import { expect, it } from "vitest";
 import { ACTIONS, RESOURCES } from "../src/data.ts";
 import {
@@ -9,7 +11,7 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { CREW_CONFIG } from "./fixtures.ts";
+import { boardItem, CONFIG, CREW_CONFIG, METRICS_VIEW, REPOS } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 
@@ -617,4 +619,237 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
       BROWSER_TEST_TIMEOUT_MS,
     );
   }
+});
+
+// F13, the Board view editor, inside the real shell (rail and FLIGHT's dock) on the Board page.
+const F13 = { id: "F13", form: 'form[aria-label="Board view"]', cap: 800 } as const;
+const F13_LABELS = Array.from({ length: 50 }, (_, i) => `label-${String(i + 1).padStart(2, "0")}`);
+const F13_CARDS: BoardItem[] = Array.from({ length: 12 }, (_, i) =>
+  boardItem({
+    issueNumber: 100 + i,
+    title: `Ticket ${100 + i}`,
+    status: "Todo",
+    state: "planned",
+    labels: i < 10 ? F13_LABELS.slice(i * 5, i * 5 + 5) : [],
+    priority: ["P0", "P1", "P2", null][i % 4] ?? null,
+    assignees: i % 3 === 0 ? [] : [`person-${i}`],
+    milestone: i % 2 === 0 ? `v${i}` : null,
+  }),
+);
+const F13_API = {
+  [RESOURCES.repos.path]: REPOS,
+  [RESOURCES.config.path]: CONFIG,
+  [RESOURCES.boards("shop-app").path]: F13_CARDS,
+  [RESOURCES.boards("site-builder").path]: [],
+  [RESOURCES.prs("shop-app").path]: [],
+  [RESOURCES.prs("site-builder").path]: [],
+  [RESOURCES.crew.path]: { rows: [], firstRunToday: null },
+  [RESOURCES.attention.path]: [],
+  "/api/metrics": METRICS_VIEW,
+};
+
+async function openF13(o: {
+  width: number;
+  height: number;
+  colorScheme?: "light" | "dark";
+  dock?: "folded" | "open";
+}) {
+  const page = await renderAt({
+    page: "test/agentV2Browser.html",
+    width: o.width,
+    height: o.height,
+    search: `?dock=${o.dock ?? "folded"}&at=/board`,
+    colorScheme: o.colorScheme ?? "light",
+    api: F13_API,
+  });
+  await page.box("#page-board .kcol");
+  await page.evaluate(async () => {
+    const button = [...document.querySelectorAll("button")].find((b) =>
+      b.textContent?.startsWith("Board view"),
+    );
+    if (!button) throw new Error("no Board view button");
+    button.focus();
+    button.click();
+  }, null);
+  await page.box(F13.form);
+  return page;
+}
+
+async function expectF13Dense(page: RenderedPage) {
+  const measured = await page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    if (!root) return null;
+    const doc = document.documentElement;
+    const list = root.querySelector<HTMLElement>(".bv-options");
+    const labelsItems = root.querySelectorAll(".bv-options")[0]?.querySelectorAll("li") ?? [];
+    const last = labelsItems[labelsItems.length - 1];
+    let lastReachable = false;
+    if (list && last) {
+      list.scrollTop = list.scrollHeight;
+      const box = list.getBoundingClientRect();
+      const item = last.getBoundingClientRect();
+      lastReachable = item.top >= box.top - 1 && item.bottom <= box.bottom + 1;
+      list.scrollTop = 0;
+    }
+    return {
+      width: root.getBoundingClientRect().width,
+      controls: [
+        ...root.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea"),
+      ].map((c) => c.getBoundingClientRect().height),
+      formOverflow: root.scrollWidth - root.clientWidth,
+      pageOverflow: doc.scrollWidth - doc.clientWidth,
+      options: labelsItems.length,
+      scrolls: list ? list.scrollHeight > list.clientHeight : false,
+      overflowY: list ? getComputedStyle(list).overflowY : "",
+      lastReachable,
+    };
+  }, F13.form);
+  expect(measured).not.toBeNull();
+  if (!measured) return;
+  expect(measured.width).toBeGreaterThan(0);
+  expect(measured.width).toBeLessThanOrEqual(F13.cap + 1);
+  expect(measured.controls.length).toBeGreaterThan(0);
+  for (const height of measured.controls) expect(Math.abs(height - 32)).toBeLessThan(0.5);
+  expect(measured.formOverflow).toBeLessThanOrEqual(1);
+  expect(measured.pageOverflow).toBeLessThanOrEqual(1);
+  expect((await page.unclipped(`${F13.form} .fgroup`)).every(Boolean)).toBe(true);
+  expect(measured.options).toBe(50);
+  expect(measured.scrolls).toBe(true);
+  expect(measured.overflowY).toBe("auto");
+  expect(measured.lastReachable).toBe(true);
+  expect(page.errors()).toEqual([]);
+}
+
+describeRendered("F13 Board view editor, rendered in the Board page", () => {
+  for (const [width, height] of VIEWPORTS) {
+    it(
+      `F13 is capped at 800px with 32px controls, no clipping and 50 scrolling options at ${width}x${height} light`,
+      async () => {
+        const page = await openF13({ width, height });
+        await expectF13Dense(page);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+  for (const [width, height] of [
+    [1280, 900],
+    [1600, 700],
+  ] as const) {
+    it(
+      `F13 holds beside FLIGHT's open dock at ${width}x${height}`,
+      async () => {
+        const page = await openF13({ width, height, dock: "open" });
+        await expectF13Dense(page);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "F13: Tab shows focus on 24x24 targets and brings the final action into view at 1600x700",
+    async () => {
+      const page = await openF13({ width: 1600, height: 700 });
+      const stops: {
+        width: number;
+        height: number;
+        outline: boolean;
+        inView: boolean;
+        submit: boolean;
+      }[] = [];
+      for (let i = 0; i < 200; i++) {
+        const stop = await page.evaluate((selector) => {
+          const el = document.activeElement as HTMLElement | null;
+          const root = document.querySelector(selector);
+          if (!el || !root?.contains(el)) return null;
+          const rect = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return {
+            width: rect.width,
+            height: rect.height,
+            outline: style.outlineStyle !== "none" && Number.parseFloat(style.outlineWidth) > 0,
+            inView: rect.top >= 0 && rect.bottom <= window.innerHeight,
+            submit: el.matches("button[type=submit]"),
+          };
+        }, F13.form);
+        if (!stop) {
+          if (i === 0) {
+            await page.press("Tab");
+            continue;
+          }
+          break;
+        }
+        stops.push(stop);
+        await page.press("Tab");
+      }
+      expect(stops.length).toBeGreaterThan(10);
+      for (const stop of stops) {
+        expect(stop.width).toBeGreaterThanOrEqual(24);
+        expect(stop.height).toBeGreaterThanOrEqual(24);
+        expect(stop.inView).toBe(true);
+      }
+      for (const stop of stops.slice(1)) expect(stop.outline).toBe(true);
+      expect(stops.find((stop) => stop.submit)?.inView).toBe(true);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  // Dark, plus the images and the manifest the QA report is built from (when MC_BOARD_VIEW_SHOTS is set).
+  const shots = process.env.MC_BOARD_VIEW_SHOTS;
+  const captures: { file: string; viewport: string; theme: string; fixture: string }[] = [];
+  for (const [width, height] of [
+    [1920, 1080],
+    [1600, 700],
+  ] as const) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      if (colorScheme === "light" && !shots) continue;
+      it(
+        `F13 holds the same at ${width}x${height} ${colorScheme}${shots ? " and is captured" : ""}`,
+        async () => {
+          const page = await openF13({ width, height, colorScheme });
+          await expectF13Dense(page);
+          if (shots) {
+            await page.evaluate(async () => {
+              await document.fonts.ready;
+            }, null);
+            mkdirSync(shots, { recursive: true });
+            const file = `board-view-${width}x${height}-${colorScheme}.png`;
+            await page.screenshot(join(shots, file));
+            captures.push({
+              file,
+              viewport: `${width}x${height}`,
+              theme: colorScheme,
+              fixture: "board-view-50-labels",
+            });
+          }
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+  if (shots)
+    it("F13 writes the capture manifest and QA report", () => {
+      mkdirSync(shots, { recursive: true });
+      const baseline = process.env.MC_BOARD_VIEW_BASELINE ?? "origin/main";
+      const head = process.env.MC_BOARD_VIEW_HEAD ?? "HEAD";
+      const manifest = captures.map((c) => ({ ...c, baseline, head }));
+      writeFileSync(join(shots, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+      writeFileSync(
+        join(shots, "qa-report.md"),
+        [
+          "# Board view editor (F13) QA report",
+          "",
+          `Baseline ${baseline}; head ${head}. Fixture: board-view-50-labels (12 cards, 50 labels).`,
+          "",
+          "| Image | Viewport | Theme |",
+          "| --- | --- | --- |",
+          ...captures.map((c) => `| ${c.file} | ${c.viewport} | ${c.theme} |`),
+          "",
+        ].join("\n"),
+      );
+      expect(captures.length).toBe(4);
+    });
 });

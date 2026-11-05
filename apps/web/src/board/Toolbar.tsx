@@ -3,7 +3,11 @@ import { copyText } from "../clipboard.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
+import { VIEW_QUERY_NOTE } from "./boardView.ts";
 import type { Lane } from "./lanes.ts";
+
+/** The id of the Board view button; the page returns focus to it when the editor closes. */
+export const BOARD_VIEW_BUTTON_ID = "boardViewButton";
 
 export type BoardLayout = "together" | "apart";
 
@@ -28,6 +32,9 @@ export function Toolbar({
   onBrief,
   layout,
   onLayout,
+  viewGroups,
+  viewOpen,
+  onView,
 }: {
   lanes: Lane[];
   lane: Lane;
@@ -45,6 +52,10 @@ export function Toolbar({
   /** Together / Apart; null where it does not apply (not All repos, or fewer than two repos). */
   layout: BoardLayout | null;
   onLayout: (l: BoardLayout) => void;
+  /** How many Board view groups narrow the cards; 0 when no view is active. */
+  viewGroups: number;
+  viewOpen: boolean;
+  onView: () => void;
 }) {
   return (
     <div className="toolbar" id="boardToolbar">
@@ -63,7 +74,7 @@ export function Toolbar({
           </button>
         ))}
       </div>
-      <span className="query" title={lane.query}>
+      <span className="query" title={viewGroups > 0 ? VIEW_QUERY_NOTE : lane.query}>
         <code>{lane.query}</code>
         <button
           type="button"
@@ -87,6 +98,16 @@ export function Toolbar({
           </option>
         ))}
       </select>
+      <button
+        id={BOARD_VIEW_BUTTON_ID}
+        type="button"
+        className={`sm${viewGroups > 0 ? " on" : ""}`}
+        aria-expanded={viewOpen}
+        aria-controls="boardViewForm"
+        onClick={onView}
+      >
+        {viewGroups > 0 ? `Board view · ${viewGroups} on` : "Board view"}
+      </button>
       <button
         type="button"
         className={`sm${agentOnly ? " on" : ""}`}

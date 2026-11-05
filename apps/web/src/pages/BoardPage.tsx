@@ -16,7 +16,17 @@ import {
 } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { needsYouItems } from "../attention.ts";
+import { BoardViewEditor } from "../board/BoardViewEditor.tsx";
 import { BriefModal } from "../board/BriefModal.tsx";
+import {
+  activeGroups,
+  type BoardView,
+  DEFAULT_VIEW,
+  matchesView,
+  optionsFrom,
+  parseView,
+  VIEW_UNREADABLE_TEXT,
+} from "../board/boardView.ts";
 import { standup, weekly } from "../board/brief.ts";
 import {
   type CardRework,
@@ -30,7 +40,12 @@ import {
 } from "../board/cards.ts";
 import { Kanban } from "../board/Kanban.tsx";
 import { ALL_LANE, lanesFor, MINE_LANE, resolveLane } from "../board/lanes.ts";
-import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx";
+import {
+  BOARD_VIEW_BUTTON_ID,
+  type BoardLayout,
+  type DoneRange,
+  Toolbar,
+} from "../board/Toolbar.tsx";
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
@@ -42,7 +57,14 @@ import {
 } from "../overview/PipelinePanel.tsx";
 import { boardPath, followLink, navigate, setupPath, useSearch } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
-import { BOARD_LAYOUT_KEY, LANE_KEY, readKey, writeKey } from "../storage.ts";
+import {
+  BOARD_LAYOUT_KEY,
+  BOARD_VIEW_KEY,
+  LANE_KEY,
+  readKey,
+  tryWriteKey,
+  writeKey,
+} from "../storage.ts";
 import "../board/board.css";
 
 const NO_REPOS: RepoView[] = [];
@@ -114,6 +136,10 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const [agentOnly, setAgentOnly] = useState(false);
   const [mineOnly, setMineOnly] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
+  // One Board view per browser, kept across lanes; it narrows `shown` and nothing else.
+  const [savedView, setSavedView] = useState(() => parseView(readKey(BOARD_VIEW_KEY)));
+  const [viewOpen, setViewOpen] = useState(false);
+  const view = savedView === "unreadable" ? null : savedView;
   const [storedLayout, setStoredLayout] = useState(() => readKey(BOARD_LAYOUT_KEY));
 
   const ticketRoute = repoId !== null && ticket !== null;
@@ -188,6 +214,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
             loopViews,
           ),
         )) &&
+      (view === null || matchesView(view, i)) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, needsYou, rows)),
@@ -195,6 +222,21 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const priorities = [
     ...new Set(inLane.map((i) => i.priority).filter((p): p is string => p !== null)),
   ].sort((a, b) => priorityRank(a) - priorityRank(b) || a.localeCompare(b));
+
+  const viewOptions = useMemo(() => optionsFrom(all), [all]);
+  const saveView = (next: BoardView): boolean => {
+    const kept = tryWriteKey(BOARD_VIEW_KEY, JSON.stringify(next));
+    setSavedView(next);
+    if (kept) {
+      setViewOpen(false);
+      document.getElementById(BOARD_VIEW_BUTTON_ID)?.focus();
+    }
+    return kept;
+  };
+  const closeView = () => {
+    setViewOpen(false);
+    document.getElementById(BOARD_VIEW_BUTTON_ID)?.focus();
+  };
 
   const ctx = { laneName: lane.name, prs, crew: rows, needsYou };
   const briefText = (mode: "standup" | "weekly"): string => {
@@ -275,7 +317,23 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         onBrief={() => setBriefOpen(true)}
         layout={layoutOn ? layout : null}
         onLayout={pickLayout}
+        viewGroups={view === null ? 0 : activeGroups(view)}
+        viewOpen={viewOpen}
+        onView={() => (viewOpen ? closeView() : setViewOpen(true))}
       />
+      {savedView === "unreadable" && (
+        <p role="status" className="crit-t s">
+          {VIEW_UNREADABLE_TEXT}
+        </p>
+      )}
+      {viewOpen && (
+        <BoardViewEditor
+          applied={view ?? DEFAULT_VIEW}
+          options={viewOptions}
+          onSave={saveView}
+          onCancel={closeView}
+        />
+      )}
       {loading && <p className="muted s">Loading the board…</p>}
       {errors.map((e) => (
         <p key={e} className="crit-t s">
