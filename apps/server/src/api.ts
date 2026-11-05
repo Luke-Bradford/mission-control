@@ -1199,6 +1199,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. A design preview runs on
+  // another port of this host, which browsers call same-site, so that is refused too; the HUD's
+  // own requests are same-origin. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path.startsWith("/api/") &&
+      (req.headers["sec-fetch-site"] === "cross-site" ||
+        req.headers["sec-fetch-site"] === "same-site")
+    ) {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
@@ -1227,24 +1245,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       !isLocalOrigin(origin)
     ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
-    }
-  });
-
-  // A cross-site no-cors GET (an <img>, fetch with
-  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
-  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
-  // callers that send no header (the guard hook, curl) are unaffected. A design preview runs on
-  // another port of this host, which browsers call same-site, so that is refused too; the HUD's
-  // own requests are same-origin. The matched route is
-  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
-  app.addHook("onRequest", async (req, reply) => {
-    const path = req.routeOptions.url ?? req.url;
-    if (
-      path.startsWith("/api/") &&
-      (req.headers["sec-fetch-site"] === "cross-site" ||
-        req.headers["sec-fetch-site"] === "same-site")
-    ) {
-      return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
 

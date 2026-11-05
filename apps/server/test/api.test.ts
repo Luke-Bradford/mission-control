@@ -2650,6 +2650,16 @@ describe("local access", () => {
       expect(r.statusCode, url).toBe(403);
       expect(r.json()).toEqual({ error: "cross-site request refused" });
     }
+    // a beacon posts text/plain: it is refused as same-site, before the content-type check can answer 415
+    for (const site of ["same-site", "cross-site"]) {
+      const beacon = await app.inject({
+        method: "POST",
+        url: "/api/flight/approvals",
+        headers: { "sec-fetch-site": site, "content-type": "text/plain;charset=UTF-8" },
+        payload: "{}",
+      });
+      expect(beacon.statusCode, site).toBe(403);
+    }
   });
 
   it("lets same-origin, none and header-less GETs reach the handler", async () => {
