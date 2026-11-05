@@ -177,7 +177,9 @@ export function PipelinePanel() {
                         )}
                         {card.priority && <b className="board-tag">{card.priority}</b>}
                         {card.size && <span className="board-tag">{card.size}</span>}
-                        {card.pr !== null && <span className="num">PR {card.pr}</span>}
+                        {card.pr !== null && !(rework && lane === "ready") && (
+                          <span className="num">PR {card.pr}</span>
+                        )}
                         {card.ci.length > 0 && <CiMarks ci={card.ci} />}
                         <span className="board-age num">{elapsed(now - card.since)}</span>
                       </span>

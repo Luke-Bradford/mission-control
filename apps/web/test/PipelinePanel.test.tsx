@@ -91,6 +91,8 @@ describe("Pipeline", () => {
     expect(await screen.findByText("Reviewed · 1 blocker · PR 1432")).toBeTruthy();
     expect(screen.getByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
     expect(screen.getByText("Rework · queued for GUIDO-2")).toBeTruthy();
+    // the Ready card's label names the PR, so its meta line does not repeat it
+    expect(screen.getAllByText(/PR 1432/)).toHaveLength(3);
   });
 
   it("opens cards on their ticket page while lane links keep their Board stage filter", async () => {
