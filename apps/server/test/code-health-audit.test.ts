@@ -305,7 +305,7 @@ describe("code-health audit", () => {
       ];
       for (const [number, id, categories] of prs) {
         review(id, number, 3);
-        categories.forEach((category, pos) => finding(id, pos, category));
+        for (const [pos, category] of categories.entries()) finding(id, pos, category);
       }
       store.refreshCodeHealthRecommendations("sample", NOW);
       const causes = Object.fromEntries(
