@@ -48,6 +48,7 @@ import {
   crewTokenPath,
 } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -75,6 +76,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("the CLI update hold", () => {
   it("records the CLI version a run starts on", async () => {

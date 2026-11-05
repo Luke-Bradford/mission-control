@@ -39,6 +39,7 @@ import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { CODEX_PROJECT_DIR, codexSeatConfig } from "../src/runtime/codex-floor.ts";
 import { crewTempRoot } from "../src/runtime/supervisor.ts";
 import { type FakeAnthropic, startFakeAnthropic } from "./fake-anthropic.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
@@ -552,8 +553,10 @@ function runToEnd(
   });
 }
 
+const listenBlocked = await blockedHere("listen");
+
 describe("the loopback probe itself", () => {
-  it("reaches the hub when run outside any sandbox", async () => {
+  it.skipIf(listenBlocked)("reaches the hub when run outside any sandbox", async () => {
     const hub = await listenOnLoopback();
     let output = "";
     try {

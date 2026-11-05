@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { blockedHere, skipTestsIf } from "../../core/test/sandbox-gaps.ts";
 import { BODY_MAX, BodyTooLarge } from "../src/envelope.ts";
 import { daemonFixture, draft } from "./daemon-fixtures.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 let home: string;
 let f: Awaited<ReturnType<typeof daemonFixture>> | undefined;

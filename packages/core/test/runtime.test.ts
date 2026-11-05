@@ -392,6 +392,8 @@ describe("the allowlist in phase 2b", () => {
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
+      // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
+      MC_SEAT_SANDBOX: "1",
     });
   });
 

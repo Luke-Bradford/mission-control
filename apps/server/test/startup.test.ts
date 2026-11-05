@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../src/api.ts";
 import type { CodexModels, ModelDeps } from "../src/runtime/codex-models.ts";
 import { fakeModels, MODEL_PAGES } from "./config-codex.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const boot = vi.hoisted(() => ({
   app: null as FastifyInstance | null,
