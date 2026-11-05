@@ -16,9 +16,10 @@ import {
   AWAY_WRITES_REFUSED,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
-  COMMS_MESSAGE_MAX,
+  CI_FAILED_TEXT,
   DEFAULT_AWAY,
   EVIDENCE_HEADING,
+  fillLoopText,
   MC_PR_BODY_MAX,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
@@ -36,7 +37,6 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { ciSeatText } from "../src/engine/engine.ts";
 import {
   CI_LOG_UNREADABLE,
   cleanLog,
@@ -595,37 +595,96 @@ describe("ciExcerpt", () => {
     expect(CI_LOG_UNREADABLE).toBe("(the CI log could not be read)");
   });
 
-  it("keeps every failing test and assertion line of a web-core-sized log, ahead of passing ones", async () => {
-    const stamp = "2026-11-05T04:59:02.0350000Z";
-    const line = (job: string, text: string) => `${job}\tRun vitest\t${stamp} ${text}`;
-    const passing = Array.from({ length: 6000 }, (_, i) =>
-      line("web-core", ` ✓ test/page${i}.test.ts (3 tests) 12ms`),
+  /** The log a failed web-core job prints, in vitest's order: stderr, `×` lines, then the failures. */
+  const vitestLog = (n: number, job = "web-core") => {
+    const line = (text: string) => `${job}\tRun vitest\t2026-11-05T04:59:02.0350000Z ${text}`;
+    const names = Array.from(
+      { length: n },
+      (_, i) => `test/pages/page-${i}.test.ts > page ${i} > ${"shows the thing ".repeat(5)}${i}`,
     );
-    const fails = [1, 2, 3].flatMap((n) => [
-      line("web-core", ` FAIL  web-core  test/page${n}.test.ts > page ${n} > shows it`),
-      line("web-core", `AssertionError: expected ${n} to be ${n + 1}`),
-    ]);
+    return {
+      names,
+      log: [
+        ...Array.from({ length: 6000 }, (_, i) => line(` ✓ test/ok${i}.test.ts (3 tests) 12ms`)),
+        line("stderr | test/pages/page-0.test.ts"),
+        ...Array.from({ length: 15 }, (_, i) => line(`Error: noise ${i}`)),
+        ...Array.from({ length: 20 }, (_, i) => line(` × test/x${i}.test.ts > x ${i}  4ms`)),
+        ...names.flatMap((name, i) => [
+          line(` FAIL  ${name}`),
+          line(`AssertionError: expected ${i} to be ${i + 1}`),
+          line(" ❯ test/pages/page.test.ts:12:5"),
+          line("     12|   expect(a).toBe(b)"),
+        ]),
+        line(" Test Files  1 failed (1)"),
+        ...Array.from({ length: 3000 }, (_, i) => line(` ✓ later${i}.test.ts 1ms`)),
+      ].join("\n"),
+    };
+  };
+  const seatText = (excerpt: string) =>
+    fillLoopText(CI_FAILED_TEXT, { sha7: SHA.slice(0, 7) }) + excerpt;
+
+  it("holds every FAIL name and its error line of a web-core-sized log, ahead of noise and passing lines", async () => {
+    const { names, log } = vitestLog(25);
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({
+        code: 0,
+        stdout: `${log}\ncheck\tVerify\tZ Error: Process completed with exit code 1.`,
+      }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    const seen = seatText(out);
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    names.forEach((name, i) => {
+      expect(seen).toContain(`FAIL  ${name}`);
+      expect(seen).toContain(`AssertionError: expected ${i} to be ${i + 1}`);
+    });
+    expect(seen).not.toContain("exit code 1");
+    const lastFail = seen.lastIndexOf("FAIL  ");
+    expect(lastFail).toBeLessThan(seen.indexOf("Error: noise"));
+    expect(lastFail).toBeLessThan(seen.indexOf("✓"));
+    expect(seen).not.toContain(" × test/x");
+  });
+
+  it("keeps the failing lines of every job ahead of any job's passing lines", async () => {
+    const job = (name: string, n: number) => [
+      `${name}\tRun\t2026-11-05T04:59:02.0Z  FAIL  ${name}.test.ts > case ${n}`,
+      `${name}\tRun\t2026-11-05T04:59:02.0Z AssertionError: ${name} expected ${n}`,
+      ...Array.from(
+        { length: 12 },
+        (_, i) => `${name}\tRun\t2026-11-05T04:59:02.0Z  ✓ ${name} ok ${i}`,
+      ),
+    ];
+    const log = [...job("web-core", 1), ...job("server (1)", 2), ...job("server (2)", 3)].join(
+      "\n",
+    );
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const seen = seatText(await createPublisher(deps()).ciExcerpt("o/mc", SHA));
+    for (const n of [
+      "web-core.test.ts > case 1",
+      "server (1).test.ts > case 2",
+      "server (2).test.ts > case 3",
+    ])
+      expect(seen).toContain(n);
+    expect(seen).toContain("AssertionError: server (2) expected 3");
+    expect(seen.lastIndexOf("FAIL")).toBeLessThan(seen.indexOf("✓"));
+  });
+
+  it("keeps a typed error line under its FAIL name", async () => {
     const log = [
-      ...passing.slice(0, 3000),
-      ...fails,
-      ...passing.slice(3000),
-      line("check", "test web-core = success"),
-      line("check", "Error: Process completed with exit code 1."),
+      "web-core\tRun\t2026-11-05T04:59:02.0Z  FAIL  a.test.ts > x",
+      "web-core\tRun\t2026-11-05T04:59:02.0Z TypeError: boom",
+      ...Array.from({ length: 20 }, (_, i) => `web-core\tRun\t2026-11-05T04:59:02.0Z  other ${i}`),
     ].join("\n");
     ghAnswers = [
       runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
       () => ({ code: 0, stdout: log }),
     ];
     const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
-    const seen = ciSeatText("CI failed.\n", out);
-    expect(Array.from(seen).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
-    for (const n of [1, 2, 3]) {
-      expect(seen).toContain(`FAIL  web-core  test/page${n}.test.ts > page ${n} > shows it`);
-      expect(seen).toContain(`AssertionError: expected ${n} to be ${n + 1}`);
-    }
-    expect(seen).not.toContain("exit code 1");
-    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
-    expect(out.indexOf("FAIL")).toBeLessThan(out.indexOf("✓"));
+    expect(out).toContain("FAIL  a.test.ts > x\nTypeError: boom");
   });
 
   it("puts the real job's lines ahead of the summary job's when several failed", async () => {

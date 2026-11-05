@@ -1295,7 +1295,7 @@ describe("CI and review", () => {
   });
 
   it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
-    "shortens a %i-character CI excerpt to the Comms limit without parking",
+    "sends the seat a %i-character CI excerpt whole and shortens only the Comms copy",
     async (length) => {
       await inCi();
       await failCi();
@@ -1304,9 +1304,10 @@ describe("CI and review", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
       const text = h.sent[0]?.text ?? "";
-      expect(Array.from(text)).toHaveLength(COMMS_MESSAGE_MAX);
-      expect(text.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
-      expect(store.comms(0)[0]?.text).toBe(text);
+      expect(text.endsWith(excerpt)).toBe(true);
+      const comms = store.comms(0)[0]?.text ?? "";
+      expect(Array.from(comms)).toHaveLength(COMMS_MESSAGE_MAX);
+      expect(comms.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
       expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);

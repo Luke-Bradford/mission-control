@@ -186,7 +186,7 @@ import { overrunText, tickLogOf } from "./ticks.ts";
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
 
-/** The seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
+/** The Comms copy of the seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
 export function ciSeatText(intro: string, excerpt: string): string {
   const shortened = "\n[CI output shortened; inspect the CI log.]";
   const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
@@ -1437,9 +1437,10 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
-        const text = ciSeatText(intro, excerpt);
-        const sent = await send(run.id, a.key, text);
-        if (sent === "sent") handOff(COMMS_MC, text);
+        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); only the Comms
+        // copy is held to a Comms message
+        const sent = await send(run.id, a.key, intro + excerpt);
+        if (sent === "sent") handOff(COMMS_MC, ciSeatText(intro, excerpt));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);

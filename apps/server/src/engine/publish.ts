@@ -340,10 +340,20 @@ function headBytes(text: string, max: number): string {
 
 /** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
 export const CI_SUMMARY_JOB = "check";
-/** A line a failure prints: a test's name, an assertion, a type or lint error. */
-const FAILING_LINE =
-  /(?:^|\s)(?:FAIL|FAILED)\b|AssertionError|^\s*[×✗✕]\s|\bError:|\berror TS\d+|^\s*\d+:\d+\s+error\s/;
+/** A test's name as vitest prints a failure. */
+const FAIL_LINE = /(?:^|\s)(?:FAIL|FAILED)\b/;
+/** The error line under a failure: an assertion or a typed error. */
+const ERROR_LINE = /AssertionError|\b\w*Error:/;
+/** A type or lint error, a failure by itself. */
+const CHECK_ERROR = /\berror TS\d+|^\d+:\d+\s+error\s/;
+/** A failed assertion's line vitest prints before its Failed Tests section. */
+const CROSS_LINE = /^[×✗✕]\s/;
+/** A line that opens (or ends) a block of a test's console output. */
+const STREAM_LINE = /^(?:stderr|stdout) \|/;
+const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
 const NOT_A_CAUSE = /Process completed with exit code/;
+/** How far under a FAIL line its error line is looked for. */
+const ERROR_WINDOW = 6;
 /** One failing line is cut here. */
 const FAILING_LINE_MAX = 300;
 /** A job's failing lines are kept up to this many, then its last lines follow. */
@@ -353,41 +363,81 @@ const CONTEXT_LINES = 10;
 /** `gh run view --log-failed` lines: job, step, then the text behind a timestamp. */
 const LOG_LINE = /^([^\t]*)\t[^\t]*\t(?:\d{4}-\d\d-\d\dT[\d:.]+Z ?)?(.*)$/;
 
+type JobLines = {
+  causes: string[];
+  crosses: string[];
+  noise: string[];
+  rest: string[];
+  fails: number;
+};
+
 /**
- * The part of a failed run's log a seat is shown: each job's failing lines (test names, assertion
- * lines) first, then the job's last lines; a log without any failing line is its last lines alone.
- * The summary job stands aside when another job has lines.
+ * The part of a failed run's log a seat is shown. Every job's failing lines come first, ranked: a
+ * test's FAIL name with the error line under it, then type and lint errors in log order; then
+ * (only when the job has no FAIL line) the `×` lines; then bare errors and console output. The
+ * last lines of each job follow. A log without any failing line is its last lines alone. The
+ * summary job stands aside when another job has lines.
  */
 export function ciLogBody(log: string, max: number): string {
-  const jobs = new Map<string, { failing: string[]; rest: string[] }>();
+  const jobs = new Map<string, JobLines>();
+  const cut = (t: string) => Array.from(t).slice(0, FAILING_LINE_MAX).join("");
+  const add = (list: string[], line: string) => {
+    if (!list.includes(line)) list.push(line);
+  };
+  let sinceFail = Number.POSITIVE_INFINITY;
+  let stream = false;
   for (const raw of log.split("\n")) {
     const m = LOG_LINE.exec(raw);
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? { failing: [], rest: [] };
+    const g = jobs.get(job) ?? { causes: [], crosses: [], noise: [], rest: [], fails: 0 };
     jobs.set(job, g);
-    if (FAILING_LINE.test(text) && !NOT_A_CAUSE.test(text)) {
-      const line = Array.from(text).slice(0, FAILING_LINE_MAX).join("");
-      if (!g.failing.includes(line)) g.failing.push(line);
-    } else g.rest.push(text);
+    if (STREAM_LINE.test(text)) stream = true;
+    else if (BLOCK_END.test(text)) stream = false;
+    if (NOT_A_CAUSE.test(text)) continue;
+    if (FAIL_LINE.test(text)) {
+      add(g.causes, cut(text));
+      g.fails++;
+      sinceFail = 0;
+      stream = false;
+    } else if (!stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
+      add(g.causes, cut(text));
+      sinceFail++;
+    } else if (CHECK_ERROR.test(text)) {
+      add(g.causes, cut(text));
+      sinceFail++;
+    } else if (CROSS_LINE.test(text)) {
+      add(g.crosses, cut(text));
+      sinceFail++;
+    } else if (stream || ERROR_LINE.test(text)) {
+      add(g.noise, cut(text));
+      sinceFail++;
+    } else {
+      g.rest.push(text);
+      sinceFail++;
+    }
   }
   if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
-  const groups = [...jobs.entries()].sort(([, a], [, b]) => b.failing.length - a.failing.length);
-  const anyFailing = groups.some(([, g]) => g.failing.length > 0);
-  if (!anyFailing) {
+  const ranked = (g: JobLines) =>
+    [...g.causes, ...(g.fails > 0 ? [] : g.crosses), ...g.noise].slice(0, FAILING_LINES_MAX);
+  const groups = [...jobs.entries()]
+    .map(([job, g]) => ({ job, g, failing: ranked(g) }))
+    .sort((a, b) => b.g.causes.length - a.g.causes.length);
+  if (!groups.some((x) => x.failing.length > 0)) {
     const lines = log.trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
     return tailBytes(lines.join("\n"), max);
   }
-  const named = groups.length > 1 || groups[0]?.[0] !== "";
-  const parts = groups.map(([job, g]) => {
-    const lines = [
-      ...g.failing.slice(0, FAILING_LINES_MAX),
-      ...g.rest.slice(-(g.failing.length > 0 ? CONTEXT_LINES : CI_EXCERPT_LINES)),
-    ];
-    return (named && job !== "" ? `[${job}]\n` : "") + lines.join("\n");
+  const named = groups.length > 1 || groups[0]?.job !== "";
+  const label = (job: string, note: string) => (named && job !== "" ? [`[${job}${note}]`] : []);
+  const first = groups.flatMap(({ job, failing }) =>
+    failing.length > 0 ? [...label(job, ""), ...failing] : [],
+  );
+  const context = groups.flatMap(({ job, g, failing }) => {
+    const lines = g.rest.slice(-(failing.length > 0 ? CONTEXT_LINES : CI_EXCERPT_LINES));
+    return lines.length > 0 ? [...label(job, ": last lines"), ...lines] : [];
   });
-  return headBytes(parts.join("\n"), max);
+  return headBytes([...first, ...context].join("\n"), max);
 }
 
 /** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
