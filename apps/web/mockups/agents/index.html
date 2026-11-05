@@ -3,306 +3,400 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mission Control · Agents mockup (GUIDO-1, busy)</title>
+    <title>Mission Control · Agents mockup (INCO-1, busy)</title>
     <style>
-      :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface2:#131a23;--line:#1b2430;--line2:#2a3646;--fg:#e7eaef;--fg2:#aab2bf;--muted:#808999;--accent:#56d8e6;--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7;--seat:#56d8e6;--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;--display:"Barlow Semi Condensed",sans-serif;--rail:0px}
-      :root[data-theme="light"]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface2:#eef1f5;--line:#dfe3ea;--line2:#c6cdd8;--fg:#121720;--fg2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--ok:#157246;--warn:#8d5b00;--crit:#a73838;--think:#6b4fc4}
+      /* Tokens copied from apps/web/src/hud.css (dark and light). Spacing 4/8/12/16/24/32/48; type 20/28, 14/20, 13/20, 12/16, 11/16. */
+      :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7;--crit-soft:rgba(240,107,104,.15);--sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono","Cascadia Mono",Consolas,ui-monospace,monospace;--display:"Barlow Semi Condensed","Arial Narrow","IBM Plex Sans",sans-serif;--sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;--rail:48px}
+      :root[data-theme="light"]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c6cdd8;--fg:#121720;--fg-2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--ok:#157246;--warn:#8d5b00;--crit:#bb2e2b;--think:#5b47c4;--crit-soft:rgba(196,48,45,.1)}
+      body.flight{--rail:380px}
       *{box-sizing:border-box}
       html,body{height:100%}
-      body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--sans);overflow:hidden}
-      body.flight{--rail:316px}
+      /* Shell sizes measured on the live app: 49 px top bar, 30 px footer, 12 px gutters, 48 px folded rail, 380 px open rail. */
+      body{margin:0;background:var(--bg);color:var(--fg);font:13px/20px var(--sans);overflow:hidden;display:flex;flex-direction:column}
       a{color:var(--accent);text-decoration:none}
-      a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-      button{font:inherit;color:var(--fg);background:var(--surface2);border:1px solid var(--line2);border-radius:6px;min-height:24px;min-width:24px;padding:0 8px;cursor:pointer}
-      .mono{font-family:var(--mono)}
-      .muted{color:var(--muted)} .fg2{color:var(--fg2)}
-      /* shell */
-      .top{height:52px;padding:0 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:24px;margin-right:var(--rail)}
-      .brand{font:700 19px var(--display);letter-spacing:.12em}
-      .nav{display:flex;gap:4px}.nav a{padding:4px 8px;color:var(--fg2);min-height:24px;display:inline-flex;align-items:center}.nav a.on{color:var(--fg);border-bottom:2px solid var(--accent)}
-      .health{margin-left:auto;display:flex;gap:16px;align-items:center;font:12px var(--mono);color:var(--fg2)}
-      .dock{position:fixed;top:52px;right:0;bottom:0;width:var(--rail);background:var(--surface);border-left:1px solid var(--line2);overflow:hidden;display:none}
-      body.flight .dock{display:block}
-      .dock .head{padding:0 16px}
-      .dock p{margin:0;padding:8px 16px;border-bottom:1px solid var(--line);font-size:12px}
-      /* page: header 52 + padding 16*2; the grid fills the rest and never scrolls the page */
-      main{height:calc(100vh - 52px);margin-right:var(--rail);padding:16px 24px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px}
-      .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
-      .head{flex:0 0 auto;height:38px;padding:0 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);font:600 14px var(--sans)}
-      .head .sub{color:var(--muted);font:12px var(--mono);font-weight:400}
-      .head .end{margin-left:auto;display:flex;gap:8px;align-items:center}
-      /* identity strip */
-      .ident{padding:8px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;row-gap:2px;overflow:visible}
-      .ident h2{margin:0;font:600 18px/24px var(--display);letter-spacing:.04em;display:flex;align-items:center;gap:8px;white-space:nowrap}
-      .ident h2 i{width:10px;height:10px;border-radius:50%;background:var(--seat)}
-      .ident h2 .rt{color:var(--fg2);font:400 13px var(--sans);letter-spacing:0}
-      .state{font:600 12px var(--mono);padding:0 8px;border:1px solid var(--ok);color:var(--ok);border-radius:99px;line-height:20px;display:inline-flex;gap:4px;align-items:center}
+      a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+      button,select,input{font:inherit;color:var(--fg)}
+      button{background:var(--surface-2);border:1px solid var(--line-2);border-radius:3px;min-height:24px;min-width:24px;padding:0 var(--sp-2);cursor:pointer}
+      .mono{font-family:var(--mono)} .muted{color:var(--muted)} .fg2{color:var(--fg-2)}
+      .ok{color:var(--ok)} .warn{color:var(--warn)} .crit{color:var(--crit)} .think{color:var(--think)}
+      .top{flex:none;height:49px;padding:0 var(--sp-4);border-bottom:1px solid var(--line);background:var(--surface);display:flex;align-items:center;gap:var(--sp-4)}
+      .brand{font:700 19px/24px var(--display);letter-spacing:.12em}
+      .nav{display:flex;gap:var(--sp-1)}.nav a{padding:0 var(--sp-2);color:var(--fg-2);min-height:24px;display:inline-flex;align-items:center}.nav a.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--accent)}
+      .health{margin-left:auto;display:flex;gap:var(--sp-4);align-items:center;font:12px/16px var(--mono);color:var(--fg-2)}
+      .shell{flex:1;min-height:0;padding:var(--sp-3);display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:var(--sp-3)}
+      .keys{flex:none;height:30px;padding:0 var(--sp-4);border-top:1px solid var(--line);display:flex;align-items:center;gap:var(--sp-4);font:12px/16px var(--mono);color:var(--muted)}
+      .dock{background:var(--surface);border:1px solid var(--line);border-radius:3px;overflow:hidden;min-width:0}
+      .dock .rail{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2);padding:var(--sp-3) 0;height:100%}
+      .dock .rail b{writing-mode:vertical-rl;font:600 12px/16px var(--mono);letter-spacing:.1em;color:var(--accent)}
+      .dock .open{display:none}
+      body.flight .dock .rail{display:none} body.flight .dock .open{display:block}
+      .dock p{margin:0;padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line);font-size:12px;line-height:16px}
+      main{min-height:0;min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr);gap:var(--sp-3)}
+      .panel{background:var(--surface);border:1px solid var(--line);border-radius:3px;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+      .head{flex:none;height:40px;padding:0 var(--sp-4);display:flex;align-items:center;gap:var(--sp-2);border-bottom:1px solid var(--line);font:600 14px/20px var(--sans)}
+      .head .sub{color:var(--muted);font:12px/16px var(--mono);font-weight:400}
+      .head .end{margin-left:auto;display:flex;gap:var(--sp-2);align-items:center}
+      /* One full-text pattern: any cut text carries data-full and shows in #tip on hover and keyboard focus. */
+      [data-full]{cursor:default}
+      #tip{position:fixed;z-index:9;max-width:480px;padding:var(--sp-2) var(--sp-3);background:var(--surface-2);border:1px solid var(--line-2);border-radius:3px;font:12px/16px var(--mono);color:var(--fg);white-space:pre-wrap;word-break:break-word;pointer-events:none}
+      #tip[hidden]{display:none}
+      .cut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+      /* identity */
+      .ident{padding:var(--sp-2) var(--sp-4);display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:var(--sp-4);row-gap:var(--sp-1)}
+      .r1{grid-column:1;display:flex;gap:var(--sp-3);align-items:center;min-width:0;white-space:nowrap}
+      .r1 h2{margin:0;font:600 20px/28px var(--display);letter-spacing:.04em;display:flex;align-items:center;gap:var(--sp-2);flex:none}
+      .r1 h2 i{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+      .r1 h2 .rt{color:var(--fg-2);font:400 13px/20px var(--sans);letter-spacing:0}
+      .state{flex:none;font:600 12px/16px var(--mono);padding:0 var(--sp-2);border:1px solid var(--ok);color:var(--ok);border-radius:99px;display:inline-flex;gap:var(--sp-1);align-items:center}
       .state::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
-      .ident .row2{grid-column:1;display:flex;gap:16px;align-items:baseline;min-width:0;white-space:nowrap}
-      .ident .row2 b{overflow:hidden;text-overflow:ellipsis;min-width:0;font-weight:600}
-      .ident .row2 .keep{flex:0 0 auto}
-      .acts{grid-column:2;grid-row:1 / span 2;display:flex;gap:8px;align-items:center}
+      .chip{flex:none;font:12px/16px var(--mono);padding:0 var(--sp-2);border:1px solid var(--warn);color:var(--warn);border-radius:3px}
+      .chip.crit{border-color:var(--crit);color:var(--crit)}
+      .why{flex:1 1 0;min-width:0;display:flex;gap:var(--sp-2);align-items:center;color:var(--fg-2)}
+      .why .cut{flex:0 1 auto}
+      .why button{flex:none;min-height:24px;border:0;background:none;color:var(--accent);padding:0 var(--sp-1)}
+      .acts{grid-column:2;grid-row:1 / span 2;display:flex;gap:var(--sp-2);align-items:center}
       .acts .danger{border-color:var(--crit);color:var(--crit)}
-      .pick{display:flex;gap:8px;align-items:center}
-      .pick select{font:12px var(--mono);color:var(--fg);background:var(--surface2);border:1px solid var(--line2);border-radius:6px;min-height:24px}
+      .acts select{background:var(--surface-2);border:1px solid var(--line-2);border-radius:3px;min-height:24px;font:12px/16px var(--mono)}
+      .r2{grid-column:1;display:flex;gap:var(--sp-3);align-items:baseline;min-width:0;white-space:nowrap}
+      .r2 .id{flex:none}
+      .r2 .title{flex:1 1 0;min-width:320px;font-weight:600}
+      .r2 .branch{flex:0 1 280px;min-width:0}
+      .r2 .keep{flex:none}
       /* columns */
-      .cols{display:grid;grid-template-columns:minmax(0,1fr) clamp(440px,24vw,560px);gap:12px;min-height:0}
-      .right{display:flex;flex-direction:column;gap:12px;min-height:0}
-      .right>*{flex:0 0 auto}
+      .cols{display:grid;grid-template-columns:minmax(0,1fr) clamp(440px,24vw,560px);gap:var(--sp-3);min-height:0}
+      .right{display:flex;flex-direction:column;gap:var(--sp-3);min-height:0;min-width:0}
+      .right>*{flex:none}
       .right>.tabs{flex:1 1 0;min-height:160px}
-      /* next move */
-      .next{padding:8px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;border-left:3px solid var(--warn)}
-      .next b{font-size:13px}.next p{margin:0;color:var(--fg2);font-size:12px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
-      .next .btn{align-self:center;grid-row:1 / span 2;grid-column:2;display:inline-flex;align-items:center;min-height:24px;padding:0 12px;border:1px solid var(--line2);border-radius:6px;background:var(--surface2);color:var(--fg)}
+      /* next move: neutral border; warn only when the owner is the operator */
+      .next{padding:var(--sp-2) var(--sp-4);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 var(--sp-3);border-left:2px solid var(--line-2)}
+      .next.operator{border-left-color:var(--warn)}
+      .next b{font-size:13px}
+      .next .txt{display:flex;gap:var(--sp-2);align-items:center;min-width:0;color:var(--fg-2);font-size:12px;line-height:16px}
+      .next .btn{align-self:center;grid-row:1 / span 2;grid-column:2;display:inline-flex;align-items:center;min-height:24px;padding:0 var(--sp-3);border:1px solid var(--line-2);border-radius:3px;background:var(--surface-2);color:var(--fg)}
       /* figures */
       .figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-      .fig{padding:8px 16px;border-right:1px solid var(--line)}.fig:last-child{border-right:0}
-      .fig label{display:block;font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-      .fig b{font:600 20px/26px var(--display);letter-spacing:.02em}
-      .fig small{display:block;font:12px var(--mono);color:var(--fg2)}
-      .meter{height:6px;margin-top:4px;background:var(--line2);border-radius:4px}.meter i{display:block;height:100%;background:var(--ok);border-radius:4px}.meter.warn i{background:var(--warn)}
-      /* loop line */
-      .loop{padding:8px 16px}
-      .loop ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
-      .loop li{font:12px var(--mono);color:var(--muted);display:inline-flex;gap:4px;align-items:center;min-height:24px;padding:0 8px;border:1px solid var(--line);border-radius:6px}
-      .loop li.done{color:var(--fg2)}.loop li.done::before{content:"✓";color:var(--ok)}
-      .loop li.now{color:var(--fg);border-color:var(--accent)}.loop li.now::before{content:"●";color:var(--accent)}
-      .loop li.held{color:var(--warn);border-color:var(--warn)}.loop li.held::before{content:"▲"}
-      .loop .cap{font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-right:4px}
-      /* prompt bar */
-      .prompt{padding:8px 16px}
-      .pbar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:4px 0;gap:1px;background:var(--line)}
+      .fig{padding:var(--sp-2) var(--sp-4);border-right:1px solid var(--line);min-width:0}.fig:last-child{border-right:0}
+      .fig label{display:block;font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+      .fig b{display:block;font:600 20px/28px var(--display);letter-spacing:.02em}
+      .fig small{display:block;font:12px/16px var(--mono);color:var(--fg-2)}
+      .meter{height:4px;margin-top:var(--sp-1);background:var(--line-2);border-radius:2px}.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
+      /* loop: one row */
+      .loop{padding:var(--sp-2) var(--sp-4);flex-direction:row;align-items:center;gap:var(--sp-2);white-space:nowrap}
+      .loop .cap{font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);flex:none}
+      .loop .step{font:12px/16px var(--mono);color:var(--muted);display:inline-flex;gap:var(--sp-1);align-items:center;min-height:24px;padding:0 var(--sp-2);border:1px solid var(--line);border-radius:3px;flex:none}
+      .loop .step.done{color:var(--fg-2)}.loop .step.done::before{content:"✓";color:var(--ok)}
+      .loop .step.now{color:var(--fg);border-color:var(--accent)}.loop .step.now::before{content:"●";color:var(--accent)}
+      /* prompt sections: the seven real sections */
+      .prompt{padding:var(--sp-2) var(--sp-4)}
+      .prompt .ph{display:flex;gap:var(--sp-2);align-items:baseline}
+      .pbar{display:flex;height:8px;border-radius:2px;overflow:hidden;margin:var(--sp-1) 0;gap:1px;background:var(--line)}
       .pbar i{display:block;height:100%}
-      .plegend{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;font:12px var(--mono);color:var(--fg2)}
-      .plegend span{display:flex;gap:4px;align-items:baseline}.plegend em{font-style:normal;margin-left:auto;color:var(--fg)}
+      .plegend{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--sp-4);font:12px/16px var(--mono);color:var(--fg-2)}
+      .plegend span{display:flex;gap:var(--sp-1);align-items:baseline;min-width:0}.plegend em{font-style:normal;margin-left:auto;color:var(--fg)}
       .plegend .big{color:var(--warn)}
-      .sw{width:8px;height:8px;border-radius:2px;flex:0 0 auto;align-self:center}
+      .sw{width:8px;height:8px;border-radius:2px;flex:none;align-self:center}
       /* tabs */
-      .tabbar{flex:0 0 auto;display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--line);overflow:hidden}
-      .tabbar button{border:0;background:none;color:var(--fg2);border-radius:6px;white-space:nowrap}
-      .tabbar button[aria-selected="true"]{color:var(--fg);background:var(--surface2);box-shadow:inset 0 -2px 0 var(--accent)}
-      .tabbar .n{font:11px var(--mono);color:var(--muted);margin-left:4px}
-      .tabbody{flex:1 1 auto;min-height:0;overflow:auto;padding:8px 16px;scrollbar-color:var(--line2) transparent}
+      .tabbar{flex:none;display:flex;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border-bottom:1px solid var(--line);overflow:hidden}
+      .tabbar button{border:0;background:none;color:var(--fg-2);white-space:nowrap;min-height:32px}
+      .tabbar button[aria-selected="true"]{color:var(--fg);background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)}
+      .tabbar .n{font:11px/16px var(--mono);color:var(--muted);margin-left:var(--sp-1)}
+      .tabbody{flex:1 1 auto;min-height:0;overflow:auto;padding:0 var(--sp-4) var(--sp-2);scrollbar-color:var(--line-2) transparent}
       .tabbody[hidden]{display:none}
-      .task{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;min-height:28px;align-items:center;border-bottom:1px solid var(--line)}
-      .task .ck{font:12px var(--mono)}.task .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task .d{font:12px var(--mono);color:var(--muted)}
-      .ok{color:var(--ok)}.warn{color:var(--warn)}.crit{color:var(--crit)}.think{color:var(--think)}
-      .lab{display:inline-block;font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:0 4px;margin-bottom:4px}
-      .tabbody p{margin:4px 0}
+      .sec{font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:var(--sp-3) 0 var(--sp-1);display:flex;gap:var(--sp-2)}
+      .sec a{margin-left:auto;text-transform:none;letter-spacing:0}
+      .tr{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:var(--sp-2);height:32px;align-items:center;border-bottom:1px solid var(--line)}
+      .tr .ck{font:12px/16px var(--mono)}
+      .tr .d{font:12px/16px var(--mono);color:var(--muted);white-space:nowrap}
+      .path{display:flex;min-width:0;font:12px/16px var(--mono)}
+      .path .dir{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+      .path .file{flex:none}
+      .kv{display:grid;grid-template-columns:minmax(96px,32%) minmax(0,1fr);gap:var(--sp-2);height:32px;align-items:center;border-bottom:1px solid var(--line)}
+      .kv span:first-child{color:var(--muted);font:12px/16px var(--mono)}
+      .lab{display:inline-block;font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:0 var(--sp-1);margin:var(--sp-3) 0 var(--sp-1)}
+      .tabbody p{margin:var(--sp-1) 0}
       /* activity */
-      .activity{display:flex;flex-direction:column}
-      .filters{display:flex;gap:4px}
+      .live{font:12px/16px var(--mono);color:var(--ok);display:inline-flex;gap:var(--sp-1);align-items:center}.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+      .filters{display:flex;gap:var(--sp-1)}
       .filters button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
-      .live{font:12px var(--mono);color:var(--ok);display:inline-flex;gap:4px;align-items:center}.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
-      .colhead,.arow{display:grid;grid-template-columns:64px 76px 84px minmax(0,1fr) 112px 72px;gap:12px;align-items:center;padding:0 16px}
-      .colhead{flex:0 0 auto;height:28px;border-bottom:1px solid var(--line);font:11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-      .rows{flex:1 1 0;min-height:0;overflow:auto;scrollbar-color:var(--line2) transparent}
-      .arow{height:28px;border-bottom:1px solid var(--line)}
-      .arow .tm,.arow .du{font:12px var(--mono);color:var(--muted)}
-      .arow .du{text-align:right}
-      .arow .kind{font:12px var(--mono);color:var(--fg2)}
-      .arow .tool{font:600 12px var(--mono)}
-      .arow .tgt{font:12px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-      .arow .tgt .dim{color:var(--muted)}
-      .arow .res{font:12px var(--mono);color:var(--fg2);white-space:nowrap}
-      .arow.fail{background:color-mix(in srgb,var(--crit) 8%,transparent)}
-      .arow.fail .res{color:var(--crit)}
-      .arow.say .tgt{font:13px var(--sans);color:var(--fg)}
-      .arow.think .tool,.arow.think .tgt{color:var(--think)}
-      .arow.now{border-left:2px solid var(--accent);padding-left:14px}
-      .tail{flex:0 0 auto;display:flex;gap:16px;padding:0 16px;height:32px;align-items:center;border-top:1px solid var(--line);font:12px var(--mono);color:var(--fg2)}
-      .tail .end{margin-left:auto}
-      @media (max-width:2000px){.colhead,.arow{grid-template-columns:56px 68px 76px minmax(0,1fr) 96px 64px;gap:8px}}
+      .filters .n{font:11px/16px var(--mono);color:var(--muted);margin-left:var(--sp-1)}
+      .rows{flex:1 1 0;min-height:0;overflow:auto;scrollbar-color:var(--line-2) transparent}
+      .ev{display:grid;grid-template-columns:48px 96px minmax(0,1fr) 64px;gap:var(--sp-3);align-items:center;padding:0 var(--sp-4);min-height:32px;border-bottom:1px solid var(--line)}
+      .ev .at,.ev .took{font:12px/16px var(--mono);color:var(--muted)}
+      .ev .took{text-align:right}
+      .ev .who{font:12px/16px var(--mono);color:var(--fg-2);display:flex;gap:var(--sp-1);align-items:center;white-space:nowrap}
+      .ev .body{min-width:0}
+      .ev.tool .body{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(120px,32%);gap:var(--sp-3);align-items:center}
+      .ev .tn{font:600 12px/16px var(--mono)}
+      .ev .tg{font:12px/16px var(--mono)}
+      .ev .rs{font:12px/16px var(--mono);color:var(--fg-2)}
+      .ev.think .who,.ev.think .body{color:var(--think);font:12px/16px var(--mono)}
+      .ev.msg .body,.ev.a2a .body,.ev.you .body{font:13px/20px var(--sans)}
+      .ev.sys .who,.ev.guard .who{color:var(--warn)}
+      .ev.guard .body{color:var(--warn);font:12px/16px var(--mono)}
+      .ev.err{background:var(--crit-soft)}
+      .ev.err .rs{color:var(--crit)}
+      .ev.now{box-shadow:inset 2px 0 0 var(--accent)}
+      .ev.multi .body{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+      .livecall{flex:none;display:flex;gap:var(--sp-2);align-items:center;padding:0 var(--sp-4);height:32px;border-top:1px solid var(--line);font:12px/16px var(--mono);color:var(--accent)}
+      .composer{flex:none;display:flex;gap:var(--sp-2);align-items:center;padding:var(--sp-2) var(--sp-4);border-top:1px solid var(--line)}
+      .composer input{flex:1;min-width:0;min-height:32px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:3px;padding:0 var(--sp-3)}
+      .composer input::placeholder{color:var(--muted)}
+      /* parked seat, and Plan stacked above the tabs from 2200 px */
+      .state.parked{border-color:var(--warn);color:var(--warn)}.state.parked::before{background:var(--warn)}
+      .loop .step.held{color:var(--warn);border-color:var(--warn)}.loop .step.held::before{content:"▲"}
+      .idle{font:12px/16px var(--mono);color:var(--muted)}
+      .stack{display:none}
+      .stack .stackplan{flex:1 1 0;min-height:0}
+      .stack .stackqueue{flex:none;padding:0 var(--sp-4) var(--sp-2);border-top:1px solid var(--line)}
+      @media (min-width:2200px){
+        .stack{display:flex;flex:1 1 0;min-height:160px}
+        .right>.tabs{flex:1 1 0}
+        .tabbar .stacked,.tabbody.stacked,.queueDup{display:none}
+        .stack.noplan{flex:none}
+      }
     </style>
   </head>
   <body>
-    <!-- Fixture: GUIDO-1 on a rework of ticket 1403 at 2560x1145. Names, figures and commands are illustration. -->
+    <!-- Source-shaped fixture, not a live capture. GUIDO-1 on mission-control#1411 (real title, head 117f67b, parked on a refused push). Prompt sections 3,952 / 1,398 / 16,299,
+         context 73.8k and ~$0.71 are from the 1434 ticket's Why section. Tool names, inputs, result lines and limits follow StreamEvent / toolTarget (target 80 chars, result 100).
+         The branch name, other prompt sections, plan, files, times and counts are illustrative. ?plan=empty draws a seat with no plan; ?flight=1 opens FLIGHT; ?theme=light. -->
     <header class="top">
       <div class="brand">MISSION CONTROL</div>
-      <nav class="nav"><a href="#">Overview</a><a href="#">Board</a><a href="#" class="on">Agents</a><a href="#">Map</a><a href="#">Comms</a><a href="#">Telemetry</a><a href="#">Audit</a></nav>
-      <div class="health"><span>CREW <b class="ok">4 working</b></span><button id="flightBtn" type="button" aria-pressed="false">FLIGHT</button><button id="themeBtn" type="button">Light</button><span>22:58</span></div>
+      <nav class="nav" aria-label="Pages"><a href="#">Overview</a><a href="#">Board</a><a href="#" class="on">Agents</a><a href="#">Map</a><a href="#">Comms</a><a href="#">QA</a><a href="#">Telemetry</a><a href="#">Audit</a></nav>
+      <div class="health"><span>CREW <b class="ok">3 working</b></span><button id="flightBtn" type="button" aria-pressed="false">FLIGHT</button><button id="themeBtn" type="button">Light</button><span>00:21</span></div>
     </header>
-    <aside class="dock" aria-label="FLIGHT dock"><div class="head">FLIGHT <span class="sub">watching 11 seats</span></div><p><b>2 need you</b><br><span class="sub">One review waits · one loop is paused</span></p><p>Next: wait for the Agents design to be approved.</p></aside>
 
-    <main id="page-agent">
-      <section class="panel ident" aria-label="guido-1 details">
-        <h2><i></i>GUIDO-1<span class="rt">· docs and design guidance</span>
-          <span class="state">Running</span>
-          <span class="fg2" style="font:12px var(--mono);letter-spacing:0">for 14m · rework, review round 2 of 3</span></h2>
-        <div class="acts">
-          <span class="pick"><label class="muted mono" for="seat" style="font-size:12px">Seat</label>
-            <select id="seat" aria-label="Choose seat"><option>GUIDO-1 · running</option><option>INCO-1 · running</option><option>RETRO-1 · reviewing</option><option>FLIGHT-1 · running</option><option>GUIDO-2 · free</option></select></span>
-          <button type="button">Message</button><button type="button">Pause</button><button type="button" class="danger">Interrupt</button><button type="button" aria-label="More actions">More ▾</button>
-        </div>
-        <div class="row2">
-          <a class="keep" href="#">mission-control#1403</a>
-          <b title="Skills carry the operator's rules on dashboard layout, with the real viewports">Skills carry the operator's rules on dashboard layout, with the real viewports</b>
-          <span class="keep mono muted">feature/1403-skills-carry-dashboard-rules</span>
-          <span class="keep"><a href="#">PR 1408</a> · <a href="#">3 screenshots</a></span>
-          <span class="keep mono fg2">writer · s/2 · claude-opus · area docs/**</span>
-        </div>
-      </section>
-
-      <div class="cols">
-        <section class="panel activity" id="activity" aria-label="Activity">
-          <div class="head">Activity <span class="sub" id="count">47 events · last 14 min</span>
-            <div class="end"><span class="live">Live</span>
-              <span class="filters" role="group" aria-label="Filter activity"><button type="button" aria-pressed="true">All</button><button type="button" aria-pressed="false">Tools</button><button type="button" aria-pressed="false">Messages</button><button type="button" aria-pressed="false">Failed 2</button></span>
-              <button type="button" aria-pressed="true">Follow</button></div></div>
-          <div class="colhead"><span>Time</span><span>Kind</span><span>Tool</span><span>What it did</span><span>Result</span><span style="text-align:right">Took</span></div>
-          <div class="rows" id="rows" tabindex="0" aria-label="Activity rows, newest first"></div>
-          <div class="tail"><span>47 events · 31 tool calls · 2 failed</span><span class="muted">Working directory <code>worktrees/mission-control/guido-1-1403</code> is removed from each row</span><a class="end" href="#">Open full trace ›</a></div>
+    <div class="shell">
+      <main id="page-agent">
+        <section class="panel ident" aria-label="guido-1 details">
+          <div class="r1">
+            <h2><i></i>GUIDO-1<span class="rt">· docs and guidance</span></h2>
+            <span class="state parked">Parked</span>
+            <a class="chip crit" href="#">Push refused</a>
+            <span class="why"><span class="cut" data-full="Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox. The change selects most of the suite, so Chrome-backed tests could not start. Parked until the controller rules on it.">Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox</span><button type="button" aria-label="Read the full reason">details</button></span>
+          </div>
+          <div class="acts">
+            <label class="muted mono" for="seat" style="font-size:12px;line-height:16px">Seat</label>
+            <select id="seat"><option>GUIDO-1 · parked</option><option>INCO-1 · running</option><option>RETRO-1 · reviewing</option><option>FLIGHT-1 · running</option><option>GUIDO-2 · free</option></select>
+            <button type="button" class="danger">Stop</button><button type="button" aria-label="More actions">More ▾</button>
+          </div>
+          <div class="r2">
+            <a class="id mono" href="#">mission-control#1411</a>
+            <b class="title cut" tabindex="0" data-full="test:related can't pass in a seat's sandbox when a change selects most of the suite">test:related can't pass in a seat's sandbox when a change selects most of the suite</b>
+            <span class="branch mono muted cut" tabindex="0" data-full="feature/1411-test-related-can-t-pass-in-a-seat-s-sandbox">feature/1411-test-related-can-t-pass-in-a-seat-s-sandbox</span>
+            <span class="keep mono muted">head 117f67b · no PR yet</span>
+            <span class="keep mono muted">parked 3m ago</span>
+          </div>
         </section>
 
-        <div class="right">
-          <section class="panel next" aria-label="Next move">
-            <b>Your next move · none; FLIGHT is waiting on this run</b>
-            <p>Round 2 of 3: RETRO-1 asked for the real-viewport table and the "dropped or moved" wording. GUIDO-1 is editing both.</p>
-            <a class="btn" href="#">Open Comms</a>
+        <div class="cols">
+          <section class="panel" id="activity" aria-label="Activity">
+            <div class="head">Activity <span class="sub" id="count"></span>
+              <div class="end"><span class="idle">Idle · last event 3m ago</span>
+                <span class="filters" role="group" aria-label="Filter activity"></span>
+                <button type="button" aria-pressed="true">Follow</button><a href="#" class="mono" style="font-size:12px">Open full trace ›</a></div></div>
+            <div class="rows" id="rows" tabindex="0" aria-label="Activity, oldest first"></div>
+            <form class="composer" onsubmit="return false"><input aria-label="Message GUIDO-1" placeholder="Message GUIDO-1: GUIDO-1 is parked; your message starts its next turn" /><button type="submit">Send</button></form>
           </section>
 
-          <section class="panel figs" aria-label="Run figures">
-            <div class="fig"><label>Cost this run</label><b>$0.71</b><small>est. · 20 turns</small></div>
-            <div class="fig"><label>Context now</label><b>73.8k</b><small>of 200k · 37%</small><div class="meter"><i style="width:37%"></i></div></div>
-            <div class="fig"><label>Tools</label><b>31</b><small class="crit">2 failed</small></div>
-          </section>
+          <div class="right">
+            <section class="panel next" aria-label="Next move">
+              <b>For the controller</b>
+              <div class="txt"><span class="cut" data-full="The push of 117f67b was refused: pnpm -s test:related selects most of the suite and cannot pass in a seat's sandbox. Rule on the check, or run it from the controller's shell, then release the push.&#10;FLIGHT recommends: run it from the controller's shell.">The push of 117f67b was refused: test:related cannot pass in this sandbox</span><button type="button" style="border:0;background:none;color:var(--accent)" aria-label="Read the full next decision">Read full</button></div>
+              <a class="btn" href="#">Open ticket</a>
+            </section>
 
-          <section class="panel loop" aria-label="Build loop">
-            <ol><li class="cap" style="border:0;padding:0">Loop · feature</li>
-              <li class="done">plan</li><li class="done">build</li><li class="done">checks</li><li class="now">review 2/3</li><li>draft PR</li><li>merge</li></ol>
-          </section>
+            <section class="panel figs" aria-label="Run figures">
+              <div class="fig"><label>Cost this run</label><b>$0.71</b><small>est. · 20 turns</small></div>
+              <div class="fig"><label>Context now</label><b>73.8k</b><small>of 200k · 37%</small><div class="meter"><i style="width:37%"></i></div></div>
+              <div class="fig"><label>Tools</label><b>28</b><small class="crit">3 failed</small></div>
+            </section>
 
-          <section class="panel prompt" aria-label="Prompt sections">
-            <div style="display:flex;gap:8px;align-items:baseline"><b>Prompt sections</b><span class="muted mono" style="font-size:12px">this run · est. 24.7k tokens</span><a class="mono" style="margin-left:auto;font-size:12px" href="#">Open prompt ›</a></div>
-            <div class="pbar" role="img" aria-label="Standing orders 3,952; role prompt 1,398; tool results 16,299; other 3,051"><i style="width:16%;background:var(--warn)"></i><i style="width:5.7%;background:var(--accent)"></i><i style="width:66%;background:var(--think)"></i><i style="width:12.3%;background:var(--muted)"></i></div>
-            <div class="plegend"><span class="big"><i class="sw" style="background:var(--warn)"></i>Standing orders<em>3,952</em></span><span><i class="sw" style="background:var(--accent)"></i>Role prompt<em>1,398</em></span><span><i class="sw" style="background:var(--think)"></i>Tool results<em>16,299</em></span><span><i class="sw" style="background:var(--muted)"></i>Other<em>3,051</em></span></div>
-          </section>
+            <section class="panel loop" aria-label="Build loop, feature profile">
+              <span class="cap">Loop</span>
+              <span class="step done" tabindex="0" data-full="plan · done 4m&#10;build · done 38m&#10;checks · done, 1 failure, 2 of 3 tries">3 done</span>
+              <span class="step held" tabindex="0" data-full="push · held, refused at 117f67b, 1 of 3 tries">push held 1/3</span>
+              <span class="step" tabindex="0" data-full="Later: draft PR, review">+2 later</span>
+            </section>
 
-          <section class="panel tabs" aria-label="Plan, queue, files, report, runs and context">
-            <div class="tabbar" role="tablist" aria-label="Seat details">
-              <button role="tab" aria-selected="true" data-tab="plan">Plan<span class="n">4/7</span></button>
-              <button role="tab" aria-selected="false" data-tab="queue">Queue<span class="n">1</span></button>
-              <button role="tab" aria-selected="false" data-tab="files">Files<span class="n">6</span></button>
-              <button role="tab" aria-selected="false" data-tab="report">Report</button>
-              <button role="tab" aria-selected="false" data-tab="runs">Runs<span class="n">3</span></button>
-              <button role="tab" aria-selected="false" data-tab="context">Context</button>
-            </div>
-            <div class="tabbody" data-panel="plan" role="tabpanel">
-              <div class="task"><span class="ck ok">✓</span><span class="t">Read the operator's four recorded complaints</span><span class="d">2m</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Add real viewports table to dashboard-layout</span><span class="d">4m</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Add "dropped or moved" rule</span><span class="d">3m</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Run the docs link check</span><span class="d">1m</span></div>
-              <div class="task"><span class="ck think">●</span><span class="t"><b>Round 2: add device-scale caveat and the 1920x940 case</b></span><span class="d">now</span></div>
-              <div class="task"><span class="ck muted">○</span><span class="t muted">Re-run the link check</span><span class="d"></span></div>
-              <div class="task"><span class="ck muted">○</span><span class="t muted">Reply to RETRO-1 with the diff</span><span class="d"></span></div>
-            </div>
-            <div class="tabbody" data-panel="queue" role="tabpanel" hidden>
-              <div class="task"><span class="ck warn">1</span><span class="t">RETRO-1 · fresh whole-branch review after round 2</span><span class="d">queued 6m</span></div>
-              <p class="muted mono" style="font-size:12px">Queue holds work for this seat. Move up asks FLIGHT.</p>
-            </div>
-            <div class="tabbody" data-panel="files" role="tabpanel" hidden>
-              <div class="task"><span class="ck warn">M</span><span class="t mono">.claude/skills/hud-design/references/dashboard-layout.md</span><span class="d">+41 −6</span></div>
-              <div class="task"><span class="ck warn">M</span><span class="t mono">.claude/skills/hud-design/SKILL.md</span><span class="d">+3 −1</span></div>
-              <div class="task"><span class="ck warn">M</span><span class="t mono">docs/runbooks/visual-qa.md</span><span class="d">+12 −0</span></div>
-              <div class="task"><span class="ck ok">A</span><span class="t mono">docs/design/real-viewports.md</span><span class="d">+58</span></div>
-              <div class="task"><span class="ck warn">M</span><span class="t mono">docs/direction.md</span><span class="d">+2 −2</span></div>
-              <div class="task"><span class="ck warn">M</span><span class="t mono">README.md</span><span class="d">+1 −1</span></div>
-            </div>
-            <div class="tabbody" data-panel="report" role="tabpanel" hidden>
-              <span class="lab">Previous run · round 1 · 2h ago</span>
-              <p>Skills now carry the layout rules. Link check passes. Two done-when lines are met; one is open.</p>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Skill names real viewports</span><span class="d">met</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Dropped-or-moved list rule</span><span class="d">met</span></div>
-              <div class="task"><span class="ck warn">○</span><span class="t">Device-scale caveat</span><span class="d">open</span></div>
-            </div>
-            <div class="tabbody" data-panel="runs" role="tabpanel" hidden>
-              <div class="task"><span class="ck think">●</span><span class="t">Round 2 · this run</span><span class="d">14m</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">Round 1 · reported, 3 findings</span><span class="d">52m</span></div>
-              <div class="task"><span class="ck ok">✓</span><span class="t">First build · draft PR 1408</span><span class="d">1h 40m</span></div>
-              <p class="muted mono" style="font-size:12px">Attempts and previous runs. RETRO-1 round 1 and an Explore subagent sit with them.</p>
-            </div>
-            <div class="tabbody" data-panel="context" role="tabpanel" hidden>
-              <div class="task"><span class="t">Context window</span><span></span><span class="d">73.8k of 200k</span></div>
-              <div class="task"><span class="t">Compactions</span><span></span><span class="d">1</span></div>
-              <div class="task"><span class="t">Model</span><span></span><span class="d">claude-opus</span></div>
-              <div class="task"><span class="t">Account</span><span></span><span class="d">claude-main</span></div>
-              <p class="muted mono" style="font-size:12px">Instructions the seat was given open here.</p>
-            </div>
-          </section>
+            <section class="panel prompt" aria-label="Prompt sections">
+              <div class="ph"><b>Prompt sections</b><span class="muted mono" style="font-size:12px;line-height:16px">latest wake · est. 24,402 tokens</span><a class="mono" style="margin-left:auto;font-size:12px;line-height:16px" href="#">Open prompt ›</a></div>
+              <div class="pbar" role="img" aria-label="Tool results 16,299; standing orders 3,952; role prompt 1,398; repo rules 1,206; lessons 642; wake digest 517; ticket 388"><i style="width:66.8%;background:var(--think)"></i><i style="width:16.2%;background:var(--warn)"></i><i style="width:5.7%;background:var(--accent)"></i><i style="width:4.9%;background:var(--ok)"></i><i style="width:2.6%;background:var(--crit)"></i><i style="width:2.1%;background:var(--fg-2)"></i><i style="width:1.6%;background:var(--muted)"></i></div>
+              <div class="plegend">
+                <span><i class="sw" style="background:var(--think)"></i>Tool results<em>16,299</em></span>
+                <span class="big"><i class="sw" style="background:var(--warn)"></i>Standing orders<em>3,952</em></span>
+                <span><i class="sw" style="background:var(--accent)"></i>Role prompt<em>1,398</em></span>
+                <span><i class="sw" style="background:var(--ok)"></i>Repo rules<em>1,206</em></span>
+                <span><i class="sw" style="background:var(--crit)"></i>Lessons<em>642</em></span>
+                <span><i class="sw" style="background:var(--fg-2)"></i>Wake digest<em>517</em></span>
+                <span><i class="sw" style="background:var(--muted)"></i>Ticket<em>388</em></span>
+              </div>
+            </section>
+
+            <!-- From 2200 px wide, Plan and Queue stand in their own panel and the tabs lose Plan; below that, one tabbed panel. -->
+            <section class="panel stack" id="stack" aria-label="Plan and queue">
+              <div class="head" id="stackHead">Plan <span class="sub"></span></div>
+              <div class="stackplan tabbody" id="stackPlan"></div>
+              <div class="stackqueue" id="stackQueue"></div>
+            </section>
+
+            <section class="panel tabs" aria-label="Plan, files, report, runs and context">
+              <div class="tabbar" role="tablist" aria-label="Seat details"></div>
+              <div class="tabbody" data-panel="plan" role="tabpanel"></div>
+              <div class="tabbody" data-panel="queue" role="tabpanel" hidden></div>
+              <div class="tabbody" data-panel="files" role="tabpanel" hidden></div>
+              <div class="tabbody" data-panel="report" role="tabpanel" hidden></div>
+              <div class="tabbody" data-panel="runs" role="tabpanel" hidden></div>
+              <div class="tabbody" data-panel="context" role="tabpanel" hidden></div>
+            </section>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+
+      <aside class="dock" aria-label="FLIGHT dock">
+        <div class="rail"><b>FLIGHT</b><span class="crit mono" style="font-size:12px">2</span></div>
+        <div class="open"><div class="head" style="padding:0 var(--sp-4)">FLIGHT <span class="sub">watching 11 seats</span></div><p><b>2 need you</b><br><span class="muted">One push refused · one loop is paused</span></p><p>Next: pass on the operator's answer about the Agents design.</p></div>
+      </aside>
+    </div>
+    <footer class="keys"><span>j/k seat</span><span>i interrupt</span><span>f FLIGHT</span><span>? help</span></footer>
+    <div id="tip" role="tooltip" hidden></div>
 
     <script>
-      // Newest first. cwd is stripped: the row reads the command, not .../worktrees/mission-control/guido-1-1403.
-      const rows = [
-        ["22:58:12","Tool","Bash","pnpm -s docs:links","running…","",1],
-        ["22:58:05","Edit","Edit","dashboard-layout.md · add the 1920x940 row to the viewports table","+9 −1","0.3s"],
-        ["22:57:50","Think","thinking","×4 · works out where the device-scale caveat belongs","","14s"],
-        ["22:57:31","Tool","Read","docs/runbooks/visual-qa.md · lines 40–120","80 lines","0.1s"],
-        ["22:57:22","Tool","Grep","\"device scale\" in .claude/skills, docs","3 files","0.2s"],
-        ["22:57:09","Say","Message","Round 2 asks for the real-viewport row and the caveat. I will add both, then re-run the link check.","","",0,"say"],
-        ["22:56:48","Tool","Bash","git diff --stat origin/main","6 files","0.4s"],
-        ["22:56:33","Tool","Bash","pnpm -s lint","exit 1 · failed","6.1s",0,"fail"],
-        ["22:56:11","Edit","Edit","SKILL.md · add Plan checklist line for first-screen fields","+3 −1","0.2s"],
-        ["22:55:58","Think","thinking","×2","","8s"],
-        ["22:55:40","Tool","Read","docs/design/system.md · lines 1–90","90 lines","0.1s"],
-        ["22:55:27","Tool","Bash","rg -n \"viewport\" .claude/skills/hud-design","12 matches","0.2s"],
-        ["22:55:02","Tool","Read","apps/web/src/hud.css · lines 1–60","60 lines","0.1s"],
-        ["22:54:41","Tool","Bash","pnpm -s vitest run test/links.test.ts","exit 0 · 21 passed","3.8s"],
-        ["22:54:20","Edit","Edit","docs/runbooks/visual-qa.md · name the Design section","+12 −0","0.2s"],
-        ["22:54:01","Think","thinking","×3","","11s"],
-        ["22:53:44","Tool","Glob","docs/**/*.md","38 files","0.1s"],
-        ["22:53:30","Tool","Bash","git status --short","6 changed","0.1s"],
-        ["22:53:12","Tool","Read","docs/direction.md · lines 20–70","50 lines","0.1s"],
-        ["22:52:47","Tool","Bash","pnpm -s docs:links","exit 1 · failed","4.2s",0,"fail"],
-        ["22:52:20","Edit","Edit","dashboard-layout.md · Truncation paragraph","+6 −2","0.2s"],
-        ["22:52:01","Tool","Read","dashboard-layout.md","143 lines","0.1s"],
-        ["22:51:36","Tool","Bash","git log --oneline -5","5 commits","0.1s"],
-        ["22:51:10","Think","thinking","×2","","9s"],
-        ["22:50:49","Tool","Bash","gh pr view 1408 --json reviews","1 review","0.9s"],
-        ["22:50:21","Say","Message","Starting round 2. RETRO-1 found 3 issues; reading them first.","","",0,"say"],
-        ["22:50:02","Tool","Read","RETRO-1 findings · round 1","3 findings","0.1s"],
-        ["22:49:41","Tool","Bash","pnpm -s typecheck","exit 0","11.4s"],
-        ["22:49:10","Edit","Edit","dashboard-layout.md · Compose in this order","+14 −3","0.3s"],
-        ["22:48:42","Tool","Bash","rg -n \"history\" docs","7 matches","0.2s"],
-        ["22:48:05","Tool","Read","SKILL.md","46 lines","0.1s"],
-        ["22:47:30","Think","thinking","×5","","21s"],
-        ["22:46:51","Tool","Bash","git fetch origin main","up to date","1.2s"],
-        ["22:46:20","Tool","Read","docs/design/flight-deck.md","60 lines","0.1s"],
-        ["22:45:44","Tool","Bash","sed -n 1,80p docs/runbooks/table-qa.md","80 lines","0.1s"],
-        ["22:45:10","Edit","Edit","visual-qa.md · Retain context and detail","+7 −1","0.2s"],
-        ["22:44:36","Tool","Bash","wc -l docs/design/*.md","3 files","0.1s"],
-        ["22:44:02","Tool","Read","operator screenshot notes, 4 November","12 lines","0.1s"],
-        ["22:43:30","Tool","Bash","cd apps/web && pnpm -s vitest run test/Agent.test.tsx","exit 0 · 14 passed","5.9s"],
-        ["22:42:58","Say","Message","Link check fails on two anchors; fixing them now.","","",0,"say"],
-        ["22:42:31","Tool","Bash","pnpm -s docs:links","exit 1 · failed","4.0s",0,"fail"],
-        ["22:41:50","Edit","Edit","README.md · fix anchor","+1 −1","0.2s"],
-        ["22:41:12","Tool","Read","README.md","88 lines","0.1s"],
-        ["22:40:34","Think","thinking","×2","","7s"],
-        ["22:39:58","Tool","Bash","git diff origin/main -- docs","412 lines","0.3s"],
-        ["22:39:20","Tool","Read","visual-qa.md","121 lines","0.1s"],
-        ["22:38:44","Say","Message","Round 1 reported. Continuing with the open done-when line.","","",0,"say"],
-      ];
-      const host = document.getElementById("rows");
-      for (const [tm, kind, tool, tgt, res, du, now, cls] of rows) {
-        const d = document.createElement("div");
-        d.className = "arow" + (cls ? " " + cls : "") + (kind === "Think" ? " think" : "") + (now ? " now" : "");
-        const [head, ...rest] = tgt.split(" · ");
-        const t = rest.length && kind !== "Think" ? `${head} <span class="dim">· ${rest.join(" · ")}</span>` : tgt;
-        d.innerHTML = `<span class="tm">${tm}</span><span class="kind">${kind}</span><span class="tool">${tool}</span><span class="tgt" tabindex="0" title="${tgt.replace(/"/g, "&quot;")}">${t}</span><span class="res">${res}</span><span class="du">${du}</span>`;
-        host.append(d);
-      }
-      // Tabs
-      const tabs = [...document.querySelectorAll(".tabbar button")];
-      for (const b of tabs) b.addEventListener("click", () => {
-        for (const o of tabs) o.setAttribute("aria-selected", String(o === b));
-        for (const p of document.querySelectorAll(".tabbody")) p.hidden = p.dataset.panel !== b.dataset.tab;
-      });
-      // FLIGHT rail and theme toggles; also readable from the URL for rendering: ?flight=1&theme=light
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
       const q = new URLSearchParams(location.search);
+      const emptyPlan = q.get("plan") === "empty";
+      // ---- Activity: oldest first, as StreamPanel shows it. kind: tool | think | msg | you | a2a | guard | sys.
+      const E = [];
+      const t = (at, name, target, result, ms, err) => E.push({ at, kind: "tool", name, target, result, ms, err });
+      const k = (at, kind, text, n) => E.push({ at, kind, text, n });
+      k("23:31", "you", "Ticket 1411 assigned: test:related can't pass in a seat's sandbox when a change selects most of the suite. Plan first, then build; check with pnpm -s test:related before you push.");
+      k("23:31", "think", "thinking", 3);
+      t("23:32", "Bash", "git status --short", "(no output)", 90);
+      t("23:32", "Read", "package.json", "     1\t{", 60);
+      t("23:33", "Grep", "test:related", "package.json:21:    \"test:related\": \"vitest run --changed origin/main\",", 190);
+      t("23:33", "Read", "vitest.config.ts", "     1\timport { defineConfig } from \"vitest/config\";", 70);
+      t("23:34", "Bash", "pnpm -s vitest list --changed origin/main", "apps/web/test/Agent.test.tsx", 8400);
+      k("23:34", "think", "thinking", 2);
+      t("23:35", "Grep", "describeRendered", "apps/web/test/browserRunner.ts:41:export function describeRendered(name: string, body: () => void) {", 200);
+      t("23:36", "Read", "apps/web/test/browserRunner.ts", "    30\tconst CHROME = process.env.MC_CHROME ?? findChrome();", 110);
+      k("23:36", "guard", "Refused: whole-file re-read of apps/web/test/browserRunner.ts (412 lines, unchanged). Read the lines you need.");
+      t("23:37", "Read", "apps/web/test/browserRunner.ts", "   300\t  async boxes(selector: string, within?: string) {", 100);
+      k("23:38", "think", "thinking", 4);
+      t("23:38", "Bash", "pnpm -s test:related", "error: 41 files selected; 9 browser files could not start Chrome in this sandbox", 212000, true);
+      t("23:39", "Bash", "rg -n \"describeRendered\" apps/web/test --count", "apps/web/test/Telemetry.browser.test.ts:1", 180);
+      t("23:39", "Bash", "ls apps/web/test | grep -c browser", "27", 70);
+      t("23:40", "Read", "apps/web/test/Telemetry.browser.test.ts", "     1\t// @vitest-environment node", 90);
+      k("23:40", "think", "thinking", 2);
+      t("23:40", "Grep", "MC_CHROME", "apps/web/test/browserRunner.ts:30:const CHROME = process.env.MC_CHROME ?? findChrome();", 150);
+      t("23:41", "Read", "docs/runbooks/visual-qa.md", "# Visual planning and QA", 80);
+      t("23:41", "Bash", "pnpm -s vitest run apps/web/test/Telemetry.browser.test.ts", "error: Chrome could not start in this sandbox", 5300, true);
+      t("23:41", "Grep", "skipped", "apps/web/test/browserRunner.ts:58:  it.skip(\"needs a browser\", () => {});", 160);
+      t("23:42", "Glob", "docs/runbooks/*.md", "docs/runbooks/table-qa.md", 60);
+      t("23:42", "Read", "docs/runbooks/table-qa.md", "# Table QA", 70);
+      k("23:42", "think", "thinking", 3);
+      t("23:42", "Bash", "git log --oneline -5 -- docs/runbooks", "e8c7103e Merge pull request #1413 from Luke-Bradford/chore/core-test-timeout", 130);
+      t("23:42", "Read", "package.json", "    18\t    \"test:related\": \"vitest run --changed origin/main\",", 50);
+      t("23:42", "Grep", "describeRendered", "apps/web/test/Telemetry.browser.test.ts:12:describeRendered(\"Telemetry\", () => {", 180);
+      t("23:42", "Read", "docs/runbooks/test-lock.md", "# The shared test lock", 60);
+      k("23:43", "a2a", "guido-1 → flight-1: test:related selects 41 files after my change to hud.css; 9 are browser files that cannot start Chrome in a seat's sandbox. Do you want those skipped, or the check run from your shell?");
+      k("23:44", "a2a", "flight-1 → guido-1: Keep the check as written. Run it; if it can't pass, say so in the report and the controller rules.");
+      t("23:45", "Edit", "docs/runbooks/test-lock.md", "The file docs/runbooks/test-lock.md has been updated.", 40);
+      t("23:46", "Bash", "pnpm -s lint", "Checked 1118 files in 1248ms. No fixes applied.", 6100);
+      t("23:46", "Bash", "pnpm -s typecheck", "$ tsc --noEmit", 31200);
+      k("23:47", "msg", "Lint and typecheck pass. test:related still cannot start 9 browser files here. I will commit, push once, and report the exact output.");
+      k("23:48", "think", "thinking", 2);
+      t("23:48", "Bash", "git add docs/runbooks/test-lock.md && git commit -m \"docs: say what test:related needs a browser for\"", "[feature/1411 117f67b] docs: say what test:related needs a browser for", 310);
+      t("23:49", "Bash", "git push -u origin feature/1411-test-related-can-t-pass-in-a-seat-s-sandbox", "error: push refused by the check gate: pnpm -s test:related has not passed on 117f67b", 1900, true);
+      k("23:49", "guard", "Push refused at 117f67b: pnpm -s test:related has not passed at this commit. Fix the check, or ask the controller to rule.");
+      k("23:50", "msg", "The push was refused because test:related cannot pass here. I am parked; the controller can rule on the check.");
+      k("23:51", "sys", "Parked: push refused");
+      const WHO = { tool: ["⌘", "tool"], think: ["·", "thinking"], msg: ["↳", "to you"], you: ["·", "prompt"], a2a: ["↳", "agents"], guard: ["!", "guard"], sys: ["◇", "system"] };
+      const rows = document.getElementById("rows");
+      for (const e of E) {
+        const d = document.createElement("div");
+        const [mark, who] = WHO[e.kind];
+        const multi = e.kind !== "tool" && e.kind !== "think" && e.kind !== "sys";
+        d.className = `ev ${e.kind}${e.err ? " err" : ""}${multi ? " multi" : ""}`;
+        const took = e.ms == null ? "" : e.ms >= 1000 ? (e.ms / 1000).toFixed(1) + "s" : e.ms + "ms";
+        let body;
+        if (e.kind === "tool") {
+          const res = (e.err ? "error: " : "") + e.result;
+          body = `<span class="tn">${e.name}</span><span class="tg cut" tabindex="0" data-full="${esc(e.name + " " + e.target)}">${esc(e.target)}</span><span class="rs cut" tabindex="0" data-full="${esc(res)}">${esc(res)}</span>`;
+        } else if (e.kind === "think") {
+          body = `<span>thinking${e.n > 1 ? " ×" + e.n : ""}</span>`;
+        } else if (e.kind === "sys") {
+          body = `<span>${e.text}</span>`;
+        } else {
+          body = `<span class="tg" tabindex="0" data-full="${esc(e.text)}">${esc(e.text)}</span>`;
+        }
+        d.innerHTML = `<span class="at">${e.at}</span><span class="who"><span aria-hidden="true">${mark}</span>${who}</span><div class="body">${body}</div><span class="took">${took}</span>`;
+        rows.append(d);
+      }
+      requestAnimationFrame(() => { rows.scrollTop = rows.scrollHeight; });
+      const c = (f) => E.filter(f).length;
+      const filters = [["All", E.length, true], ["Messages", c((e) => ["you", "msg", "a2a", "sys"].includes(e.kind)), false], ["Thinking", c((e) => e.kind === "think"), false], ["Tools", c((e) => e.kind === "tool"), false], ["Guard", c((e) => e.kind === "guard"), false]];
+      document.querySelector(".filters").innerHTML = filters.map(([l, n, on]) => `<button type="button" aria-pressed="${on}">${l}<span class="n">${n}</span></button>`).join("");
+      document.getElementById("count").textContent = `${E.length} events · ${c((e) => e.err)} failed tools`;
+
+      // ---- Plan and queue. A seat with no plan has no Plan panel or tab; the queue is shown on its own.
+      const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["●", "Push once and report the exact output"], ["○", "Wait for the controller's ruling on the check"], ["○", "Open the draft PR"], ["○", "Request review"], ["○", "Answer review findings"], ["○", "Re-run the three checks"], ["○", "Report evidence for each done-when line"], ["○", "Hand the branch to merge"], ["○", "Close the plan"]];
+      const queue = [["RETRO-1 · fresh review once the PR opens", "after the push"], ["mission-control#1428 · the token work follow-up", "next ticket"]];
+      const doneN = plan.filter((p) => p[0] === "✓").length;
+      const planRows = plan.map(([ck, x], i) => `<div class="tr"><span class="ck ${ck === "✓" ? "ok" : ck === "●" ? "think" : "muted"}">${ck}</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d">${ck === "●" ? "now" : ""}</span></div>`).join("");
+      const queueRows = queue.map(([x, d], i) => `<div class="tr"><span class="ck warn">${i + 1}</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
+      const planBlock = plan.length ? `<div class="sec">Plan <span>${doneN} of ${plan.length} done</span></div>${planRows}` : "";
+      const queueBlock = `<div class="sec">Queued after this run <span>${queue.length}</span></div>${queueRows}`;
+      document.querySelector("#stackHead .sub").textContent = plan.length ? `${doneN} of ${plan.length} done · ${queue.length} queued` : `${queue.length} queued · no plan yet`;
+      document.getElementById("stackHead").firstChild.textContent = plan.length ? "Plan " : "Queue ";
+      document.getElementById("stackPlan").innerHTML = plan.length ? planRows : "";
+      document.getElementById("stackPlan").hidden = !plan.length;
+      document.getElementById("stack").classList.toggle("noplan", !plan.length);
+      document.getElementById("stackQueue").innerHTML = (plan.length ? `<div class="sec">Queued after this run <span>${queue.length}</span></div>` : "") + queueRows;
+
+      const files = [["M", "docs/runbooks/test-lock.md", "+14 −2"], ["M", "docs/runbooks/visual-qa.md", "+6 −0"], ["M", "apps/web/src/hud.css", "+3 −1"], ["M", "apps/web/test/browserRunner.ts", "+11 −4"], ["A", "docs/runbooks/test-related-in-a-sandbox.md", "+58"], ["M", "package.json", "+1 −1"], ["M", ".claude/skills/hud-design/SKILL.md", "+2 −0"], ["M", "docs/direction.md", "+2 −2"], ["M", "README.md", "+1 −1"], ["M", "apps/web/test/Telemetry.browser.test.ts", "+0 −0"], ["M", "apps/web/test/RunTrace.browser.test.ts", "+0 −0"], ["M", "docs/superpowers/plans/2026-10-21-plan-7a-engine-board.md", "+4 −0"]];
+      const pathHtml = (p) => { const i = p.lastIndexOf("/"); return `<span class="path" tabindex="0" data-full="${esc(p)}"><span class="dir">${esc(p.slice(0, i + 1))}</span><span class="file">${esc(p.slice(i + 1))}</span></span>`; };
+      const filesHtml = `<div class="sec">Changed files <span>${files.length} vs main</span></div>` + files.map(([s, p, d]) => `<div class="tr"><span class="ck ${s === "A" ? "ok" : "warn"}">${s}</span>${pathHtml(p)}<span class="d">${d}</span></div>`).join("");
+      const done = [["not", "test:related passes in a seat's sandbox when a change selects most of the suite"], ["not", "Browser-backed files are named, with what they need"], ["met", "The runbook says what test:related needs and what to do without it"]];
+      const links = ["docs/runbooks/test-lock.md", "docs/runbooks/test-related-in-a-sandbox.md", "package.json · test:related", "vitest.config.ts", "apps/web/test/browserRunner.ts", "comms:2084 · FLIGHT's ruling", "mission-control#1411 · ticket", "mission-control#1428 · token work"];
+      const reportHtml = `<span class="lab">Previous run · round 1 · 2h ago</span><p class="fg2">Documented what test:related needs a browser for. The check itself still cannot pass here.</p><div class="sec">Done when <span>1 of ${done.length} met</span></div>` + done.map(([s, x]) => `<div class="tr"><span class="ck ${s === "met" ? "ok" : "warn"}">${s === "met" ? "✓" : "○"}</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d">${s === "met" ? "met" : "open"}</span></div>`).join("") + `<div class="sec">Saved links <span>${links.length} of 28</span></div>` + links.map((l) => `<div class="tr"><span class="ck muted">↗</span><span class="cut" tabindex="0" data-full="${esc(l)}"><a href="#">${esc(l)}</a></span><span class="d"></span></div>`).join("") + `<div class="tr"><span class="ck muted">…</span><a href="#" class="mono" style="font-size:12px">Show all 28 links ›</a><span class="d"></span></div>`;
+      const runs = [["●", "mission-control#1411 · this run (3 of 3), parked", "28m"], ["✓", "mission-control#1411 · run 2, reported", "52m"], ["✓", "mission-control#1411 · run 1, set aside", "9m"], ["✓", "feature/1409-screenshot-evidence-times-out-on-every · PR 1418", "1h 3m"], ["✓", "docs/hud-design-blank-slate-gaps · PR 1408", "47m"], ["✓", "chore/core-test-timeout · PR 1413", "22m"]];
+      const rel = [["review", "RETRO-1 · run 2 review · reported", "2 Important"], ["subagent", "Explore · find where test:related is defined", "completed"], ["subagent", "Explore · list browser test files", "completed"]];
+      const runsHtml = `<div class="sec">Attempts and previous runs <span>${runs.length}</span></div>` + runs.map(([ck, x, d]) => `<div class="tr"><span class="ck ${ck === "●" ? "think" : "ok"}">${ck}</span><span class="cut" tabindex="0" data-full="${esc(x)}"><a href="#">${esc(x)}</a></span><span class="d">${d}</span></div>`).join("") + `<div class="sec">Related work <span>${rel.length}</span></div>` + rel.map(([kd, x, d]) => `<div class="tr"><span class="ck muted">·</span><span class="cut" tabindex="0" data-full="${esc(kd + ": " + x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
+      const kv = [["Role", "crew · writer · s/1"], ["Account", "claude-main"], ["Model", "claude-opus-5-5 · effort high"], ["CLI", "claude code 2.1"], ["Area", "docs/**, .claude/skills/**"], ["Branch", "feature/1411-test-related-can-t-pass-in-a-seat-s-sandbox"], ["Context window", "73.8k of 200k · 1 compaction"], ["Prompt", "24,402 est. tokens · 7 sections"], ["Session", "s/1 · started 22:54"]];
+      const tools = [["Bash", 11, 3], ["Read", 9, 0], ["Edit", 4, 0], ["Grep", 3, 0], ["Glob", 1, 0]];
+      const mono = 'class="mono" style="font-size:12px;line-height:16px"';
+      const ctxHtml = `<div class="sec">Seat</div>` + kv.map(([a, b]) => `<div class="kv"><span>${a}</span><span class="cut mono" style="font-size:12px;line-height:16px" tabindex="0" data-full="${esc(b)}">${esc(b)}</span></div>`).join("") + `<div class="sec">Tools this run <span>28 calls · 3 failed</span></div>` + tools.map(([n, cn, f]) => `<div class="kv"><span>${n}</span><span ${mono}>${cn} calls${f ? ` · <b class="crit">${f} failed</b>` : ""}</span></div>`).join("") + `<div class="sec">Standing orders <a href="#">Open instructions ›</a></div><div class="kv"><span>Orders</span><span ${mono}>3,952 est. tokens in this wake</span></div>`;
+
+      // Tabs. Plan and Queue are tabs below 2200 px; from 2200 px they stand in the Plan panel above.
+      const TABS = [...(plan.length ? [["plan", `Plan<span class="n">${doneN}/${plan.length}</span>`, planBlock + queueBlock]] : []), ["files", `Files<span class="n">${files.length}</span>`, filesHtml], ["report", "Report", reportHtml], ["runs", `Runs<span class="n">${runs.length}</span>`, (plan.length ? "" : `<div class="queueDup">${queueBlock}</div>`) + runsHtml], ["context", "Context", ctxHtml]];
+      const bar = document.querySelector(".tabbar");
+      bar.innerHTML = TABS.map(([id, label], i) => `<button role="tab" aria-selected="${i === 0}" data-tab="${id}" class="${id === "plan" ? "stacked" : ""}">${label}</button>`).join("");
+      for (const p of document.querySelectorAll(".tabbody[data-panel]")) {
+        const tab = TABS.find((x) => x[0] === p.dataset.panel);
+        if (!tab) { p.remove(); continue; }
+        p.innerHTML = tab[2];
+        p.classList.toggle("stacked", tab[0] === "plan");
+      }
+      const tabs = [...bar.querySelectorAll("button")];
+      const select = (id) => { for (const o of tabs) o.setAttribute("aria-selected", String(o.dataset.tab === id)); for (const p of document.querySelectorAll(".tabbody[data-panel]")) p.hidden = p.dataset.panel !== id; };
+      for (const b of tabs) b.addEventListener("click", () => select(b.dataset.tab));
+      const wide = matchMedia("(min-width: 2200px)");
+      const first = () => { const cur = tabs.find((b) => b.getAttribute("aria-selected") === "true"); if (wide.matches && (!cur || cur.classList.contains("stacked"))) select("files"); };
+      select(TABS[0][0]); first(); wide.addEventListener("change", () => { if (!wide.matches) select(TABS[0][0]); else first(); });
+
+      // ---- Full-text pattern: hover or keyboard focus shows #tip for any [data-full]
+      const tip = document.getElementById("tip");
+      const show = (el) => { tip.textContent = el.dataset.full; tip.hidden = false; const r = el.getBoundingClientRect(); const w = tip.offsetWidth; tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + "px"; tip.style.top = (r.bottom + 4 + tip.offsetHeight > innerHeight ? Math.max(8, r.top - tip.offsetHeight - 4) : r.bottom + 4) + "px"; };
+      for (const el of document.querySelectorAll("[data-full]")) { if (!el.hasAttribute("tabindex")) el.tabIndex = 0; }
+      document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-full]"); if (el) show(el); });
+      document.addEventListener("focusout", () => { tip.hidden = true; });
+      document.addEventListener("mouseover", (e) => { const el = e.target.closest?.("[data-full]"); if (el) show(el); });
+      document.addEventListener("mouseout", () => { tip.hidden = true; });
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") tip.hidden = true; });
+
+      // ---- Rail and theme: ?flight=1 opens FLIGHT (380 px); folded is a 48 px rail. ?theme=light.
       const setFlight = (on) => { document.body.classList.toggle("flight", on); document.getElementById("flightBtn").setAttribute("aria-pressed", String(on)); };
-      const setTheme = (t) => { document.documentElement.dataset.theme = t; document.getElementById("themeBtn").textContent = t === "dark" ? "Light" : "Dark"; };
+      const setTheme = (x) => { document.documentElement.dataset.theme = x; document.getElementById("themeBtn").textContent = x === "dark" ? "Light" : "Dark"; };
       setFlight(q.get("flight") === "1"); setTheme(q.get("theme") === "light" ? "light" : "dark");
       document.getElementById("flightBtn").addEventListener("click", () => setFlight(!document.body.classList.contains("flight")));
       document.getElementById("themeBtn").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
