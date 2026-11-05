@@ -2,7 +2,7 @@ import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 
 // The server suites that spawn real keeper and fake-CLI process trees. Run side by side on a
-// 2-vCPU CI shard, their cleanup waits timed out (#810: 16 of 28 failed runs, 27–28 Oct), so they
+// small CI shard (2 vCPU when #810 was fixed; the CI log now prints the current size), their cleanup waits timed out (#810: 16 of 28 failed runs, 27–28 Oct), so they
 // run in their own project, one file at a time.
 const PROCESS_SUITES = [
   "apps/server/test/supervisor-*.test.ts",
@@ -14,6 +14,11 @@ const PROCESS_SUITES = [
   "apps/server/test/runtime-session.test.ts",
 ];
 
+// CI workers: the smaller of 2 and cores - 1 (Vitest's default), never below 1.
+const CI_WORKERS = Math.max(1, Math.min(2, availableParallelism() - 1));
+// Logged so the CI log shows the real runner size (#1468): on 2 CPUs the cap equals the default.
+if (process.env.CI) console.log(`vitest: ${availableParallelism()} CPUs, maxWorkers ${CI_WORKERS}`);
+
 // Per-project environments: node for the server and core, jsdom for the web app (its own config).
 export default defineConfig({
   test: {
@@ -24,9 +29,10 @@ export default defineConfig({
     // On CI a `server` shard failed with `[vitest-worker]: Timeout calling "onTaskUpdate"` after every
     // test passed (#1468): a loaded runner left a worker's call to the main process unanswered for
     // 60 s. Vitest 3.2.7 hardcodes that 60 s (no setting), so CI caps workers at 2 instead, which
-    // leaves the main process CPU to answer. Vitest's own default is cores - 1, so the cap never raises it.
+    // leaves the main process CPU to answer. The cap never raises the default (cores - 1), so on a
+    // 2-CPU runner (1 worker already) it changes nothing; the CI log line above shows which size ran.
     // Not `dangerouslyIgnoreUnhandledErrors`: a real unhandled error must still fail the job.
-    maxWorkers: process.env.CI ? Math.max(1, Math.min(2, availableParallelism() - 1)) : 3,
+    maxWorkers: process.env.CI ? CI_WORKERS : 3,
     projects: [
       {
         test: {
