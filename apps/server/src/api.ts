@@ -257,7 +257,7 @@ import {
   setExternalMergeHold,
   setExternalPrControl,
 } from "./external-pr-control.ts";
-import { readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -4994,7 +4994,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.hasUnfinishedBuildRun(repoId, pr.branch)
+          branchOwned(config, store, repoId, pr.branch)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;

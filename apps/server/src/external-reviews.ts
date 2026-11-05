@@ -19,6 +19,24 @@ export const externalReviewKey = (repo: string, pr: number): string => `external
 export const isExternalReview = (row: ReviewRow): boolean =>
   row.authorRunId === externalReviewKey(row.repoId, row.prNumber);
 
+/**
+ * A branch the crew or an observed loop still owns: a build run that has not ended, or any run of a
+ * configured loop (observed loops are read-only, so their PRs never take the external path).
+ */
+export const branchOwned = (
+  config: Pick<CcConfig, "loops">,
+  store: Store,
+  repoId: string,
+  branch: string,
+): boolean =>
+  store
+    .runsOnBranch(repoId, branch)
+    .some(
+      (run) =>
+        run.reviewId == null &&
+        (run.endedAt === null || config.loops.some((loop) => loop.id === run.agentId)),
+    );
+
 export interface ExternalReviewSubject {
   sha: string;
   branch: string;
@@ -121,7 +139,7 @@ export function createExternalReviews(deps: {
       pr?.state === "open" &&
       !pr.isDraft &&
       pr.headSha === row.sha &&
-      !store.hasUnfinishedBuildRun(row.repoId, pr.branch)
+      !branchOwned(deps.config, store, row.repoId, pr.branch)
     );
   }
 
@@ -253,7 +271,7 @@ export function createExternalReviews(deps: {
           if (repo.autonomy !== "merge") continue;
           for (const pr of store.pullRequests(repo.id)) {
             if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
-            if (store.hasUnfinishedBuildRun(repo.id, pr.branch)) continue;
+            if (branchOwned(deps.config, store, repo.id, pr.branch)) continue;
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);

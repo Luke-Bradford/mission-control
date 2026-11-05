@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { externalPrControl, setExternalMergeHold } from "../src/external-pr-control.ts";
+import {
+  externalMergeHold,
+  externalPrControl,
+  setExternalMergeHold,
+} from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
@@ -199,6 +203,33 @@ describe("external PR controller merge", () => {
     store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
+  });
+
+  it("serves the PR control routes for an ended run and refuses an unfinished one", async () => {
+    const h = harness();
+    buildRun(2);
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    const hold = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/merge-hold",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA, action: "hold", reason: "x" }),
+      });
+    try {
+      expect((await hold()).statusCode).toBe(200);
+      expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await hold()).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
   });
 
   it("refuses a PR whose ended run still has a merge hold, until the hold is released", async () => {

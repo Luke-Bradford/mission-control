@@ -2325,13 +2325,6 @@ export class Store {
     ).map(toRun);
   }
 
-  /** A build run on the branch that has not ended (live or parked). Ended ones no longer own the PR. */
-  hasUnfinishedBuildRun(repoId: RepoId, branch: string): boolean {
-    return this.runsOnBranch(repoId, branch).some(
-      (run) => run.reviewId == null && run.endedAt === null,
-    );
-  }
-
   /**
    * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
    * someone releases it. A follow-on run gets a copy (run-handoffs.ts), so only the latest one counts.

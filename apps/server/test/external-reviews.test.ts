@@ -213,6 +213,16 @@ describe("external PR review subjects", () => {
     expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
   });
 
+  it("leaves a configured loop's branch alone, ended iteration or not", async () => {
+    buildRun({ agentId: "shop-ta", endedAt: 2 });
+    const h = harness();
+    const loops = [{ id: "shop-ta", repoId: "sample" }] as unknown as CcConfig["loops"];
+    const deps = { ...h.deps, config: { ...config, loops } };
+    await createExternalReviews(deps).sync();
+    expect(store.reviewsIn(["queued"])).toHaveLength(0);
+    expect(h.writes).toHaveLength(0);
+  });
+
   it("reviews an ended run's PR whose head carries a mc/review status with no review row", async () => {
     buildRun({ endedAt: 2 });
     store.upsertPullRequests(

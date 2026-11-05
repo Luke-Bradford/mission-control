@@ -21,7 +21,7 @@ import {
   externalPrControl,
   setExternalPrControl,
 } from "../external-pr-control.ts";
-import { isExternalReview, readExternalSubject } from "../external-reviews.ts";
+import { branchOwned, isExternalReview, readExternalSubject } from "../external-reviews.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
@@ -44,7 +44,7 @@ export async function mergeExternalPr(i: {
   const sha = cached?.headSha;
   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
-  if (store.hasUnfinishedBuildRun(repo.id, cached.branch))
+  if (branchOwned(i.config, store, repo.id, cached.branch))
     return fail("This branch belongs to a crew run; use its normal merge path.");
   const runHold = store.branchMergeHold(repo.id, cached.branch);
   if (runHold) return fail(`This PR has a merge hold from ${runHold.by}: ${runHold.reason}`);
@@ -297,7 +297,7 @@ export async function mergeExternalPr(i: {
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
       store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
-      store.hasUnfinishedBuildRun(repo.id, finalSubject.branch) ||
+      branchOwned(i.config, store, repo.id, finalSubject.branch) ||
       store.branchMergeHold(repo.id, finalSubject.branch)
     )
       return fail("The PR head, checks, ownership or hold changed before merge.");

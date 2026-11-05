@@ -4,6 +4,7 @@ import {
   clockHm,
   type FlightPrFlow,
   type FlightPrFlowRow,
+  NEW_LOOP,
   type PullRequestView,
   prCarries,
   type ReviewRow,
@@ -12,6 +13,7 @@ import {
   reviewFor,
   ticketWaits,
 } from "@mc/core";
+import { isExternalReview } from "./external-reviews.ts";
 import type { Store } from "./store.ts";
 
 type Stage = FlightPrFlowRow["stage"];
@@ -266,11 +268,26 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
               pr.headSha,
               carriedFrom(run?.loop?.carry, run?.loop?.reviewWaivedSha, pr.headSha),
             );
-      const currentReview = candidateReviews.find((r) => r.id === fact?.id) ?? null;
+      // An ended run no longer drives the PR: the hub's own external review of this head does.
+      const external =
+        run && run.endedAt !== null && pr.headSha
+          ? (reviews.findLast(
+              (r) => isExternalReview(r) && r.sha === pr.headSha && r.state !== "superseded",
+            ) ?? null)
+          : null;
+      const currentReview = external ?? candidateReviews.find((r) => r.id === fact?.id) ?? null;
       const h = run ? readHistory(pr, run) : null;
       const latestPoint = h?.points.at(-1);
       const fixing = latestPoint?.position.stage === "rework";
-      const p = position(run?.loop ?? null, pr.headSha, currentReview ?? null, fixing);
+      // Only a merge hold outlives the ended run; its stale phase, park or epoch must not win.
+      const p = external
+        ? position(
+            run?.loop?.mergeHold ? { ...NEW_LOOP, mergeHold: run.loop.mergeHold } : null,
+            pr.headSha,
+            external,
+            false,
+          )
+        : position(run?.loop ?? null, pr.headSha, currentReview ?? null, fixing);
       const liveReview =
         currentReview && ["queued", "starting", "running"].includes(currentReview.state)
           ? currentReview
@@ -289,7 +306,7 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       const ownerSince =
         ownerKind === "nobody"
           ? (run?.endedAt ?? pr.createdAt)
-          : (latestPoint?.at ??
+          : ((external ? undefined : latestPoint?.at) ??
             currentReview?.startedAt ??
             currentReview?.createdAt ??
             pr.createdAt);

@@ -70,7 +70,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
-import { createExternalReviews, readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
@@ -492,7 +492,7 @@ export async function main(): Promise<void> {
       );
       if (!subject) return null;
       const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
-      if (pr?.headSha !== review.sha || store.hasUnfinishedBuildRun(repo.id, subject.branch))
+      if (pr?.headSha !== review.sha || branchOwned(config, store, repo.id, subject.branch))
         return null;
       const linked = pr?.ticket?.startsWith(`${repo.id}#`)
         ? Number(pr.ticket.slice(repo.id.length + 1))
