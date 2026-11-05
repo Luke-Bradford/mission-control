@@ -74,7 +74,7 @@ export function Toolbar({
           </button>
         ))}
       </div>
-      <span className="query" title={viewGroups > 0 ? VIEW_QUERY_NOTE : lane.query}>
+      <span className="query" title={lane.query}>
         <code>{lane.query}</code>
         <button
           type="button"
@@ -85,6 +85,7 @@ export function Toolbar({
           Copy
         </button>
       </span>
+      {viewGroups > 0 && <span className="xs muted">{VIEW_QUERY_NOTE}</span>}
       {lane.url && <ExternalLink url={lane.url}>Open in GitHub ↗</ExternalLink>}
       <span className="spacer" />
       <label className="s fg2" htmlFor="fPrio">

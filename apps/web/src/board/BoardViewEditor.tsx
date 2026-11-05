@@ -87,6 +87,7 @@ export function BoardViewEditor({
       ref={formRef}
       className="fform fform-800 boardview"
       noValidate
+      id="boardViewForm"
       aria-label="Board view"
       onSubmit={submit}
     >

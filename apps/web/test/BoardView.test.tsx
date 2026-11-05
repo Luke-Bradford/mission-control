@@ -260,7 +260,7 @@ describe("the Board view editor", () => {
     stub();
     const { container } = await open();
     expect(shownTickets(container)).toEqual(["shop-app#1"]);
-    expect(container.querySelector('[title="Lane query; Board view not included"]')).toBeTruthy();
+    expect(screen.getByText("Lane query; Board view not included")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Board view/ }).className).toContain("on");
   });
 });
