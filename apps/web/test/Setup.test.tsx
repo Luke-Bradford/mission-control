@@ -1918,6 +1918,20 @@ describe("Setup › Repos & seats: the add-repo steps", () => {
     );
   });
 
+  it("a server error at the live checks is a failed check, not a dropped connection", async () => {
+    await toChecks({
+      "POST /api/repos/preview": () => ({
+        status: 502,
+        body: { error: "github: no CI workflow directory on octo-org/mission" },
+      }),
+    });
+    press("Run live checks");
+    const summary = await within(form()).findByRole("region", { name: "A check failed" });
+    expect(summary.textContent).toContain("no CI workflow directory");
+    expect(summary.textContent).toContain("Nothing was saved");
+    expect(summary.textContent).not.toContain("connection dropped");
+  });
+
   it("converting a second repo starts a fresh form for that repo", async () => {
     load();
     at("repos");
@@ -2175,6 +2189,50 @@ describe("Setup › Repos & seats: the seat form", () => {
     await waitFor(() => expect(form.textContent).toContain("catalogue down"));
     expect(form.textContent).not.toContain("No discovered models");
     expect(within(form).getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("Retry rereads the model list and fills the Model select", async () => {
+    const form = await openForm({
+      "/api/accounts/models": () => ({ status: 503, body: { error: "catalogue down" } }),
+    });
+    await waitFor(() => expect(form.textContent).toContain("catalogue down"));
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation(async (input, init) =>
+      input === "/api/accounts/models"
+        ? new Response(
+            JSON.stringify([
+              { accountId: "claude-main", models: [{ model: "sonnet", efforts: [] }] },
+            ]),
+          )
+        : answer(input, init),
+    );
+    fireEvent.click(within(form).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect((within(form).getByLabelText("Model") as HTMLSelectElement).value).toBe("sonnet"),
+    );
+    expect(form.textContent).not.toContain("catalogue down");
+  });
+
+  it("while the model list loads, Model says so and Save explains the wait", async () => {
+    load({
+      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
+      "/api/crew/changes": CHANGES,
+    });
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation((input, init) =>
+      input === "/api/accounts/models" ? new Promise<Response>(() => {}) : answer(input, init),
+    );
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    fireEvent.click(within(card).getByRole("button", { name: "+ Add seat to this repo" }));
+    const form = await screen.findByRole("form", { name: "Add seat" });
+    const model = within(form).getByLabelText("Model") as HTMLSelectElement;
+    expect(model.selectedOptions[0]?.textContent).toBe("Loading models…");
+    fill(form, "inco-2");
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    const summary = await within(form).findByRole("region", { name: "Fix before saving" });
+    expect(summary.textContent).toContain("still loading");
+    expect(posts()).toBe(0);
   });
 
   it("with no models, the 'Model is required' link lands on Account, which can take focus", async () => {

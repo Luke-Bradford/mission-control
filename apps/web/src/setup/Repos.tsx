@@ -908,8 +908,12 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
     }
     go(to);
   };
-  const fail = (cause: unknown) => {
-    const uncertain = isUncertain(cause instanceof ApiError ? cause.status : undefined);
+  const fail = (cause: unknown, readOnly = false) => {
+    // The live checks only read: a 5xx there is the server's own answer (GitHub said no), and
+    // only an answer that never came is a lost connection.
+    const uncertain = readOnly
+      ? !(cause instanceof ApiError)
+      : isUncertain(cause instanceof ApiError ? cause.status : undefined);
     setFailure({ text: errorText(cause), uncertain });
     setFocusKey((key) => key + 1);
     return uncertain;
@@ -944,7 +948,7 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
     } catch (cause) {
       if (mine === latest.current) {
         setChecks((now) => ({ ...now, [stage]: "fail" }));
-        fail(cause);
+        fail(cause, true);
       }
     } finally {
       if (mine === latest.current) {
@@ -1223,6 +1227,9 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
       >
         {failure?.uncertain && issues.length === 0 && (
           <p className="s">{step === 3 ? CHECK_LOST_TEXT : UNCERTAIN_TEXT}</p>
+        )}
+        {failure && !failure.uncertain && issues.length === 0 && step === 3 && (
+          <p className="s">Nothing was saved and your entries are kept.</p>
         )}
       </ErrorSummary>
       {busy && (
