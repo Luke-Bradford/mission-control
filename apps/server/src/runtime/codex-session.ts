@@ -11,6 +11,7 @@ import {
   isObj,
   type SessionEvent,
 } from "@mc/core";
+import { plainCall } from "../guard/plain-call.ts";
 import { str } from "../util.ts";
 import { CODEX_MCP_ELICITATION } from "./codex-wire.ts";
 import { CODEX_DELIVERY } from "./keeper.ts";
@@ -583,6 +584,8 @@ function codexSession(
               toolUseId: key,
               ok: item.status === "completed" && item.exitCode === 0,
               ...(typeof item.exitCode === "number" ? { exitCode: item.exitCode } : {}),
+              // a call that pipes or chains past the check ends with the last step's status (#1411)
+              ...(typeof item.command === "string" ? { wrapped: !plainCall(item.command) } : {}),
               ...(i.fullAccess &&
               key === item.id &&
               typeof item.command === "string" &&

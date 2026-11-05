@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { blockedHere, skipTestsIf } from "../../core/test/sandbox-gaps.ts";
 import { controlPayload, sign, signDirectory } from "../src/auth.ts";
 import type { Identity } from "../src/keys.ts";
 import { unwrapRoomKey } from "../src/membership.ts";
@@ -12,6 +13,8 @@ import { type ClientMessage, type RelayMessage, relayMessageSchema } from "../sr
 import { makeHello } from "../src/relay-client.ts";
 import { startNodeRelay } from "../src/relay-node.ts";
 import { fixture } from "./relay-fixtures.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 let dir: string;
 let relay: Awaited<ReturnType<typeof startNodeRelay>>;
