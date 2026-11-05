@@ -18,7 +18,6 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
-  CONTROLLER_CHECK_PARK,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -41,7 +40,6 @@ import {
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
-  flightFloorBlocked,
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
@@ -867,9 +865,7 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.kind !== "blocked") return false;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-  return (
-    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
-  );
+  return park === "budget" || park === "account" || park === UAT_PARK;
 }
 
 /**
@@ -1558,7 +1554,7 @@ function noteOwner(
     (isHardRulesFlagKey(n.key) || n.key.startsWith("ready:"))
   ) {
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
-    return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
+    return loop?.touches ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
     return OWNER_CONTROLLER;

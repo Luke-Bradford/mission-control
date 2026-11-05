@@ -67,6 +67,7 @@ import {
   fixKey,
   fixSentText,
   fixText,
+  flightClearanceReasons,
   gateView,
   globMatches,
   hardRulesBySettingKey,
@@ -154,6 +155,7 @@ import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
+import { sendFlightMergedLine } from "../flight/merged-line.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
@@ -276,7 +278,7 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "second-review-done": "a second review was already requested on this head",
   "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
-    "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
+    "a blocking review on floor-enforcing paths cannot be accepted past; use second_review or send it for rework",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -355,6 +357,12 @@ export interface Engine {
    * author the failure.
    */
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
+  /**
+   * FLIGHT takes in a PR head that came from outside the run: it is recorded as the run's push
+   * and the run goes back to CI on it. False when the run is not in review or ci on an open PR
+   * whose head is this one, or when it already is the push.
+   */
+  adoptPrHead(runId: string, head: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
@@ -600,15 +608,6 @@ export function createEngine(deps: EngineDeps): Engine {
         ) ||
       seat === undefined ||
       accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
-    );
-  }
-
-  function requiresIndependentController(loop: RunLoop, sha: string): boolean {
-    return (
-      loop.touches?.sha === sha &&
-      loop.touches.paths.some((path) =>
-        FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
-      )
     );
   }
 
@@ -1764,7 +1763,36 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           return refused(r, "merge");
         }
+        const merged = cur.merging?.done.includes("merge") === true;
         stepDone("merge", a.sha, mergedText(cur.prNumber));
+        // FLIGHT's own call covered this merge: the operator hears of it once, with its reason
+        const reasons =
+          !merged && flightPowersOf(config, run.repoId) === "superuser"
+            ? flightClearanceReasons(cur, a.sha)
+            : [];
+        if (reasons.length > 0 && cur.prNumber !== null) {
+          const issue = issueOf(run);
+          const decision =
+            store
+              .flightDecisionsOnTicket(run.ticket ?? "", [run.id], 20)
+              .find((d) => d.kind === "merge" || d.kind === "settle") ?? null;
+          if (
+            sendFlightMergedLine(
+              { store, config, log },
+              {
+                at,
+                pr: cur.prNumber,
+                reasons,
+                ticket:
+                  run.ticket !== null && issue !== null
+                    ? { ref: run.ticket, repoId: run.repoId, issue }
+                    : null,
+                decision: decision === null ? null : { id: decision.id, basis: decision.basis },
+              },
+            )
+          )
+            bus.emit("agents");
+        }
         deps.pollGithub?.();
         out.again = true;
         return;
@@ -2080,16 +2108,6 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
-    // FLIGHT cannot clear its own authority changes. Request the independent verdict while
-    // clearance is pending, before the merge action that used to create this check too late.
-    if (
-      cur.phase === "review" &&
-      cur.awaitingFlight &&
-      requiresIndependentController(cur, cur.awaitingFlight) &&
-      !(cur.controllerCheck?.sha === cur.awaitingFlight && cur.controllerCheck.pass)
-    ) {
-      cur.controllerCheck = { sha: cur.awaitingFlight, from: "review", pass: false };
-    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2849,7 +2867,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         if (kind === "budget" && isDollarCapReason(loop.parked.reason)) return refuse("dollar-cap");
-        // only the controller's verdict settles a controller check, for every caller
+        // only a recorded verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
         if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
@@ -2867,7 +2885,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
-            if (kind !== "stuck") return refuse("wrong-action");
+            if (kind !== "stuck" && kind !== "gate") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
             if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
               return refuse("head-moved");
@@ -3050,8 +3068,7 @@ export function createEngine(deps: EngineDeps): Engine {
           held !== undefined &&
           held !== null &&
           !held.pass &&
-          loop.awaitingFlight === held.sha &&
-          requiresIndependentController(loop, held.sha);
+          loop.awaitingFlight === held.sha;
         if (
           run.endedAt !== null ||
           (!awaiting &&
@@ -3285,12 +3302,63 @@ export function createEngine(deps: EngineDeps): Engine {
         if (
           !sha ||
           (expectedSha !== undefined && sha !== expectedSha) ||
-          sha !== store.runPush(runId)?.sha ||
-          (requiresIndependentController(run.loop, sha) &&
-            !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass))
+          sha !== store.runPush(runId)?.sha
         )
           return false;
-        store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });
+        // a stored pending check row for this head is FLIGHT's to pass with this verdict
+        const check = run.loop.controllerCheck;
+        store.setRunLoop(runId, {
+          ...run.loop,
+          flightClearedSha: sha,
+          awaitingFlight: null,
+          ...(check?.sha === sha && !check.pass
+            ? { controllerCheck: { ...check, pass: true } }
+            : {}),
+        });
+        await pass(runId);
+        return true;
+      });
+    },
+
+    adoptPrHead(runId, head) {
+      return onChainResult(runId, false, async () => {
+        if (!live()) return false;
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (
+          !run ||
+          !loop ||
+          run.endedAt !== null ||
+          flightHeld(run) ||
+          (loop.phase !== "review" && loop.phase !== "ci") ||
+          run.branch === null
+        )
+          return false;
+        const pr = findPr(run, loop);
+        if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
+          return false;
+        const at = now();
+        store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
+        store.setRunPush({ runId, sha: head, at });
+        store.setRunLoop(runId, {
+          ...loop,
+          phase: "ci",
+          pushFor: head,
+          pushStartedAt: at,
+          gate: null,
+          touches: null,
+          flightClearedSha: null,
+          awaitingFlight: null,
+          transient: 0,
+        });
+        store.addLoopEvent(
+          `${runId}:${loop.epoch}:adopted:${head}`,
+          runId,
+          `FLIGHT adopted head ${head.slice(0, 7)} from outside the run`,
+          at,
+        );
+        lastTransient.delete(runId);
+        bus.emit("agents");
         await pass(runId);
         return true;
       });

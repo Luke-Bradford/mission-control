@@ -79,8 +79,11 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
   };
 }
 
+/** A link to a FLIGHT decision on a ticket's page. */
+const DECISION_LINK = /^\/tickets\/[\w.-]+\/\d+#decision-\d+$/;
+
 function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {
-  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
+  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b|\/tickets\/[\w.-]+\/\d+#decision-\d+)/g);
   const occurrences = new Map<string, number>();
   return (
     <>
@@ -88,7 +91,11 @@ function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) 
         const n = occurrences.get(part) ?? 0;
         occurrences.set(part, n + 1);
         const key = `${part}:${n}`;
-        return /^(?:PR \d+|#\d+)$/.test(part) ? (
+        return DECISION_LINK.test(part) ? (
+          <a className="comms-ref" key={key} href={part} onClick={(e) => followLink(e, part)}>
+            the logged decision
+          </a>
+        ) : /^(?:PR \d+|#\d+)$/.test(part) ? (
           <button
             className="comms-ref"
             key={key}

@@ -1529,3 +1529,7 @@ export const runawayTrippedDecision = (reason: string): string =>
   `Runaway breaker tripped: ${reason}.`;
 export const RUNAWAY_LIFTED_DECISION = "Operator lifted the runaway breaker.";
 export const RUNAWAY_NOT_TRIPPED = "The runaway breaker is not tripped.";
+
+/** The one line the operator gets after FLIGHT merges a PR that needed its call. */
+export const flightMergedLine = (pr: number, reasons: readonly string[], link: string): string =>
+  `FLIGHT merged PR ${pr}: ${reasons.join("; ")}. Reason: ${link}`;

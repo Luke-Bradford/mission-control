@@ -1159,7 +1159,7 @@ This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
-The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that only the controller can merge past. FLIGHT's `settle_park` refusals name the same reasons. Past that blocking review FLIGHT uses `second_review` (below), not the controller.
+The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that cannot be accepted past. FLIGHT's `settle_park` refusals name the same reasons. Past that blocking review FLIGHT uses `second_review` (below) or sends it for rework.
 
 ### Rework a parked run
 
@@ -1195,9 +1195,9 @@ It applies to repos where the engine merges (`merge` workspaces).
 A ticket with a controller-check heading (`## Controller check`, or a near spelling: another level,
 "Checks", a suffix) is never merged by the engine until you pass it. When the run's review is clean
 and CI is green, the run parks as `controller-check` with that section's text (cut to a short brief;
-the ticket has the rest), and it shows in Needs you. Once a ticket has listed a check, a pass is
+the ticket has the rest). FLIGHT does the check, and the park is FLIGHT's to clear. Once a ticket has listed a check, a pass is
 needed even if the heading is later removed. If the ticket cannot be read, the run parks the same way
-after three tries, saying so. Do the check, then record the verdict for the head you looked at:
+after three tries, saying so. Do the check, then record the verdict for the head you looked at (FLIGHT uses `mc operator`; the operator may use the route):
 
 ```sh
 curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"verdict":"pass","sha":"<7 or more characters of the head>"}'
@@ -1206,7 +1206,7 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
+A plain resume or message does not lift this park: only a recorded verdict does, and on a superuser repo FLIGHT's `mc operator` call records it on any path. On a standard repo FLIGHT may not record it for changes to its own runtime or approval rules. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
@@ -1286,7 +1286,7 @@ Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket'
 itself: `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
 that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
 removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
-run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
+run's PR until FLIGHT records the check's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
 
@@ -1315,9 +1315,12 @@ it has waited. A chain that has stood still for 30 minutes raises a `chain_stall
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
-repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are FLIGHT shortcuts; each change is a logged decision. The floor is the repo's own rules (guard rules,
-hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
-[FLIGHT approvals](#flight-approvals)) is what lifts one.
+repo reserves (`always_ask`). These are FLIGHT shortcuts; each change is a logged decision. On a superuser
+repo `mc merge_pr` clears any PR once review is clean and CI is green, guard rules, hard-rule paths, CI
+workflows and the CLAUDE.md block included, with no controller check and no approval row. The hub logs
+the clearance with its basis and sends the operator one line per such merge, linking the logged reason.
+A standard repo keeps the floor: a controller's approval (see [FLIGHT approvals](#flight-approvals))
+is what lifts it.
 
 The crew-pause panel lists active run exceptions, who granted each, its reason and time. A
 finished or missing run no longer has an exception, even after a hub restart. The hub event
@@ -1404,19 +1407,30 @@ GitHub reviews and CI, and the independent exact-head QA report. GitHub receives
 with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
 run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
 ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
-hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
+hard-rule PR then needs the same head-bound `merge-floor` approval below on a standard repo; on a
+superuser repo FLIGHT's own logged decision is enough. A merge hold on the branch's
 latest build run still refuses the merge after that run ends, until the hold is released. An operator's
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
 No build run is invented and no board card is marked Done by this path.
 
-Protected repository rules require the existing head-bound `merge-floor` controller approval.
-Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
-unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
-controller check. FLIGHT cannot give itself that verdict through `mc operator`; the in-process
-request retains its authenticated FLIGHT actor instead of impersonating an anonymous operator.
-For a crew PR awaiting FLIGHT clearance, the engine requests this check before clearance. The
-operator can pass the current head through `/api/runs/:id/controller-check`, after which FLIGHT
-clears the PR through its ordinary merge path. A new head requires a new verdict.
+When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an
+unended run, but FLIGHT's shell may merge, resolve and commit on a detached HEAD (`git fetch`, `git
+checkout --detach origin/<branch>`, `git merge origin/main`), then push the result to the PR's own
+branch. The guard refuses those git writes on `main` and in a checkout it cannot read, and a push to
+`main` stays refused. Or FLIGHT starts a seat on the ticket and sends the conflict to it.
+
+On a standard repo, protected repository rules require the existing head-bound `merge-floor`
+controller approval. Ordinary CLAUDE.md prose does not require that approval when its Mission Control
+section is unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
+controller check there, which FLIGHT cannot give itself through `mc operator`.
+
+On a superuser repo only `always_ask` labels and a linked ticket's `## Controller check` hold an
+external PR. FLIGHT's own logged decision covers protected paths, and after the merge the operator gets
+one line naming them, linked to the decision. For a crew PR awaiting FLIGHT clearance, `mc merge_pr`
+clears the head. When the PR's head came from outside the run (a commit from a person or another
+worktree) the run cannot await clearance; `mc merge_pr` then adopts that head as the run's push, so CI
+and RETRO check it, and FLIGHT calls it again when it awaits. A `gate` park (strays or foreign commits
+on a superuser repo) is lifted with `settle_park` `lift`.
 
 External PR acceptance and controller checks have head-bound records. A required acceptance
 appears in the existing QA queue and uses the existing operator route:
@@ -1428,8 +1442,8 @@ appears in the existing QA queue and uses the existing operator route:
 A failure or send-back needs its note. Each route rechecks the current head and PR provenance;
 an old verdict does not apply after a push. A merge hold remains on the PR across pushes and can
 only be changed from the head the caller has checked. Operator acceptance stays with the operator.
-FLIGHT may manage its own holds and ordinary evidence checks, while operator holds and checks on
-FLIGHT's own access remain the independent controller's. These records do not replace CI or QA,
+FLIGHT may manage its own holds and evidence checks (on a standard repo not those on its own access),
+while operator holds remain the operator's. These records do not replace CI or QA,
 and they never stand in for #1214's day-long post-Update observation.
 
 ### FLIGHT approvals
@@ -1442,7 +1456,7 @@ POST /api/flight/approvals { "rule": "merge-floor" | "repo-rules" | "merge-push"
                              "scope": "...", "until": "<ISO time, within 7 days>", "reason": "..." }
 ```
 
-- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
+- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`, on a standard repo or an external PR with `always_ask`; a superuser repo's FLIGHT clears these itself. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
 - `repo-rules`, `merge-push`: a call the guard refused. The scope is the exact command, or the exact file path for Edit and Write. It lets that one call through once, then it is used up.
 
 Each grant and each use is a decision of kind `approval` on the Audit ledger. The refusal text names the rule.

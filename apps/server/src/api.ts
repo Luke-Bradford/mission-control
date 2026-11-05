@@ -4932,8 +4932,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
-      // The verdict on a run's `## Controller check`. FLIGHT may record routine evidence, while
-      // checks of its own runtime and approval guidance require an independent controller.
+      // The verdict on a run's `## Controller check`. On a superuser repo FLIGHT records it on any
+      // path; on a standard repo FLIGHT may only record routine evidence.
       // Reader: docs/runbook.md#record-a-controller-check
       api.post<{ Params: { id: string } }>(
         "/runs/:id/controller-check",
@@ -4947,13 +4947,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           if (
             flightActor(req) &&
+            flightPowersOf(config, run.repoId) !== "superuser" &&
             run.loop.touches?.paths.some((path) =>
               FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
             )
           )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
@@ -5058,10 +5058,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const control = externalPrControl(store, target.repo.id, number, target.sha);
           if (!control?.controllerRequired)
             return reply.code(404).send({ error: "this head has no outstanding controller check" });
-          if (flightActor(req) && control.protectedController)
+          if (
+            flightActor(req) &&
+            flightPowersOf(config, target.repo.id) !== "superuser" &&
+            control.protectedController
+          )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
           setExternalPrControl(store, target.repo.id, number, target.sha, {

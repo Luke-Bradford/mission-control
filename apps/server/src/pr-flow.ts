@@ -69,7 +69,7 @@ function position(
   if (loop?.controllerCheck && !loop.controllerCheck.pass)
     return {
       stage: "controller check",
-      owner: "controller",
+      owner: "FLIGHT",
       reason:
         loop.controllerCheck.sha === sha
           ? "controller check"

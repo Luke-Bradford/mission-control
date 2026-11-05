@@ -232,6 +232,8 @@ let engineCalls: unknown[][];
 let holdCalls: unknown[][];
 let clearanceCalls: unknown[][];
 let clearanceOk: boolean;
+let adoptCalls: unknown[][];
+let adoptOk: boolean;
 let rerunOk: boolean;
 let editCalls: unknown[][];
 let readImpl: (issue: number) => BoardItem | null;
@@ -342,6 +344,8 @@ beforeEach(() => {
   holdCalls = [];
   clearanceCalls = [];
   clearanceOk = true;
+  adoptCalls = [];
+  adoptOk = true;
   rerunOk = true;
   editCalls = [];
   // the live read answers with the stored card unless a test says otherwise
@@ -472,6 +476,10 @@ beforeEach(() => {
       clearFlight: async (...args) => {
         clearanceCalls.push(args);
         return clearanceOk;
+      },
+      adoptPrHead: async (...args) => {
+        adoptCalls.push(args);
+        return adoptOk;
       },
       rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
@@ -6821,25 +6829,69 @@ describe("superuser housekeeping", () => {
     "packages/core/src/flight-access.ts",
     "roles/FLIGHT.md",
     ".claude/skills/flight-ops/SKILL.md",
-  ])("requires independent current-head controller evidence for %s", async (path) => {
+  ])("clears %s with no controller check, and logs the decision", async (path) => {
     elevated();
     runPr();
     const loop = need(store.run("r-pr")?.loop);
     store.setRunLoop("r-pr", { ...loop, touches: { sha: SHA, paths: [path] } });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    expect(clearanceCalls).toEqual([]);
-    store.setRunLoop("r-pr", {
-      ...loop,
-      touches: { sha: SHA, paths: [path] },
-      controllerCheck: { sha: "old-head", from: "review", pass: true },
-    });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    store.setRunLoop("r-pr", {
-      ...loop,
-      touches: { sha: SHA, paths: [path] },
-      controllerCheck: { sha: SHA, from: "review", pass: true },
-    });
     expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    expect(decisions().filter((d) => d.kind === "merge")).toEqual([
+      expect.objectContaining({ targetRunId: "r-pr", decision: expect.stringContaining(path) }),
+    ]);
+  });
+  it("merge_pr clears a guard, .github and CLAUDE.md PR with no approval row and logs its basis", async () => {
+    elevated();
+    runPr();
+    const paths = ["apps/server/src/guard/rules.ts", ".github/workflows/ci.yml", "CLAUDE.md"];
+    const loop = need(store.run("r-pr")?.loop);
+    store.setRunLoop("r-pr", { ...loop, touches: { sha: SHA, paths } });
+    const result = await call("merge_pr", {
+      pr: 12,
+      basis: "Read the diff; the gate change is right",
+    });
+    expect(result).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    const merges = decisions().filter((d) => d.kind === "merge");
+    expect(merges).toHaveLength(1);
+    expect(merges[0]).toMatchObject({
+      targetRunId: "r-pr",
+      ref: "mc#7",
+      basis: "Read the diff; the gate change is right",
+    });
+    for (const path of paths) expect(merges[0]?.decision).toContain(path);
+    expect(decisions().filter((d) => d.kind === "approval")).toEqual([]);
+  });
+  it("merge_pr adopts a head that came from outside the run, once, and refuses otherwise", async () => {
+    elevated();
+    runPr();
+    const OUTSIDE = "e".repeat(40);
+    store.setRunPush({ runId: "r-pr", sha: SHA_B, at: NOW });
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), awaitingFlight: null });
+    ghImpl = async (a) => ({
+      code: 0,
+      stdout:
+        a[0] === "pr" && a[1] === "view"
+          ? JSON.stringify({
+              state: "OPEN",
+              isCrossRepository: false,
+              headRefOid: OUTSIDE,
+              headRefName: "mc/7",
+            })
+          : "",
+      stderr: "",
+    });
+    const r = await call("merge_pr", { pr: 12 });
+    expect(r).toEqual({
+      text: `PR #12's head ${OUTSIDE.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`,
+    });
+    expect(adoptCalls).toEqual([["r-pr", OUTSIDE]]);
+    expect(clearanceCalls).toEqual([]);
+    // a head that is the run's own push is not adopted
+    adoptCalls.length = 0;
+    store.setRunPush({ runId: "r-pr", sha: OUTSIDE, at: NOW });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([]);
   });
   it.each(["ruling", "review-failed", "conflict"])("cannot accept a %s park", async (kind) => {
     elevated();
@@ -6923,7 +6975,7 @@ describe("superuser housekeeping", () => {
     ["head-moved", "the pushed head moved"],
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
-    ["floor-enforced", "only the controller can merge it"],
+    ["floor-enforced", "use second_review or send it for rework"],
     ["second-review-done", "second review was already requested"],
     ["no-second-reviewer", "no reviewer on another account"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
@@ -7150,16 +7202,15 @@ describe("superuser housekeeping", () => {
     ".github/actions/setup/action.yml",
     ".github/CODEOWNERS",
     "CLAUDE.md",
-  ])("merge_pr refuses %s even on a stale awaiting-flight record", async (path) => {
+  ])("merge_pr clears %s with no approval row", async (path) => {
     elevated();
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       touches: { sha: SHA, paths: [path] },
     });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    expect(clearanceCalls).toEqual([]);
-    expect(ghCalls).toEqual([]);
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
   });
   it("merge_pr refuses a PR that waits for the operator's acceptance", async () => {
     elevated();
@@ -9822,35 +9873,21 @@ describe("FLIGHT's full access (#1214)", () => {
       );
     beforeEach(elevated);
 
-    it("refuses a hard-rule path with no approval, and names how to get one", async () => {
+    it("clears a hard-rule path with no approval row, and says so on the ledger", async () => {
       floorPr(".github/workflows/ci.yml");
-      const r = await call("merge_pr", { pr: 12 });
-      expect(r.isError).toBe(true);
-      expect(r.text).toContain("/api/flight/approvals");
-      expect(clearanceCalls).toEqual([]);
-    });
-
-    it("clears the PR once a controller's approval for that head is recorded, and says so on the ledger", async () => {
-      floorPr(".github/workflows/ci.yml");
-      grant();
       expect((await call("merge_pr", { pr: 12 })).isError).toBeUndefined();
       expect(clearanceCalls).toEqual([["r-pr", SHA]]);
-      expect(decisions().find((d) => d.kind === "approval")?.decision).toContain(
-        "controller read the workflow change",
+      expect(decisions().find((d) => d.kind === "merge")?.decision).toContain(
+        ".github/workflows/ci.yml",
       );
+      expect(decisions().some((d) => d.kind === "approval")).toBe(false);
     });
 
-    it.each([
-      ["another head", { scope: `pr:12@${SHA_B.slice(0, 12)}` }],
-      ["another PR", { scope: `pr:13@${SHA.slice(0, 12)}` }],
-      ["a head named too briefly", { scope: `pr:12@${SHA.slice(0, 3)}` }],
-      ["a different rule", { rule: "repo-rules" as const }],
-      ["an expired window", { until: NOW - 1 }],
-    ])("does not take an approval for %s", async (_name, over) => {
+    it("ignores a recorded approval: FLIGHT's own call is enough", async () => {
       floorPr("CLAUDE.md");
-      grant(over);
-      expect((await call("merge_pr", { pr: 12 })).isError).toBe(true);
-      expect(clearanceCalls).toEqual([]);
+      grant({ scope: `pr:13@${SHA.slice(0, 12)}` });
+      expect((await call("merge_pr", { pr: 12 })).isError).toBeUndefined();
+      expect(clearanceCalls).toEqual([["r-pr", SHA]]);
     });
   });
 

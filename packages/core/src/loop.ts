@@ -186,7 +186,7 @@ export function isCiFailureEvent(text: string): boolean {
 export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 /** The park kind of a run whose author ruled on a CI failure instead of fixing it. */
 export const RULING_PARK = "ruling";
-/** The park kind of a run whose ticket lists a controller check; only the operator settles it. */
+/** The park kind of a run whose ticket lists a controller check; only a recorded verdict (FLIGHT's, on a superuser repo) settles it. */
 export const CONTROLLER_CHECK_PARK = "controller-check";
 /** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
 export const MERGE_HOLD_PARK = "merge-hold";
@@ -333,7 +333,7 @@ export const controllerCheckUnreadableText = (sha: string, why: string): string 
   `controller check on ${sha.slice(0, 7)}: ticket could not be read: ${why}`;
 /** Why a plain resume or message cannot lift this park. */
 export const CONTROLLER_CHECK_USE_ROUTE =
-  "this run waits for the controller's verdict: POST /api/runs/:id/controller-check";
+  "this run waits for a recorded check: POST /api/runs/:id/controller-check";
 /** The park reason of a held merge: who holds it and why. */
 export const mergeHoldParkText = (by: string, reason: string): string =>
   `merge held by ${by}: ${reason}`;
@@ -858,25 +858,53 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     P !== null &&
     (loop.flightClearedSha === P ||
       (loop.carry?.to === P && loop.carry.from === loop.flightClearedSha));
-  // only a controller's approval for this head lifts the floor; FLIGHT's own clearance never does
+  // On a superuser repo FLIGHT's own clearance covers every path, outside commit and stray file;
+  // a standard repo keeps the floor, which only an approval for this head lifts.
   const approved = s.floorApproved === true;
-  const floor = elevated && flightFloorBlocked({ touches, gate }) && !approved;
-  const clear =
+  const outside = gate !== null && (gate.strays.length > 0 || !gate.hubOnly);
+  const flightCall =
     touches !== null &&
-    !floor &&
-    (gate?.missionControlChanged !== true || approved) &&
-    (touches.paths.length === 0 || cleared);
+    (touches.paths.length > 0 || gate?.missionControlChanged === true || outside);
+  const clear = elevated
+    ? touches !== null && (!flightCall || cleared)
+    : touches !== null &&
+      (gate?.missionControlChanged !== true || approved) &&
+      touches.paths.length === 0;
   const otherGates =
     on &&
     s.pr?.mergeable !== "CONFLICTING" &&
     s.hardRulesSet === true &&
-    gate?.hubOnly === true &&
-    gate.strays.length === 0 &&
+    gate !== null &&
+    (elevated || (gate.hubOnly && gate.strays.length === 0)) &&
     (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
-  const awaiting =
-    elevated && otherGates && touches !== null && touches.paths.length > 0 && !floor && !cleared;
+  const awaiting = elevated && otherGates && flightCall && !cleared;
   const passes = otherGates && clear;
   return { on, P, touches, gate, clear, passes, awaiting };
+}
+
+/** Up to five paths, then "and N more". */
+const clearancePaths = (paths: readonly string[]): string =>
+  paths.length > 5
+    ? `${paths.slice(0, 5).join(", ")} and ${paths.length - 5} more`
+    : paths.join(", ");
+
+/** The reason line for protected paths a merge changed. */
+export const touchesReason = (paths: readonly string[]): string =>
+  `touches ${clearancePaths(paths)}`;
+
+/** Why this head needed FLIGHT's call. Empty: it did not. */
+export function flightClearanceReasons(
+  loop: Pick<RunLoop, "touches" | "gate">,
+  sha: string,
+): string[] {
+  const touches = loop.touches?.sha === sha ? loop.touches : null;
+  const gate = loop.gate?.sha === sha ? loop.gate : null;
+  const reasons: string[] = [];
+  if (touches !== null && touches.paths.length > 0) reasons.push(touchesReason(touches.paths));
+  const strays = (gate?.strays ?? []).filter((p) => !(touches?.paths ?? []).includes(p));
+  if (strays.length > 0) reasons.push(`files outside the seat's area: ${clearancePaths(strays)}`);
+  if (gate !== null && !gate.hubOnly) reasons.push("a commit from outside the run");
+  return reasons;
 }
 
 /** The move of a merged run's card to Done, once per epoch: a later move by hand is left alone. */
@@ -1128,7 +1156,7 @@ function stateStep(s: LoopSnapshot): Step {
   // A hard-rule touch is the operator's to merge, so the hard-rule paths it brings are not strays;
   // it does not hide foreign commits or other strays.
   const gv = gateView(s, loop);
-  if (gv.on && gv.touches !== null && gv.gate !== null) {
+  if (s.flightPowers !== "superuser" && gv.on && gv.touches !== null && gv.gate !== null) {
     const hard = gv.touches.paths;
     const strays = gv.gate.strays.filter((p) => !hard.includes(p));
     if (strays.length > 0) return park(loop, "gate", gateStrayParkText(seat.call, strays));
@@ -1343,7 +1371,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
               hardPaths.length > 0 &&
               gv.gate?.hubOnly === true &&
               gv.gate.strays.every((p) => hardPaths.includes(p));
-            if (hardOnly && gv.touches !== null) {
+            if ((gv.awaiting || hardOnly) && gv.touches !== null) {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: gv.awaiting

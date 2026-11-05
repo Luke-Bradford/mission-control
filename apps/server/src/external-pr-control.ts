@@ -7,7 +7,7 @@ export interface ExternalPrControl {
   uatAccepted: boolean;
   controllerRequired: boolean;
   controllerPassed: boolean;
-  /** A change to the code or guidance governing FLIGHT needs an independent controller verdict. */
+  /** Standard repos only: a change to the code or guidance governing FLIGHT needs an independent verdict. */
   protectedController?: boolean;
   note: string | null;
 }
@@ -70,7 +70,7 @@ export function externalControlReason(
   if (hold !== null) return hold;
   const control = externalPrControl(store, repo, pr, sha);
   if (control?.controllerRequired && !control.controllerPassed)
-    return control.note ?? "Waiting for the controller's evidence on this PR head.";
+    return control.note ?? "Waiting for FLIGHT's check of this PR head.";
   if (control?.uatRequired && !control.uatAccepted)
     return control.note ?? "Waiting for the operator's acceptance of this PR head.";
   return null;

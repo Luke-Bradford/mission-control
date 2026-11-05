@@ -171,6 +171,32 @@ describe("TicketPage", () => {
     expect(gh[0]?.getAttribute("href")).toBe(GH);
   });
 
+  it("a decision hash opens its full text", async () => {
+    window.history.replaceState(null, "", "/tickets/shop-app/3349#decision-9");
+    try {
+      show(history());
+      await screen.findByRole("heading", { name: "Quote cache" });
+      const entry = document.getElementById("decision-9") as HTMLElement;
+      expect(entry).not.toBeNull();
+      await waitFor(() =>
+        expect((entry.querySelector("details.tk-more") as HTMLDetailsElement).open).toBe(true),
+      );
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("opens nothing for a hash that names a decision off the page", async () => {
+    window.history.replaceState(null, "", "/tickets/shop-app/3349#decision-999");
+    try {
+      show(history());
+      await screen.findByRole("heading", { name: "Quote cache" });
+      expect(document.querySelectorAll("details.tk-more[open]")).toHaveLength(0);
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   it("says loading while the ticket loads", () => {
     stubFetch({ "/api/config": CONFIG, [PATH]: () => ({ status: 200, body: history() }) });
     render(<TicketPage repoId="shop-app" number={3349} />);

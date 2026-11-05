@@ -33,6 +33,7 @@ import {
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
   fixSentText,
+  flightMergedLine,
   globMatches,
   hardRulesBySettingKey,
   hardRulesFlagKey,
@@ -4361,6 +4362,38 @@ describe("the engine runs reviews", () => {
       reported(first().id, []);
     }
 
+    describe("FLIGHT adopts a head from outside the run", () => {
+      it("adoptPrHead moves the run to ci on the new head, and refuses a working run", async () => {
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().phase).toBe("review");
+        setLoop({ gate: { ...need(h.gate), sha: SHA }, flightClearedSha: SHA });
+        // nothing to adopt while the head is the run's own push
+        expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
+        // the PR's head moved to a commit the run did not make
+        setPr({ ci: "passing", headSha: SHA_B });
+        expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
+        clock += 1000;
+        expect(await h.engine.adoptPrHead(RUN, SHA_B)).toBe(true);
+        expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        expect(store.newestRunCommit(RUN)?.sha).toBe(SHA_B);
+        // CI is green on the new head, so the pass that follows has already moved it on to review
+        expect(loopOf()).toMatchObject({
+          pushFor: SHA_B,
+          flightClearedSha: null,
+          awaitingFlight: null,
+        });
+        expect(["ci", "review"]).toContain(loopOf().phase);
+        expect(loopOf().gate?.sha ?? SHA_B).toBe(SHA_B);
+        expect(loopTexts().some((t) => t.includes("adopted head"))).toBe(true);
+        // a run that is working is refused
+        setLoop({ phase: "working" });
+        setPr({ ci: "passing", headSha: SHA });
+        expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
+        expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+      });
+    });
+
     describe("a hold on the merge", () => {
       it("parks a clean, green run instead of merging, and merges once released", async () => {
         await toReview();
@@ -5451,62 +5484,109 @@ describe("the engine runs reviews", () => {
       expect(h.gateReads.slice(1).every((g) => g.known)).toBe(true);
     });
 
+    const flightSeatConfig = () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      need(config.crew?.sessions[0]).seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+    };
+    const mergeLines = () =>
+      store.commsOnTicket("mc#7", "#7", ["PR 12"], 20).filter((m) => m.to === "CAPCOM");
+
     it.each([
       "apps/server/src/flight/tools.ts",
       "apps/server/src/api.ts",
       "packages/core/src/flight-access.ts",
-    ])(
-      "requests an independent check before FLIGHT clearance for %s, accepts the operator API verdict, then merges",
-      async (path) => {
-        need(config.repos[0]).flightPowers = "superuser";
-        need(config.crew?.sessions[0]).seats.push({
-          id: "flight-1",
-          role: "FLIGHT",
-          accountId: "claude-main",
-          model: "opus",
-          area: [],
-        });
-        h.touches = [path];
-        h.gate = { ...need(h.gate), strays: [] };
-        await gateOpen();
-        await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
-        expect(
-          h.hardRuleLists.some((rules) =>
-            rules.some((pattern) => globMatches(pattern, path, true)),
-          ),
-        ).toBe(true);
-        expect(h.steps).toEqual([]);
-        expect(loopOf().controllerCheck).toEqual({ sha: SHA, from: "review", pass: false });
-        expect(await h.engine.clearFlight(RUN, SHA)).toBe(false);
-        const app = buildApp({
-          config,
-          store,
-          bus: new ChangeBus(),
-          engine: h.engine,
-          operatorToken: "fixture-operator",
-          now: () => clock,
-          supervisor: { status: () => ({ enabled: true, note: null }) } as Supervisor,
-        });
-        try {
-          const post = (sha: string) =>
-            app.inject({
-              method: "POST",
-              url: `/api/runs/${encodeURIComponent(RUN)}/controller-check`,
-              headers: { "x-mc-operator": "fixture-operator" },
-              payload: { verdict: "pass", sha },
-            });
-          expect((await post(SHA_B)).statusCode).toBe(409);
-          expect((await post(SHA)).statusCode).toBe(200);
-          expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
-          expect(loopOf().awaitingFlight).toBe(SHA);
-          expect(h.steps).not.toContain("merge");
-        } finally {
-          await app.close();
-        }
-        expect(await h.engine.clearFlight(RUN)).toBe(true);
-        expect(h.steps).toContain("merge");
-      },
-    );
+    ])("FLIGHT clears %s with no controller check, and the engine merges it", async (path) => {
+      flightSeatConfig();
+      h.touches = [path];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      expect(h.steps).toEqual([]);
+      expect(loopOf().controllerCheck ?? null).toBeNull();
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(h.steps).toContain("merge");
+    });
+
+    it("a stored pending controller check on the head is passed by FLIGHT's clearance", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      setLoop({ controllerCheck: { sha: SHA, from: "review", pass: false } });
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
+    });
+
+    it("a commit from outside the run and stray files wait for FLIGHT, then merge", async () => {
+      flightSeatConfig();
+      h.touches = [];
+      h.gate = { ...need(h.gate), hubOnly: false, strays: ["docs/outside.md"] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      expect(loopOf().parked).toBeNull();
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(h.steps).toContain("merge");
+    });
+
+    it("one line to the operator after a merge FLIGHT cleared", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/guard/x.ts", ".github/workflows/ci.yml"];
+      h.gate = { ...need(h.gate), hubOnly: false, strays: ["docs/outside.md"] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      const decisionId = store.addFlightDecision({
+        at: clock,
+        kind: "merge",
+        seatId: null,
+        targetRunId: RUN,
+        ref: "mc#7",
+        questionId: null,
+        about: "PR #12",
+        decision: "Cleared",
+        basis: "Read the diff",
+      });
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(mergeLines()).toHaveLength(1);
+      const reasons = [
+        "touches apps/server/src/guard/x.ts, .github/workflows/ci.yml",
+        "files outside the seat's area: docs/outside.md",
+        "a commit from outside the run",
+      ];
+      expect(mergeLines()[0]).toMatchObject({
+        from: "flight-1",
+        to: "CAPCOM",
+        ref: "PR 12",
+        label: null,
+        text: flightMergedLine(12, reasons, `/tickets/mc/7#decision-${decisionId}`),
+      });
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(mergeLines()).toHaveLength(1);
+    });
+
+    it("no line to the operator when nothing needed FLIGHT's call", async () => {
+      flightSeatConfig();
+      h.touches = [];
+      await gateOpen();
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toContain("merge");
+      expect(mergeLines()).toEqual([]);
+    });
+
+    it("no line to the operator on a standard repo", async () => {
+      h.touches = [];
+      await gateOpen();
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toContain("merge");
+      expect(mergeLines()).toEqual([]);
+    });
 
     it.each(["apps/web/src/x.ts", "apps/server/src/guard/x.ts", "apps/server/src/api.ts"])(
       "accept keeps RETRO independent on %s",
@@ -5733,8 +5813,6 @@ describe("the engine runs reviews", () => {
         await h.engine.reconcileRun(RUN);
         expect(loopOf().parked).toBeNull();
         expect(h.sent.some((l) => l.key.includes("flight-rework"))).toBe(false);
-        expect(await h.engine.clearFlight(RUN, SHA)).toBe(false);
-        expect(await h.engine.controllerCheck(RUN, "pass", SHA)).toEqual({ lifted: true });
         expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
         await h.engine.reconcileRun(RUN);
         expect(h.steps).toContain("merge");
@@ -5895,6 +5973,16 @@ describe("the engine runs reviews", () => {
       expect(await operate(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe(true);
     });
 
+    it("lift settles a gate park, and the run is re-judged", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "gate", reason: "strays", ended: false } });
+      expect(await operate(RUN, "FLIGHT", { kinds: ["stuck", "gate"], action: "lift" })).toBe(true);
+      expect(loopOf().parked).toBeNull();
+      expect(loopOf().phase).not.toBe("parked");
+    });
+
     describe("names the check that refused", () => {
       const refusal = async (
         by: "CAPCOM" | "FLIGHT",
@@ -6042,7 +6130,7 @@ describe("the engine runs reviews", () => {
       expect(
         attentionItems(config, store, clock).find((i) => i.key === `note:ready:${RUN}:${SHA}`)
           ?.owner,
-      ).toBe("operator");
+      ).toBe("flight");
       expect(loopOf().touches).toEqual({
         sha: SHA,
         paths: h.touches,
@@ -6053,7 +6141,7 @@ describe("the engine runs reviews", () => {
       });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
-        readyHardRuleText(`${REPO}#7`, 12, h.touches),
+        `${REPO}#7: PR #12 awaiting-flight on ${SHA}`,
       );
     });
 
@@ -6076,7 +6164,7 @@ describe("the engine runs reviews", () => {
       });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
-        readyHardRuleText(`${REPO}#7`, 12, h.touches),
+        `${REPO}#7: PR #12 awaiting-flight on ${SHA}`,
       );
     });
 
