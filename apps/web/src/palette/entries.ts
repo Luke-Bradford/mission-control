@@ -9,6 +9,7 @@ import {
 } from "@mc/core";
 import { seatError } from "../agent/seat.ts";
 import { ApiError, apiPost } from "../api.ts";
+import { openNeed } from "../attention.ts";
 import { ticketForRef } from "../comms/model.ts";
 import { callSign, seatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
@@ -19,7 +20,6 @@ import {
   commsCrewPath,
   commsFlightPath,
   commsTicketPath,
-  itemPath,
   navigate,
   type Page,
   ticketPath,
@@ -47,6 +47,7 @@ export interface PaletteEntry {
 
 const PAGE_TITLES: Record<Page, string> = {
   overview: "Overview",
+  needs: "Needs you",
   flight: "FLIGHT",
   board: "Board",
   agent: "Agent",
@@ -253,7 +254,7 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
       title: th.text,
       hint: th.key,
       haystack: `${th.key} ${th.text}`,
-      run: () => navigate(itemPath(th.key)),
+      run: () => openNeed(th),
     });
   }
   return out;

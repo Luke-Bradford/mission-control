@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode } from "react";
+import { createContext, Fragment, type ReactNode, useContext } from "react";
+import { SafeLink } from "./SafeLink.tsx";
 
 /** The code block's class: it scrolls sideways inside its own box (see `.md pre.md-code` in hud/shared.css). */
 export const MD_CODE_CLASS = "md-code";
@@ -17,7 +18,8 @@ type MdNode =
   | { t: "text"; text: string }
   | { t: "code"; text: string }
   | { t: "bold"; kids: MdNode[] }
-  | { t: "link"; kids: MdNode[]; url: string };
+  /** `image` marks `![label](url)`: other surfaces show the label as text. */
+  | { t: "link"; kids: MdNode[]; url: string; image?: boolean };
 
 /** A run of two or more stars; `open`/`close` say whether it can open or close bold by what is next to it. */
 type Stars = { t: "stars"; k: number; open: boolean; close: boolean };
@@ -122,8 +124,15 @@ function parse(s: string): MdNode[] {
         buf += c;
         i++;
       } else {
+        const image = buf.endsWith("!");
+        if (image) buf = buf.slice(0, -1);
         flush();
-        flat.push({ t: "link", kids: parse(s.slice(i + 1, close)), url: s.slice(close + 2, end) });
+        flat.push({
+          t: "link",
+          kids: parse(s.slice(i + 1, close)),
+          url: s.slice(close + 2, end),
+          ...(image ? { image: true } : {}),
+        });
         i = end + 1;
       }
     } else {
@@ -192,12 +201,52 @@ function limit(nodes: MdNode[], max: number): MdNode[] {
   return take(nodes);
 }
 
+/** True under `OpenLinks`: links and bare http(s) URLs become safe, openable links. */
+const OpenLinksContext = createContext(false);
+
+/** Text, with bare http(s) URLs made links under `OpenLinks`. */
+function MdText({ text }: { text: string }) {
+  const open = useContext(OpenLinksContext);
+  if (!open || !text.includes("http")) return <>{text}</>;
+  const parts = text.split(BARE_URL);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: split parts never reorder
+          <SafeLink key={i} url={part}>
+            {part}
+          </SafeLink>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
+/** A bare URL ends before whitespace, a closing bracket or sentence punctuation. */
+const BARE_URL = /(https?:\/\/[^\s<>()[\]]*[^\s<>()[\].,;:!?'"])/g;
+
+function MdLink({ url, children }: { url: string; children: ReactNode }) {
+  const open = useContext(OpenLinksContext);
+  return open ? <SafeLink url={url}>{children}</SafeLink> : <span title={url}>{children}</span>;
+}
+
+/**
+ * Markdown links under it open in the browser (https, loopback http, same-origin paths only; the
+ * rest are refused in text). Elsewhere a link is its text with the URL in `title`.
+ */
+export function OpenLinks({ children }: { children: ReactNode }) {
+  return <OpenLinksContext.Provider value={true}>{children}</OpenLinksContext.Provider>;
+}
+
 function render(nodes: MdNode[]): ReactNode[] {
   const node = (n: MdNode): ReactNode => {
     if (n.t === "code") return <code>{n.text}</code>;
     if (n.t === "bold") return <strong>{render(n.kids)}</strong>;
-    if (n.t === "link") return <span title={n.url}>{render(n.kids)}</span>;
-    return n.text;
+    if (n.t === "link") return <MdLink url={n.url}>{render(n.kids)}</MdLink>;
+    return <MdText text={n.text} />;
   };
   return nodes.map((n, i) => (
     // biome-ignore lint/suspicious/noArrayIndexKey: parsed text has no id and never reorders

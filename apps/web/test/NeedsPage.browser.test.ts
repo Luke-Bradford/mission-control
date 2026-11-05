@@ -1,0 +1,242 @@
+// @vitest-environment node
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import {
+  BROWSER_TEST_TIMEOUT_MS,
+  browserSession,
+  describeRendered,
+  type RenderedPage,
+} from "./browserRunner.ts";
+import { desktopFixture } from "./desktopFixtures.ts";
+import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
+
+const { renderAt } = browserSession();
+const SHOTS = process.env.MC_SHOT_DIR;
+
+const SHA = "a".repeat(40);
+const PICTURE = `/api/prs/1453/evidence/${SHA}/needs-light-after.png`;
+/** A 1600 x 1000 mockup, so a thumbnail and a large picture differ. */
+const MOCKUP = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#e8eef9"/><rect x="40" y="40" width="440" height="920" fill="#c5d3ee"/><rect x="520" y="40" width="1040" height="120" fill="#9db4e0"/><text x="560" y="115" font-size="48" font-family="sans-serif">Proposed layout</text></svg>`;
+const ASSETS = { [PICTURE]: { contentType: "image/svg+xml", body: MOCKUP } };
+
+const KEY = "decision:layout";
+const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
+
+const LONG = Array.from(
+  { length: 9 },
+  (_, i) => `Line ${i + 1} of a longer reply that explains the trade-off in some detail.`,
+).join("\n");
+
+function messages(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `m${i}`,
+    itemKey: KEY,
+    correlationId: "d1",
+    role: i % 2 ? "operator" : "flight",
+    text: i % 5 === 0 ? LONG : `Message ${i + 1}: short and plain.`,
+    at: NOW - (n - i) * MIN,
+  }));
+}
+
+function api(n = 6) {
+  const asks = [
+    item({
+      key: KEY,
+      kind: "decision",
+      agentId: "guido-1",
+      escalationId: null,
+      ticket: "shop-app#1453",
+      text: "Which layout should the Needs you page use?",
+      at: NOW - 2 * HOUR,
+      brief: brief({
+        ask: "Which layout should the Needs you page use: a list and the open item, or one long column?",
+        original: `Here is the proposal.\n\n![Proposed layout](${PICTURE})\n\nSee the [spec](https://example.com/spec) too.`,
+        assessment: "A list with the open item beside it keeps every ask one click away.",
+        recommendation: "List and open item.",
+        recommendedOptionId: "list",
+        options: [
+          { id: "list", label: "List and open item", answer: "Use the list and open item." },
+          { id: "column", label: "One long column", answer: "Use one long column." },
+        ],
+      }),
+    }),
+    item({ key: "question:two", kind: "question", escalationId: null, text: "Second ask" }),
+    item({ key: "question:three", kind: "question", escalationId: null, text: "Third ask" }),
+  ];
+  const base = desktopFixture().api;
+  const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: messages(n) };
+  return {
+    ...base,
+    "/api/attention": asks,
+    "/api/attention/held": [],
+    "/api/notifications": { open: [], handledToday: [] },
+    [discussionPath(KEY)]: discussion,
+    [`${discussionPath(KEY)}?id=d1`]: discussion,
+  };
+}
+
+async function ready(page: RenderedPage) {
+  await page.boxes("#page-needs .needs-band");
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }, undefined);
+  if (page.errors().length) throw new Error(page.errors().join("; "));
+}
+
+async function pictureLoaded(page: RenderedPage) {
+  await page.boxes(".needs-frame img");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const img = document.querySelector(".needs-frame img") as HTMLImageElement;
+        if (img.complete && img.naturalWidth) resolve();
+        else img.addEventListener("load", () => resolve());
+      }),
+    undefined,
+  );
+}
+
+describeRendered("Needs you page", () => {
+  it(
+    "the open item fills the width with the mockup shown large",
+    async () => {
+      for (const [width, height, minImage] of [
+        [2560, 1200, 1300],
+        [1920, 940, 900],
+      ] as const) {
+        const label = `${width}x${height}`;
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: api(),
+          assets: ASSETS,
+        });
+        try {
+          await ready(page);
+          await pictureLoaded(page);
+          const detail = await page.box(".needs-detail");
+          expect(
+            width - (detail.x + detail.width),
+            `${label}: detail reaches the right edge`,
+          ).toBeLessThanOrEqual(32);
+          const image = await page.box(".needs-frame img");
+          expect(image.width, `${label}: the mockup is large`).toBeGreaterThanOrEqual(minImage);
+          const band = await page.box(".needs-band");
+          expect(
+            band.y + band.height,
+            `${label}: the band is on the first screen`,
+          ).toBeLessThanOrEqual(height);
+          const tab = await page.box(".tabs a.needs-tab b");
+          expect(
+            tab.y + tab.height,
+            `${label}: the tab count is on the first screen`,
+          ).toBeLessThanOrEqual(height);
+          const scroll = await page.evaluate(
+            () => document.documentElement.scrollHeight - innerHeight,
+            undefined,
+          );
+          expect(scroll, `${label}: the page itself does not scroll`).toBeLessThanOrEqual(0);
+          expect(await page.reachable(".needs-band")).toEqual([true]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "thirty messages stay readable and the question stays on screen",
+    async () => {
+      for (const [width, height] of [
+        [2560, 1200],
+        [1920, 940],
+        [1600, 700],
+      ] as const) {
+        const label = `${width}x${height}`;
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: api(30),
+          assets: ASSETS,
+        });
+        try {
+          await ready(page);
+          await page.boxes("#needsMsgs .dmsg");
+          const before = await page.box(".needs-band");
+          for (const to of ["top", "bottom"] as const) {
+            await page.evaluate((where) => {
+              const log = document.getElementById("needsMsgs") as HTMLElement;
+              log.scrollTop = where === "top" ? 0 : log.scrollHeight;
+            }, to);
+            expect(
+              await page.box(".needs-band"),
+              `${label}: band after scrolling to ${to}`,
+            ).toEqual(before);
+          }
+          if (width >= 1920) {
+            const message = await page.box("#needsMsgs .dmsg");
+            expect(
+              message.width,
+              `${label}: messages are wide enough to read`,
+            ).toBeGreaterThanOrEqual(400);
+          }
+          expect(
+            await page.reachable("#needsMsgs .dmsg:last-of-type"),
+            `${label}: last message`,
+          ).toEqual([true]);
+          expect(
+            await page.reachable("#needsDiscussionForm textarea"),
+            `${label}: composer`,
+          ).toEqual([true]);
+          expect(before.height, `${label}: the band stays within its limit`).toBeLessThanOrEqual(
+            136,
+          );
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "captures the design views",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        for (const [width, height] of [
+          [2560, 1200],
+          [1920, 940],
+        ] as const) {
+          const page = await renderAt({
+            page: "test/needsBrowser.html",
+            width,
+            height,
+            colorScheme: scheme,
+            api: api(),
+            assets: ASSETS,
+          });
+          try {
+            await ready(page);
+            await pictureLoaded(page);
+            // populated: the question, the picture, the options and the conversation are all there
+            await page.boxes(".needs-band-question");
+            await page.boxes("#needsMsgs .dmsg");
+            await page.boxes(".needs-row");
+            if (SHOTS) {
+              mkdirSync(SHOTS, { recursive: true });
+              await page.screenshot(join(SHOTS, `needs-${width}x${height}-${scheme}.png`));
+            }
+          } finally {
+            await page.close();
+          }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});

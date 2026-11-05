@@ -1,11 +1,10 @@
 import { ATTENTION_LABEL, type AttentionItem } from "@mc/core";
-import { needsYouItems, openNeedsYou, sortNeeds } from "../attention.ts";
+import { needsYouItems, openNeed, sortNeeds } from "../attention.ts";
 import { useNow } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { elapsed } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { followLink, NEEDS_YOU_PATH } from "../router.ts";
-import { openItem } from "../shell/overlays.ts";
 
 /** Rows shown before the rest move behind a link, so this panel never pushes the others away. */
 const SHOWN = 4;
@@ -38,11 +37,7 @@ export function NextActionsPanel() {
         <ul className="needs-list">
           {items.slice(0, SHOWN).map((item) => (
             <li key={item.key}>
-              <button
-                type="button"
-                className="needs-row"
-                onClick={() => (item.notTriaging ? openNeedsYou() : openItem(item.key))}
-              >
+              <button type="button" className="needs-row" onClick={() => openNeed(item)}>
                 <span className="needs-kind">{ATTENTION_LABEL[item.kind].toLowerCase()}</span>
                 <span className="needs-text" title={item.text}>
                   {item.text}

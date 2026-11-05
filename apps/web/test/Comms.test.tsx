@@ -1023,8 +1023,6 @@ describe("Decisions", () => {
           }),
         ]}
         rows={ROWS}
-        flightSeat={null}
-        onDiscuss={() => {}}
       />,
     );
 

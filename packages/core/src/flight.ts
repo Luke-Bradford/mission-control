@@ -28,6 +28,7 @@ export const watchCheckoutName = (seatId: string): string => `${seatId}-watch`;
 /** The canonical top-level HUD route catalogue, shared by the web router and product pass. */
 export const HUD_PAGE_PATHS = {
   overview: "/",
+  needs: "/needs-you",
   flight: "/flight",
   board: "/board",
   agent: "/agent",

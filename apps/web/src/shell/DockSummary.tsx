@@ -1,10 +1,9 @@
 import { ATTENTION_LABEL, type AttentionItem, type Crew, type FlightSummaryView } from "@mc/core";
-import { openNeedsYou, youAction } from "../attention.ts";
+import { openNeed, openNeedsYou, youAction } from "../attention.ts";
 import type { Resource } from "../data.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { openItem } from "./overlays.ts";
 import { useStore } from "./store.ts";
 
 /** The existing attention order and read-only headline; no second queue or decision store. */
@@ -24,7 +23,7 @@ export function DockSummary({
   const stale = (summary.data?.headlineAgeMin ?? 0) >= 60;
   const headline = summary.data?.headline;
   const first = asks[0];
-  const open = (item: AttentionItem) => (item.notTriaging ? openNeedsYou() : openItem(item.key));
+  const open = openNeed;
   return (
     <section className="dock-summary scroll" aria-label="FLIGHT summary">
       <div className="dock-summary-state s" aria-live="polite">

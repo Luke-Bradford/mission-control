@@ -14,6 +14,7 @@ import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { dur, hhmm, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { useMetrics } from "../metrics.ts";
+import { NEEDS_YOU_PATH, navigate } from "../router.ts";
 import { stateWord } from "../shell/Dock.tsx";
 import { useStore } from "../shell/store.ts";
 import { type FlightSeat, type FlightView, flightOffText } from "./flightTypes.ts";
@@ -70,6 +71,7 @@ function Counter({
   warn = false,
   metric,
   onOpen,
+  to,
 }: {
   tab: FlightTab;
   label: string;
@@ -78,12 +80,14 @@ function Counter({
   /** The registry figure this counter shows, when it is one. */
   metric?: MetricId;
   onOpen: (tab: FlightTab) => void;
+  /** A page this counter leads to instead of a tab (Needs you is its own page). */
+  to?: string;
 }) {
   return (
     <button
       type="button"
       className={`flight-counter${warn && n ? " tone-warn" : ""}`}
-      onClick={() => onOpen(tab)}
+      onClick={() => (to === undefined ? onOpen(tab) : navigate(to))}
       aria-label={`${label}: ${n ?? "loading"}`}
     >
       <b data-metric={metric}>{n ?? DASH}</b> {label}
@@ -169,6 +173,7 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
           warn
           metric="needsYou"
           onOpen={onOpen}
+          to={NEEDS_YOU_PATH}
         />
         <Counter tab="needs" label="FLIGHT handling" n={handling} onOpen={onOpen} />
         <Counter tab="did" label="decided 24 h" n={decided} onOpen={onOpen} />
