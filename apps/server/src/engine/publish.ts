@@ -414,6 +414,7 @@ export function ciLogBody(log: string, max: number): string {
   let open: string[] | null = null;
   let sinceFail = 0;
   let stream = false;
+  let lastJob: string | null = null;
   for (const raw of log.split("\n")) {
     const m = LOG_LINE.exec(raw);
     const job = m === null ? "" : (m[1] ?? "");
@@ -421,6 +422,12 @@ export function ciLogBody(log: string, max: number): string {
     if (text === "") continue;
     const g = jobs.get(job) ?? { entries: [], marks: [], noise: [], rest: [], fails: 0 };
     jobs.set(job, g);
+    // a FAIL line's error window and a console block end where the job's lines do
+    if (job !== lastJob) {
+      open = null;
+      stream = false;
+      lastJob = job;
+    }
     if (STREAM_LINE.test(text)) stream = true;
     else if (BLOCK_END.test(text)) stream = false;
     if (NOT_A_CAUSE.test(text)) continue;
@@ -476,8 +483,12 @@ export function ciLogBody(log: string, max: number): string {
     .sort((a, b) => b.entries.length - a.entries.length);
   const failingOf = (x: Group) => x.entries.length + x.marks.length;
   if (!groups.some((x) => failingOf(x) > 0)) {
-    const lines = log.trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
-    return tailBytes(lines.join("\n"), max);
+    // the last lines of the jobs still standing: the summary job's stay out of it
+    const kept = log
+      .trimEnd()
+      .split("\n")
+      .filter((raw) => jobs.has(LOG_LINE.exec(raw)?.[1] ?? ""));
+    return tailBytes(kept.slice(-CI_EXCERPT_LINES).join("\n"), max);
   }
   const named = groups.length > 1 || groups[0]?.job !== "";
   const label = (job: string, tier: string) =>

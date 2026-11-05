@@ -696,6 +696,8 @@ describe("ciExcerpt", () => {
     const log = [
       "web-core\tRun\t2026-11-05T04:59:02.0Z  FAIL  a.test.ts > it works",
       "web-core\tRun\t2026-11-05T04:59:02.0Z AssertionError: expected 1 to be 2",
+      'check\tVerify\t2026-11-05T04:59:03.0Z test "failure" = success',
+      "check\tVerify\t2026-11-05T04:59:03.0Z Error: needs failed",
       "check\tVerify\t2026-11-05T04:59:03.0Z Error: Process completed with exit code 1.",
     ].join("\n");
     ghAnswers = [
@@ -913,6 +915,17 @@ describe("ciExcerpt", () => {
       ]);
       expect(out.match(/FAIL/g)).toHaveLength(1);
       expect(out.indexOf("later")).toBeGreaterThan(out.indexOf("[web-core: console]"));
+    });
+
+    it("tails the real job's lines, not the summary job's, when no line ranks as failing", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 200 }, (_, i) => L(`build step ${i}`, "validate")),
+        L('test "failure" = success', "check"),
+        ...Array.from({ length: 4 }, (_, i) => L(`check line ${i}`, "check")),
+      ]);
+      expect(out).toContain("build step 120");
+      expect(out).toContain("build step 199");
+      expect(out).not.toContain('test "failure"');
     });
 
     it("prints a repeated type error once", async () => {
