@@ -190,7 +190,7 @@
          chip "Held · hub", next move "Waiting on FLIGHT", account claude-max, model claude-sonnet-5-5 (medium), CLI 2.1.318, area apps/server/**, packages/core/**, docs/**, and the branch.
          Prompt sections 3,952 / 1,398 / 16,299, context 73.8k and ~$0.71 are from the 1434 ticket's Why section. Activity rows follow StreamEvent / toolTarget (target 80 chars, result 100).
          The reasons, other prompt sections, plan, files, links, times and counts are illustrative.
-         ?state=running draws the running seat; default is parked. ?plan=empty, ?flight=1, ?theme=light. -->
+         Default: parked on a refused rework push. ?state=running draws the seat running; ?state=review draws it held on review with the rework composer. ?plan=empty, ?flight=1, ?theme=light. -->
     <header class="top">
       <div class="brand">MISSION CONTROL</div>
       <nav class="nav" aria-label="Pages"><a href="#">Overview</a><a href="#">Board</a><a href="#" class="on">Agents</a><a href="#">Map</a><a href="#">Comms</a><a href="#">QA</a><a href="#">Telemetry</a><a href="#">Audit</a></nav>
@@ -271,18 +271,21 @@
       const q = new URLSearchParams(location.search);
       const emptyPlan = q.get("plan") === "empty";
       const RUN = q.get("state") === "running";
+      const REV = q.get("state") === "review";
       // ---- Identity, next move and loop for the two states. The state word appears once: in the pill.
       const full = (t, label) => `<span class="cut" tabindex="0" data-full="${esc(label)}">${esc(t)}</span>`;
       const S = RUN
-        ? { pill: "Running", cls: "", chip: null, why: "Checking 117f67b again with pnpm -s test:related", whyFull: "Checking 117f67b again with pnpm -s test:related after FLIGHT's ruling. The call waits for the shared test lock.", buttons: ["Interrupt", "Stop", "More ▾"], age: "state changed 42s ago", last: "last event just now" }
-        : { pill: "Parked", cls: " parked", chip: "Held · hub", why: "Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox", whyFull: "Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox. The change selects most of the suite, so Chrome-backed tests could not start. The seat waits for FLIGHT's ruling.", buttons: ["Stop", "More ▾"], age: "state changed 3m ago", last: "last event 3m ago" };
+        ? { pill: "Running", cls: "", why: "Checking 117f67b again with pnpm -s test:related", whyFull: "Checking 117f67b again with pnpm -s test:related after FLIGHT's ruling. The call waits for the shared test lock.", buttons: ["Interrupt", "Stop", "More ▾"], age: "state changed 42s ago", last: "last event just now" }
+        : REV
+          ? { pill: "Parked", cls: " parked", why: "RETRO-1 found 5 blocking findings on the current PR head", whyFull: "RETRO-1 found 5 blocking findings on the current PR head. The seat waits for the findings to be sent back for rework. Sending them does not waive them.", buttons: ["Stop", "More ▾"], age: "state changed 3m ago", last: "last event 3m ago" }
+          : { pill: "Parked", cls: " parked", why: "Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox", whyFull: "Push refused at 117f67b: pnpm -s test:related did not pass in this seat's sandbox. The change selects most of the suite, so Chrome-backed tests could not start. The seat waits for FLIGHT's ruling.", buttons: ["Stop", "More ▾"], age: "state changed 3m ago", last: "last event 3m ago" };
       const SEATS = ["GUIDO-1", "INCO-1", "RETRO-1", "FLIGHT-1", "GUIDO-2"];
       document.getElementById("ident").innerHTML = `
           <div class="r1">
             <h2><i></i>GUIDO-1<span class="rt">· Backend developer</span></h2>
             <span class="state${S.cls}">${S.pill}</span>
             <span class="chip">Held · hub</span>
-            <span class="chip crit" tabindex="0" data-full="5 blocking review findings on the current PR head (117f67b)">5 blocking findings · current head</span>
+            <span class="chip crit" tabindex="0" data-full="5 blocking review findings on the current PR head">5 blocking findings · current head</span>
             <span class="why">${full(S.why, S.whyFull)}<button type="button" aria-label="Read the full reason">details</button></span>
           </div>
           <div class="acts">
@@ -297,19 +300,21 @@
             <span class="keep"><a href="#">PR 1430</a> · <span class="mono muted">head 117f67b</span></span>
             <span class="keep mono muted">${S.age}</span>
           </div>`;
-      const seatHint = RUN ? "Reaches GUIDO-1 mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters." : "This sends RETRO's findings on 117f67b back for rework. It does not waive them.";
-      document.getElementById("composer").innerHTML = `<input aria-label="Message this agent" aria-describedby="hint" placeholder="${RUN ? "Message GUIDO-1…" : "Send findings back for rework…"}" /><button type="submit" class="primary">${RUN ? "Send" : "Send rework message"}</button>${RUN ? `<button type="button" title="Stop the current turn, then send">Interrupt and send</button>` : ""}<span class="hint" id="hint">${seatHint}</span>`;
+      // A seat held on review gets the rework composer; every other state gets Send and Interrupt and send.
+      const seatHint = REV ? "This sends RETRO's findings on the current head back for rework. It does not waive them." : RUN ? "Reaches GUIDO-1 mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters." : "Your message starts GUIDO-1's next turn.";
+      document.getElementById("composer").innerHTML = `<input aria-label="Message this agent" aria-describedby="hint" placeholder="${REV ? "Send findings back for rework…" : "Message GUIDO-1…"}" /><button type="submit" class="primary">${REV ? "Send rework message" : "Send"}</button>${REV ? "" : `<button type="button" title="Stop the current turn, then send">Interrupt and send</button>`}<span class="hint" id="hint">${seatHint}</span>`;
       document.getElementById("liveState").textContent = RUN ? "Live" : S.last;
       if (RUN) document.getElementById("liveState").className = "live";
       const nextEl = document.getElementById("next");
       if (RUN) nextEl.remove(); // no next move: the panel is left out and its height goes to the tabs
+      else if (REV) nextEl.innerHTML = `<b>For the controller</b>
+              <div class="txt"><span class="cut" tabindex="0" data-full="Send RETRO-1's 5 blocking findings back for rework, or rule on them. Sending them does not waive them.">Send RETRO-1's 5 blocking findings back for rework</span><button type="button" style="border:0;background:none;color:var(--accent)" aria-label="Read the full next decision">Read full</button></div>
+              <a class="btn" href="#">Open review</a>`;
       else nextEl.innerHTML = `<b>Waiting on FLIGHT</b>
               <div class="txt"><span class="cut" tabindex="0" data-full="FLIGHT rules on the refused push of 117f67b. Run the check from the controller's shell, or rule that it cannot pass in a seat's sandbox, then release the push.&#10;FLIGHT recommends: run it from the controller's shell.">FLIGHT rules on the refused push of 117f67b</span><button type="button" style="border:0;background:none;color:var(--accent)" aria-label="Read the full next decision">Read full</button></div>
               <a class="btn" href="#">Open conversation</a>`;
       document.getElementById("loop").innerHTML = `<span class="cap">Loop · feature</span>
-              <span class="step done" tabindex="0" data-full="plan · done 4m&#10;build · done 38m&#10;checks · done, 1 failure, 2 of 3 tries">3 done</span>
-              ${RUN ? `<span class="step now" tabindex="0" data-full="checks · running, 3 of 3 tries">checks 3/3</span>` : `<span class="step held" tabindex="0" data-full="push · held, refused at 117f67b, 1 of 3 tries">held 1/3</span>`}
-              <span class="step" tabindex="0" data-full="Later: ${RUN ? "push, draft PR, review" : "draft PR, review"}">+${RUN ? 3 : 2} later</span>`;
+              ${REV ? `<span class="step done" tabindex="0" data-full="plan · done 4m&#10;build · done 38m&#10;checks · done, 1 failure, 2 of 3 tries&#10;draft PR · done, PR 1430">4 done</span><span class="step held" tabindex="0" data-full="review · held, 5 blocking findings, round 1 of 3">held 1/3</span><span class="step" tabindex="0" data-full="Later: rework, re-review, merge">+3 later</span>` : `<span class="step done" tabindex="0" data-full="plan · done 4m&#10;build · done 38m&#10;checks · done, 1 failure, 2 of 3 tries&#10;draft PR · done, PR 1430&#10;review · done, 5 blocking findings">5 done</span>${RUN ? `<span class="step now" tabindex="0" data-full="checks · running, 3 of 3 tries">checks 3/3</span>` : `<span class="step held" tabindex="0" data-full="push · held, refused at 117f67b, 1 of 3 tries">held 1/3</span>`}<span class="step" tabindex="0" data-full="Later: re-review, merge">+2 later</span>`}`;
       if (RUN) {
         const lc = document.getElementById("liveCall");
         lc.hidden = false;
@@ -319,7 +324,7 @@
       const E = [];
       const t = (at, name, target, result, ms, err, more) => E.push({ at, kind: "tool", name, target, result, ms, err, more });
       const k = (at, kind, text, n) => E.push({ at, kind, text, n });
-      k("23:31", "you", "Ticket 1411 assigned: test:related can't pass in a seat's sandbox when a change selects most of the suite. Plan first, then build; check with pnpm -s test:related before you push.");
+      k("23:31", "you", "RETRO-1 reviewed PR 1430: 5 blocking findings. Fix them, check with pnpm -s test:related before you push, and push once.");
       k("23:31", "think", "thinking", 3);
       t("23:32", "Bash", "git status --short", "(no output)", 90);
       t("23:32", "Read", "package.json", "     1\t{", 60);
@@ -360,6 +365,11 @@
       k("23:49", "guard", "Push refused at 117f67b: pnpm -s test:related has not passed at this commit. Fix the check, or ask the controller to rule.");
       k("23:50", "msg", "The push was refused because test:related cannot pass here. The controller can rule on the check.");
       k("23:51", "sys", "Push refused at 117f67b");
+      if (REV) {
+        E.splice(-4, 4);
+        k("23:49", "a2a", "retro-1 → guido-1: RETRO-1 reviewed the current PR head: 5 Important, 2 Minor. Findings are in RETRO-1's report_findings record.");
+        k("23:50", "sys", "Held for rework: 5 blocking findings");
+      }
       if (RUN) {
         E.splice(-4, 4);
         E.push({ at: "23:49", kind: "tool", name: "Bash", target: "pnpm -s test:related", result: "running…", ms: null, err: false, now: true });
@@ -396,7 +406,7 @@
       document.getElementById("count").textContent = `${E.length} events · ${c((e) => e.err)} failed tools`;
 
       // ---- Plan and queue. A seat with no plan has no Plan panel or tab; the queue is shown on its own.
-      const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["●", "Push once and report the exact output"], ["○", "Wait for the controller's ruling on the check"], ["○", "Open the draft PR"], ["○", "Request review"], ["○", "Answer review findings"], ["○", "Re-run the three checks"], ["○", "Report evidence for each done-when line"], ["○", "Hand the branch to merge"], ["○", "Close the plan"]];
+      const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["✓", "Open the draft PR"], ["✓", "Request review"], ["✓", "Read RETRO's 5 blocking findings"], ...(REV ? [["●", "Wait for the findings to be sent back for rework"], ["○", "Fix the 5 findings"], ["○", "Re-run the three checks"], ["○", "Push the rework"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]] : [["●", "Push the rework once and report the output"], ["○", "Wait for FLIGHT's ruling on the refused push"], ["○", "Answer the 5 findings"], ["○", "Re-run the three checks"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]])];
       const queue = [["mission-control#1434", "Agents page answers what a seat is doing on one screen, with Activity as the part that grows", "P0", false], ["mission-control#1433", "Overview Board shows whole cards, no dead blocks, scrolling only where needed", "P2", true]];
       const focusRow = `<div class="focusrow"><span class="lbl">Focus</span><span class="cut" tabindex="0" data-full="label:area:tests">label:area:tests</span><button type="button" style="margin-left:auto">Change</button></div>`;
       const doneN = plan.filter((p) => p[0] === "✓").length;
@@ -417,11 +427,11 @@
       const diffHtml = `<div class="diff" aria-label="Diff of docs/runbooks/test-lock.md"><div class="dh"><b>docs/runbooks/test-lock.md</b><span class="muted">117f67b</span><button type="button">Close diff</button></div><pre><span class="d">− A full suite run waits for the shared lock.</span>\n<span class="a">+ A full suite run waits for the shared lock. test:related can select most of the suite.</span>\n<span class="a">+ Browser-backed files need Chrome; a seat's sandbox cannot start it.</span>\n<span class="a">+ Run those from the controller's shell, and say so in the report.</span></pre></div>`;
       const filesHtml = `<div class="sec">Changed files <span>${files.length} vs main</span></div>` + files.map(([st, p, ad, dl, sha], i) => `<button type="button" class="tr f" aria-pressed="${i === 0}" data-full="${esc(p)}"><span class="ck ${st === "A" ? "ok" : "warn"}">${st}</span>${pathHtml(p)}<span class="d"><span class="add">${ad}</span> <span class="del">${dl}</span></span><span class="d">${sha}</span></button>`).join("") + diffHtml;
       const done = [["not", "test:related passes in a seat's sandbox when a change selects most of the suite", "Run 2 reported the check cannot start 9 browser files here"], ["not", "Browser-backed files are named, with what they need", "docs/runbooks/test-related-in-a-sandbox.md lists the 9 files"], ["met", "The runbook says what test:related needs and what to do without it", "docs/runbooks/test-lock.md, section 'Without a browser'"]];
-      const left = ["Rule on the refused push of 117f67b (FLIGHT)", "Request review once the checks pass"];
+      const left = REV ? ["Fix the 5 blocking findings", "Request a fresh review"] : ["Rule on the refused push of 117f67b (FLIGHT)", "Answer the 5 blocking findings"];
       const links = [["PR", "PR #1430"], ["FILE", "docs/runbooks/test-lock.md"], ["FILE", "docs/runbooks/test-related-in-a-sandbox.md"], ["FILE", "package.json"], ["FILE", "vitest.config.ts"], ["FILE", "apps/web/test/browserRunner.ts"], ["SHOT", "test-related-sandbox-before.png"], ["SHOT", "test-related-sandbox-after.png"]];
       const reportHtml = `<span class="lab">Previous run · round 1 · 2h ago</span><p class="fg2">Documented what test:related needs a browser for. The check itself still cannot pass here.</p><div class="sec">Done when <span>1 of ${done.length} met</span></div>` + done.map(([st, x, ev]) => `<div class="tr two"><span class="ck ${st === "met" ? "ok" : "warn"}">${st === "met" ? "✓" : "○"}</span><span class="mid"><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><small class="cut" tabindex="0" data-full="${esc(ev)}">${esc(ev)}</small></span><span class="d">${st === "met" ? "met" : "open"}</span></div>`).join("") + `<div class="sec">Left</div>` + left.map((x) => `<div class="tr"><span class="ck muted">○</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d"></span></div>`).join("") + `<div class="sec">Saved links <span>${links.length} of 28</span></div>` + links.map(([kd, l]) => `<div class="tr"><span class="ck muted">↗</span><a class="rowlink" href="#" data-full="${esc(l)}"><span class="kind">${kd}</span><span class="cut">${esc(l)}</span></a><span class="d"></span></div>`).join("") + `<div class="tr"><span class="ck muted">…</span><a href="#" class="mono more" style="font-size:12px">Show all 28 links ›</a><span class="d"></span></div>`;
       const runs = [["●", "mission-control#1411 · this run (3 of 3)", "28m"], ["✓", "mission-control#1411 · run 2, reported", "52m"], ["✓", "mission-control#1411 · run 1, set aside", "9m"], ["✓", "mission-control#1409 · Screenshot evidence times out on every… · feature/1409-screenshot-evidence-times-out-on-every · PR 1418", "1h 3m"], ["✓", "docs/hud-design-blank-slate-gaps · PR 1408", "47m"], ["✓", "chore/core-test-timeout · PR 1413", "22m"]];
-      const rel = [["review", "RETRO-1 · run 2 review · reported", "2 Important"], ["subagent", "Explore · find where test:related is defined", "completed"], ["subagent", "Explore · list browser test files", "completed"]];
+      const rel = [["review", "RETRO-1 · run 2 review · reported", "5 blocking"], ["subagent", "Explore · find where test:related is defined", "completed"], ["subagent", "Explore · list browser test files", "completed"]];
       const runsHtml = `<div class="sec">Attempts and previous runs <span>${runs.length}</span></div>` + runs.map(([ck, x, d]) => `<div class="tr"><span class="ck ${ck === "●" ? "think" : "ok"}">${ck}</span><a class="rowlink" href="#" data-full="${esc(x)}"><span class="cut">${esc(x)}</span></a><span class="d">${d}</span></div>`).join("") + `<div class="sec">Related work <span>${rel.length}</span></div>` + rel.map(([kd, x, d]) => `<div class="tr"><span class="ck muted">·</span><span class="cut" tabindex="0" data-full="${esc(kd + ": " + x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
       const kv = [["Role", "GUIDO · writer · s/mission-control"], ["Account", "claude-max"], ["Model", "claude-sonnet-5-5 · medium"], ["CLI", "2.1.318"], ["Area", "apps/server/**, packages/core/**, docs/**"], ["Branch", "feature/1411-test-related-can-t-pass-in-a-seat-s"], ["Context window", "73.8k of 200k · 1 compaction"], ["Cost", "$0.71 est. · $0.04 per reported turn"], ["Prompt", "24,402 est. tokens · 7 sections"], ["Session", "s/mission-control · started 22:54"]];
       const tools = [["Bash", 11, 3], ["Read", 9, 0], ["Edit", 4, 0], ["Grep", 3, 0], ["Glob", 1, 0]];

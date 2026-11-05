@@ -18,7 +18,7 @@ const HOLE_MAX = 200;
 describeRendered("Agents mockup in a browser", () => {
   for (const [width, height] of SIZES) {
     for (const rail of RAIL) {
-      for (const variant of ["", "&plan=empty", "&state=running"]) {
+      for (const variant of ["", "&plan=empty", "&state=running", "&state=review"]) {
         const where = `${width}x${height}${rail ? " FLIGHT open" : " FLIGHT folded"}${variant ? `, ${variant.slice(1).replace("=", " ")}` : ""}`;
         it(
           `answers the seat on one screen at ${where}`,
@@ -209,9 +209,20 @@ describeRendered("Agents mockup in a browser", () => {
               ).toBe(true);
             }
             expect(r.smallTargets, `${where}: controls are at least 24 px each way`).toEqual([]);
+            // Only a seat held on review gets the rework composer; a refused push or a running seat
+            // gets Send and Interrupt and send.
+            const rework = variant === "&state=review";
             expect(r.composerButtons, `${where}: composer actions`).toContain(
-              running ? "Interrupt and send" : "Send rework message",
+              rework ? "Send rework message" : "Interrupt and send",
             );
+            expect(
+              r.composerButtons.includes("Send rework message"),
+              `${where}: the rework message shows only on a review hold`,
+            ).toBe(rework);
+            expect(
+              r.composerButtons.includes("Interrupt and send"),
+              `${where}: Interrupt and send shows everywhere but a review hold`,
+            ).toBe(!rework);
             expect(
               r.blocking,
               `${where}: the blocking-findings count is on the identity strip`,

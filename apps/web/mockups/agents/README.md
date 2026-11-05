@@ -1,13 +1,14 @@
 # Agents page mockup (GUIDO-1, busy)
 
-A static proposal for the Agents page. It is not product code. Open `index.html`. The default view is GUIDO-1 parked on a refused push; `?state=running` is the same seat running. Add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
+A static proposal for the Agents page. It is not product code. Open `index.html`. The default view is GUIDO-1 parked on a refused rework push (the PR is open and review found 5 blocking findings; the rework push was refused). `?state=running` is the same seat running; `?state=review` is the seat held on review, waiting for the findings to be sent back. Add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
 
 **Render list** (each at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open):
 
 1. `index.html` (parked, with a plan)
-2. `index.html?state=running` (running: Interrupt, the live call bar waiting on the test lock, no Next move panel)
-3. `index.html?plan=empty` (no plan)
-4. `index.html?theme=light` (parked, light)
+2. `index.html?state=review` (held on review: the rework composer, a Next move about the findings)
+3. `index.html?state=running` (running: Interrupt, the live call bar waiting on the test lock, no Next move panel)
+4. `index.html?plan=empty` (no plan)
+5. `index.html?theme=light` (parked, light)
 
 Render at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open. `apps/web/test/AgentsMockup.browser.test.ts` measures the same sizes and states.
 
@@ -32,7 +33,7 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 ## Layout
 
 - **Identity strip.** Seat, role, the state (the only place "Parked" or "Running" appears: the picker lists names only, the age reads "state changed 3m ago", the composer placeholder names no state), review chip, the reason with a details control, seat picker and actions. Second row: ticket, title (first claim on the width, never under 320 px), branch (shrinks), PR, head and age. The role, account, model, effort, CLI and area line moved to the Context tab.
-- **Actions.** A running crew seat gets Interrupt, Stop and More; a parked one gets Stop and More; Pause only appears for an observed loop. The composer under Activity keeps today's actions: Send, and "Interrupt and send" while running; a seat held on review gets "Send rework message" instead. Its hint line stays under the input (the mid-turn note, or "This sends RETRO's findings … It does not waive them.").
+- **Actions.** A running crew seat gets Interrupt, Stop and More; a parked one gets Stop and More; Pause only appears for an observed loop. The composer under Activity keeps today's actions. A seat held on review (`?state=review`) gets "Send rework message" and the hint "This sends RETRO's findings … It does not waive them." Every other state, including a refused push, gets Send and "Interrupt and send". The hint is the mid-turn note while running; for an idle seat it reads "Your message starts GUIDO-1's next turn." (today's hint names the state, "GUIDO-1 is parked; …", which would show the state twice, so the build drops the state word).
 - **Activity (left, primary).** Time, kind, tool, target, result, duration. Filters All, Messages, Thinking, Tools, Guard with counts; Follow; link to the full trace. The live call bar shows while a tool runs, or the wait for the test lock with the seat holding it (`?state=running`). It takes all spare height; the rows scroll inside it.
 - **Right column (440 to 560 px).** Next move (only when there is one; the running view has none and the tabs take its height), Cost / Context / Tools, one loop row, Prompt sections (all seven), then the detail tabs.
 - **Plan at 2560 (changed after the first render).** The current step opens in view, centred in the list. From 2200 px wide, Plan and Queue stand in their own panel above the tabs, and the tabs lose Plan. At 1920, and below 2200, Plan and its queue stay one tab. The reason: at 2560 a single tab left about 390 px empty.
