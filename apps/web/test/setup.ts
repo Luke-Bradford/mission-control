@@ -23,7 +23,7 @@ function memoryStorage(): Storage {
   };
 }
 
-// Node 25 has its own global localStorage which, without --localstorage-file, has no methods and
+// Node 25 and later have their own global localStorage which, without --localstorage-file, has no methods and
 // shadows jsdom's; each test gets a fresh working one instead.
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
