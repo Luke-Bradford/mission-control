@@ -1501,6 +1501,38 @@ export async function installAfterSync(
 }
 
 /**
+ * A handed-over branch is taken at origin's tip. The PR's head can be ahead of the local branch
+ * (the controller pushes to it), and a seat started on the old tip could not push. Local work that
+ * origin lacks stays; a branch that has diverged is refused, since neither side may be dropped.
+ */
+async function followOrigin(w: (args: string[]) => Promise<string>, branch: string): Promise<void> {
+  const remote = await w([
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "--end-of-options",
+    `refs/remotes/origin/${branch}^{commit}`,
+  ]).then(
+    (s) => s.trim(),
+    () => null,
+  );
+  if (!remote) return;
+  const head = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+  if (head === remote || (await succeeds(w(["merge-base", "--is-ancestor", remote, head])))) return;
+  if (!(await succeeds(w(["merge-base", "--is-ancestor", head, remote])))) {
+    throw new CheckoutError("path", `${branch} has diverged from origin's; it was not changed`);
+  }
+  try {
+    await w(["merge", "--ff-only", "--quiet", remote]);
+  } catch (e) {
+    throw new CheckoutError("path", `${branch} could not be moved to origin's tip`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+}
+
+/**
  * Gives a run its branch and worktree: reuses this ticket's worktree if it exists, else adds one
  * on the existing branch (local, or origin's tracked) or on a new branch from origin's default
  * branch, then installs dependencies when the worktree has a pnpm or uv lockfile (`installAll`).
@@ -1551,6 +1583,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     const status = await crewGit(
       path,
       [
@@ -1630,6 +1665,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff && local !== null) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     await installAll(
       {
         checkout: i.checkout,

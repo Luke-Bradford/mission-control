@@ -1,7 +1,7 @@
-import { NEW_LOOP, type PullRequestView, reviewCheckOf } from "@mc/core";
+import { NEW_LOOP, type PullRequestView, type RunHandoff, reviewCheckOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
+import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
@@ -170,11 +170,55 @@ describe("external PR review subjects", () => {
   });
 
   it("does not review a branch whose build run is still unfinished", async () => {
-    buildRun({ endedAt: null, status: "parked" });
+    buildRun({ endedAt: null, status: "running", loop: { ...NEW_LOOP, phase: "parked" } });
     const h = harness();
     await createExternalReviews(h.deps).sync();
     expect(store.reviewsIn(["queued"])).toHaveLength(0);
     expect(h.writes).toHaveLength(0);
+  });
+
+  it("stops wanting a queued review once a run is unfinished on the branch", async () => {
+    buildRun({ endedAt: 2 });
+    const service = createExternalReviews(harness().deps);
+    await service.sync();
+    const queued = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    expect(service.wanted(queued)).toBe(true);
+    buildRun({ id: "builder:new", endedAt: null, status: "running" });
+    expect(service.wanted(queued)).toBe(false);
+  });
+
+  describe("branchOwned", () => {
+    it("holds a branch a seat has claimed the handoff of before its run row exists", () => {
+      buildRun({ endedAt: 2 });
+      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
+      store.recordHandoff({
+        runId: "builder:old",
+        repoId: "sample",
+        ticket: "sample#1",
+        branch: "feature/sample",
+        at: 2,
+      } as RunHandoff);
+      expect(store.claimHandoff("builder:old", "token")).toBe(true);
+      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(true);
+      // a PR head under another ref is held through the ticket
+      expect(branchOwned(config, store, "sample", "feature/other")).toBe(false);
+      expect(branchOwned(config, store, "sample", "feature/other", "sample#1")).toBe(true);
+      store.acceptHandoff("builder:old", "token", "guido-2", "guido-2:new");
+      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
+    });
+
+    it("holds a PR whose ticket has a live run on another branch", () => {
+      buildRun({ id: "builder:live", endedAt: null, status: "running", branch: "feature/live" });
+      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
+      expect(branchOwned(config, store, "sample", "feature/sample", "sample#1")).toBe(true);
+    });
+
+    it("keeps every run of a configured loop out of the external path", () => {
+      buildRun({ endedAt: 2 });
+      const withLoop = { ...config, loops: [{ id: "builder" }] } as unknown as CcConfig;
+      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
+      expect(branchOwned(withLoop, store, "sample", "feature/sample")).toBe(true);
+    });
   });
 
   it("reviews an ended run's PR when the mc/review status on its head is this hub's own", async () => {

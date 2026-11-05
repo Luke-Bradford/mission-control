@@ -111,6 +111,23 @@ export function publicHandoff(h: RunHandoff): RunHandoff {
   return { ...h, branch: safe(h.branch), worktree: h.worktree === null ? null : safe(h.worktree) };
 }
 
+/**
+ * Where the next author works. The ended run's open PR is the branch to push to: its head can be
+ * a different ref than the ended run's branch, and the old worktree is only kept on that same ref.
+ */
+export function handoffTarget(
+  store: Store,
+  h: Pick<RunHandoff, "runId" | "repoId" | "ticket" | "branch" | "worktree">,
+): { branch: string; worktree: string | null } {
+  // only the PR the ended run itself opened: another open PR on the ticket stays a refusal
+  const prNumber = store.run(h.runId)?.loop?.prNumber;
+  const pr = store
+    .pullRequestsOnTicket(h.repoId, h.ticket)
+    .find((p) => p.state === "open" && p.number === prNumber && p.branch !== "");
+  if (!pr || pr.branch === h.branch) return { branch: h.branch, worktree: h.worktree };
+  return { branch: pr.branch, worktree: null };
+}
+
 /** Taking over work grants no clearance or acceptance and cannot release an operator's hold. */
 export function inheritedHandoffLoop(
   source: RunLoop | null | undefined,

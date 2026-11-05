@@ -1401,12 +1401,23 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
-run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
-ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+with `--match-head-commit`; branch protection stays in force. A branch keeps its normal engine path
+while a build run is live or parked on it, while a run is live on the same ticket under another
+branch, while a seat has claimed the ticket's handoff and has no run row yet, and for every run of a
+configured (observed) loop. Once that run has ended (a controller pushed the head and FLIGHT ended the
+run to free the seat), the PR is reviewed and merged like one with no crew author; a
 hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
 latest build run still refuses the merge after that run ends, until the hold is released. An operator's
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+This is decided, not an oversight: a hold that outlived the run could be cleared only by starting a
+seat. A clean review reads only the pushed head, so uncommitted work the ended run left in its
+worktree is not seen by the review or by `merge_pr`; the ticket's open handoff lists it.
+
+An ended run's PR with review findings goes back to a seat with `reassign_ticket`. The seat works on
+the PR's own head: when the run opened a PR whose head ref differs from the run's branch, the seat
+starts on that ref, and a handed-over branch behind origin's is moved to origin's tip (a diverged one
+is refused, and nothing is changed). A stuck run whose newest commit is the PR's head, pushed by hand
+after the push gate refused it, is recorded as pushed when FLIGHT lifts the park, so it reaches review.
 No build run is invented and no board card is marked Done by this path.
 
 Protected repository rules require the existing head-bound `merge-floor` controller approval.

@@ -176,6 +176,7 @@ import {
 import type { ReviewPreviews } from "../review-preview.ts";
 import {
   enrichHandoff,
+  handoffTarget,
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
@@ -3505,9 +3506,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
-                ...(handoff
-                  ? { handoff: { branch: handoff.branch, worktree: handoff.worktree } }
-                  : {}),
+                ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
                   markPending: (path) => store.markCheckoutPending(path, now()),
