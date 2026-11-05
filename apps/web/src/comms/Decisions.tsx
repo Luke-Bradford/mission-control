@@ -4,6 +4,7 @@ import { apiPost } from "../api.ts";
 import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { ACTIONS } from "../data.ts";
+import { writeFailure } from "../demo/mode.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import { mss } from "../fmt.ts";
 import { followLink, NEEDS_YOU_PATH } from "../router.ts";
@@ -52,8 +53,8 @@ export function DecisionCard({
       await apiPost(ACTIONS.hold(item.key), { reason, condition });
       setHeld(true);
       setHolding(false);
-    } catch {
-      setError("Could not hold this decision.");
+    } catch (e) {
+      setError(writeFailure(e, "Could not hold this decision."));
     }
   };
   return (
