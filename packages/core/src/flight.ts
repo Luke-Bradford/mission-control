@@ -3,6 +3,8 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 export {
   CATCH_UP_KINDS,
   type CatchUpKind,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   FLIGHT_NOT_TRIAGING_CAUSES,
   type FlightNotTriagingCause,
 } from "./flight-model.ts";
