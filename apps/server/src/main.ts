@@ -313,6 +313,7 @@ export async function main(): Promise<void> {
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
+    boardWrites: !preview,
     store,
     bus,
     cliHold,

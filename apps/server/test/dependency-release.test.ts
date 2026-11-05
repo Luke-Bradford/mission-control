@@ -276,10 +276,25 @@ describe("release on merge", () => {
       card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
     ]);
     store.upsertPullRequests(REPO, [pr(900)], T0);
+    store.upsertRun(run("r-50", "mc#50", 901));
     await release(T0);
     store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
     await release(T0 + 2 * MIN);
     expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
+  });
+
+  it("leaves a Blocked card no run here touched, and does not mark it released", async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900)], T0);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+    expect(moves).toEqual([]);
+    expect(observeWaits(store, REPO, T0 + 3 * MIN).released.every((r) => r.moved !== true)).toBe(
+      true,
+    );
   });
 
   it("leaves an incomplete dependent in Blocked", async () => {

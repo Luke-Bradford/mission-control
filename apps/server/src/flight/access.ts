@@ -39,7 +39,7 @@ export function createAccessTools(h: PowerHelpers) {
   });
   const operator = h.superTool(
     MC_TOOL_NAMES.operator,
-    "Call one of the hub's operator routes in process, as the operator would: POST to a run's resume, end, message, controller-check or merge-hold; a seat's start, message, interrupt or end; crew-pause, away, update, or an attention item's dismiss or hold; or GET any other /api path. The route's own checks still apply. A refused route says what is allowed.",
+    "Call one of the hub's operator routes in process, as the operator would: POST to a run's resume, end, message, controller-check or merge-hold; an external PR's review-request, controller-check or merge-hold; a seat's start, message, interrupt or end; crew-pause, away, update, or an attention item's dismiss or hold; or GET any other /api path. The route's own checks still apply. A refused route says what is allowed.",
     OperatorArgs,
     "operator",
     async (a: z.output<typeof OperatorArgs>, _repo, ctx: McToolContext): Promise<McToolResult> => {

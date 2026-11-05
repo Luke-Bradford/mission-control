@@ -75,3 +75,22 @@ export function externalControlReason(
     return control.note ?? "Waiting for the operator's acceptance of this PR head.";
   return null;
 }
+
+const askKey = (repo: string, pr: number) => `external-review-ask:${repo}#${pr}`;
+
+/** Whether the operator or FLIGHT asked this hub for a QA review of the PR. The ask is in this store only. */
+export function externalReviewAsked(store: Store, repo: string, pr: number): boolean {
+  return store.getSetting(askKey(repo, pr)) !== null;
+}
+
+/** Records the ask; asking again keeps the first. It stands for later heads of the PR. */
+export function askExternalReview(
+  store: Store,
+  repo: string,
+  pr: number,
+  by: "FLIGHT" | "CAPCOM",
+  at: number,
+): void {
+  if (externalReviewAsked(store, repo, pr)) return;
+  store.setSetting(askKey(repo, pr), JSON.stringify({ at, by }));
+}

@@ -1,6 +1,7 @@
 import { NEW_LOOP, type PullRequestView, reviewCheckOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { askExternalReview } from "../src/external-pr-control.ts";
 import { createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prUat } from "../src/pr-uat.ts";
@@ -53,6 +54,8 @@ let store: Store;
 beforeEach(() => {
   store = new Store(":memory:");
   store.upsertPullRequests("sample", [pr()], 1);
+  // a review is asked-for work: the operator or FLIGHT asked this hub to review PR 7
+  askExternalReview(store, "sample", 7, "CAPCOM", 1);
 });
 afterEach(() => store.close());
 
@@ -92,6 +95,25 @@ function harness() {
 }
 
 describe("external PR review subjects", () => {
+  it("queues nothing and writes nothing for a PR nobody asked this hub to review", async () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toEqual([]);
+    expect(h.writes).toEqual([]);
+  });
+
+  it("an older queued row with no ask is no longer wanted", async () => {
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    expect(service.wanted(row)).toBe(true);
+    store.deleteSetting("external-review-ask:sample#7");
+    expect(service.wanted(row)).toBe(false);
+  });
+
   it("queues one exact-head review without adding a developer run and survives restart", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);

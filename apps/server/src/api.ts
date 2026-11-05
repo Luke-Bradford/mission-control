@@ -252,6 +252,7 @@ import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  askExternalReview,
   externalMergeHold,
   externalPrControl,
   setExternalMergeHold,
@@ -5071,6 +5072,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           store.addHubEvent(
             `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (asking this hub to review a hand-opened PR).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/review-request",
+        async (req, reply) => {
+          const body = z
+            .strictObject({ sha: z.string().regex(/^[a-f0-9]{40}$/i) })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid review-request" });
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          askExternalReview(
+            store,
+            target.repo.id,
+            number,
+            flightActor(req) ? "FLIGHT" : "CAPCOM",
+            now(),
+          );
+          store.addHubEvent(
+            `${flightActor(req) ? "FLIGHT" : "Controller"} asked for a QA review of external PR ${target.repo.id}#${number} at ${target.sha}`,
             now(),
           );
           bus.emit("boards");

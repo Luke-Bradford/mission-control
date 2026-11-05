@@ -8,6 +8,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
+import { externalReviewAsked } from "./external-pr-control.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
@@ -136,6 +137,7 @@ export function createExternalReviews(deps: {
       isExternalReview(row) &&
       (deps.enabled?.() ?? true) &&
       repo?.autonomy === "merge" &&
+      externalReviewAsked(store, row.repoId, row.prNumber) &&
       pr?.state === "open" &&
       !pr.isDraft &&
       pr.headSha === row.sha &&
@@ -272,6 +274,8 @@ export function createExternalReviews(deps: {
           for (const pr of store.pullRequests(repo.id)) {
             if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
             if (branchOwned(deps.config, store, repo.id, pr.branch)) continue;
+            // a review is asked-for work: without an ask in this store the PR is left alone
+            if (!externalReviewAsked(store, repo.id, pr.number)) continue;
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);

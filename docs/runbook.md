@@ -1432,6 +1432,24 @@ FLIGHT may manage its own holds and ordinary evidence checks, while operator hol
 FLIGHT's own access remain the independent controller's. These records do not replace CI or QA,
 and they never stand in for #1214's day-long post-Update observation.
 
+#### Which PRs a hub acts on
+
+Several hubs can run on one repo, even under one GitHub login. A hub's automatic GitHub writes (a
+card move, a branch delete, the screenshot section of a PR body, a review comment or `mc/review`
+status) are limited to work it owns, so a hub with no runs writes nothing:
+
+- A branch is owned when a work run in this hub's store has it, ended or not (a review run does not
+  count). A PR is owned when its branch is, or when someone asked this hub to review it.
+- A card is owned when a work run here has its ticket, or a run here moved it. A Blocked card with
+  no run here is not released by this hub when its wait resolves.
+- A PR opened by hand has no run. Ask this hub to review it with
+  `POST /api/prs/:repo/:number/review-request { sha }` (FLIGHT: `mc operator`). The ask is kept in
+  this hub's store only, stands for later heads of the PR, and is what starts its QA review, its
+  `mc/review` status, its card follow and its screenshot evidence. Asking again changes nothing.
+  Without an ask the PR is read and shown, never written to.
+- A preview never moves a card: it polls GitHub and shows it.
+- Hubs still read and show every PR, including another hub's.
+
 ### FLIGHT approvals
 
 A controller (the controller session or the operator) lets FLIGHT go past one rule for one scope until a
@@ -2272,7 +2290,8 @@ touched.
   branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
   FLIGHT's `delete_branch` is a separate, explicit action with its own checks.
 - **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
-  merging; the agents decide what to do with it.
+  merging; the agents decide what to do with it. A closed PR is no signal for any hub write: it
+  moves no card either.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
   branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
   its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any

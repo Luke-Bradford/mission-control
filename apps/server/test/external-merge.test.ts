@@ -7,6 +7,7 @@ import type { CcConfig } from "../src/config.ts";
 import {
   externalMergeHold,
   externalPrControl,
+  externalReviewAsked,
   setExternalMergeHold,
 } from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
@@ -227,6 +228,62 @@ describe("external PR controller merge", () => {
       expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
       store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
       expect((await hold()).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records an ask for a QA review in this store and refuses an unfinished run", async () => {
+    const h = harness();
+    buildRun(2);
+    const post = (app: Awaited<ReturnType<typeof buildApp>>) =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    try {
+      expect(externalReviewAsked(store, "sample", 7)).toBe(false);
+      expect((await post(app)).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7)).toBe(true);
+      expect(
+        store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
+      ).toHaveLength(2);
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await post(app)).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("answers 409 to an ask on a hub that writes nothing", async () => {
+    const h = harness();
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+      noLoopWrites: true,
+    });
+    try {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+      expect(r.statusCode).toBe(409);
+      expect(externalReviewAsked(store, "sample", 7)).toBe(false);
     } finally {
       await app.close();
     }

@@ -2864,6 +2864,21 @@ export class Store {
     return rows.map((r) => this.boardMoveOf(r));
   }
 
+  /**
+   * Whether a real run in this store moved the issue's card to a column (done). Rows under
+   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
+   */
+  runMovedCard(repoId: RepoId, issue: number): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
+           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
+        )
+        .get(repoId, issue) !== undefined
+    );
+  }
+
   /** Every move of the run's card, oldest first, pending ones too. */
   boardMovesOfRun(runId: string): BoardMove[] {
     const rows = this.db
