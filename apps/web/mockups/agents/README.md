@@ -1,12 +1,12 @@
 # Agents page mockup (GUIDO-1, busy)
 
-A static proposal for the Agents page. It is not product code. Open `index.html`. The default view is GUIDO-1 parked on a refused rework push (the PR is open and review found 5 blocking findings; the rework push was refused). `?state=running` is the same seat running; `?state=review` is the seat held on review, waiting for the findings to be sent back. Add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
+A static proposal for the Agents page. It is not product code. Open `index.html`. The default view is GUIDO-1 parked on a refused rework push (the PR is open and review found 5 blocking findings; the rework push was refused). `?state=running` is the same seat re-running its checks on the rework before any push (no Held chip, no pending ruling); `?state=review` is the seat held on review, waiting for the findings to be sent back. Add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
 
 **Render list** (each at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open):
 
 1. `index.html` (parked, with a plan)
 2. `index.html?state=review` (held on review: the rework composer, a Next move about the findings)
-3. `index.html?state=running` (running: Interrupt, the live call bar waiting on the test lock, no Next move panel)
+3. `index.html?state=running` (running its checks before the push: Interrupt, the live call bar waiting on the test lock, no Held chip, no Next move panel)
 4. `index.html?plan=empty` (no plan)
 5. `index.html?theme=light` (parked, light)
 

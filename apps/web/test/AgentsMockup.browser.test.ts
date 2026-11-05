@@ -60,6 +60,19 @@ describeRendered("Agents mockup in a browser", () => {
                 (b) => visible(b) && b.textContent === "Change",
               );
               const upVisible = [...document.querySelectorAll(".qi button")].some(visible);
+              const chipTexts = [...document.querySelectorAll(".ident .chip")].map(
+                (c) => c.textContent ?? "",
+              );
+              const loopFull = [...document.querySelectorAll<HTMLElement>(".loop .step")].map(
+                (c) => c.dataset.full ?? "",
+              );
+              const planOpen = [
+                ...document.querySelectorAll("#stackPlan .tr, .tabbody[data-panel=plan] .tr"),
+              ]
+                .filter((r) => r.querySelector(".ck")?.textContent !== "✓")
+                .map((r) => r.textContent ?? "");
+              const reportText =
+                document.querySelector('.tabbody[data-panel="report"]')?.textContent ?? "";
               const toolRows = document.querySelectorAll(".ev.tool").length;
               const toolSummaries = document.querySelectorAll(".ev.tool summary").length;
               const toolExtraStops = document.querySelectorAll('.ev.tool [tabindex="0"]').length;
@@ -150,6 +163,10 @@ describeRendered("Agents mockup in a browser", () => {
                 stackGap,
                 stackNow,
                 smallTargets: [...smallTargets],
+                chipTexts,
+                loopFull,
+                planOpen,
+                reportText,
                 composerButtons,
                 changeVisible,
                 upVisible,
@@ -207,6 +224,25 @@ describeRendered("Agents mockup in a browser", () => {
                 r.stackNow ?? r.tabNow,
                 `${where}: the current plan step is in view when the page opens`,
               ).toBe(true);
+            }
+            // The running view is one moment: the checks run on the rework, before any push or ruling.
+            expect(
+              r.chipTexts.includes("Held · hub"),
+              `${where}: the Held chip shows only when the seat is not running`,
+            ).toBe(!running);
+            if (running) {
+              expect(
+                r.loopFull.join(" "),
+                `${where}: checks are current, not also done`,
+              ).not.toContain("checks · done");
+              expect(r.loopFull.join(" "), `${where}: Later names the push`).toContain("push");
+              expect(
+                r.planOpen.join(" "),
+                `${where}: no pending ruling in a running plan`,
+              ).not.toMatch(/ruling|refused/i);
+              expect(r.reportText, `${where}: Left has no ruling on a refused push`).not.toMatch(
+                /Rule on the refused push/,
+              );
             }
             expect(r.smallTargets, `${where}: controls are at least 24 px each way`).toEqual([]);
             // Only a seat held on review gets the rework composer; a refused push or a running seat
