@@ -70,7 +70,7 @@ which it writes only when you press pause or resume.
 
 ## Install
 
-Requires Node 25 or later and pnpm. Run these from the repo root:
+Requires Node 26 or later and pnpm. Run these from the repo root:
 
 ```sh
 pnpm install
@@ -662,18 +662,52 @@ What each seat's process starts with:
   Files left by a hub that went down, these and any draft PR body file (`pr-<uuid>.md`), are
   removed when the next one takes the crew lock.
 
+## Moving a hub to a new Node
+
+Do this when other software shares the machine's Homebrew Node. `brew upgrade node` changes that Node
+for everything on the machine, and a service with a native module (such as `better-sqlite3`) fails on
+its next restart. This way changes only the hub and its seats.
+
+1. Unpack the official tarball from nodejs.org in its own folder, and check it against `SHASUMS256.txt`.
+   Keep it out of the hub's data directory (by default `~/.local/share/mission-control`): a seat's
+   sandbox can't re-allow a folder inside it. `~/.local/mc-node/<version>` works.
+2. Boot a preview on it, with a copy of the database and the config (see "Run", using the new `node`
+   in that command). It must answer.
+3. Keep a copy of the plist. In `~/Library/LaunchAgents/com.missioncontrol.server.plist`, set the first
+   `ProgramArguments` entry to the new `node` and put its folder first on `PATH`. In `config.yaml`, set
+   `crew.node` to the new `node`. Seats pick up `node` and `pnpm` from that `PATH`. Use `PlistBuddy`, not
+   `plutil -replace`, which inserts a new array entry and leaves the old one as the script to run:
+
+   ```sh
+   plist=~/Library/LaunchAgents/com.missioncontrol.server.plist
+   cp "$plist" "$plist.bak"
+   /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 <node>" "$plist"
+   /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:PATH <node folder>:<old PATH>" "$plist"
+   /usr/libexec/PlistBuddy -c "Print :ProgramArguments" -c "Print :EnvironmentVariables:PATH" "$plist"
+   ```
+
+4. Restart the hub when no seat is starting. A seat mid-turn keeps working through the restart and the
+   new hub attaches to it (`docs/spikes/2026-10-22-seat-survives-hub-restart.md`); it stays on the old
+   Node until its run ends, so keep the old Node installed. A `launchctl kickstart` does not re-read the
+   plist, so run `launchctl bootout gui/$(id -u)/com.missioncontrol.server`, then
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`. `bootout`
+   can return before the old process has exited. If `bootstrap` answers `Bootstrap failed: 5`, launchd
+   is still removing the old job: try again after a second, until it succeeds.
+5. Check that the hub answers and `ps` shows the new `node`. Start one seat and run its checks.
+
+To go back, restore the plist copy and the old `crew.node`, then repeat step 4.
+
 ## Setting up another machine
 
 These steps take a second Mac from nothing to a hub running crew on a board that another
 machine's hub also works. Do them in this order; the sections they name have the detail.
 
 1. **Toolchain.**
-   - Node: `brew install node` gives the current release at `/opt/homebrew/bin/node`, which CI
-     (25) and `engines` match, and needs none of step 6's node edits. The full suite also passes
-     on 24, with a pnpm `Unsupported engine` warning on each command; Homebrew's `node@24` is
-     keg-only, so it is neither at `/opt/homebrew/bin/node` nor on `PATH`. If you use it, put it
-     on your shell's `PATH` (`export PATH="/opt/homebrew/opt/node@24/bin:$PATH"` in
-     `~/.zprofile`); step 6 covers the hub.
+   - Node 26 (LTS), the release CI and `engines` match. Node 25 is past end of life (1 June 2026)
+     and gets no security fixes. `brew install node` installs the current release at
+     `/opt/homebrew/bin/node`; check with `node -v` that it is 26 or later. If other software on the
+     machine needs its own Node, keep that one and install 26 beside it instead: step 6 covers the
+     hub, and "Moving a hub to a new Node" covers the swap.
    - pnpm 11, the version CI uses. Homebrew offers pnpm 12, so install 11 with npm:
      `npm install -g pnpm@11`.
    - The `claude` CLI on `PATH`, for the seats. The copy bundled with the VS Code extension is
@@ -714,12 +748,11 @@ machine's hub also works. Do them in this order; the sections they name have the
      checkout of this repo, which is not denied by default. An entry may not be or hold the
      crew's folders, so keep `mc-crew` outside every folder you list.
 6. **Start** the hub with the launchd job, as in "As a launchd job", from the hub's clone. If node
-   is not at `/opt/homebrew/bin/node`, give its path (for `node@24`, the stable link
-   `/opt/homebrew/opt/node@24/bin/node`) in three places before `launchctl bootstrap`:
+   is not at `/opt/homebrew/bin/node`, give its path in three places before `launchctl bootstrap`:
    - the plist's first `ProgramArguments` entry. Without it launchd cannot start the hub:
      `launchctl print gui/$(id -u)/com.missioncontrol.server` shows
      `last exit code = 78: EX_CONFIG` and both logs stay empty;
-   - its folder (`/opt/homebrew/opt/node@24/bin`) at the front of the plist's `PATH`, since
+   - its folder at the front of the plist's `PATH`, since
      pnpm starts with `#!/usr/bin/env node`: the hub runs pnpm itself (worktree installs,
      Update), and the seats inherit that `PATH`;
    - `crew.node` in `config.yaml` (see "Config"). Without it crew stays off with
@@ -1868,7 +1901,7 @@ initialization retries on the next event. Presence does not write room rows. Hea
 30 seconds with a 24-second throttle to allow jitter. Presence status and timestamps, socket
 authentication and replay cursors survive hibernation through WebSocket attachments.
 
-For a LAN relay, with Node 25 and `packages/agentcomms/bin` on `PATH`:
+For a LAN relay, with Node 26 and `packages/agentcomms/bin` on `PATH`:
 
 ```sh
 # Set a strong operator secret in the environment (do not commit it).
@@ -1956,7 +1989,7 @@ runs in its own process group, which is killed after 30 seconds. Windows uses `t
 to terminate the hook process tree. `comms_read` accepts `limit`
 (default 50, maximum 500), and returns undeliverable rows alongside delivered messages.
 
-Use Node 25 and a checkout with workspace dependencies installed on both machines. Deploy the
+Use Node 26 and a checkout with workspace dependencies installed on both machines. Deploy the
 Worker using [Agent comms relay](#agent-comms-relay) above, then use its base URL, for example
 `wss://agentcomms-relay.YOUR-SUBDOMAIN.workers.dev`. Do not append `/rooms/...`; the CLI does that.
 For a LAN test use `ws://RELAY-LAN-IP:7480`. The relay must be reachable from both machines.
@@ -2062,7 +2095,7 @@ They pass the same body size, secret scan and rate guards as manual sends.
 
 On the Mac, save the following as `~/Library/LaunchAgents/com.agentcomms.home.plist`.
 Replace `/Users/YOU`, the checkout path and `/opt/homebrew/bin/node` with absolute paths on your
-machine (`command -v node` must resolve to Node 25). launchd does not expand `~` or `$HOME`.
+machine (`command -v node` must resolve to Node 26). launchd does not expand `~` or `$HOME`.
 Create the home directory's `logs/` subdirectory before loading it.
 
 ```xml
