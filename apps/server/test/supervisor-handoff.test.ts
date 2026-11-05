@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
 import { expect, it } from "vitest";
+import { externalReviewKey } from "../src/external-reviews.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
 
@@ -198,8 +199,41 @@ it("starts the returned seat on the open PR's own ref, not the ended run's local
     ],
     1,
   );
+  // the hub's own review of the PR head reported after the first author ended
+  const reviewId = store.requestReview({
+    authorRunId: externalReviewKey("mc", 9),
+    repoId: "mc",
+    seatId: "retro",
+    prNumber: 9,
+    sha: tip,
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 2,
+  });
+  if (reviewId === null) throw new Error("review not queued");
+  store.setReviewState(reviewId, ["queued"], "running", { runId: "retro:x", at: 3 });
+  store.recordFindings(reviewId, "retro:x", {
+    verdict: { spec: "pass", quality: "fail" },
+    summary: "one finding",
+    findings: [
+      {
+        severity: "Important",
+        file: "pr.txt",
+        line: 1,
+        summary: "the pr file is wrong",
+        scenario: "it breaks",
+        fix: "fix the pr file",
+      },
+    ],
+    at: 4,
+  });
   await sup.endRun("guido-1");
   const second = await sup.startRun("guido-2", 42);
+  await until(() => expect(userLines().some((l) => l.includes("the pr file is wrong"))).toBe(true));
+  const brief = userLines().find((l) => l.includes("the pr file is wrong")) ?? "";
+  expect(brief).toContain(`Branch: ${head}`);
+  expect(brief).not.toContain(`Branch: ${first.branch}`);
   expect(first.branch).not.toBe(head);
   expect(second.branch).toBe(head);
   expect(store.run(second.runId)?.branch).toBe(head);

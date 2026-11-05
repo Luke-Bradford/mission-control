@@ -176,6 +176,7 @@ import {
 import type { ReviewPreviews } from "../review-preview.ts";
 import {
   enrichHandoff,
+  handoffForBrief,
   handoffTarget,
   inheritedHandoffLoop,
   publicHandoff,
@@ -3719,7 +3720,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
-      if (handoff) brief += `\n\n${wrapExternalText(handoffText(publicHandoff(handoff)))}`;
+      if (handoff)
+        brief += `\n\n${wrapExternalText(
+          handoffText(publicHandoff(handoffForBrief(store, handoff, checkout))),
+        )}`;
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       const briefPieces = [

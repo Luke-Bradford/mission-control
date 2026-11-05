@@ -1,6 +1,14 @@
-import { NEW_LOOP, type PullRequestView, type RunHandoff, reviewCheckOf } from "@mc/core";
+import {
+  isReviewBudgetFailure,
+  NEW_LOOP,
+  type PullRequestView,
+  type RunHandoff,
+  reviewBudgetFailure,
+  reviewCheckOf,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { reviewerOf } from "../src/engine/engine.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prUat } from "../src/pr-uat.ts";
@@ -208,10 +216,62 @@ describe("external PR review subjects", () => {
       at: 3,
     });
     const h = harness();
-    const reviewer = vi.fn((_repo: string, _author?: string) => "retro");
+    const reviewer = vi.fn((_repo: string, _pick?: { author?: string | undefined }) => "retro");
     await createExternalReviews({ ...h.deps, reviewer }).sync();
-    expect(reviewer).toHaveBeenCalledWith("sample", "builder");
+    expect(reviewer).toHaveBeenCalledWith("sample", expect.objectContaining({ author: "builder" }));
     expect(store.reviewsOfRun(externalReviewKey("sample", 7))[0]).toMatchObject({ round: 2 });
+  });
+
+  it("tries a review that ran out of tokens again on the other review seat", async () => {
+    buildRun({ endedAt: 2 });
+    const seat = (id: string) => ({
+      id,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "a",
+      model: "opus",
+      area: [],
+    });
+    const crew = {
+      ...config,
+      crew: { sessions: [{ id: "s", repoId: "sample", seats: [seat("retro"), seat("retro-2")] }] },
+    } as unknown as CcConfig;
+    const h = harness();
+    const deps = {
+      ...h.deps,
+      reviewer: (
+        _repo: string,
+        pick?: { role?: string | undefined; avoid?: ReadonlySet<string> },
+      ) =>
+        reviewerOf(crew, "retro", pick?.role, {
+          store,
+          now: 100,
+          ...(pick?.avoid === undefined ? {} : { avoid: pick.avoid }),
+        })?.id ?? null,
+    };
+    const service = createExternalReviews(deps);
+    await service.sync();
+    const key = externalReviewKey("sample", 7);
+    const first = store.reviewsOfRun(key)[0]!;
+    expect(first.seatId).toBe("retro");
+    store.setReviewState(first.id, ["queued"], "running", { runId: "retro:x", at: 3 });
+    store.setReviewState(first.id, ["running"], "failed", {
+      at: 4,
+      failure: reviewBudgetFailure(1000),
+    });
+    expect(isReviewBudgetFailure(store.review(first.id)?.failure ?? null)).toBe(true);
+    await service.sync();
+    const rows = store.reviewsOfRun(key);
+    expect(rows.map((r) => r.seatId)).toEqual(["retro", "retro-2"]);
+    // with no other seat to try, the failed review stands and nothing more is queued
+    await service.sync();
+    store.setReviewState(rows[1]!.id, ["queued"], "running", { runId: "retro-2:x", at: 5 });
+    store.setReviewState(rows[1]!.id, ["running"], "failed", {
+      at: 6,
+      failure: reviewBudgetFailure(1000),
+    });
+    await service.sync();
+    expect(store.reviewsOfRun(key)).toHaveLength(2);
   });
 
   describe("branchOwned", () => {

@@ -661,14 +661,14 @@ export async function main(): Promise<void> {
       store,
       gh,
       cwd: hubRoot ?? process.cwd(),
-      reviewer: (repoId, author) => {
+      reviewer: (repoId, pick) => {
         const session = config.crew?.sessions.find((value) => value.repoId === repoId);
         const first = session?.seats[0];
         return first
-          ? (reviewerOf(config, first.id, undefined, {
+          ? (reviewerOf(config, first.id, pick?.role, {
               store,
               now: Date.now(),
-              ...(author === undefined ? {} : { avoid: new Set([author]) }),
+              ...(pick?.avoid === undefined ? {} : { avoid: pick.avoid }),
             })?.id ?? null)
           : null;
       },

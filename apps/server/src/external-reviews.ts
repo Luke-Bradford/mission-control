@@ -2,6 +2,7 @@
 import {
   type EvidenceManifest,
   evidenceSectionText,
+  isReviewBudgetFailure,
   type PullRequestView,
   REVIEW_STATUS_CONTEXT,
   type ReviewRow,
@@ -128,7 +129,10 @@ export function createExternalReviews(deps: {
   store: Store;
   gh: GhRunner;
   cwd: string;
-  reviewer(repoId: string, author?: string): string | null;
+  reviewer(
+    repoId: string,
+    pick?: { author?: string | undefined; role?: string | undefined; avoid?: ReadonlySet<string> },
+  ): string | null;
   evidence?: PrEvidence;
   reportBaseUrl?: string;
   evidenceManifest?(repo: string, pr: number, sha: string): EvidenceManifest | null;
@@ -289,7 +293,19 @@ export function createExternalReviews(deps: {
               let row = reviews.findLast(
                 (review) => review.sha === pr.headSha && review.state !== "superseded",
               );
-              if (row === undefined && pr.ci === "passing") {
+              // a review that ran out of tokens is tried again on another review seat, if there is one
+              const failedSeats = new Set(
+                reviews
+                  .filter(
+                    (review) =>
+                      review.sha === pr.headSha &&
+                      review.state === "failed" &&
+                      isReviewBudgetFailure(review.failure),
+                  )
+                  .map((review) => review.seatId),
+              );
+              const retry = row?.state === "failed" && failedSeats.has(row.seatId);
+              if ((row === undefined || retry) && pr.ci === "passing") {
                 if (
                   reviews.length === 0 &&
                   pr.checks?.some((check) => check.name === REVIEW_STATUS_CONTEXT) &&
@@ -304,8 +320,17 @@ export function createExternalReviews(deps: {
                   .runsOnBranch(repo.id, pr.branch)
                   .filter((run) => run.reviewId == null)
                   .sort((a, b) => (a.endedAt ?? Infinity) - (b.endedAt ?? Infinity))
-                  .at(-1)?.agentId;
-                const seat = deps.reviewer(repo.id, author);
+                  .at(-1);
+                const seat = deps.reviewer(repo.id, {
+                  author: author?.agentId,
+                  role: author?.profile?.profile.reviewer.role,
+                  avoid: failedSeats,
+                });
+                if (retry && seat && failedSeats.has(seat)) {
+                  // no other review seat: the failed review stands
+                  if (row) await publish(pr, row);
+                  continue;
+                }
                 if (
                   !seat ||
                   !(await readExternalSubject(deps.gh, deps.cwd, repo, pr.number, pr.headSha))
