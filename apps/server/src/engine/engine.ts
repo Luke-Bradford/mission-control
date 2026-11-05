@@ -19,6 +19,8 @@ import {
   AWAY_STATUS_ADDED,
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
   asideForAnswerEventText,
   asideForReworkEventText,
@@ -1566,10 +1568,13 @@ export function createEngine(deps: EngineDeps): Engine {
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
         // (not while the run waits for the operator's answer: that wakes it)
-        const waitsOnPerson = store
-          .openQuestions()
-          .some((q) => q.runId === run.id && q.passedAt !== null);
-        cur.aside = { worktree, wake: cur.phase === "working" && !waitsOnPerson };
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
+        const waitsOnPerson = asked !== undefined;
+        cur.aside = {
+          worktree,
+          wake: cur.phase === "working" && !waitsOnPerson,
+          ...(asked ? { ask: asked.id } : {}),
+        };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1639,6 +1644,13 @@ export function createEngine(deps: EngineDeps): Engine {
           );
           out.again = true;
           return;
+        }
+        // a run parked on the operator's question gets one line to carry on with the answer
+        if (cur.aside?.ask !== undefined) {
+          cur.pendingLine = {
+            key: answerLineKey(run.id, cur.aside.ask),
+            text: answeredLineText,
+          };
         }
         cur.aside = null;
         store.addLoopEvent(

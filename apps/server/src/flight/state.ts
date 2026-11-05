@@ -70,6 +70,7 @@ import {
   flightContextText,
   hudColumnOf,
   type ItemDiscussion,
+  idleLong,
   idlePeriod,
   inLane,
   LANE_LABEL_PREFIX,
@@ -632,6 +633,8 @@ function wakeInputs(i: {
   store: Store;
   seats: FlightSeatState[];
   tickets: FlightState["tickets"];
+  /** Every open ticket, past the digest's cap: the idle-seat check counts them all. */
+  allTickets: FlightState["tickets"];
   items: FlightState["items"];
   areas: Record<string, string[]> | undefined;
   hubLogin: string | null;
@@ -662,24 +665,27 @@ function wakeInputs(i: {
   return idle === undefined ? { fit, fresh } : { fit, fresh, idle };
 }
 
-/** The setting that keeps when a seat first stood idle with tickets open (the hub's own record). */
+/** The setting that keeps when each seat's idle spell began (the hub's own record). */
 export const FLIGHT_IDLE_SEAT_SETTING = "flight.idle-seat";
 
-const readIdleSince = (store: Store): number | null => {
+const readIdleSince = (store: Store): Record<string, number> => {
   try {
-    const v = JSON.parse(store.getSetting(FLIGHT_IDLE_SEAT_SETTING) ?? "null") as {
-      since?: unknown;
+    const v = JSON.parse(store.getSetting(FLIGHT_IDLE_SEAT_SETTING) || "null") as {
+      seats?: Record<string, unknown>;
     } | null;
-    return typeof v?.since === "number" ? v.since : null;
+    return Object.fromEntries(
+      Object.entries(v?.seats ?? {}).filter((e): e is [string, number] => typeof e[1] === "number"),
+    );
   } catch {
-    return null;
+    return {};
   }
 };
 
 /**
  * The free build seats that have open tickets near their area (Backlog, Refinement or Ready) and no
  * FLIGHT wait on them or the ticket, read from the board with no FLIGHT tokens. A ticket is near a
- * seat when its one area label is the seat's, or it has none or several (it needs triage).
+ * seat when its one area label is the seat's, or it has none or several (it needs triage). Each
+ * seat's spell is timed on its own.
  */
 function idleSeats(
   i: Parameters<typeof wakeInputs>[0],
@@ -689,7 +695,7 @@ function idleSeats(
 ): FlightIdleSeats | undefined {
   // a ticket held behind an open PR is waiting by FLIGHT's own choice, not open work for a seat
   const held = new Set(i.store.activeHolds().map((h) => h.ref));
-  const open = i.tickets.filter((t) => !held.has(t.ref) && !waitingOn(waits, t.ref, i.now));
+  const open = i.allTickets.filter((t) => !held.has(t.ref) && !waitingOn(waits, t.ref, i.now));
   const near = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
     if (rules === null || Object.keys(rules.areas).length === 0) return true;
     if (claimedByOther(t, i.hubLogin)) return false;
@@ -702,52 +708,60 @@ function idleSeats(
     .filter((x) => x.near.length > 0);
   if (seats.length === 0) return undefined;
   const tickets = [...new Map(seats.flatMap((x) => x.near).map((t) => [t.ref, t])).values()];
-  const since = readIdleSince(i.store) ?? i.now;
+  const stored = readIdleSince(i.store);
   return {
-    seats: seats.map((x) => x.id).sort(),
+    seats: seats
+      .map((x) => {
+        const since = stored[x.id] ?? i.now;
+        return { id: x.id, since, ms: Math.max(0, i.now - since) };
+      })
+      .sort((a, b) => a.id.localeCompare(b.id)),
     open: tickets.map((t) => t.ref).sort(),
     untriaged: tickets
       .filter((t) => t.noStatus === true)
       .map((t) => t.ref)
       .sort(),
     ready: [...new Set(seats.flatMap((x) => fit[x.id] ?? []))].sort(),
-    since,
-    ms: Math.max(0, i.now - since),
   };
 }
 
 /**
- * Keeps when the idle spell began: written when seats first idle with tickets open, cleared when
- * none do. The watcher calls it on each look; reads of the state never write.
+ * Keeps when each seat's idle spell began: a seat is added when it first idles with tickets open
+ * and dropped when it stops. The watcher calls it on each look; reads of the state never write.
  */
 export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: number): void {
-  const idle = s.wake?.idle;
-  const held = store.getSetting(FLIGHT_IDLE_SEAT_SETTING);
-  if (idle === undefined) {
-    if (held !== null && held !== "") store.setSetting(FLIGHT_IDLE_SEAT_SETTING, "");
-    return;
-  }
-  if (readIdleSince(store) === null) {
-    store.setSetting(FLIGHT_IDLE_SEAT_SETTING, JSON.stringify({ since: idle.since || now }));
-  }
+  const before = readIdleSince(store);
+  const after = Object.fromEntries(
+    (s.wake?.idle?.seats ?? []).map((x) => [x.id, before[x.id] ?? now]),
+  );
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  store.setSetting(
+    FLIGHT_IDLE_SEAT_SETTING,
+    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after }),
+  );
 }
 
-/** The log line for an idle spell past one period: how long, and why nothing started. */
-export function idleSeatLine(idle: FlightIdleSeats): string {
+/** The log line for the seats idle past a 30-minute period: each one's time, and why nothing started. */
+export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seats"]): string {
   const why =
     idle.ready.length > 0
       ? `Ready ${idle.ready.join(", ")} not started`
       : "no Ready ticket fits; FLIGHT has promoted none and logged no wait";
   const triage =
     idle.untriaged.length > 0 ? ` (${idle.untriaged.length} with no board status)` : "";
-  return `flight watch: seat idle: ${idle.seats.join(", ")} for ${Math.floor(idle.ms / 60_000)} min with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
+  const named = seats.map((x) => `${x.id} ${Math.floor(x.ms / 60_000)} min`).join(", ");
+  return `flight watch: seat idle: ${named} with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
 }
 
-/** When FLIGHT is next woken about idle seats: a period boundary, or the first one. */
+/** When FLIGHT is next woken about idle seats: the soonest period boundary of any seat. */
 export function idleWakeAt(idle: FlightIdleSeats): number {
-  const period = idlePeriod(idle);
-  return (
-    idle.since + FLIGHT_IDLE_MS + (period === null ? 0 : (period + 1) * FLIGHT_IDLE_SEAT_WAKE_MS)
+  return Math.min(
+    ...idle.seats.map((x) => {
+      const period = idlePeriod(x.ms);
+      return (
+        x.since + FLIGHT_IDLE_MS + (period === null ? 0 : (period + 1) * FLIGHT_IDLE_SEAT_WAKE_MS)
+      );
+    }),
   );
 }
 
@@ -930,7 +944,7 @@ export function flightState(i: {
 
   const active = store.activeTickets();
   const waitsOf = waitReader(store, session.repoId);
-  const tickets = board
+  const openTickets = board
     .filter(
       (b) =>
         !b.closed &&
@@ -945,7 +959,6 @@ export function flightState(i: {
         a.createdAt - b.createdAt ||
         a.issueNumber - b.issueNumber,
     )
-    .slice(0, FLIGHT_TICKETS_LISTED)
     .map((b) => {
       const column = hudColumnOf(b);
       return {
@@ -968,6 +981,8 @@ export function flightState(i: {
         assignees: b.assignees ?? [],
       };
     });
+  // the digest lists the first FLIGHT_TICKETS_LISTED; the idle-seat check reads all of them
+  const tickets = openTickets.slice(0, FLIGHT_TICKETS_LISTED);
 
   const ready = new Set(store.notes().flatMap((n) => (n.kind === "ready" ? [n.runId] : [])));
   // The list is the stored read of the repo's PRs, not any run's phase or park: an open PR is
@@ -1287,6 +1302,7 @@ export function flightState(i: {
       store,
       seats,
       tickets,
+      allTickets: openTickets,
       items,
       areas: i.areas,
       hubLogin: i.hubLogin ?? null,
@@ -1559,11 +1575,9 @@ export function wakeFacts(
   });
 }
 
-/** The idle-seat facts: each seat with the period of its spell, so a new period is a new fact. */
-const idleFacts = (idle: FlightIdleSeats | undefined): string[] => {
-  const period = idle === undefined ? null : idlePeriod(idle);
-  return idle === undefined || period === null ? [] : idle.seats.map((x) => `${x}:${period}`);
-};
+/** The idle-seat facts: each long-idle seat with the period of its own spell, so a new period is a new fact. */
+const idleFacts = (idle: FlightIdleSeats | undefined): string[] =>
+  idleLong(idle).map((x) => `${x.id}:${idlePeriod(x.ms)}`);
 
 /** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
 export const itemFactId = (x: { kind: string; key: string; text: string }): string =>

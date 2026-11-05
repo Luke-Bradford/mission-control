@@ -7384,6 +7384,20 @@ export class Store {
       .run(at, agentId);
   }
 
+  /**
+   * Marks every open question of one run answered at `at`; with `unpassedOnly`, leaves the ones
+   * passed to the operator open. Another run of the same seat keeps its own questions.
+   */
+  answerRunQuestions(runId: string, at: number, unpassedOnly = false): void {
+    this.db
+      .prepare(
+        `UPDATE seat_questions SET answered_at = ? WHERE run_id = ? AND answered_at IS NULL${
+          unpassedOnly ? " AND passed_at IS NULL" : ""
+        }`,
+      )
+      .run(at, runId);
+  }
+
   /** Records an mc tool failure for the operator; returns its id. */
   addCrewError(e: Omit<CrewError, "id">): number {
     const r = this.db

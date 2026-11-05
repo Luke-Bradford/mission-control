@@ -5158,9 +5158,11 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
   it("counts a ticket with no board status as work to triage, and says so", () => {
     tick(T0);
     const state = read(T0 + GAP);
-    expect(state.wake?.idle).toMatchObject({ seats: ["guido-1"], untriaged: ["mc#2"] });
+    expect(state.wake?.idle?.seats.map((x) => x.id)).toEqual(["guido-1"]);
+    expect(state.wake?.idle?.untriaged).toEqual(["mc#2"]);
     expect(state.wake?.idle?.open).toEqual(["mc#1", "mc#2", "mc#3"]);
     expect(wakeSummary(state)).toContain("1 with no board status to triage");
+    expect(wakeSummary(state)).toContain("longest 10 min");
     expect(pending(state)).toBe(true);
   });
 
@@ -5182,6 +5184,46 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     // inco-1 is free too, but owns apps/web/**: the server tickets are not near it
     expect(idleFact(T0 + GAP)).toEqual([]);
     store.replaceBoard("mc", [card(1, "Backlog", ["area:web"])]);
+    tick(T0);
+    expect(idleFact(T0 + GAP)).toEqual(["inco-1:0"]);
+  });
+
+  it("times each seat on its own: a seat freed late has no inherited idle time", () => {
+    // a ticket with no area label is near every seat
+    store.replaceBoard("mc", [card(1, "Backlog", [])]);
+    live("inco-1", "r-inco");
+    tick(T0);
+    const at41 = T0 + 41 * MIN;
+    tick(at41);
+    // inco-1's run ends at minute 41 and its seat is free from then
+    store.upsertRun(run("r-inco", "inco-1", { endedAt: at41, status: "ok" }));
+    store.setSeatSession(row("inco-1", null));
+    expect(idleFact(at41)).toEqual(["guido-1:1"]);
+    tick(at41);
+    expect(idleFact(at41 + 9 * MIN)).toEqual(["guido-1:1"]);
+    expect(idleFact(at41 + GAP)).toEqual(["guido-1:1", "inco-1:0"]);
+    expect(read(at41 + GAP).wake?.idle?.seats.map((x) => [x.id, x.ms])).toEqual([
+      ["guido-1", at41 + GAP - T0],
+      ["inco-1", GAP],
+    ]);
+  });
+
+  it("counts every open ticket, not the 30 the digest lists", () => {
+    const many = Array.from({ length: 40 }, (_, n) => card(n + 1, n < 9 ? "" : "Backlog"));
+    store.replaceBoard("mc", many);
+    tick(T0);
+    const idle = read(T0 + GAP).wake?.idle;
+    expect(idle?.open).toHaveLength(40);
+    expect(idle?.untriaged).toHaveLength(9);
+    expect(read(T0 + GAP).tickets).toHaveLength(30);
+    expect(wakeSummary(read(T0 + GAP))).toContain("40 open tickets (9 with no board status");
+  });
+
+  it("names a web seat whose only ticket is past the digest's 30", () => {
+    const server = Array.from({ length: 31 }, (_, n) => card(n + 1, "Backlog"));
+    const web = { ...card(90, "Backlog", ["area:web"]), createdAt: T0 + 1000 };
+    store.replaceBoard("mc", [...server, web]);
+    recordFlightWait(store, "guido-1", { on: "a P0", until: T0 + 5 * 60 * MIN, at: T0 });
     tick(T0);
     expect(idleFact(T0 + GAP)).toEqual(["inco-1:0"]);
   });
@@ -5220,6 +5262,20 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       nowMs = T0 + GAP + FLIGHT_IDLE_SEAT_WAKE_MS + MIN;
       await watch.check();
       expect(sendCalls).toHaveLength(2);
+    });
+
+    it("times and logs the idle hours while FLIGHT is rate limited", async () => {
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: T0 + 10 * 60 * MIN };
+      await watch.check();
+      expect(store.getSetting("flight.idle-seat")).toContain("guido-1");
+      nowMs = T0 + 31 * MIN;
+      await watch.check();
+      nowMs = T0 + 61 * MIN;
+      await watch.check();
+      const idle = logged.filter((l) => l.includes("seat idle"));
+      expect(idle).toHaveLength(2);
+      expect(idle[1]).toContain("61 min");
+      expect(sendCalls).toEqual([]);
     });
 
     it("logs each period over 30 minutes: how long, and why", async () => {

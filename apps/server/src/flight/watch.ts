@@ -368,6 +368,19 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const t = now();
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
+    // Seats idle with tickets open are timed and logged whether or not FLIGHT can be woken now:
+    // it may be in a turn, rate limited or rotating, and the hours still count.
+    const idleState = flightState({
+      config,
+      store,
+      busy: supervisor.busy(),
+      now: t,
+      hubLogin: deps.login ?? null,
+      lock: deps.lockState?.(),
+      areas: await deps.areas?.(found.session.repoId),
+    });
+    trackIdleSeat(store, idleState, t);
+    logIdleSeats(idleState);
 
     let added = false;
     let nextDue = Infinity;
@@ -562,8 +575,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       lock: deps.lockState?.(),
       areas: await deps.areas?.(found.session.repoId),
     });
-    trackIdleSeat(store, state, t);
-    logIdleSeats(state);
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
@@ -670,20 +681,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   let gapTimer: NodeJS.Timeout | null = null;
-  /** The last 30-minute period of an idle spell that was logged: one line per period. */
-  let loggedIdle: { since: number; period: number } | null = null;
+  /** Each idle seat's last logged 30-minute period: one line per seat period. */
+  const loggedIdle = new Map<string, number>();
   /** Every period over 30 minutes with a free seat and open tickets: how long, and why. */
   function logIdleSeats(state: FlightState): void {
     const idle = state.wake?.idle;
-    if (idle === undefined) {
-      loggedIdle = null;
-      return;
+    for (const id of [...loggedIdle.keys()]) {
+      if (!idle?.seats.some((x) => x.id === id)) loggedIdle.delete(id);
     }
-    const period = Math.floor(idle.ms / FLIGHT_IDLE_SEAT_WAKE_MS);
-    if (period < 1) return;
-    if (loggedIdle?.since === idle.since && loggedIdle.period >= period) return;
-    loggedIdle = { since: idle.since, period };
-    log(idleSeatLine(idle));
+    if (idle === undefined) return;
+    const due = idle.seats.filter((x) => {
+      const period = Math.floor(x.ms / FLIGHT_IDLE_SEAT_WAKE_MS);
+      return period >= 1 && (loggedIdle.get(x.id) ?? 0) < period;
+    });
+    if (due.length === 0) return;
+    for (const x of due) loggedIdle.set(x.id, Math.floor(x.ms / FLIGHT_IDLE_SEAT_WAKE_MS));
+    log(idleSeatLine(idle, due));
   }
 
   /** Checks again once the wake gap has passed; one pending re-check at a time. */

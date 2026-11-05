@@ -533,7 +533,9 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
+    Partial<
+      Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold" | "reconcileRun">
+    >;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -4234,6 +4236,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         MessageBody,
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
+          // A passed question whose run was set aside is answered by that run, not the seat's
+          // current one: the reply waits in the run's inbox, only its question closes, and the
+          // engine wakes it. Nothing is written to the run that holds the seat now.
+          const parked = store
+            .openQuestions()
+            .find(
+              (q) =>
+                q.agentId === id &&
+                q.passedAt !== null &&
+                q.runId !== runId &&
+                store.run(q.runId)?.endedAt === null &&
+                store.run(q.runId)?.loop?.aside != null,
+            );
+          if (parked !== undefined) {
+            const asideRun = store.run(parked.runId);
+            try {
+              await sendComms(
+                {
+                  store,
+                  crew: commsCrew,
+                  knownSecrets: deps.knownSecrets ?? (async () => []),
+                  now,
+                },
+                COMMS_CAPCOM,
+                {
+                  to: id,
+                  text: b.text,
+                  ref: asideRun?.ticket ?? undefined,
+                  targetRunId: parked.runId,
+                },
+              );
+            } catch (e) {
+              throw new SupervisorError(
+                400,
+                e instanceof Error ? e.message : "Comms message refused.",
+              );
+            }
+            store.answerQuestion(parked.id, now());
+            bus.emit("attention");
+            await deps.engine?.reconcileRun?.(parked.runId);
+            return { ok: true };
+          }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
             await sendComms(

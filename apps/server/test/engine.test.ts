@@ -7,6 +7,8 @@ import {
   AWAY_BUG_VERIFIED,
   AWAY_SETTING,
   type AwayDiff,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -7327,8 +7329,14 @@ describe("the engine runs reviews", () => {
       store.passQuestion(id, clock);
       await h.engine.reconcileRun(b);
       expect(h.asides).toEqual([b]);
+      // the freed seat is offered its next ticket
+      await vi.waitFor(() => expect(h.taken).toEqual([SEAT]));
       await vi.waitFor(() =>
-        expect(store.run(b)?.loop?.aside).toEqual({ worktree: expect.any(String), wake: false }),
+        expect(store.run(b)?.loop?.aside).toEqual({
+          worktree: expect.any(String),
+          wake: false,
+          ask: id,
+        }),
       );
       await h.engine.reconcileRun(b);
       expect(h.wakes).toEqual([]);
@@ -7336,6 +7344,12 @@ describe("the engine runs reviews", () => {
       store.answerQuestion(id, clock);
       await h.engine.reconcileRun(b);
       await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+      // one line carries the answer to the woken run, and it is not sent twice
+      await vi.waitFor(() => expect(h.sent.map((m) => m.text)).toEqual([answeredLineText]));
+      await h.engine.reconcileRun(b);
+      await h.engine.reconcileRun(b);
+      expect(h.sent.map((m) => m.text)).toEqual([answeredLineText]);
+      expect(sentKeys()).toEqual([answerLineKey(b, id)]);
     });
 
     it("two set-aside reworks come back oldest first", async () => {

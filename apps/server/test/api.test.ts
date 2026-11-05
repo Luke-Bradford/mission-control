@@ -7876,6 +7876,71 @@ describe("the first loop's engine", () => {
     await none.a.close();
   });
 
+  it("answers a passed question by its set-aside run, not the run now on the seat (#1451)", async () => {
+    store.upsertRun(
+      run({
+        id: "parked",
+        agentId: "guido-1",
+        ticket: "shop-app#9",
+        loop: { ...loop, phase: "working", aside: { worktree: "/w/parked", wake: false, ask: 1 } },
+      }),
+    );
+    store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+    const qid = store.addQuestion({
+      agentId: "guido-1",
+      runId: "parked",
+      text: "Which provider?",
+      at: NOW,
+    });
+    store.passQuestion(qid, NOW);
+    const otherId = store.addQuestion({
+      agentId: "guido-1",
+      runId: "next",
+      text: "Own question?",
+      at: NOW,
+    });
+    const reconciled: string[] = [];
+    const sup = stubSupervisor();
+    sup.seat = () => ({
+      seatId: "guido-1",
+      runId: "next",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    supervisorCalls.length = 0;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: sup,
+      engine: {
+        onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+        status: () => ({ on: true, note: null }),
+        reconcileRun: async (runId: string) => void reconciled.push(runId),
+      },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/seats/guido-1/message",
+      headers: json,
+      payload: { text: "Use Stripe." },
+    });
+    expect(r.statusCode).toBe(200);
+    // only the parked run's question closes, the reply is addressed to that run, and the run now
+    // on the seat is not written to
+    expect(store.openQuestions().map((q) => q.id)).toEqual([otherId]);
+    expect(store.comms(0, "parked")).toEqual([
+      expect.objectContaining({ to: "guido-1", text: "Use Stripe." }),
+    ]);
+    expect(store.comms(0, "next")).toEqual([]);
+    expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
+    expect(reconciled).toEqual(["parked"]);
+    await a.close();
+  });
+
   it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
     store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
     const { a, told, calls } = engineApp(null);

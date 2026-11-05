@@ -512,6 +512,11 @@ export const asideInCiEventText = (call: string): string =>
 /** A run still being built leaves its seat for rework due on another of the seat's PRs. */
 export const asideForAnswerEventText = (call: string): string =>
   `waiting on the operator's answer; ${call} is free for its next ticket and this one comes back once answered`;
+/** The line a run gets when its parked question is answered: the answer itself waits in its Comms inbox. */
+export const answeredLineText =
+  "The operator answered your question. The answer is in your Comms inbox: read it and carry on with the ticket.";
+export const answerLineKey = (runId: string, questionId: number): string =>
+  `answer:${runId}:${questionId}`;
 export const asideForReworkEventText = (call: string): string =>
   `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;

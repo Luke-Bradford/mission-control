@@ -129,6 +129,26 @@ describe("questions and strays", () => {
     expect(store.strays().map((s) => s.path)).toEqual(["docs/b.md"]);
   });
 
+  it("another run's end or a message spares a question of a set-aside run of the seat (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const parked = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "parked?",
+      at: 1,
+    });
+    store.passQuestion(parked, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "one?", at: 1 });
+    await sup.message("guido-1", "per customer", { interrupt: false });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+    store.addQuestion({ agentId: "guido-1", runId, text: "two?", at: 1 });
+    await sup.endRun("guido-1");
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+  });
+
   it("a run that crashes closes them too", async () => {
     const { sup } = make();
     sup.start();

@@ -187,7 +187,12 @@ export interface RunLoop {
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
   /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
-  aside?: { worktree: string; wake: boolean } | null;
+  aside?: {
+    worktree: string;
+    wake: boolean;
+    /** The operator question this run waits on: the run wakes once it is answered. */
+    ask?: number;
+  } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
