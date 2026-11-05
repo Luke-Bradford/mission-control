@@ -27,12 +27,12 @@ What is this seat doing, is it OK, and what can I do? One screen, no page scroll
 
 49 px top bar, 30 px footer, 12 px gutters, FLIGHT's rail 48 px folded and 380 px open, nav in the live order (Overview, Board, Agents, Map, Comms, QA, Telemetry, Audit). Stand-ins: the top bar's right-hand controls and the footer keys are shortened.
 
-Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity 68 px, gap 12, columns 757 px. The right column: Next move 60, figures 84, loop 48, prompt sections 118, four 12 px gaps, leaving about 400 px for the tabs.
+Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity 68 px, gap 12, columns 757 px. The right column: Next move 60, figures 84, loop 48, prompt sections 118, four 12 px gaps, leaving about 400 px for the tabs. The composer is two lines (input, then the hint), about 68 px, and comes out of Activity, which has the spare height. At 2560 the Plan panel and the tabs share the remainder 3 to 2, so the current plan step stays in view.
 
 ## Layout
 
 - **Identity strip.** Seat, role, the state (the only place "Parked" or "Running" appears: the picker lists names only, the age reads "state changed 3m ago", the composer placeholder names no state), review chip, the reason with a details control, seat picker and actions. Second row: ticket, title (first claim on the width, never under 320 px), branch (shrinks), PR, head and age. The role, account, model, effort, CLI and area line moved to the Context tab.
-- **Actions.** A running crew seat gets Interrupt, Stop and More; a parked one gets Stop and More; Pause only appears for an observed loop. Messaging the seat is the composer under Activity, as today.
+- **Actions.** A running crew seat gets Interrupt, Stop and More; a parked one gets Stop and More; Pause only appears for an observed loop. The composer under Activity keeps today's actions: Send, and "Interrupt and send" while running; a seat held on review gets "Send rework message" instead. Its hint line stays under the input (the mid-turn note, or "This sends RETRO's findings … It does not waive them.").
 - **Activity (left, primary).** Time, kind, tool, target, result, duration. Filters All, Messages, Thinking, Tools, Guard with counts; Follow; link to the full trace. The live call bar shows while a tool runs, or the wait for the test lock with the seat holding it (`?state=running`). It takes all spare height; the rows scroll inside it.
 - **Right column (440 to 560 px).** Next move (only when there is one; the running view has none and the tabs take its height), Cost / Context / Tools, one loop row, Prompt sections (all seven), then the detail tabs.
 - **Plan at 2560 (changed after the first render).** The current step opens in view, centred in the list. From 2200 px wide, Plan and Queue stand in their own panel above the tabs, and the tabs lose Plan. At 1920, and below 2200, Plan and its queue stay one tab. The reason: at 2560 a single tab left about 390 px empty.
@@ -43,7 +43,7 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 | Item today | Where it goes |
 | --- | --- |
 | "What is happening now?" panel | Dropped. State is in the identity strip. Its extra lines (checking a PR, a queued review, a source error) show as the chip beside the state, as a banner, or in Next move, only when they apply. |
-| Run health stat | Dropped while it is fine. A failing run shows as a chip beside the state. |
+| Run health stat ("Held", "5 blocking review findings", "Current PR head") | A chip beside the state: "5 blocking findings · current head", with the live count; its full wording shows on hover or focus. The state word is the pill. When the review verdict is not recorded the chip is left out. |
 | Header badge, seat chip, "Running" in four places | One state pill in the identity strip. |
 | Reason text and its details route | Kept in the identity strip, with a details control that shows the whole text. |
 | Review check chip beside the state | Kept, beside the state. |
@@ -66,9 +66,18 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 | Related work (reviews, subagents, set-aside runs) | Runs tab, "Related work". |
 | Attempts and previous runs | Runs tab, "Attempts and previous runs". Opens lazily, as today. |
 | Subagents tab | Runs tab, "Related work"; the tab returns in the build when a seat has more subagents than fit. |
-| Plan 0/0, Queue tabs | Plan (with its queue) is a tab below 2200 px and a panel above. Queue is part of it. A seat with no plan shows no Plan tab. |
-| Files tab and file diff | Files tab. The folder part of a path is cut and the file name stays. |
-| Prompt tab | Context tab links to it; "Open prompt" stays in the Prompt sections panel. |
+| Plan 0/0, Queue tabs | Plan (with Focus and the Next rows) is a tab below 2200 px and a panel above. A seat with no plan shows no Plan tab. |
+| Files tab, file diff and the commit column | Files tab. Each row is a button (path with the folder cut and the file name kept, +added −removed, commit or "uncommitted"); the pressed row opens its diff under the list, as today, with a Close control. |
+| Prompt tab | Context tab, "Prompt", with an "Open prompt" link; "Open prompt" also stays in the Prompt sections panel. |
+| Tool row detail (full input, full result, duration) | Each tool row is one disclosure (one keyboard stop). Opening it shows the input, the whole result and the duration; the failed test:related row is drawn open. |
+| The held chip's own Reason control | Merged into the identity strip's reason and its "details" control. |
+| Cost per reported turn | Context tab, "Cost" ("$0.71 est. · $0.04 per reported turn"). |
+| The loop's profile | The loop row's caption: "Loop · feature". |
+| Queue: Focus with Change | Top of the Plan panel (and the Plan tab, or the Runs tab for a seat with no plan below 2200 px): "Focus", its text and a Change control. |
+| Queue: "Now" | The identity strip (the ticket, title, branch and PR) and the loop row; no separate list. |
+| Queue: "Next · from Ready, by priority" and the ↑ move-up | Under the plan: each queued ticket with its priority, and ↑ ("Ask FLIGHT to move this up") on a row that sits below a higher priority. |
+| Queue: "Done" | Runs tab, "Attempts and previous runs" (finished tickets are the ✓ rows). |
+| The note that each ticket starts a fresh run | Dropped. Say if you want it back. |
 | Prompt sections bar | Kept with all seven sections; standing orders stand out against the role prompt. |
 | Instructions disclosure | Context tab, "Standing orders", with "Open instructions". |
 | Handoff panel | Shown in Next move when a handoff is open. |
@@ -80,3 +89,5 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 - Result strings are the first line the hub records, cut at 100 characters. The mockup invents no counts, such as "+9 −1" or "80 lines".
 - Stopped, error and observed-loop states keep this grid; the panels with nothing to say (Next move, the loop row) drop out.
 - Not rendered by its author, who cannot start Chrome. FLIGHT renders it. The browser test is written but has not run here.
+- Ticket titles in the queue and runs are the real ones where this fixture knows them (1411, 1434) or shortened from the real branch name (1409) or taken from FLIGHT's description of the ticket (1433); the rest is illustrative.
+- Every link, button, select and input is at least 24 px each way; a link in a list row fills the 32 px row.

@@ -40,6 +40,30 @@ describeRendered("Agents mockup in a browser", () => {
                 const b = now.getBoundingClientRect();
                 return b.top >= a.top - 0.5 && b.bottom <= a.bottom + 0.5;
               };
+              const visible = (el: Element) => el.getClientRects().length > 0;
+              const small = () =>
+                [...document.querySelectorAll<HTMLElement>("a, button, select, input, summary")]
+                  .filter((el) => visible(el) && !el.closest("[hidden]"))
+                  .filter((el) => {
+                    const b = el.getBoundingClientRect();
+                    return b.width < 24 || b.height < 24;
+                  })
+                  .map(
+                    (el) =>
+                      `${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 30)}"`,
+                  );
+              const smallTargets = new Set(small());
+              const composerButtons = [...document.querySelectorAll(".composer button")].map(
+                (b) => b.textContent ?? "",
+              );
+              const changeVisible = [...document.querySelectorAll(".focusrow button")].some(
+                (b) => visible(b) && b.textContent === "Change",
+              );
+              const upVisible = [...document.querySelectorAll(".qi button")].some(visible);
+              const toolRows = document.querySelectorAll(".ev.tool").length;
+              const toolSummaries = document.querySelectorAll(".ev.tool summary").length;
+              const toolExtraStops = document.querySelectorAll('.ev.tool [tabindex="0"]').length;
+              const toolOpen = document.querySelectorAll(".ev.tool details[open] pre").length;
               const stackNow = inView("#stackPlan");
               const tabNow = inView('.tabbody[data-panel="plan"]');
               const stateText = [
@@ -69,6 +93,7 @@ describeRendered("Agents mockup in a browser", () => {
                 );
                 const last = body?.lastElementChild?.getBoundingClientRect();
                 if (!body || !last) continue;
+                for (const x of small()) smallTargets.add(x);
                 const room = body.getBoundingClientRect().bottom - last.bottom;
                 gaps.push({
                   tab: b.dataset.tab ?? "",
@@ -124,6 +149,21 @@ describeRendered("Agents mockup in a browser", () => {
                 gaps,
                 stackGap,
                 stackNow,
+                smallTargets: [...smallTargets],
+                composerButtons,
+                changeVisible,
+                upVisible,
+                toolRows,
+                toolSummaries,
+                toolExtraStops,
+                toolOpen,
+                blocking: /5 blocking/.test(document.querySelector(".ident")?.textContent ?? ""),
+                filesDiff: document.querySelector('.tabbody[data-panel="files"] .diff') !== null,
+                fileCommit:
+                  document.querySelector('.tabbody[data-panel="files"] .tr.f')?.textContent ?? "",
+                promptLink: /Open prompt/.test(
+                  document.querySelector('.tabbody[data-panel="context"]')?.textContent ?? "",
+                ),
                 tabNow,
                 stateWords: stateText.match(/\b(parked|running)\b/gi) ?? [],
                 interrupt,
@@ -168,6 +208,26 @@ describeRendered("Agents mockup in a browser", () => {
                 `${where}: the current plan step is in view when the page opens`,
               ).toBe(true);
             }
+            expect(r.smallTargets, `${where}: controls are at least 24 px each way`).toEqual([]);
+            expect(r.composerButtons, `${where}: composer actions`).toContain(
+              running ? "Interrupt and send" : "Send rework message",
+            );
+            expect(
+              r.blocking,
+              `${where}: the blocking-findings count is on the identity strip`,
+            ).toBe(true);
+            if (variant !== "&plan=empty" || width >= 2200) {
+              expect(r.changeVisible, `${where}: Focus has a Change control`).toBe(true);
+              expect(r.upVisible, `${where}: a queued row can ask FLIGHT to move up`).toBe(true);
+            }
+            expect(r.toolSummaries, `${where}: each tool row is one disclosure`).toBe(r.toolRows);
+            expect(r.toolExtraStops, `${where}: a tool row has one keyboard stop`).toBe(0);
+            expect(r.toolOpen, `${where}: one tool row is drawn open`).toBeGreaterThan(0);
+            expect(r.filesDiff, `${where}: a file diff is drawn open`).toBe(true);
+            expect(r.fileCommit, `${where}: files keep the commit column`).toMatch(
+              /117f67b|uncommitted/,
+            );
+            expect(r.promptLink, `${where}: Context links to the prompt`).toBe(true);
             expect(r.cutNotFocusable, `${where}: cut text must take focus`).toEqual([]);
           },
           BROWSER_TEST_TIMEOUT_MS,

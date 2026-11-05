@@ -125,7 +125,6 @@
       .ev .took{text-align:right}
       .ev .who{font:12px/16px var(--mono);color:var(--fg-2);display:flex;gap:var(--sp-1);align-items:center;white-space:nowrap}
       .ev .body{min-width:0}
-      .ev.tool .body{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(120px,32%);gap:var(--sp-3);align-items:center}
       .ev .tn{font:600 12px/16px var(--mono)}
       .ev .tg{font:12px/16px var(--mono)}
       .ev .rs{font:12px/16px var(--mono);color:var(--fg-2)}
@@ -155,11 +154,35 @@
       .stack .stackplan{flex:1 1 0;min-height:0}
       .stack .stackqueue{flex:none;padding:0 var(--sp-4) var(--sp-2);border-top:1px solid var(--line)}
       @media (min-width:2200px){
-        .stack{display:flex;flex:1 1 0;min-height:160px}
-        .right>.tabs{flex:1 1 0}
+        .stack{display:flex;flex:3 1 0;min-height:160px}
+        .right>.tabs{flex:2 1 0}
         .tabbar .stacked,.tabbody.stacked,.queueDup{display:none}
         .stack.noplan{flex:none}
       }
+      /* targets: every link, button, select and input is at least 24 px each way */
+      .r2 a,.r2 .keep a,.ph a,.sec a,.more,.end a{display:inline-flex;align-items:center;min-height:24px}
+      .rowlink{display:flex;align-items:center;min-height:32px;min-width:0;width:100%}
+      .rowlink .cut{flex:1 1 auto}
+      .tr.f{grid-template-columns:24px minmax(0,1fr) auto 88px;width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;text-align:left;padding:0;min-height:32px}
+      .tr.f[aria-pressed="true"]{background:var(--surface-2)}
+      .tr .add{color:var(--ok)}.tr .del{color:var(--crit)}
+      .diff{margin:var(--sp-2) 0;border:1px solid var(--line);border-radius:3px;font:12px/16px var(--mono);overflow:hidden}
+      .diff .dh{display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-2);min-height:32px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+      .diff .dh button{margin-left:auto}
+      .diff pre{margin:0;padding:var(--sp-2);white-space:pre-wrap;word-break:break-word}
+      .diff .a{color:var(--ok)}.diff .d{color:var(--crit)}
+      .ev.tool details{min-width:0}
+      .ev.tool summary{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(120px,32%);gap:var(--sp-3);align-items:center;min-height:32px;cursor:pointer;list-style:none}
+      .ev.tool summary::-webkit-details-marker{display:none}
+      .ev.tool details pre{margin:0 0 var(--sp-2);padding:var(--sp-2) var(--sp-3);background:var(--surface-2);border:1px solid var(--line);border-radius:3px;font:12px/16px var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--fg-2)}
+      .ev.tool{align-items:start}
+      .ev.tool>.at,.ev.tool>.who,.ev.tool>.took{align-self:start;line-height:32px}
+      .composer{flex-wrap:wrap}
+      .composer .hint{flex:1 0 100%;font:12px/16px var(--mono);color:var(--muted)}
+      .composer .primary{border-color:var(--accent);color:var(--accent)}
+      .focusrow{flex:none;display:flex;align-items:center;gap:var(--sp-2);min-height:32px;padding:0 var(--sp-4);border-bottom:1px solid var(--line);font:12px/16px var(--mono)}
+      .focusrow .lbl{color:var(--muted)}
+      .qi .pr{font:12px/16px var(--mono);color:var(--muted)}
     </style>
   </head>
   <body>
@@ -183,10 +206,10 @@
             <div class="head">Activity <span class="sub" id="count"></span>
               <div class="end"><span class="idle" id="liveState"></span>
                 <span class="filters" role="group" aria-label="Filter activity"></span>
-                <button type="button" id="follow" aria-pressed="true">Follow</button><a href="#" class="mono" style="font-size:12px">Open full trace ›</a></div></div>
+                <button type="button" id="follow" aria-pressed="true">Follow</button><a href="#" class="mono more" style="font-size:12px">Open full trace ›</a></div></div>
             <div class="rows" id="rows" tabindex="0" aria-label="Activity, oldest first"></div>
             <div class="livecall" id="liveCall" hidden></div>
-            <form class="composer" onsubmit="return false"><input aria-label="Message GUIDO-1" placeholder="Message GUIDO-1" /><button type="submit">Send</button></form>
+            <form class="composer" id="composer" onsubmit="return false"></form>
           </section>
 
           <div class="right">
@@ -201,7 +224,7 @@
             <section class="panel loop" id="loop" aria-label="Build loop, feature profile"></section>
 
             <section class="panel prompt" aria-label="Prompt sections">
-              <div class="ph"><b>Prompt sections</b><span class="muted mono" style="font-size:12px;line-height:16px">latest wake · est. 24,402 tokens</span><a class="mono" style="margin-left:auto;font-size:12px;line-height:16px" href="#">Open prompt ›</a></div>
+              <div class="ph"><b>Prompt sections</b><span class="muted mono" style="font-size:12px;line-height:16px">latest wake · est. 24,402 tokens</span><a class="mono more" style="margin-left:auto;font-size:12px;line-height:16px" href="#">Open prompt ›</a></div>
               <div class="pbar" role="img" aria-label="Tool results 16,299; standing orders 3,952; role prompt 1,398; repo rules 1,206; lessons 642; wake digest 517; ticket 388"><i style="width:66.8%;background:var(--think)"></i><i style="width:16.2%;background:var(--warn)"></i><i style="width:5.7%;background:var(--accent)"></i><i style="width:4.9%;background:var(--ok)"></i><i style="width:2.6%;background:var(--crit)"></i><i style="width:2.1%;background:var(--fg-2)"></i><i style="width:1.6%;background:var(--muted)"></i></div>
               <div class="plegend">
                 <span><i class="sw" style="background:var(--think)"></i>Tool results<em>16,299</em></span>
@@ -217,6 +240,7 @@
             <!-- From 2200 px wide, Plan and Queue stand in their own panel and the tabs lose Plan; below that, one tabbed panel. -->
             <section class="panel stack" id="stack" aria-label="Plan and queue">
               <div class="head" id="stackHead">Plan <span class="sub"></span></div>
+              <div id="stackFocus"></div>
               <div class="stackplan tabbody" id="stackPlan"></div>
               <div class="stackqueue" id="stackQueue"></div>
             </section>
@@ -257,7 +281,8 @@
           <div class="r1">
             <h2><i></i>GUIDO-1<span class="rt">· Backend developer</span></h2>
             <span class="state${S.cls}">${S.pill}</span>
-            ${S.chip ? `<span class="chip">${S.chip}</span>` : ""}
+            <span class="chip">Held · hub</span>
+            <span class="chip crit" tabindex="0" data-full="5 blocking review findings on the current PR head (117f67b)">5 blocking findings · current head</span>
             <span class="why">${full(S.why, S.whyFull)}<button type="button" aria-label="Read the full reason">details</button></span>
           </div>
           <div class="acts">
@@ -272,6 +297,8 @@
             <span class="keep"><a href="#">PR 1430</a> · <span class="mono muted">head 117f67b</span></span>
             <span class="keep mono muted">${S.age}</span>
           </div>`;
+      const seatHint = RUN ? "Reaches GUIDO-1 mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters." : "This sends RETRO's findings on 117f67b back for rework. It does not waive them.";
+      document.getElementById("composer").innerHTML = `<input aria-label="Message this agent" aria-describedby="hint" placeholder="${RUN ? "Message GUIDO-1…" : "Send findings back for rework…"}" /><button type="submit" class="primary">${RUN ? "Send" : "Send rework message"}</button>${RUN ? `<button type="button" title="Stop the current turn, then send">Interrupt and send</button>` : ""}<span class="hint" id="hint">${seatHint}</span>`;
       document.getElementById("liveState").textContent = RUN ? "Live" : S.last;
       if (RUN) document.getElementById("liveState").className = "live";
       const nextEl = document.getElementById("next");
@@ -279,9 +306,9 @@
       else nextEl.innerHTML = `<b>Waiting on FLIGHT</b>
               <div class="txt"><span class="cut" tabindex="0" data-full="FLIGHT rules on the refused push of 117f67b. Run the check from the controller's shell, or rule that it cannot pass in a seat's sandbox, then release the push.&#10;FLIGHT recommends: run it from the controller's shell.">FLIGHT rules on the refused push of 117f67b</span><button type="button" style="border:0;background:none;color:var(--accent)" aria-label="Read the full next decision">Read full</button></div>
               <a class="btn" href="#">Open conversation</a>`;
-      document.getElementById("loop").innerHTML = `<span class="cap">Loop</span>
+      document.getElementById("loop").innerHTML = `<span class="cap">Loop · feature</span>
               <span class="step done" tabindex="0" data-full="plan · done 4m&#10;build · done 38m&#10;checks · done, 1 failure, 2 of 3 tries">3 done</span>
-              ${RUN ? `<span class="step now" tabindex="0" data-full="checks · running, 3 of 3 tries">checks 3/3</span>` : `<span class="step held" tabindex="0" data-full="push · held, refused at 117f67b, 1 of 3 tries">push held 1/3</span>`}
+              ${RUN ? `<span class="step now" tabindex="0" data-full="checks · running, 3 of 3 tries">checks 3/3</span>` : `<span class="step held" tabindex="0" data-full="push · held, refused at 117f67b, 1 of 3 tries">held 1/3</span>`}
               <span class="step" tabindex="0" data-full="Later: ${RUN ? "push, draft PR, review" : "draft PR, review"}">+${RUN ? 3 : 2} later</span>`;
       if (RUN) {
         const lc = document.getElementById("liveCall");
@@ -290,7 +317,7 @@
       }
       // ---- Activity: oldest first, as StreamPanel shows it. kind: tool | think | msg | you | a2a | guard | sys.
       const E = [];
-      const t = (at, name, target, result, ms, err) => E.push({ at, kind: "tool", name, target, result, ms, err });
+      const t = (at, name, target, result, ms, err, more) => E.push({ at, kind: "tool", name, target, result, ms, err, more });
       const k = (at, kind, text, n) => E.push({ at, kind, text, n });
       k("23:31", "you", "Ticket 1411 assigned: test:related can't pass in a seat's sandbox when a change selects most of the suite. Plan first, then build; check with pnpm -s test:related before you push.");
       k("23:31", "think", "thinking", 3);
@@ -305,7 +332,7 @@
       k("23:36", "guard", "Refused: whole-file re-read of apps/web/test/browserRunner.ts (412 lines, unchanged). Read the lines you need.");
       t("23:37", "Read", "apps/web/test/browserRunner.ts", "   300\t  async boxes(selector: string, within?: string) {", 100);
       k("23:38", "think", "thinking", 4);
-      t("23:38", "Bash", "pnpm -s test:related", "error: 41 files selected; 9 browser files could not start Chrome in this sandbox", 212000, true);
+      t("23:38", "Bash", "pnpm -s test:related", "error: 41 files selected; 9 browser files could not start Chrome in this sandbox", 212000, true, "\n  apps/web/test/Telemetry.browser.test.ts\n  apps/web/test/RunTrace.browser.test.ts\n  … 7 more");
       t("23:39", "Bash", "rg -n \"describeRendered\" apps/web/test --count", "apps/web/test/Telemetry.browser.test.ts:1", 180);
       t("23:39", "Bash", "ls apps/web/test | grep -c browser", "27", 70);
       t("23:40", "Read", "apps/web/test/Telemetry.browser.test.ts", "     1\t// @vitest-environment node", 90);
@@ -348,7 +375,10 @@
         let body;
         if (e.kind === "tool") {
           const res = (e.err ? "error: " : "") + e.result;
-          body = `<span class="tn">${e.name}</span><span class="tg cut" tabindex="0" data-full="${esc(e.name + " " + e.target)}">${esc(e.target)}</span><span class="rs cut" tabindex="0" data-full="${esc(res)}">${esc(res)}</span>`;
+          const shown = e.target.length > 80 ? `${e.target.slice(0, 79)}…` : e.target;
+          const input = JSON.stringify(e.name === "Bash" ? { command: e.target } : e.name === "Grep" || e.name === "Glob" ? { pattern: e.target } : { file_path: e.target });
+          const open = e.err && e.target === "pnpm -s test:related" ? " open" : "";
+          body = `<details${open}><summary><span class="tn">${e.name}</span><span class="tg cut">${esc(shown)}</span><span class="rs cut">${esc(res)}</span></summary><pre>${esc(`input: ${input}\nresult: ${res}${e.more ?? ""}\nduration: ${took || "—"}`)}</pre></details>`;
         } else if (e.kind === "think") {
           body = `<span>thinking${e.n > 1 ? " ×" + e.n : ""}</span>`;
         } else if (e.kind === "sys") {
@@ -367,36 +397,39 @@
 
       // ---- Plan and queue. A seat with no plan has no Plan panel or tab; the queue is shown on its own.
       const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["●", "Push once and report the exact output"], ["○", "Wait for the controller's ruling on the check"], ["○", "Open the draft PR"], ["○", "Request review"], ["○", "Answer review findings"], ["○", "Re-run the three checks"], ["○", "Report evidence for each done-when line"], ["○", "Hand the branch to merge"], ["○", "Close the plan"]];
-      const queue = [["RETRO-1 · fresh review once the PR opens", "after the push"], ["mission-control#1428 · the token work follow-up", "next ticket"]];
+      const queue = [["mission-control#1434", "Agents page answers what a seat is doing on one screen, with Activity as the part that grows", "P0", false], ["mission-control#1433", "Overview Board shows whole cards, no dead blocks, scrolling only where needed", "P2", true]];
+      const focusRow = `<div class="focusrow"><span class="lbl">Focus</span><span class="cut" tabindex="0" data-full="label:area:tests">label:area:tests</span><button type="button" style="margin-left:auto">Change</button></div>`;
       const doneN = plan.filter((p) => p[0] === "✓").length;
       const planRows = plan.map(([ck, x], i) => `<div class="tr"><span class="ck ${ck === "✓" ? "ok" : ck === "●" ? "think" : "muted"}">${ck}</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d">${ck === "●" ? "now" : ""}</span></div>`).join("");
-      const queueRows = queue.map(([x, d], i) => `<div class="tr"><span class="ck warn">${i + 1}</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
-      const planBlock = plan.length ? `<div class="sec">Plan <span>${doneN} of ${plan.length} done</span></div>${planRows}` : "";
-      const queueBlock = `<div class="sec">Queued after this run <span>${queue.length}</span></div>${queueRows}`;
+      const queueRows = queue.map(([ref, title, pri, up], i) => `<div class="tr qi" style="grid-template-columns:24px minmax(0,1fr) auto"><span class="ck warn">${i + 1}</span><span class="cut" tabindex="0" data-full="${esc(`${ref} ${title}`)}">${esc(ref)} ${esc(title)}</span><span class="d"><span class="pr">${pri}</span>${up ? ` <button type="button" title="Ask FLIGHT to move this up" aria-label="Ask FLIGHT to move ${esc(ref)} up">↑</button>` : ""}</span></div>`).join("");
+      const planBlock = focusRow + (plan.length ? `<div class="sec">Plan <span>${doneN} of ${plan.length} done</span></div>${planRows}` : "");
+      const queueBlock = `<div class="sec">Next · from Ready, by priority <span>${queue.length}</span></div>${queueRows}`;
       document.querySelector("#stackHead .sub").textContent = plan.length ? `${doneN} of ${plan.length} done · ${queue.length} queued` : `${queue.length} queued · no plan yet`;
       document.getElementById("stackHead").firstChild.textContent = plan.length ? "Plan " : "Queue ";
       document.getElementById("stackPlan").innerHTML = plan.length ? planRows : "";
+      document.getElementById("stackFocus").innerHTML = focusRow;
       document.getElementById("stackPlan").hidden = !plan.length;
       document.getElementById("stack").classList.toggle("noplan", !plan.length);
-      document.getElementById("stackQueue").innerHTML = (plan.length ? `<div class="sec">Queued after this run <span>${queue.length}</span></div>` : "") + queueRows;
+      document.getElementById("stackQueue").innerHTML = (plan.length ? `<div class="sec">Next · from Ready, by priority <span>${queue.length}</span></div>` : "") + queueRows;
 
-      const files = [["M", "docs/runbooks/test-lock.md", "+14 −2"], ["M", "docs/runbooks/visual-qa.md", "+6 −0"], ["M", "apps/web/src/hud.css", "+3 −1"], ["M", "apps/web/test/browserRunner.ts", "+11 −4"], ["A", "docs/runbooks/test-related-in-a-sandbox.md", "+58"], ["M", "package.json", "+1 −1"], ["M", ".claude/skills/hud-design/SKILL.md", "+2 −0"], ["M", "docs/direction.md", "+2 −2"], ["M", "README.md", "+1 −1"], ["M", "apps/web/test/Telemetry.browser.test.ts", "+0 −0"], ["M", "apps/web/test/RunTrace.browser.test.ts", "+0 −0"], ["M", "docs/superpowers/plans/2026-10-21-plan-7a-engine-board.md", "+4 −0"]];
-      const pathHtml = (p) => { const i = p.lastIndexOf("/"); return `<span class="path" tabindex="0" data-full="${esc(p)}"><span class="dir">${esc(p.slice(0, i + 1))}</span><span class="file">${esc(p.slice(i + 1))}</span></span>`; };
-      const filesHtml = `<div class="sec">Changed files <span>${files.length} vs main</span></div>` + files.map(([s, p, d]) => `<div class="tr"><span class="ck ${s === "A" ? "ok" : "warn"}">${s}</span>${pathHtml(p)}<span class="d">${d}</span></div>`).join("");
+      const files = [["M", "docs/runbooks/test-lock.md", "+14", "−2", "117f67b"], ["M", "docs/runbooks/visual-qa.md", "+6", "−0", "117f67b"], ["M", "apps/web/src/hud.css", "+3", "−1", "uncommitted"], ["M", "apps/web/test/browserRunner.ts", "+11", "−4", "3ac91e0"], ["A", "docs/runbooks/test-related-in-a-sandbox.md", "+58", "−0", "117f67b"], ["M", "package.json", "+1", "−1", "3ac91e0"], ["M", ".claude/skills/hud-design/SKILL.md", "+2", "−0", "uncommitted"], ["M", "docs/direction.md", "+2", "−2", "uncommitted"], ["M", "README.md", "+1", "−1", "3ac91e0"], ["M", "apps/web/test/Telemetry.browser.test.ts", "+0", "−0", "uncommitted"], ["M", "apps/web/test/RunTrace.browser.test.ts", "+0", "−0", "uncommitted"], ["M", "docs/superpowers/plans/2026-10-21-plan-7a-engine-board.md", "+4", "−0", "3ac91e0"]];
+      const pathHtml = (p) => { const i = p.lastIndexOf("/"); return `<span class="path"><span class="dir">${esc(p.slice(0, i + 1))}</span><span class="file">${esc(p.slice(i + 1))}</span></span>`; };
+      const diffHtml = `<div class="diff" aria-label="Diff of docs/runbooks/test-lock.md"><div class="dh"><b>docs/runbooks/test-lock.md</b><span class="muted">117f67b</span><button type="button">Close diff</button></div><pre><span class="d">− A full suite run waits for the shared lock.</span>\n<span class="a">+ A full suite run waits for the shared lock. test:related can select most of the suite.</span>\n<span class="a">+ Browser-backed files need Chrome; a seat's sandbox cannot start it.</span>\n<span class="a">+ Run those from the controller's shell, and say so in the report.</span></pre></div>`;
+      const filesHtml = `<div class="sec">Changed files <span>${files.length} vs main</span></div>` + files.map(([st, p, ad, dl, sha], i) => `<button type="button" class="tr f" aria-pressed="${i === 0}" data-full="${esc(p)}"><span class="ck ${st === "A" ? "ok" : "warn"}">${st}</span>${pathHtml(p)}<span class="d"><span class="add">${ad}</span> <span class="del">${dl}</span></span><span class="d">${sha}</span></button>`).join("") + diffHtml;
       const done = [["not", "test:related passes in a seat's sandbox when a change selects most of the suite", "Run 2 reported the check cannot start 9 browser files here"], ["not", "Browser-backed files are named, with what they need", "docs/runbooks/test-related-in-a-sandbox.md lists the 9 files"], ["met", "The runbook says what test:related needs and what to do without it", "docs/runbooks/test-lock.md, section 'Without a browser'"]];
       const left = ["Rule on the refused push of 117f67b (FLIGHT)", "Request review once the checks pass"];
       const links = [["PR", "PR #1430"], ["FILE", "docs/runbooks/test-lock.md"], ["FILE", "docs/runbooks/test-related-in-a-sandbox.md"], ["FILE", "package.json"], ["FILE", "vitest.config.ts"], ["FILE", "apps/web/test/browserRunner.ts"], ["SHOT", "test-related-sandbox-before.png"], ["SHOT", "test-related-sandbox-after.png"]];
-      const reportHtml = `<span class="lab">Previous run · round 1 · 2h ago</span><p class="fg2">Documented what test:related needs a browser for. The check itself still cannot pass here.</p><div class="sec">Done when <span>1 of ${done.length} met</span></div>` + done.map(([st, x, ev]) => `<div class="tr two"><span class="ck ${st === "met" ? "ok" : "warn"}">${st === "met" ? "✓" : "○"}</span><span class="mid"><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><small class="cut" tabindex="0" data-full="${esc(ev)}">${esc(ev)}</small></span><span class="d">${st === "met" ? "met" : "open"}</span></div>`).join("") + `<div class="sec">Left</div>` + left.map((x) => `<div class="tr"><span class="ck muted">○</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d"></span></div>`).join("") + `<div class="sec">Saved links <span>${links.length} of 28</span></div>` + links.map(([kd, l]) => `<div class="tr"><span class="ck muted">↗</span><span class="cut" tabindex="0" data-full="${esc(l)}"><span class="kind">${kd}</span><a href="#">${esc(l)}</a></span><span class="d"></span></div>`).join("") + `<div class="tr"><span class="ck muted">…</span><a href="#" class="mono" style="font-size:12px">Show all 28 links ›</a><span class="d"></span></div>`;
-      const runs = [["●", "mission-control#1411 · this run (3 of 3)", "28m"], ["✓", "mission-control#1411 · run 2, reported", "52m"], ["✓", "mission-control#1411 · run 1, set aside", "9m"], ["✓", "feature/1409-screenshot-evidence-times-out-on-every · PR 1418", "1h 3m"], ["✓", "docs/hud-design-blank-slate-gaps · PR 1408", "47m"], ["✓", "chore/core-test-timeout · PR 1413", "22m"]];
+      const reportHtml = `<span class="lab">Previous run · round 1 · 2h ago</span><p class="fg2">Documented what test:related needs a browser for. The check itself still cannot pass here.</p><div class="sec">Done when <span>1 of ${done.length} met</span></div>` + done.map(([st, x, ev]) => `<div class="tr two"><span class="ck ${st === "met" ? "ok" : "warn"}">${st === "met" ? "✓" : "○"}</span><span class="mid"><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><small class="cut" tabindex="0" data-full="${esc(ev)}">${esc(ev)}</small></span><span class="d">${st === "met" ? "met" : "open"}</span></div>`).join("") + `<div class="sec">Left</div>` + left.map((x) => `<div class="tr"><span class="ck muted">○</span><span class="cut" tabindex="0" data-full="${esc(x)}">${esc(x)}</span><span class="d"></span></div>`).join("") + `<div class="sec">Saved links <span>${links.length} of 28</span></div>` + links.map(([kd, l]) => `<div class="tr"><span class="ck muted">↗</span><a class="rowlink" href="#" data-full="${esc(l)}"><span class="kind">${kd}</span><span class="cut">${esc(l)}</span></a><span class="d"></span></div>`).join("") + `<div class="tr"><span class="ck muted">…</span><a href="#" class="mono more" style="font-size:12px">Show all 28 links ›</a><span class="d"></span></div>`;
+      const runs = [["●", "mission-control#1411 · this run (3 of 3)", "28m"], ["✓", "mission-control#1411 · run 2, reported", "52m"], ["✓", "mission-control#1411 · run 1, set aside", "9m"], ["✓", "mission-control#1409 · Screenshot evidence times out on every… · feature/1409-screenshot-evidence-times-out-on-every · PR 1418", "1h 3m"], ["✓", "docs/hud-design-blank-slate-gaps · PR 1408", "47m"], ["✓", "chore/core-test-timeout · PR 1413", "22m"]];
       const rel = [["review", "RETRO-1 · run 2 review · reported", "2 Important"], ["subagent", "Explore · find where test:related is defined", "completed"], ["subagent", "Explore · list browser test files", "completed"]];
-      const runsHtml = `<div class="sec">Attempts and previous runs <span>${runs.length}</span></div>` + runs.map(([ck, x, d]) => `<div class="tr"><span class="ck ${ck === "●" ? "think" : "ok"}">${ck}</span><span class="cut" tabindex="0" data-full="${esc(x)}"><a href="#">${esc(x)}</a></span><span class="d">${d}</span></div>`).join("") + `<div class="sec">Related work <span>${rel.length}</span></div>` + rel.map(([kd, x, d]) => `<div class="tr"><span class="ck muted">·</span><span class="cut" tabindex="0" data-full="${esc(kd + ": " + x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
-      const kv = [["Role", "GUIDO · writer · s/mission-control"], ["Account", "claude-max"], ["Model", "claude-sonnet-5-5 · medium"], ["CLI", "2.1.318"], ["Area", "apps/server/**, packages/core/**, docs/**"], ["Branch", "feature/1411-test-related-can-t-pass-in-a-seat-s"], ["Context window", "73.8k of 200k · 1 compaction"], ["Prompt", "24,402 est. tokens · 7 sections"], ["Session", "s/mission-control · started 22:54"]];
+      const runsHtml = `<div class="sec">Attempts and previous runs <span>${runs.length}</span></div>` + runs.map(([ck, x, d]) => `<div class="tr"><span class="ck ${ck === "●" ? "think" : "ok"}">${ck}</span><a class="rowlink" href="#" data-full="${esc(x)}"><span class="cut">${esc(x)}</span></a><span class="d">${d}</span></div>`).join("") + `<div class="sec">Related work <span>${rel.length}</span></div>` + rel.map(([kd, x, d]) => `<div class="tr"><span class="ck muted">·</span><span class="cut" tabindex="0" data-full="${esc(kd + ": " + x)}">${esc(x)}</span><span class="d">${d}</span></div>`).join("");
+      const kv = [["Role", "GUIDO · writer · s/mission-control"], ["Account", "claude-max"], ["Model", "claude-sonnet-5-5 · medium"], ["CLI", "2.1.318"], ["Area", "apps/server/**, packages/core/**, docs/**"], ["Branch", "feature/1411-test-related-can-t-pass-in-a-seat-s"], ["Context window", "73.8k of 200k · 1 compaction"], ["Cost", "$0.71 est. · $0.04 per reported turn"], ["Prompt", "24,402 est. tokens · 7 sections"], ["Session", "s/mission-control · started 22:54"]];
       const tools = [["Bash", 11, 3], ["Read", 9, 0], ["Edit", 4, 0], ["Grep", 3, 0], ["Glob", 1, 0]];
       const mono = 'class="mono" style="font-size:12px;line-height:16px"';
-      const ctxHtml = `<div class="sec">Seat</div>` + kv.map(([a, b]) => `<div class="kv"><span>${a}</span><span class="cut mono" style="font-size:12px;line-height:16px" tabindex="0" data-full="${esc(b)}">${esc(b)}</span></div>`).join("") + `<div class="sec">Tools this run <span>28 calls · 3 failed</span></div>` + tools.map(([n, cn, f]) => `<div class="kv"><span>${n}</span><span ${mono}>${cn} calls${f ? ` · <b class="crit">${f} failed</b>` : ""}</span></div>`).join("") + `<div class="sec">Standing orders <a href="#">Open instructions ›</a></div><div class="kv"><span>Orders</span><span ${mono}>3,952 est. tokens in this wake</span></div>`;
+      const ctxHtml = `<div class="sec">Seat</div>` + kv.map(([a, b]) => `<div class="kv"><span>${a}</span><span class="cut mono" style="font-size:12px;line-height:16px" tabindex="0" data-full="${esc(b)}">${esc(b)}</span></div>`).join("") + `<div class="sec">Tools this run <span>28 calls · 3 failed</span></div>` + tools.map(([n, cn, f]) => `<div class="kv"><span>${n}</span><span ${mono}>${cn} calls${f ? ` · <b class="crit">${f} failed</b>` : ""}</span></div>`).join("") + `<div class="sec">Prompt <a href="#" class="mono">Open prompt ›</a></div><div class="kv"><span>Latest wake</span><span class="mono" style="font-size:12px;line-height:16px">24,402 est. tokens · 7 sections</span></div><div class="sec">Standing orders <a href="#">Open instructions ›</a></div><div class="kv"><span>Orders</span><span ${mono}>3,952 est. tokens in this wake</span></div>`;
 
       // Tabs. Plan and Queue are tabs below 2200 px; from 2200 px they stand in the Plan panel above.
-      const TABS = [...(plan.length ? [["plan", `Plan<span class="n">${doneN}/${plan.length}</span>`, planBlock + queueBlock]] : []), ["files", `Files<span class="n">${files.length}</span>`, filesHtml], ["report", "Report", reportHtml], ["runs", `Runs<span class="n">${runs.length}</span>`, (plan.length ? "" : `<div class="queueDup">${queueBlock}</div>`) + runsHtml], ["context", "Context", ctxHtml]];
+      const TABS = [...(plan.length ? [["plan", `Plan<span class="n">${doneN}/${plan.length}</span>`, planBlock + queueBlock]] : []), ["files", `Files<span class="n">${files.length}</span>`, filesHtml], ["report", "Report", reportHtml], ["runs", `Runs<span class="n">${runs.length}</span>`, (plan.length ? "" : `<div class="queueDup">${focusRow}${queueBlock}</div>`) + runsHtml], ["context", "Context", ctxHtml]];
       const bar = document.querySelector(".tabbar");
       bar.innerHTML = TABS.map(([id, label], i) => `<button role="tab" aria-selected="${i === 0}" data-tab="${id}" class="${id === "plan" ? "stacked" : ""}">${label}</button>`).join("");
       for (const p of document.querySelectorAll(".tabbody[data-panel]")) {
