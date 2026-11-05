@@ -353,11 +353,11 @@ import {
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
+import { handoffTarget } from "../run-handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { InstructionInput } from "../standing-instructions.ts";
-import { handoffTarget } from "../run-handoffs.ts";
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
