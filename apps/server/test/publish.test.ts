@@ -39,6 +39,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import {
   CI_LOG_UNREADABLE,
+  ciLogBody,
   cleanLog,
   createPublisher,
   EARLIER_PR_OPEN,
@@ -536,8 +537,8 @@ describe("ciExcerpt", () => {
     for (const section of out.split("\n\n")) {
       expect(section).toMatch(/^[a-z]+:\n\S/);
     }
-    // the first run's text takes the whole budget: the second run gets no header, and its log is
-    // not read at all
+    // each run left gets an equal part of what is left: a first run with a huge log cannot take
+    // the second run's room, and the whole stays inside the cap
     ghCalls = [];
     ghAnswers = [
       runs(
@@ -545,10 +546,14 @@ describe("ciExcerpt", () => {
         { databaseId: 2, name: "x".repeat(CI_EXCERPT_MAX), conclusion: "failure" },
       ),
       () => ({ code: 0, stdout: "y".repeat(CI_EXCERPT_MAX * 2) }),
+      () => ({ code: 0, stdout: "z".repeat(CI_EXCERPT_MAX * 2) }),
     ];
     const full = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(Buffer.byteLength(full)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
-    expect(ghCalls.filter((c) => c[1] === "view")).toHaveLength(1);
+    expect(ghCalls.filter((c) => c[1] === "view")).toHaveLength(2);
+    const [one, two] = full.split("\n\n");
+    expect(Buffer.byteLength(one ?? "")).toBeLessThanOrEqual(CI_EXCERPT_MAX / 2);
+    expect(two).toContain("z");
   });
 
   it("fills the budget exactly across sections when the first does not use it all", async () => {
@@ -800,6 +805,133 @@ describe("ciExcerpt", () => {
       expect(out.indexOf("[many]")).toBeLessThan(out.indexOf("[typecheck]"));
       expect(out.match(/error TS2322/g)).toHaveLength(100);
       expect(out).toContain("[50 more failing lines in many not shown; inspect the CI log.]");
+    });
+    it("ranks only a line that starts with FAIL, never a passing test or code line that says it", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 120 }, (_, i) =>
+          L(` ✓ a${i}.test.ts > shows the FAILED badge 1ms`),
+        ),
+        L(" FAIL  b.test.ts > real"),
+        L("AssertionError: real"),
+        L('  9| it("shows the FAILED badge", () => {'),
+      ]);
+      expect(out).toContain("FAIL  b.test.ts > real");
+      expect(out).toContain("AssertionError: real");
+      expect(out.indexOf("FAIL  b.test.ts")).toBeLessThan(out.indexOf("✓"));
+      const marks = await excerpt([L(" ✓ a > FAIL badge 1ms"), L(" × b.test.ts > b 3ms")]);
+      expect(marks).toContain("× b.test.ts > b");
+    });
+
+    it("never goes past its room, down to a few bytes, with notices to count", () => {
+      const lines = [
+        ...Array.from({ length: 60 }, (_, i) => [
+          L(` FAIL  test/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+          L(`AssertionError: expected ${i} to be ${i + 1}`),
+        ]).flat(),
+        ...[1, 2, 3, 4].flatMap((n) => [
+          L(` FAIL  s${n}.test.ts > one`, `server (${n})`),
+          L("AssertionError: no", `server (${n})`),
+        ]),
+      ].join("\n");
+      for (const room of [10, 60, 100, 200, 333, 1000, 4000, 8192]) {
+        expect(Buffer.byteLength(ciLogBody(lines, room))).toBeLessThanOrEqual(room);
+      }
+      for (let room = 150; room < 700; room += 7) {
+        expect(Buffer.byteLength(ciLogBody(lines, room))).toBeLessThanOrEqual(room);
+      }
+    });
+
+    it("stays inside the cap across two failed runs, the second with four failing jobs", async () => {
+      const first = Array.from({ length: 60 }, (_, i) => [
+        L(` FAIL  test/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+        L(`AssertionError: expected ${i} to be ${i + 1}`),
+      ])
+        .flat()
+        .join("\n");
+      const second = [1, 2, 3, 4]
+        .flatMap((n) => [
+          L(` FAIL  s${n}.test.ts > one`, `server (${n})`),
+          L("AssertionError: no", `server (${n})`),
+        ])
+        .join("\n");
+      ghAnswers = [
+        runs(
+          { databaseId: 1, name: "a", conclusion: "failure" },
+          { databaseId: 2, name: "b", conclusion: "failure" },
+        ),
+        () => ({ code: 0, stdout: first }),
+        () => ({ code: 0, stdout: second }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    });
+
+    it("gives a later run's failures room ahead of an earlier run's console output", async () => {
+      const first = [
+        L(" FAIL  a.test.ts > first run failure"),
+        L("AssertionError: first"),
+        L("stderr | a.test.ts"),
+        ...Array.from({ length: 300 }, (_, i) => L(`Warning: ${"w".repeat(100)} ${i}`)),
+      ].join("\n");
+      const second = [
+        L(" FAIL  s.test.ts > second run failure", "server (1)"),
+        L("AssertionError: second", "server (1)"),
+      ].join("\n");
+      ghAnswers = [
+        runs(
+          { databaseId: 1, name: "a", conclusion: "failure" },
+          { databaseId: 2, name: "b", conclusion: "failure" },
+        ),
+        () => ({ code: 0, stdout: first }),
+        () => ({ code: 0, stdout: second }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("FAIL  s.test.ts > second run failure");
+      expect(out).toContain("AssertionError: second");
+    });
+
+    it("reads a huge console log in well under a second per hundred thousand lines", () => {
+      const lines = [
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: x"),
+        L("stderr | a"),
+        ...Array.from({ length: 150_000 }, (_, i) => L(`console line number ${i} of the run`)),
+      ].join("\n");
+      const at = Date.now();
+      const out = ciLogBody(lines, CI_EXCERPT_MAX);
+      expect(Date.now() - at).toBeLessThan(5000);
+      expect(out).toContain("FAIL  a.test.ts > t");
+    });
+
+    it("prints a FAIL name once and does not attach a later error to it", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: first"),
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: later"),
+      ]);
+      expect(out.match(/FAIL/g)).toHaveLength(1);
+      expect(out.indexOf("later")).toBeGreaterThan(out.indexOf("[web-core: console]"));
+    });
+
+    it("prints a repeated type error once", async () => {
+      const out = await excerpt([
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+      ]);
+      expect(out.match(/error TS2345/g)).toHaveLength(1);
+    });
+
+    it("caps × lines at 100, counts the rest, and puts them ahead of console output", async () => {
+      const out = await excerpt([
+        L("stderr | a"),
+        L("console first"),
+        ...Array.from({ length: 150 }, (_, i) => L(` × test/x${i}.test.ts > x 4ms`)),
+      ]);
+      expect(out.match(/× test\/x/g)).toHaveLength(100);
+      expect(out).toContain("[50 more failing lines in web-core not shown; inspect the CI log.]");
+      expect(out.indexOf("× test/x")).toBeLessThan(out.indexOf("console first"));
     });
   });
 

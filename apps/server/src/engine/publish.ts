@@ -333,8 +333,8 @@ function tailBytes(text: string, max: number): string {
 
 /** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
 export const CI_SUMMARY_JOB = "check";
-/** A test's name as vitest prints a failure. */
-const FAIL_LINE = /(?:^|\s)(?:FAIL|FAILED)\b/;
+/** A failure as vitest prints it, at the start of the line: never a passing test or code line that says FAIL. */
+const FAIL_LINE = /^(?:FAIL|FAILED)\b/;
 /** The error line under a failure: an assertion or a typed error. */
 const ERROR_LINE = /AssertionError|\b\w*Error:/;
 /** A type or lint error, a failure by itself. */
@@ -402,8 +402,14 @@ export function ciLogBody(log: string, max: number): string {
     seen.add(key);
     return true;
   };
+  // a set per list: a log may hold hundreds of thousands of distinct console lines
+  const sets = new Map<string[], Set<string>>();
   const addOnce = (list: string[], line: string) => {
-    if (!list.includes(line)) list.push(line);
+    const held = sets.get(list) ?? new Set<string>();
+    sets.set(list, held);
+    if (held.has(line)) return;
+    held.add(line);
+    list.push(line);
   };
   let open: string[] | null = null;
   let sinceFail = 0;
@@ -482,6 +488,8 @@ export function ciLogBody(log: string, max: number): string {
   for (const x of groups) {
     if (failingOf(x) > 0) budget -= byteLength(omittedText(99999, x.job)) + 1;
   }
+  // too little room for any notice: the lines get it all, and no notice is added
+  if (budget < 0) budget = max;
   const tiers: Tier[] = [
     { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
     { name: "", units: (x) => x.marks.map((l) => [l]), shown: groups.map(() => []) },
@@ -504,11 +512,11 @@ export function ciLogBody(log: string, max: number): string {
   // lower tier; a job that stops fitting is closed for its tier
   const fill = (t: Tier, from: number) => {
     const closed = new Set<number>();
+    const lists = groups.map((x) => t.units(x));
     for (let i = from; ; i++) {
       let any = false;
       for (let gi = 0; gi < groups.length; gi++) {
-        const units = t.units(groups[gi] as Group);
-        const unit = units[i];
+        const unit = lists[gi]?.[i];
         if (closed.has(gi) || unit === undefined) continue;
         any = true;
         if (!take(t, gi, unit)) closed.add(gi);
@@ -540,7 +548,9 @@ export function ciLogBody(log: string, max: number): string {
     const shown =
       (tier0.shown[gi] as string[][]).flat().length +
       ((tiers[1] as Tier).shown[gi] as string[][]).length;
-    if (total > shown) out.push(omittedText(total - shown, x.job));
+    const note = omittedText(total - shown, x.job);
+    // a notice only when it fits: the body never goes past `max`
+    if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max) out.push(note);
   });
   return out.join("\n");
 }
@@ -928,8 +938,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const sections: string[] = [];
         for (const f of failed) {
           const head = `${cleanLog(f.name).slice(0, RUN_NAME_MAX)}:\n`;
-          const room = budget - (sections.length > 0 ? SEPARATOR_BYTES : 0) - byteLength(head);
-          if (room <= 0) break; // no room for a header with anything under it
+          // each run left gets an equal part of what is left; what one does not use passes on
+          const left = failed.length - failed.indexOf(f);
+          const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
+          const room = share - byteLength(head);
+          if (room <= 0) continue; // no room for a header with anything under it
           const viewed = await deps.gh(
             ["run", "view", `--repo=${repo}`, String(f.id), "--log-failed"],
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
