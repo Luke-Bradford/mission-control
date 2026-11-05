@@ -107,6 +107,18 @@ export function recommendationRow(db: Db, repo: string, id: string): Recommendat
     .get(repo, id);
   return row ? decode(row) : null;
 }
+/** Every undecided one-per-PR proposal (a snoozed one counts once its date has passed), for grouping. */
+export function openRepeatedRoundsRows(db: Db, repo: string, at: number): RecommendationRecord[] {
+  return db
+    .prepare(
+      `SELECT * FROM code_health_recommendations WHERE repo_id=? AND active=1
+       AND json_extract(proposal,'$.rule')='repeated-rounds'
+       AND (json_extract(state,'$.kind')='proposed' OR (json_extract(state,'$.kind')='snoozed' AND json_extract(state,'$.until')<=?))
+       ORDER BY id LIMIT 500`,
+    )
+    .all(repo, at)
+    .map(decode);
+}
 export function recommendationRowsForFiles(
   db: Db,
   repo: string,

@@ -53,7 +53,7 @@ changes still need their existing proposal and approval paths. No recommendation
 applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
 
 **FLIGHT's own accept.** When `create_ticket` is given a `recommendationId` whose proposal is still
-`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `code-health.ts`; today
+`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `flight-model.ts`, a hard rule, so widening it needs operator clearance; today
 `repeatedly-changed-large-file`), the hub accepts it for FLIGHT first: owner `FLIGHT (<seat>)`, review
 date 30 days on, the call's `basis` as the reason, recorded in the flight decision audit with the
 seat as actor. Any other rule is left proposed and the call is refused; the operator's token, typed

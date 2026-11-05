@@ -6,6 +6,7 @@ import type { PullRequestView } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCodeHealthAudit } from "../src/code-health/audit.ts";
 import { groupRecommendations } from "../src/code-health/groups.ts";
+import { CodeHealthReader } from "../src/code-health/read.ts";
 import { type Proposal, upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { Store } from "../src/store.ts";
 
@@ -32,7 +33,11 @@ const pr = (number: number, branch: string, patch: Partial<PullRequestView> = {}
     mergeable: null,
     ...patch,
   }) as PullRequestView;
-const config = { repos: [{ id: "sample" }] } as never;
+const CHECKOUT = "/fixture/checkout";
+const config = {
+  repos: [{ id: "sample" }],
+  crew: { sessions: [{ repoId: "sample", checkout: CHECKOUT }] },
+} as never;
 
 describe("code-health audit", () => {
   let dir: string, store: Store, db: DatabaseSync;
@@ -196,6 +201,89 @@ describe("code-health audit", () => {
       audit(NOW + DAY);
       expect(store.codeHealthRecommendation("sample", due.id)?.remeasure?.current).toBe(1);
     });
+    const big = () =>
+      proposal("repeatedly-changed-large-file", "big", {
+        target: { metric: "lines", direction: "decrease", baseline: 1500 },
+        scope: {
+          kind: "file-risk",
+          file: "src/big.ts",
+          from: 0,
+          until: 0,
+          observedFrom: null,
+          observedUntil: null,
+        },
+      });
+    const sizes = (n: number, files: { path: string; lines: number }[], at: number) =>
+      store.recordCodeHealthSizeSnapshot(
+        "sample",
+        CHECKOUT,
+        {
+          version: 1,
+          analysedSha: n.toString(16).repeat(40).slice(0, 40),
+          files,
+          excludedBinaryFiles: 0,
+          elapsedMs: 1,
+        },
+        at,
+      );
+    it("counts a file that was broken up and removed as improved", () => {
+      const due = big();
+      accept(due, NOW - 1000);
+      sizes(
+        1,
+        [
+          { path: "src/big/a.ts", lines: 300 },
+          { path: "src/big/b.ts", lines: 300 },
+        ],
+        NOW - 10,
+      );
+      audit();
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toMatchObject({
+        baseline: 1500,
+        current: 0,
+        change: "improved",
+      });
+    });
+    it("measures the shrunk file", () => {
+      const due = big();
+      accept(due, NOW - 1000);
+      sizes(2, [{ path: "src/big.ts", lines: 400 }], NOW - 10);
+      audit();
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toMatchObject({
+        current: 400,
+        change: "improved",
+      });
+    });
+    it("tries again when sizes are not collected yet, and gives up after 7 days", () => {
+      const due = big();
+      accept(due, NOW - 1000);
+      audit();
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toBeNull();
+      sizes(3, [{ path: "src/big.ts", lines: 400 }], NOW + 3_600_000);
+      audit(NOW + 3_600_000);
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toMatchObject({
+        current: 400,
+        change: "improved",
+      });
+      const late = proposal("repeatedly-changed-large-file", "late", {
+        target: { metric: "lines", direction: "decrease", baseline: 1500 },
+        scope: {
+          kind: "file-risk",
+          file: "src/late.ts",
+          from: 0,
+          until: 0,
+          observedFrom: null,
+          observedUntil: null,
+        },
+      });
+      accept(late, NOW + 2 * DAY);
+      store.remeasureCodeHealth("sample", NOW + 3 * DAY, undefined);
+      expect(store.codeHealthRecommendation("sample", late.id)?.remeasure).toBeNull();
+      store.remeasureCodeHealth("sample", NOW + 10 * DAY, undefined);
+      expect(store.codeHealthRecommendation("sample", late.id)?.remeasure?.change).toBe(
+        "unmeasured",
+      );
+    });
     it("says unmeasured when the metric cannot be read", () => {
       const due = proposal("collection", "gap");
       accept(due, NOW - 1000);
@@ -203,6 +291,65 @@ describe("code-health audit", () => {
       expect(store.codeHealthRecommendation("sample", due.id)?.remeasure?.change).toBe(
         "unmeasured",
       );
+    });
+  });
+
+  describe("deriving a cause from review findings", () => {
+    it("names the most common category, breaks ties alphabetically and says uncategorised", () => {
+      const prs: [number, number, string[]][] = [
+        [40, 40, ["spec", "spec", "docs"]],
+        [41, 41, ["spec"]],
+        [42, 42, ["docs", "docs", "spec"]],
+        [43, 43, ["spec", "docs"]],
+        [44, 44, []],
+      ];
+      for (const [number, id, categories] of prs) {
+        review(id, number, 3);
+        categories.forEach((category, pos) => finding(id, pos, category));
+      }
+      store.refreshCodeHealthRecommendations("sample", NOW);
+      const causes = Object.fromEntries(
+        store
+          .codeHealthRecommendations("sample")
+          .filter((row) => row.rule === "repeated-rounds")
+          .map((row) => [row.scope?.pr, row.scope?.cause]),
+      );
+      expect(causes).toEqual({
+        40: "spec",
+        41: "spec",
+        42: "docs",
+        43: "docs",
+        44: "uncategorised",
+      });
+      const reader = new CodeHealthReader(store, config, () => NOW);
+      const groups = reader.recommendationHistory("sample", 0).groups;
+      expect(groups.map((g) => [g.cause, g.prs])).toEqual([
+        ["docs", [42, 43]],
+        ["spec", [40, 41]],
+        ["uncategorised", [44]],
+      ]);
+    });
+    it("groups every undecided proposal of a cause, whatever page it falls on", () => {
+      for (let n = 100; n < 160; n++)
+        upsertRecommendation(
+          db,
+          proposal("repeated-rounds", `many${n}`, {
+            scope: {
+              pr: n,
+              cause: "spec",
+              from: 0,
+              until: 0,
+              observedFrom: null,
+              observedUntil: null,
+            },
+          }),
+          NOW,
+        );
+      const reader = new CodeHealthReader(store, config, () => NOW);
+      const first = reader.recommendationHistory("sample", 0);
+      expect(first.groups).toHaveLength(1);
+      expect(first.groups[0]?.prs).toHaveLength(60);
+      expect(reader.recommendationHistory("sample", 50).groups).toEqual([]);
     });
   });
 

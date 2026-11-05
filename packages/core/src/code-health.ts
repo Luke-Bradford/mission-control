@@ -249,15 +249,6 @@ export const CODE_HEALTH_RULES = {
   mixedCi: { requiresOrderedFailureThenSuccess: true, classification: "candidate" },
 } as const;
 
-/**
- * Rules FLIGHT may accept by itself: work it can ticket without a code or rule change (breaking up
- * a bloated file today; flaky-test, minor-dependency and fold-into-agreed-work rules join when
- * they exist). Every other rule stays with the operator.
- */
-export const CODE_HEALTH_FLIGHT_TIER_RULES: readonly string[] = ["repeatedly-changed-large-file"];
-/** When FLIGHT accepts without a date, the accepted proposal is re-measured this long after. */
-export const CODE_HEALTH_FLIGHT_REVIEW_DAYS = 30;
-
 /** Half-open rolling UTC window: from <= observation < until. */
 export function codeHealthWindowBounds(window: CodeHealthWindow, until: number) {
   if (!CODE_HEALTH_WINDOWS.includes(window) || !Number.isSafeInteger(until) || until < 0)

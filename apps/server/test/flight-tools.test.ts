@@ -20,6 +20,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   ciLogText,
@@ -1361,6 +1362,17 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
+  });
+});
+
+describe("create_ticket recommendationId", () => {
+  it("tells FLIGHT which proposed code-health rules it may accept itself", () => {
+    const props = (
+      named("create_ticket").inputSchema as { properties: Record<string, { description?: string }> }
+    ).properties;
+    for (const rule of CODE_HEALTH_FLIGHT_TIER_RULES)
+      expect(props.recommendationId?.description).toContain(rule);
+    expect(props.recommendationId?.description).toContain("operator accepts");
   });
 });
 

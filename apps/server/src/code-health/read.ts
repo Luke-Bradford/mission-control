@@ -335,7 +335,11 @@ export class CodeHealthReader {
       return {
         ...page,
         recommendations: rows.map((row) => this.recommendationEvidence(row, revision)),
-        groups: groupRecommendations(rows),
+        // Built from every undecided proposal, not this page, so one cause is one group; first page only.
+        groups:
+          offset === 0
+            ? groupRecommendations(this.store.codeHealthOpenRepeatedRounds(repoId, this.now()))
+            : [],
       };
     });
   }

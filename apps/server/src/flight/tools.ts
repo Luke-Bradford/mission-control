@@ -39,6 +39,7 @@ import {
   CLOSE_DESCRIPTION,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
@@ -947,6 +948,9 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
   ];
   return `query(${vars.join(", ")}) { repository(owner: $owner, name: $name) { issues(${filters.join(", ")}) { pageInfo { hasNextPage endCursor } nodes { number title labels(first: 20) { nodes { name } } assignees(first: 10) { nodes { login } } projectItems(first: 10) { nodes { project { number } status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }`;
 }
+
+/** What recommendationId means; the tier list is read from core so the text cannot drift. */
+export const CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION = `A code-health recommendation. An accepted one links its work. A proposed one whose rule is in FLIGHT's tier (${CODE_HEALTH_FLIGHT_TIER_RULES.join(", ")}) is accepted for you: owner FLIGHT, review in ${CODE_HEALTH_FLIGHT_REVIEW_DAYS} days, your basis recorded. Any other proposed one is refused until the operator accepts it. Durable link and recovery prevent duplicate work on retry.`;
 
 /** Each repo's last create_ticket or comment_ticket call: one at a time, so the duplicate check holds. */
 const ticketQueue = new Map<string, Promise<unknown>>();
@@ -4195,8 +4199,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           recommendationId: {
             type: "string",
             pattern: "^chr_[a-f0-9]{32}$",
-            description:
-              "Optional accepted code-health recommendation. Durable link and recovery prevent duplicate work on retry.",
+            description: CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION,
           },
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },

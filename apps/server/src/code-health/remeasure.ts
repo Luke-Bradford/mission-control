@@ -5,6 +5,9 @@ import { recommendationRow } from "./recommendations.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
 const WINDOW_MS = 30 * 86_400_000;
+/** A measure that is unavailable for now is retried each pass, then stored as unmeasured after this long. */
+const RETRY_FOR_MS = 7 * 86_400_000;
+const RETRY = "retry";
 
 /** The target metric as it reads now, with a note when it cannot be read. */
 function measure(
@@ -13,11 +16,10 @@ function measure(
   row: NonNullable<ReturnType<typeof recommendationRow>>,
   at: number,
   checkout: string | undefined,
-): { current: number | null; note: string } {
+): { current: number | null; note: string } | typeof RETRY {
   if (row.rule === "recurring-correction" && row.scope?.file && row.scope.category) {
     const source = store.codeHealthReviews(repoId, at - WINDOW_MS, at);
-    if (source.observedFrom === null)
-      return { current: null, note: "No reviews were reported in the last 30 days." };
+    if (source.observedFrom === null) return RETRY;
     const ids = new Set(
       source.findings
         .filter((f) => f.file === row.scope?.file && f.category === row.scope?.category)
@@ -28,20 +30,25 @@ function measure(
       note: "Distinct findings in this category and file, last 30 days.",
     };
   }
-  if (row.rule === "repeatedly-changed-large-file" && row.scope?.file && checkout) {
-    const sizes = store.codeHealthSizeSnapshot(repoId, checkout);
-    if (sizes?.status !== "available" || !sizes.analysedSha)
-      return { current: null, note: "File sizes are not currently collected." };
-    const found = store.codeHealthSizedPaths(
-      repoId,
-      checkout,
-      sizes.analysedSha,
-      [row.scope.file],
-      0,
-    );
-    return found[0]
-      ? { current: found[0].lines, note: "Measured lines at the latest size snapshot." }
-      : { current: null, note: "The file is not in the latest size snapshot." };
+  if (row.rule === "repeatedly-changed-large-file" && row.scope?.file) {
+    if (!checkout) return RETRY;
+    try {
+      const sizes = store.codeHealthSizeSnapshot(repoId, checkout);
+      if (sizes?.status !== "available" || !sizes.analysedSha) return RETRY;
+      const found = store.codeHealthSizedPaths(
+        repoId,
+        checkout,
+        sizes.analysedSha,
+        [row.scope.file],
+        0,
+      );
+      // A file gone from a current snapshot was broken up or removed: the best result.
+      return found[0]
+        ? { current: found[0].lines, note: "Measured lines at the latest size snapshot." }
+        : { current: 0, note: "File no longer exists at the latest size snapshot." };
+    } catch {
+      return RETRY;
+    }
   }
   return { current: null, note: "This rule has no repeatable measure." };
 }
@@ -78,7 +85,15 @@ export function remeasureDue(
   for (const { id } of due) {
     const row = recommendationRow(db, repoId, String(id));
     if (!row?.baseline) continue;
-    const { current, note } = measure(store, repoId, row, at, checkout);
+    const measured = measure(store, repoId, row, at, checkout);
+    if (measured === RETRY && at < (row.reviewAt ?? 0) + RETRY_FOR_MS) continue;
+    const { current, note } =
+      measured === RETRY
+        ? {
+            current: null,
+            note: "The measure stayed unavailable for 7 days after the review date.",
+          }
+        : measured;
     const baseline = row.baseline.target.baseline;
     const result: Remeasure = {
       at,

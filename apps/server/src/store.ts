@@ -163,6 +163,7 @@ import {
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
+  openRepeatedRoundsRows,
   RecommendationMutation,
   recommendationProposals,
   recommendationRow,
@@ -1333,6 +1334,9 @@ export class Store {
 
   codeHealthRecommendations(repoId: string, openAt?: number) {
     return recommendationRows(this.db, repoId, openAt);
+  }
+  codeHealthOpenRepeatedRounds(repoId: string, at: number) {
+    return openRepeatedRoundsRows(this.db, repoId, at);
   }
   codeHealthRecommendationPage(repoId: string, offset: number) {
     const rows = this.db
