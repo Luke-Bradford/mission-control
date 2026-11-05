@@ -669,14 +669,20 @@ for everything on the machine, and a service with a native module (such as `bett
 its next restart. This way changes only the hub and its seats.
 
 1. Unpack the official tarball from nodejs.org in its own folder, and check it against `SHASUMS256.txt`.
-   Keep it out of the hub's data directory: a seat's sandbox can't re-allow a folder inside it.
-2. Boot a preview on it, with a copy of the database and the config (see "Run"). It must answer.
+   Keep it out of the hub's data directory (by default `~/.local/share/mission-control`): a seat's
+   sandbox can't re-allow a folder inside it. `~/.local/mc-node/<version>` works.
+2. Boot a preview on it, with a copy of the database and the config (see "Run", using the new `node` in that command). It must answer.
 3. Keep a copy of the plist. In `~/Library/LaunchAgents/com.missioncontrol.server.plist`, set the first
    `ProgramArguments` entry to the new `node` and put its folder first on `PATH`. In `config.yaml`, set
-   `crew.node` to the new `node`. Seats pick up `node` and `pnpm` from that `PATH`.
-4. Wait until no seat is mid-run if you can. A `launchctl kickstart` does not re-read the plist, so run
-   `launchctl bootout gui/$(id -u)/com.missioncontrol.server`, then
-   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`.
+   `crew.node` to the new `node`. Seats pick up `node` and `pnpm` from that `PATH`. Edit the array entry
+   with `/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 <node>"`, not `plutil -replace`, which inserts
+   a new entry and leaves the old one as the script to run. Read the file back before going on.
+4. Restart the hub when no seat is starting. A seat mid-turn keeps working through the restart and the
+   new hub attaches to it (`docs/spikes/2026-10-22-seat-survives-hub-restart.md`); it stays on the old
+   Node until its run ends, so keep the old Node installed. A `launchctl kickstart` does not re-read the
+   plist, so run `launchctl bootout gui/$(id -u)/com.missioncontrol.server`, wait for the old process to
+   exit, then run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`.
+   If it answers `Bootstrap failed: 5`, launchd is still removing the old job: try again after a second.
 5. Check that the hub answers and `ps` shows the new `node`. Start one seat and run its checks.
 
 To go back, restore the plist copy and the old `crew.node`, then repeat step 4.
@@ -688,8 +694,8 @@ machine's hub also works. Do them in this order; the sections they name have the
 
 1. **Toolchain.**
    - Node 26 (LTS), the release CI and `engines` match. Node 25 is past end of life (1 June 2026)
-     and gets no security fixes. `brew install node` installs 26 at `/opt/homebrew/bin/node`; check
-     with `node -v`. If other software on the machine needs its own Node, keep that one and install
+     and gets no security fixes. `brew install node` installs the current release at
+     `/opt/homebrew/bin/node`; check with `node -v` that it is 26 or later. If other software on the machine needs its own Node, keep that one and install
      26 beside it instead: step 6 covers the hub, and "Moving a hub to a new Node" covers the swap.
    - pnpm 11, the version CI uses. Homebrew offers pnpm 12, so install 11 with npm:
      `npm install -g pnpm@11`.
