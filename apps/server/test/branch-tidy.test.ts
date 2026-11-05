@@ -116,6 +116,12 @@ const tidyWith = (gh: GhRunner, keep: string[] = []) =>
 const merged = (n: number, branch: string) =>
   store.upsertPullRequests("mc", [{ ...pr(n, branch, "merged"), headSha: `sha-${branch}` }], NOW);
 
+/** A branch this hub's ended run made and a merged PR carried, so only the guard under test can stop its delete. */
+const mine = (n: number, branch: string) => {
+  store.upsertRun(run(`r${n}`, branch, { endedAt: NOW - 30 * HOUR, status: "ok" }));
+  merged(n, branch);
+};
+
 const ref = (b: string) => `repos/o/mc/git/refs/heads/${b}`;
 
 it("a closed PR deletes nothing, even on a branch this hub's own run made", async () => {
@@ -128,13 +134,22 @@ it("a closed PR deletes nothing, even on a branch this hub's own run made", asyn
   expect(deleted).toEqual([]);
 });
 
-it("the sweep deletes an orphan older than 24 hours and keeps open-PR, live-run, young, kept and stacked-on branches", async () => {
+it("the sweep deletes its own ended, merged branches older than 24 hours and keeps open-PR, live-run, young, kept and stacked-on branches", async () => {
   store.upsertRun(run("live", "feature/live", {}));
   store.upsertRun(run("ended", "feature/ended", { endedAt: NOW - HOUR, status: "ok" }));
   store.upsertRun(run("orphan", "feature/orphan", { endedAt: NOW - 30 * HOUR, status: "ok" }));
   store.upsertRun(run("unmerged", "feature/unmerged", { endedAt: NOW - 30 * HOUR, status: "ok" }));
-  for (const [i, b] of ["feature/orphan", "feature/ended", "feature/young"].entries())
+  for (const [i, b] of ["feature/orphan", "feature/ended", "feature/live"].entries())
     merged(i + 10, b);
+  for (const [i, b] of [
+    "feature/open",
+    "feature/base",
+    "feature/young",
+    "main",
+    "archive/old",
+    "keep/me",
+  ].entries())
+    mine(i + 20, b);
   const { gh, deleted } = fakeGh(
     {
       main: 500,
@@ -158,6 +173,7 @@ it("the sweep deletes an orphan older than 24 hours and keeps open-PR, live-run,
 });
 
 it("deletes nothing when GitHub cannot be read", async () => {
+  mine(1, "feature/orphan");
   const { gh, deleted } = fakeGh({ "feature/orphan": 100 }, []);
   const broken: GhRunner = async (args, o) =>
     args[0] === "pr" ? { code: 1, stdout: "", stderr: "HTTP 502" } : gh(args, o);
@@ -166,6 +182,8 @@ it("deletes nothing when GitHub cannot be read", async () => {
 });
 
 it("never deletes a branch name that is not path-safe", async () => {
+  mine(1, "feature/a b");
+  mine(2, "feature/a%2e");
   const { gh, deleted } = fakeGh({ "feature/a b": 100, "feature/a%2e": 100 }, []);
   expect(await tidyWith(gh).sweep()).toEqual([]);
   expect(deleted).toEqual([]);
@@ -226,7 +244,7 @@ it("drops a seat clone's merged and remote-gone branches, and keeps a live run's
 
 it("tidies nothing in a repo with an observed loop or no crew session", async () => {
   const { gh, deleted } = fakeGh({ "feature/9-loop-work": 30, "operator/wip": 72 }, []);
-  store.upsertRun(run("old", "feature/9-loop-work", { endedAt: NOW - 30 * HOUR, status: "ok" }));
+  mine(9, "feature/9-loop-work");
   store.upsertRun(run("old1", "feature/1-closed", { endedAt: NOW - 30 * HOUR, status: "ok" }));
   store.upsertPullRequests("mc", [pr(1, "feature/1-closed", "closed")], NOW);
   for (const cfg of [

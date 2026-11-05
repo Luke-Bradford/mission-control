@@ -2282,7 +2282,7 @@ export class Store {
     ).map(toRun);
   }
 
-  /** The branches this hub's own work runs (not review runs) created in a repo, ended or not. */
+  /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
   runBranches(repoId: RepoId): Set<string> {
     const rows = this.statement(
       "SELECT DISTINCT branch FROM runs WHERE repo_id = ? AND review_id IS NULL AND branch IS NOT NULL",

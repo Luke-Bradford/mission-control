@@ -1,10 +1,11 @@
 /**
  * Branch tidying. GitHub's delete-on-merge removes a branch only when its PR merges, so the hub
- * removes the rest: a branch with no
- * open PR, no live run and no commit for a day (`sweep`). It also drops the local branches of the
- * seat clones that are merged or whose remote is gone (`pruneLocal`).
+ * removes the rest: a branch with no open PR, no live run, no commit for a day and a tip a merged PR
+ * carried as its head (`sweep`). It also drops the local branches of the seat clones that are merged
+ * or whose remote is gone (`pruneLocal`).
  *
- * Only a branch one of this hub's own runs created is ever deleted: a second hub on the same repo
+ * Only a branch one of this hub's own work runs worked on is ever deleted (that includes a run that
+ * adopted a branch already on origin, whose tip must still be merged): a second hub on the same repo
  * has runs this store cannot see, so a branch with no run here is not proven unused.
  *
  * The one GitHub write is `DELETE /git/refs/heads/<branch>`. A branch is deleted only after

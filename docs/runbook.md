@@ -2219,9 +2219,11 @@ touched.
   or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
   last PR on its branch merged; nothing is sent, so a merged branch is not
   recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
-- **Only its own branches.** The hub deletes only a branch that one of its own work runs created
-  (a review run does not count). A second hub on the same repo has runs this hub cannot see, so a
+- **Only its own branches.** The sweep deletes only a branch that one of this hub's work runs worked
+  on (a review run does not count). A run that adopted a branch already on origin counts, and that
+  branch's tip must still be merged. A second hub on the same repo has runs this hub cannot see, so a
   branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
+  FLIGHT's `delete_branch` is a separate, explicit action with its own checks.
 - **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
   merging; the agents decide what to do with it.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
