@@ -1,5 +1,5 @@
 import "./temp-home.ts";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type ConfigView, type Crew, OPERATOR_HEADER } from "@mc/core";
@@ -263,6 +263,30 @@ describe("mixed hub startup", () => {
     expect(boot.serving).toBe(true);
     expect(boot.discoveryStarted).toBe(true);
     await expect(boot.app?.close()).resolves.toBeUndefined();
+  });
+
+  const plantStaleWork = (): string[] => {
+    const work = join(dir, "data/pr-evidence-work");
+    const leftovers = [join(work, "capture-x"), join(work, "sides/abc")];
+    for (const path of leftovers) mkdirSync(path, { recursive: true });
+    return leftovers;
+  };
+
+  it("clears a dead capture's work folder when the live hub starts", async () => {
+    const leftovers = plantStaleWork();
+    boot.evidenceLive = true;
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(leftovers.map((path) => existsSync(path))).toEqual([false, false]);
+  });
+
+  it("leaves the work folder alone in a preview hub, which never captures", async () => {
+    const leftovers = plantStaleWork();
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(leftovers.map((path) => existsSync(path))).toEqual([true, true]);
   });
 
   it("connects stream counts to scheduler client presence", async () => {

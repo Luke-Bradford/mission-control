@@ -2467,6 +2467,92 @@ describe("set aside", () => {
       }
     });
 
+    /** A run that pushed once, then made a commit the push gate refused: the commit stays unpushed. */
+    const refused = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
+      const s = base(
+        { headCommit: SHA2, pr: pr({ ci: "passing" }), reworkDue: true, ...over },
+        {
+          phase: "ci",
+          pushFor: SHA2,
+          pushStartedAt: NOW - 60_000,
+          transient: 1,
+          lastRefusal: "the push gate refused the commit",
+          cardFor: "ci:0",
+          ...loop,
+        },
+      );
+      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
+    };
+
+    it("sets aside a pushed run whose newer commit was refused, when rework is due on the seat", () => {
+      const cases: [string, LoopSnapshot][] = [
+        ["in ci", refused()],
+        [
+          "stuck",
+          refused(
+            {},
+            { phase: "parked", parked: { kind: "stuck", reason: "not on GitHub", ended: false } },
+          ),
+        ],
+        [
+          "refused park",
+          refused(
+            {},
+            { phase: "parked", parked: { kind: "refused", reason: "refused", ended: false } },
+          ),
+        ],
+      ];
+      for (const [name, s] of cases) {
+        const r = reconcile(s);
+        expect(
+          kindsOf(r.actions).filter((k) => k === "set-aside"),
+          name,
+        ).toHaveLength(1);
+        expect(
+          r.actions.find((a) => a.kind === "set-aside"),
+          name,
+        ).toEqual({
+          kind: "set-aside",
+          displaced: true,
+        });
+      }
+    });
+
+    it("keeps a refused run on its seat while no rework is due", () => {
+      const cases: [string, LoopSnapshot][] = [
+        ["no rework due", refused({ reworkDue: false })],
+        ["no commit read", refused({ headCommit: null })],
+        ["in turn", refused({ seat: { ...refused().seat, inTurn: true } })],
+        ["review phase", refused({}, { phase: "review" })],
+        // in ci with nothing refused: the push has not been tried yet
+        ["not refused yet", refused({}, { lastRefusal: null, transient: 0 })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("does not displace a rework run that has just reported its fix, before its push is tried", () => {
+      const s = base(
+        {
+          headCommit: SHA2,
+          reworkDue: true,
+          evidence: { id: 2, at: 3000, ruling: false },
+          evidenceCount: 2,
+        },
+        { phase: "working", reportedEvidenceId: 1 },
+      );
+      const idle = { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false } };
+      expect(reconcile(idle).actions).not.toContainEqual({ kind: "set-aside", displaced: true });
+    });
+
+    it("a run off its seat with a refused commit is due back, behind the rework", () => {
+      const r = reconcile(
+        off({ headCommit: SHA2, reworkDue: true }, { phase: "ci", ...asideOf(true) }),
+      );
+      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
+
     it("the displaced run is flagged to come back, behind the rework", () => {
       const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
       expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });

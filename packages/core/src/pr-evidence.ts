@@ -195,3 +195,14 @@ export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string)
     ...lines,
   ].join("\n");
 }
+
+/**
+ * The labels the evidence capture clicks on the Audit page. The page renders them and the capture
+ * finds its controls by them, so each lives here once; a rename on either side then fails a test
+ * (apps/server/test/qa-labels.test.ts) instead of timing out a live capture.
+ */
+export const QA_VIEW_LABEL = "QA view";
+export const QA_DISCLOSURE_LABEL = "Workflow history and earlier proposals";
+/** The button text of each Audit tab a capture selects. */
+export const QA_TAB_LABELS = { readiness: "PR readiness", hotspots: "Hotspots" } as const;
+export type QaTab = keyof typeof QA_TAB_LABELS;

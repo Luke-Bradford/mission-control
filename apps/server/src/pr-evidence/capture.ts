@@ -153,6 +153,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
             ),
           );
         } catch (e) {
+          // A stopped capture says why it stopped; the page in progress did not fail.
+          if (signal.aborted) throw e;
           // Say which render failed: the render's own message names neither page nor side.
           const why = e instanceof Error ? e.message : String(e);
           throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
