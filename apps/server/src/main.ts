@@ -80,7 +80,12 @@ import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
-import { cloneState, configuredChecks, createCheckRecorder, seatWorktree } from "./guard/check-runs.ts";
+import {
+  cloneState,
+  configuredChecks,
+  createCheckRecorder,
+  seatWorktree,
+} from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import {
