@@ -952,8 +952,12 @@ function stateStep(s: LoopSnapshot): Step {
         : capReason !== null
           ? { kind: "budget", reason: capReason, ended: true }
           : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+    // A park that ended with blocking findings owes its card the Ready move even if the park
+    // already moved it to Blocked: clear the mark so desiredStep plans it. A budget stop stays.
+    const reviewed = reviewView(s, loop);
+    const owesReady = parked.kind !== "budget" && reviewed.blocked && !reviewed.waived;
     return {
-      loop: { ...loop, phase: "parked", parked },
+      loop: { ...loop, phase: "parked", parked, ...(owesReady ? { cardFor: null } : {}) },
       actions:
         capReason !== null && loop.parked?.kind !== "budget"
           ? [{ kind: "event", text: parkedEventText(capReason) }]
@@ -1652,7 +1656,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
           ? IN_PROGRESS
           : IN_REVIEW
         : loop.phase === "parked"
-          ? loop.parked?.ended && reviewed
+          ? loop.parked?.ended && loop.parked.kind !== "budget" && reviewed
             ? READY
             : BLOCKED
           : IN_PROGRESS;

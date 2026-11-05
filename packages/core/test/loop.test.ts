@@ -2071,6 +2071,34 @@ describe("review decisions", () => {
     ]);
   });
 
+  it("a dollar-cap stop during rework stays Blocked, not Ready", () => {
+    const capped = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "exit" }, costUsd: 12.5, budgetUsd: 12.5 },
+      { cardFor: "rework:0" },
+    );
+    expect(kinds(reconcile(capped).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Blocked" },
+    ]);
+  });
+
+  it("a run that parked on blocking findings and then ended moves its Blocked card to Ready", () => {
+    const parked = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" } },
+      {
+        phase: "parked",
+        parked: { kind: "review", reason: "rounds", ended: false },
+        cardFor: "parked:0",
+      },
+    );
+    const r = reconcile(parked);
+    expect(r.loop.parked?.ended).toBe(true);
+    expect(kinds(r.actions, "move-card")).toEqual([{ kind: "move-card", column: "Ready" }]);
+    // the stale Blocked mark is cleared so the move is planned; the engine sets the new mark
+    expect(r.loop.cardFor).toBeNull();
+  });
+
   it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
     const rows = [fact({ id: 5, blocking: 1 })];
     const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");

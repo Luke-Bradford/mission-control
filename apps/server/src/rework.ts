@@ -1,18 +1,28 @@
-import type { PullRequestView, ReviewRow } from "@mc/core";
+import { carriedFrom, type PullRequestView, type ReviewRow, reviewFor } from "@mc/core";
 import type { Store } from "./store.ts";
 
 /**
- * The newest review of an open PR when it reported blocking findings on the PR's current head:
- * the ticket is in rework (a developer owes a fix), not waiting on a review. Null otherwise,
- * including once a push has moved the head past the reviewed sha.
+ * The review of an open PR's current head when it reported blocking findings the loop still
+ * counts: the ticket is in rework (a developer owes a fix), not waiting on a review. Judged as the
+ * loop judges it, by the author run's epoch, waiver and carried review. A superseded re-review is
+ * skipped, so it does not hide the blocking one. Null otherwise, including once a push has moved
+ * the head past the reviewed sha.
  */
 export function reworkReview(store: Store, pr: PullRequestView): ReviewRow | null {
   if (pr.state !== "open") return null;
-  const latest = store.reviewsOfPr(pr.repoId, pr.number).at(-1);
-  return latest !== undefined &&
-    latest.state === "reported" &&
-    latest.blocking > 0 &&
-    (pr.headSha === null || pr.headSha === latest.sha)
-    ? latest
-    : null;
+  const rows = store.reviewsOfPr(pr.repoId, pr.number);
+  const newest = rows.findLast((r) => r.state !== "superseded");
+  if (newest === undefined) return null;
+  const head = pr.headSha ?? newest.sha;
+  const loop = store.run(newest.authorRunId)?.loop;
+  if (loop?.reviewWaivedSha === head) return null;
+  const authored = rows.filter((r) => r.authorRunId === newest.authorRunId);
+  const current =
+    loop == null
+      ? newest.sha === head
+        ? newest
+        : null
+      : reviewFor(authored, loop.epoch, head, carriedFrom(loop.carry, loop.reviewWaivedSha, head));
+  const row = current === null ? null : (authored.find((r) => r.id === current.id) ?? null);
+  return row !== null && row.state === "reported" && row.blocking > 0 ? row : null;
 }

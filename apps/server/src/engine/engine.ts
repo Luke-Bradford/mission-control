@@ -2185,9 +2185,11 @@ export function createEngine(deps: EngineDeps): Engine {
     const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
     // Only a card the hub moved to Blocked can have left it: a draft repo's card is never moved,
     // and a move that failed leaves the card wherever it was.
-    const movedThere = store
-      .boardMovesOfRun(run.id)
-      .some((m) => m.column === "Blocked" && m.state === "done");
+    const moves = store.boardMovesOfRun(run.id);
+    // A card sent to Ready (an ended run with review findings) is on offer to the next seat: the
+    // work is not stuck, so the note is not wanted.
+    if (moves.some((m) => m.column === "Ready" && m.state === "done")) return true;
+    const movedThere = moves.some((m) => m.column === "Blocked" && m.state === "done");
     return (
       repo?.autonomy === "merge" &&
       movedThere &&

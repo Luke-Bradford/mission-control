@@ -206,13 +206,15 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
 const isLinked = (p: PullRequestView): boolean =>
   p.ticket !== null || (p.closingIssues?.length ?? 0) > 0;
 
-/** What a card shows of a review that found blocking problems; the seat is the PR's author. */
+/** What a card shows of a review that found blocking problems. */
 function reworkFacts(
   store: Store,
   review: ReviewRow,
+  live: Run | undefined,
   agentStates: ReadonlyMap<string, HudState>,
 ): NonNullable<PipelineCard["rework"]> {
-  const seat = store.run(review.authorRunId)?.agentId ?? null;
+  // the seat that holds the ticket now owes the fix; else the author of the reviewed run
+  const seat = live?.agentId ?? store.run(review.authorRunId)?.agentId ?? null;
   return {
     round: review.round,
     blockers: review.blocking,
@@ -334,7 +336,7 @@ export function pipelineStages(
         who: run?.agentId ?? null,
         priority: item.priority,
         size: item.size,
-        ...(review === null ? {} : { rework: reworkFacts(store, review, agentStates) }),
+        ...(review === null ? {} : { rework: reworkFacts(store, review, run, agentStates) }),
       });
     }
   }

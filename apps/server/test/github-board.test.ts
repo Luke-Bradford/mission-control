@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { BoardItem, PullRequestView, Run } from "@mc/core";
+import { type BoardItem, NEW_LOOP, type PullRequestView, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
@@ -462,7 +462,7 @@ describe("followPrs", () => {
 
   /** A reported review of PR 91's head `sha` with `blocking` Important findings. */
   function reported(sha: string, blocking: number): void {
-    store.upsertRun(run({ endedAt: 2000, status: "ok" }));
+    if (store.run("r1") === null) store.upsertRun(run({ endedAt: 2000, status: "ok" }));
     const id = store.requestReview({
       authorRunId: "r1",
       repoId: "mc",
@@ -496,6 +496,36 @@ describe("followPrs", () => {
     const b = await follow("Ready", "O_ready", [pr({ headSha: "a".repeat(40) })]);
     expect(b.mutations()).toHaveLength(0);
     expect(store.boardMoves(0)).toEqual([]);
+  });
+
+  it("a superseded re-review does not hide the blocking review", async () => {
+    const sha = "a".repeat(40);
+    reported(sha, 2);
+    const id = store.requestReview({
+      authorRunId: "r1",
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 91,
+      sha,
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: 1600,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "superseded", { at: 1700 });
+    const b = await follow("Ready", "O_ready", [pr({ headSha: sha })]);
+    expect(b.mutations()).toHaveLength(0);
+  });
+
+  it("a waived blocking review is not rework: the card moves to In review", async () => {
+    const sha = "a".repeat(40);
+    store.upsertRun(
+      run({ endedAt: 2000, status: "ok", loop: { ...NEW_LOOP, reviewWaivedSha: sha } }),
+    );
+    reported(sha, 2);
+    const b = await follow("Ready", "O_ready", [pr({ headSha: sha })]);
+    expect(b.state.card).toBe("O_review");
   });
 
   it("moves it to In review once the PR head has moved past the reviewed sha", async () => {

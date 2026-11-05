@@ -654,3 +654,50 @@ it("a Ready card whose run ended keeps the reviewed facts and the PR", () => {
     rework: { round: 2, blockers: 1, seat: "seat", seatBusy: false },
   });
 });
+
+it("a waived blocking review is not rework: the card stays In review", () => {
+  store.replaceBoard("repo", [card(4, "In review")]);
+  store.upsertRun(
+    run(4, { loop: { ...NEW_LOOP, phase: "review", prNumber: 104, reviewWaivedSha: SHA } }),
+  );
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
+  reported("run-4", 104, SHA, 1, 3);
+  const result = summary();
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
+  expect(result.pipeline[3]?.cards[0]?.rework).toBeUndefined();
+});
+
+it("names the seat that holds the ticket now, not the one that ended", () => {
+  store.replaceBoard("repo", [card(4, "In progress")]);
+  store.upsertRun(
+    run(4, {
+      agentId: "old-seat",
+      endedAt: NOW - 10 * MIN,
+      status: "ok",
+      loop: { ...NEW_LOOP, prNumber: 104 },
+    }),
+  );
+  store.upsertRun(
+    run(4, {
+      id: "run-4b",
+      agentId: "new-seat",
+      seq: 5,
+      startedAt: NOW - 5 * MIN,
+      loop: { ...NEW_LOOP, phase: "working", prNumber: 104 },
+    }),
+  );
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
+  reported("run-4", 104, SHA, 1, 2);
+  store.addAgentEvent({
+    agentId: "new-seat",
+    at: NOW - MIN,
+    from: "idle",
+    to: "running",
+    text: "x",
+  });
+  const card4 = summary().pipeline[1]?.cards[0];
+  expect(card4).toMatchObject({
+    who: "new-seat",
+    rework: { seat: "new-seat", seatBusy: true },
+  });
+});
