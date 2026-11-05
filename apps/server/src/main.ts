@@ -1040,10 +1040,7 @@ export async function main(): Promise<void> {
         log(`branch tidy: ${what} failed: ${e instanceof Error ? e.message : String(e)}`);
       });
     };
-    const everyTenMinutes = quietly("closed-PR pass and local prune", async () => [
-      ...(await tidy.closedPass()),
-      ...(await tidy.pruneLocal()),
-    ]);
+    const everyTenMinutes = quietly("local prune", () => tidy.pruneLocal());
     setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
     setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
     setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
