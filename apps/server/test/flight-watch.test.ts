@@ -4915,6 +4915,43 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
   });
 
+  it("reading the operator's message does not wake FLIGHT a second time", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const sent = store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "hello",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    store.markCommsInboxRead("flight-1", [String(sent?.id)]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("answering a question does not wake FLIGHT again for a seat that stays free", async () => {
+    live("flight-1", "r-flight");
+    live("guido-1", "r-guido");
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    store.setSeatSession(row("inco-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
   it("an acked Needs-you item is not listed for FLIGHT to triage again", () => {
     liveCrew();
     ask();

@@ -61,6 +61,7 @@ import {
   markItemsShown,
   markPrsShown,
   nextWakeAt,
+  onlySettled,
   openReasonIds,
   operatorItems,
   pending,
@@ -589,6 +590,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
     }
     settleLeft(state, t);
+    // only things that went away since the last wake (a question answered, a message read) tell FLIGHT nothing new
+    if (left === null && onlySettled(lastFacts, wake)) lastFacts = wake;
     // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
     const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
     const batched =

@@ -154,6 +154,15 @@ describe("how long FLIGHT took to see a blocker", () => {
   });
 });
 
+describe("seat calls older than a week", () => {
+  it("still count in the wait figures", () => {
+    const at = NOW - 8 * DAY;
+    store.addFlightWake("r-f", at + 60_000, ["signals"]);
+    recordSeatCall(store, "mc", { seat: "guido-1", ref: null, reason: "stuck", at });
+    expect(flightWakeWaits(store, NOW, "flight-1", "mc").blockerMedianMs).toBe(60_000);
+  });
+});
+
 describe("the handover threshold", () => {
   it("is 150K tokens", () => {
     expect(FLIGHT_CONTEXT_ROTATE_TOKENS).toBe(150_000);

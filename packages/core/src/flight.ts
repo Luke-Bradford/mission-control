@@ -1152,7 +1152,7 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
-  /** Ids of the operator's plain messages to FLIGHT that its inbox has not read; they wake it at once. */
+  /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
   operator?: string[];
 }
 

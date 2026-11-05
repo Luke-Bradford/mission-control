@@ -1710,6 +1710,27 @@ export function routineOnly(previous: string, current: string): boolean {
   return changed;
 }
 
+/**
+ * Whether the only differences between two wake facts are things that went away (a question
+ * answered, a message read, a park lifted): nothing new to tell FLIGHT. A breaker lift is not
+ * settled, as a lift alone wakes FLIGHT.
+ */
+export function onlySettled(previous: string, current: string): boolean {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  let removed = false;
+  for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+    const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
+    if ([...now].some((v) => !old.has(v))) return false;
+    if ([...old].some((v) => !now.has(v))) {
+      if (category === "breaker") return false;
+      removed = true;
+    }
+  }
+  return removed;
+}
+
 /** The ids of the reasons still open in this state; a delivered signal stays open while it holds. */
 export function openReasonIds(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
