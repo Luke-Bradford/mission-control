@@ -405,7 +405,7 @@ export const MC_PUSH_CHECKS =
 /** What `mc push` found for one configured check on the pushed head. */
 export type CheckState = "missing" | "failed";
 const CHECKS_ADVICE =
-  "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again.";
+  "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again. If the run has since parked because the push never appeared, report_evidence refuses the same commit: make one small real commit with mc commit (an empty commit is refused), run the checks on it, then report again.";
 
 /** Claude's Bash tool kills a call at this many ms when the call names no `timeout`. */
 export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
@@ -447,7 +447,7 @@ const sha7 = (sha: string | null): string =>
 export const checkDropText = (d: CheckDrop): string => {
   switch (d.reason) {
     case "not-plain":
-      return `the call \`${d.invoked}\` was not counted: it chains the check with a pipe, ||, ;, a line break or another command. Run it exactly as written.`;
+      return `the call \`${d.invoked}\` was not counted: it chains the check with a pipe, ||, ;, a line break or another command. Run the check alone from the worktree root, with no cd, sleep or pipe in front of or behind it (a cd into your own worktree is the one thing allowed).`;
     case "dirty-start":
       return `the call started on ${sha7(d.head)} with uncommitted or untracked files in the tree, so it was not counted. Commit or delete them, then run the check again.`;
     case "dirty-end":
