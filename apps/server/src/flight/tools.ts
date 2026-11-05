@@ -1266,6 +1266,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // is handed back first.
     if (q.passedAt !== null) store.unpassQuestion(id);
     store.answerQuestion(id, at);
+    bus.emit("attention");
     store.addComms({
       at,
       from: ctx.seatId,

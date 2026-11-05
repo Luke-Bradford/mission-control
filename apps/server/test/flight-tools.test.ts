@@ -1506,6 +1506,7 @@ describe("answer_question", () => {
       },
     ]);
     expect(seen).toContain("flight");
+    expect(seen).toContain("attention");
   });
 
   it("keeps a hub-assembled 1500-character question and its long answer whole", async () => {
@@ -1724,6 +1725,9 @@ describe("answer_question", () => {
     expect(store.question(first)?.answeredAt).toBe(NOW);
     expect(store.question(second)?.answeredAt).toBeNull();
     expect(store.openQuestions().map((q) => q.id)).toEqual([second]);
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toMatchObject([
+      { id: second },
+    ]);
     expect(await call("answer_question", A(second, { answer: "main" }))).toEqual({
       text: "Answered GUIDO-1.",
     });
