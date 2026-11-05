@@ -69,7 +69,7 @@ async function readInside(root: string, file: string): Promise<Buffer | null> {
   }
 }
 
-export function webHandler(webRoot: string) {
+export function webHandler(webRoot: string, csp: string = WEB_CSP) {
   const rootPromise = realpath(resolve(webRoot)).catch(() => resolve(webRoot));
 
   return async (req: FastifyRequest, reply: FastifyReply) => {
@@ -98,7 +98,7 @@ export function webHandler(webRoot: string) {
     }
     const type = TYPES[isFile ? ext.toLowerCase() : ".html"] ?? "application/octet-stream";
     reply.type(type);
-    if (type.startsWith("text/html")) reply.header("content-security-policy", WEB_CSP);
+    if (type.startsWith("text/html")) reply.header("content-security-policy", csp);
     reply.header(
       "cache-control",
       isFile && urlPath.startsWith(HASHED_PREFIX)
