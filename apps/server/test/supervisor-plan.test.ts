@@ -3,7 +3,10 @@ import "./supervisor-harness.ts";
 import type { Run, RunPlan } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { runView } from "../src/runview.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { boardCard, make, store, TICKET } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("run plan snapshot", () => {
   it.each([

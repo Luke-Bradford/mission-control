@@ -70,7 +70,7 @@ which it writes only when you press pause or resume.
 
 ## Install
 
-Requires Node 25 or later and pnpm. Run these from the repo root:
+Requires Node 26 or later and pnpm. Run these from the repo root:
 
 ```sh
 pnpm install
@@ -233,10 +233,11 @@ profiles:
 
 ## Reviews of controller and personal PRs
 
-In a `merge` workspace, an open PR without a crew author run enters the existing scratch review
-queue after its CI passes. The PR must come from the same repository and target its default branch.
-Drafts, forks and PRs labelled `skip-review` are excluded. Existing crew branches retain their normal
-author-run review path. An existing `mc/review` status from another reviewer is respected.
+In a `merge` workspace, an open PR with no live or parked build run enters the existing scratch review
+queue after its CI passes. That covers a PR whose build run has ended. The PR must come from the same
+repository and target its default branch. Drafts, forks and PRs labelled `skip-review` are excluded.
+A branch with a live or parked build run keeps its author-run review path. An `mc/review` status is
+respected as another reviewer's when this hub has no review of that head.
 
 The reviewer uses the exact head SHA. Before launch and before publishing, the hub checks the PR
 again. A later push needs a new review; a closed, drafted, opted-out or changed PR cannot receive an
@@ -662,18 +663,52 @@ What each seat's process starts with:
   Files left by a hub that went down, these and any draft PR body file (`pr-<uuid>.md`), are
   removed when the next one takes the crew lock.
 
+## Moving a hub to a new Node
+
+Do this when other software shares the machine's Homebrew Node. `brew upgrade node` changes that Node
+for everything on the machine, and a service with a native module (such as `better-sqlite3`) fails on
+its next restart. This way changes only the hub and its seats.
+
+1. Unpack the official tarball from nodejs.org in its own folder, and check it against `SHASUMS256.txt`.
+   Keep it out of the hub's data directory (by default `~/.local/share/mission-control`): a seat's
+   sandbox can't re-allow a folder inside it. `~/.local/mc-node/<version>` works.
+2. Boot a preview on it, with a copy of the database and the config (see "Run", using the new `node`
+   in that command). It must answer.
+3. Keep a copy of the plist. In `~/Library/LaunchAgents/com.missioncontrol.server.plist`, set the first
+   `ProgramArguments` entry to the new `node` and put its folder first on `PATH`. In `config.yaml`, set
+   `crew.node` to the new `node`. Seats pick up `node` and `pnpm` from that `PATH`. Use `PlistBuddy`, not
+   `plutil -replace`, which inserts a new array entry and leaves the old one as the script to run:
+
+   ```sh
+   plist=~/Library/LaunchAgents/com.missioncontrol.server.plist
+   cp "$plist" "$plist.bak"
+   /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 <node>" "$plist"
+   /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:PATH <node folder>:<old PATH>" "$plist"
+   /usr/libexec/PlistBuddy -c "Print :ProgramArguments" -c "Print :EnvironmentVariables:PATH" "$plist"
+   ```
+
+4. Restart the hub when no seat is starting. A seat mid-turn keeps working through the restart and the
+   new hub attaches to it (`docs/spikes/2026-10-22-seat-survives-hub-restart.md`); it stays on the old
+   Node until its run ends, so keep the old Node installed. A `launchctl kickstart` does not re-read the
+   plist, so run `launchctl bootout gui/$(id -u)/com.missioncontrol.server`, then
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`. `bootout`
+   can return before the old process has exited. If `bootstrap` answers `Bootstrap failed: 5`, launchd
+   is still removing the old job: try again after a second, until it succeeds.
+5. Check that the hub answers and `ps` shows the new `node`. Start one seat and run its checks.
+
+To go back, restore the plist copy and the old `crew.node`, then repeat step 4.
+
 ## Setting up another machine
 
 These steps take a second Mac from nothing to a hub running crew on a board that another
 machine's hub also works. Do them in this order; the sections they name have the detail.
 
 1. **Toolchain.**
-   - Node: `brew install node` gives the current release at `/opt/homebrew/bin/node`, which CI
-     (25) and `engines` match, and needs none of step 6's node edits. The full suite also passes
-     on 24, with a pnpm `Unsupported engine` warning on each command; Homebrew's `node@24` is
-     keg-only, so it is neither at `/opt/homebrew/bin/node` nor on `PATH`. If you use it, put it
-     on your shell's `PATH` (`export PATH="/opt/homebrew/opt/node@24/bin:$PATH"` in
-     `~/.zprofile`); step 6 covers the hub.
+   - Node 26 (LTS), the release CI and `engines` match. Node 25 is past end of life (1 June 2026)
+     and gets no security fixes. `brew install node` installs the current release at
+     `/opt/homebrew/bin/node`; check with `node -v` that it is 26 or later. If other software on the
+     machine needs its own Node, keep that one and install 26 beside it instead: step 6 covers the
+     hub, and "Moving a hub to a new Node" covers the swap.
    - pnpm 11, the version CI uses. Homebrew offers pnpm 12, so install 11 with npm:
      `npm install -g pnpm@11`.
    - The `claude` CLI on `PATH`, for the seats. The copy bundled with the VS Code extension is
@@ -714,12 +749,11 @@ machine's hub also works. Do them in this order; the sections they name have the
      checkout of this repo, which is not denied by default. An entry may not be or hold the
      crew's folders, so keep `mc-crew` outside every folder you list.
 6. **Start** the hub with the launchd job, as in "As a launchd job", from the hub's clone. If node
-   is not at `/opt/homebrew/bin/node`, give its path (for `node@24`, the stable link
-   `/opt/homebrew/opt/node@24/bin/node`) in three places before `launchctl bootstrap`:
+   is not at `/opt/homebrew/bin/node`, give its path in three places before `launchctl bootstrap`:
    - the plist's first `ProgramArguments` entry. Without it launchd cannot start the hub:
      `launchctl print gui/$(id -u)/com.missioncontrol.server` shows
      `last exit code = 78: EX_CONFIG` and both logs stay empty;
-   - its folder (`/opt/homebrew/opt/node@24/bin`) at the front of the plist's `PATH`, since
+   - its folder at the front of the plist's `PATH`, since
      pnpm starts with `#!/usr/bin/env node`: the hub runs pnpm itself (worktree installs,
      Update), and the seats inherit that `PATH`;
    - `crew.node` in `config.yaml` (see "Config"). Without it crew stays off with
@@ -880,7 +914,11 @@ clone under your account:
      section.
 3. **Board moves, in a `merge` repo only:** the run's own card to *In progress*, *In review* or
    *Blocked*, through `updateProjectV2ItemFieldValue` (see `autonomy` below). A `draft` repo gets
-   none.
+   none. *In review* means a review is queued or running: once a review reports blocking findings
+   the card goes back to *In progress* with its seat (rework), and to *In review* again on the
+   next push or re-review. If the run ends first, the card goes to *Ready*. The pipeline cards
+   carry `rework` (round, blockers, seat, whether the seat is running) while the newest review
+   of the PR's head is blocking; the PR-following move never puts such a card back In review.
 4. **The run's own PR body:** `gh pr edit <number> --repo=<owner/name> --body-file=<0600 file>`,
    after the same text checks as the draft PR, when the engine adds RETRO's minor findings.
 5. **The review status:** `gh api repos/<owner/name>/statuses/<sha> -f state=… -f context=mc/review -f description=…`,
@@ -1363,8 +1401,13 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A crew-owned branch keeps its normal
-engine path. No build run is invented and no board card is marked Done by this path.
+with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
+run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
+ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
+latest build run still refuses the merge after that run ends, until the hold is released. An operator's
+Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+No build run is invented and no board card is marked Done by this path.
 
 Protected repository rules require the existing head-bound `merge-floor` controller approval.
 Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
@@ -1457,7 +1500,7 @@ the setup action names the Owner field in its warning. Area labels (`area:server
 
 **Status moves (`autonomy`).** Each repo in the config has `autonomy: draft` (the default) or
 `autonomy: merge`. Only in a `merge` repo may Mission Control move a run's own card between Status
-columns (*In progress*, *In review*, *Blocked*), through GitHub's `updateProjectV2ItemFieldValue`;
+columns (*In progress*, *In review*, *Blocked*, and *Ready* for an ended run with review findings), through GitHub's `updateProjectV2ItemFieldValue`;
 `merge` needs a crew session for that repo (without one the config fails to load). In a `draft`
 repo it makes no call at all. The engine moves only a looped run's own card. Every move attempt that changes a card, or fails to, is recorded and shown in
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
@@ -1868,7 +1911,7 @@ initialization retries on the next event. Presence does not write room rows. Hea
 30 seconds with a 24-second throttle to allow jitter. Presence status and timestamps, socket
 authentication and replay cursors survive hibernation through WebSocket attachments.
 
-For a LAN relay, with Node 25 and `packages/agentcomms/bin` on `PATH`:
+For a LAN relay, with Node 26 and `packages/agentcomms/bin` on `PATH`:
 
 ```sh
 # Set a strong operator secret in the environment (do not commit it).
@@ -1956,7 +1999,7 @@ runs in its own process group, which is killed after 30 seconds. Windows uses `t
 to terminate the hook process tree. `comms_read` accepts `limit`
 (default 50, maximum 500), and returns undeliverable rows alongside delivered messages.
 
-Use Node 25 and a checkout with workspace dependencies installed on both machines. Deploy the
+Use Node 26 and a checkout with workspace dependencies installed on both machines. Deploy the
 Worker using [Agent comms relay](#agent-comms-relay) above, then use its base URL, for example
 `wss://agentcomms-relay.YOUR-SUBDOMAIN.workers.dev`. Do not append `/rooms/...`; the CLI does that.
 For a LAN test use `ws://RELAY-LAN-IP:7480`. The relay must be reachable from both machines.
@@ -2062,7 +2105,7 @@ They pass the same body size, secret scan and rate guards as manual sends.
 
 On the Mac, save the following as `~/Library/LaunchAgents/com.agentcomms.home.plist`.
 Replace `/Users/YOU`, the checkout path and `/opt/homebrew/bin/node` with absolute paths on your
-machine (`command -v node` must resolve to Node 25). launchd does not expand `~` or `$HOME`.
+machine (`command -v node` must resolve to Node 26). launchd does not expand `~` or `$HOME`.
 Create the home directory's `logs/` subdirectory before loading it.
 
 ```xml
@@ -2368,6 +2411,39 @@ If `origin/HEAD` cannot be resolved, the check fails; the controller repairs the
 branch ref rather than changing the required command. The hub never executes the seat's check
 code in the server process. Its existing exception for engine-only clean merges of main is
 unchanged; this check gates seat-authored pushes and does not certify that separate publish path.
+
+### Tests a seat's sandbox cannot run (#1411)
+
+Some tests need what a seat's sandbox denies: `sandbox-exec`, listening on a port, or
+`pnpm install` with a store, or starting a crew run (its temp folder, and `ps`). A change to a widely imported file selects them all, and in a seat
+they could only fail (the installs run to their timeouts), so `test:related` could never pass.
+`apps/server/test/sandbox-gaps.ts` skips such a test only when both hold: the process runs under a
+seat's sandbox (`SANDBOX_RUNTIME=1`) and a probe of that capability fails there. CI sets no such
+marker and runs every test. Where the sandbox allows the capability, the test runs and a real
+failure still fails. Each skip is named on stderr (`sandbox-gaps: skipping ...`). Mark a new test of
+this kind with `blockedHere("listen" | "seatbelt" | "install" | "crew-run")`.
+
+The seat is told by `MC_SEAT_SANDBOX=1`, which the hub puts in every crew seat's environment
+(Claude and Codex), or by the Claude sandbox's `SANDBOX_RUNTIME=1`. The shared rule and the
+`listen`, `seatbelt`, `ps` and `git-hooks` probes are in `packages/core/test/sandbox-gaps.ts` (no
+server imports, so agentcomms tests use it too); `install` and `crew-run` are in
+`apps/server/test/sandbox-gaps.ts`. Whether Codex's own sandbox passes the variable on to its shell
+commands is not verified.
+
+The test-lock row's outcome: `fail` when the hook reports a failed call, `pass` for a plain call
+that succeeded, and `done` (never `pass`) for a call that pipes or chains past the check, such as
+`pnpm -s test; echo exit=$?` or `... | tail`, because its status is the last step's. That is the
+path that fits the 4 Nov report (lock `pass`, the seat saw exit 1, no check record, since a chain
+with `;` or `|` is never counted as a check). A Codex command releases as `fail` when it did not
+succeed, and as `done` when it succeeded but piped or chained past the check. A Post whose hook
+exit code is null (interrupted or background) is unknown: the lock row ends `done` and the check
+recorder stores not-ok, so it never counts toward the push gate. A review run's `done` locked call
+still shows in the QA report as a hub receipt, with no pass claimed.
+
+Not covered by a test in a seat: the Codex release outcome (`supervisor-checks.test.ts`, which
+needs a crew run and so skips in a seat; CI runs it), and whether Codex's own sandbox passes
+`MC_SEAT_SANDBOX` on to its shell commands. A Codex seat that shows tests failing on `listen`,
+`ps` or `sandbox-exec` instead of skipping is the sign it does not; report it.
 
 
 ### Durable QA reports

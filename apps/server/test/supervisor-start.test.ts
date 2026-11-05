@@ -63,6 +63,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SEAT_SANDBOX_ENV,
   SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
@@ -113,6 +114,7 @@ import {
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -143,6 +145,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -860,6 +864,7 @@ describe("startRun", () => {
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
+      SEAT_SANDBOX_ENV,
       ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
       "UV_NO_SYNC",

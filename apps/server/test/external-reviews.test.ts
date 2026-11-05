@@ -138,7 +138,7 @@ describe("external PR review subjects", () => {
     },
   );
 
-  it("does not review a crew-owned branch, even when its run ended", async () => {
+  const buildRun = (patch: Record<string, unknown>) =>
     store.upsertRun({
       id: "builder:old",
       agentId: "builder",
@@ -156,11 +156,96 @@ describe("external PR review subjects", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
+      ...patch,
     });
+
+  it("reviews a PR whose only build run has ended", async () => {
+    buildRun({ endedAt: 2 });
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    expect(store.reviewsIn(["queued"])).toHaveLength(1);
+    expect(h.writes).toHaveLength(1);
+    expect(service.wanted(store.reviewsOfRun(externalReviewKey("sample", 7))[0]!)).toBe(true);
+  });
+
+  it("does not review a branch whose build run is still unfinished", async () => {
+    buildRun({ endedAt: null, status: "parked" });
     const h = harness();
     await createExternalReviews(h.deps).sync();
     expect(store.reviewsIn(["queued"])).toHaveLength(0);
     expect(h.writes).toHaveLength(0);
+  });
+
+  it("reviews an ended run's PR when the mc/review status on its head is this hub's own", async () => {
+    buildRun({ id: "builder:ended", endedAt: 2 });
+    store.requestReview({
+      authorRunId: "builder:ended",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    });
+    store.upsertPullRequests(
+      "sample",
+      [
+        pr({
+          checks: [
+            {
+              name: "mc/review",
+              state: "passing",
+              kind: "status",
+              conclusion: "success",
+              attempt: null,
+              url: null,
+            },
+          ],
+        }),
+      ],
+      2,
+    );
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
+  it("leaves a configured loop's branch alone, ended iteration or not", async () => {
+    buildRun({ agentId: "shop-ta", endedAt: 2 });
+    const h = harness();
+    const loops = [{ id: "shop-ta", repoId: "sample" }] as unknown as CcConfig["loops"];
+    const deps = { ...h.deps, config: { ...config, loops } };
+    await createExternalReviews(deps).sync();
+    expect(store.reviewsIn(["queued"])).toHaveLength(0);
+    expect(h.writes).toHaveLength(0);
+  });
+
+  it("reviews an ended run's PR whose head carries a mc/review status with no review row", async () => {
+    buildRun({ endedAt: 2 });
+    store.upsertPullRequests(
+      "sample",
+      [
+        pr({
+          checks: [
+            {
+              name: "mc/review",
+              state: "passing",
+              kind: "status",
+              conclusion: "success",
+              attempt: null,
+              url: null,
+            },
+          ],
+        }),
+      ],
+      2,
+    );
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
   });
 
   it("requeues on a new SHA and never carries an old verdict onto it", async () => {

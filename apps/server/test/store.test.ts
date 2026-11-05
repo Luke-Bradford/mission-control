@@ -3335,6 +3335,37 @@ describe("test lock history", () => {
     expect(store.lockRuns(0)[0]).toMatchObject({ queuedAt: 4500, endedAt: 6000, outcome: "freed" });
   });
 
+  it("keeps a review run's wrapped (done) locked call as a hub receipt with no pass claimed (#1411)", () => {
+    const sha = "a".repeat(40);
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 7,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 100,
+    });
+    if (id === null) throw new Error("no id");
+    store.setReviewState(id, ["queued"], "starting", { at: 110 });
+    store.setReviewState(id, ["starting"], "running", { at: 120, runId: "rev-run" });
+    const h = {
+      runId: "rev-run",
+      seatId: "retro",
+      command: "pnpm -s vitest run 2>&1 | tail -20",
+      toolUseId: "one",
+      since: 1000,
+    };
+    store.addLockHold(h);
+    store.deleteLockHold("rev-run", "one", 2000, undefined);
+    const receipts = store.qaCheckReceipts("rev-run", sha);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ command: h.command, ok: null, exitCode: null });
+    expect(receipts[0]?.evidence).toContain("tool done");
+  });
+
   it("records the Post hook event as pass or fail, and a failed call fails the whole hold", () => {
     const h = { runId: "r1", seatId: "a1", command: "pnpm test", toolUseId: "one", since: 1000 };
     store.addLockHold(h);

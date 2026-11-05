@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { directionKey, readDirectionContext } from "../src/runtime/instruction-context.ts";
 import { crewPromptPath } from "../src/store.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   clone,
   dbPath,
@@ -20,6 +21,8 @@ import {
   until,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const flight = {
   id: "flight-1",
