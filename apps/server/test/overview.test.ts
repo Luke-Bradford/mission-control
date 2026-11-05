@@ -571,3 +571,76 @@ it("uses a question's recorded answer time between overview reads", () => {
   store.answerQuestions("seat", END - 2 * MIN);
   expect(summary().kpis.needsYou.series).toEqual([...Array(26).fill(0), 1, 0, 0, 0]);
 });
+
+/** A reported review of PR `prNumber`'s `sha`: round `round`, `blocking` blocking findings. */
+const reported = (runId: string, prNumber: number, sha: string, round: number, blocking: number) => {
+  const id = store.requestReview({
+    authorRunId: runId,
+    repoId: "repo",
+    seatId: "retro",
+    prNumber,
+    sha,
+    epoch: 0,
+    attempt: 1,
+    round,
+    at: NOW - 30 * MIN,
+  });
+  if (id === null) throw new Error("no review");
+  store.setReviewState(id, ["queued"], "running", { at: NOW - 29 * MIN, runId: "rr" });
+  store.recordFindings(id, "rr", {
+    verdict: { spec: "pass", quality: blocking > 0 ? "fail" : "pass" },
+    summary: "s",
+    findings: Array.from({ length: blocking }, (_, i) => ({
+      severity: "Important" as const,
+      file: "a.ts",
+      line: i + 1,
+      summary: "s",
+      scenario: "w",
+      fix: "f",
+    })),
+    at: NOW - 20 * MIN,
+  });
+};
+const SHA = "a".repeat(40);
+
+it("shows a rework card as building, with the review's round, blockers and its seat", () => {
+  store.replaceBoard("repo", [card(4, "In progress")]);
+  store.upsertRun(run(4, { loop: { ...NEW_LOOP, phase: "review", prNumber: 104 } }));
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
+  reported("run-4", 104, SHA, 2, 3);
+  store.addAgentEvent({ agentId: "seat", at: NOW - MIN, from: "idle", to: "running", text: "x" });
+  const result = summary();
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0]);
+  expect(result.pipeline[1]?.cards[0]).toMatchObject({
+    ticket: 4,
+    pr: 104,
+    rework: { round: 2, blockers: 3, seat: "seat", seatBusy: true },
+  });
+});
+
+it("keeps a card In review when its newest review is clean or its head has moved on", () => {
+  store.replaceBoard("repo", [card(4, "In review"), card(5, "In review")]);
+  for (const n of [4, 5])
+    store.upsertRun(run(n, { loop: { ...NEW_LOOP, phase: "review", prNumber: 100 + n } }));
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA }), pr(5, { headSha: "b".repeat(40) })], NOW);
+  reported("run-4", 104, SHA, 1, 0);
+  reported("run-5", 105, SHA, 1, 2);
+  const result = summary();
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 2, 0, 0]);
+  expect(result.pipeline[3]?.cards.every((c) => c.rework === undefined)).toBe(true);
+});
+
+it("a Ready card whose run ended keeps the reviewed facts and the PR", () => {
+  store.replaceBoard("repo", [card(4, "Ready")]);
+  store.upsertRun(
+    run(4, { endedAt: NOW - 10 * MIN, status: "done", loop: { ...NEW_LOOP, prNumber: 104 } }),
+  );
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
+  reported("run-4", 104, SHA, 2, 1);
+  const result = summary();
+  expect(result.pipeline[0]?.cards[0]).toMatchObject({
+    ticket: 4,
+    pr: 104,
+    rework: { round: 2, blockers: 1, seat: "seat", seatBusy: false },
+  });
+});

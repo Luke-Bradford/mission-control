@@ -1468,7 +1468,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "move-card": {
         await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
-        cur.cardFor = cardMark(planned.phase, planned.epoch);
+        cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
         return;
       }
       case "note":

@@ -2,15 +2,18 @@ import {
   type AttentionItem,
   CI_PASSED_EVENT_PREFIX,
   hudColumnOf,
+  type HudState,
   isCiFailureEvent,
   needsYouItems,
   type OverviewSummary,
   type PipelineCard,
   type PipelineStage,
   type PullRequestView,
+  type ReviewRow,
   type Run,
   startOfLocalDay,
 } from "@mc/core";
+import { reworkReview } from "./rework.ts";
 import { parseTicket } from "./runview.ts";
 import { runSpend } from "./spend.ts";
 import type { Store } from "./store.ts";
@@ -203,6 +206,21 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
 const isLinked = (p: PullRequestView): boolean =>
   p.ticket !== null || (p.closingIssues?.length ?? 0) > 0;
 
+/** What a card shows of a review that found blocking problems; the seat is the PR's author. */
+function reworkFacts(
+  store: Store,
+  review: ReviewRow,
+  agentStates: ReadonlyMap<string, HudState>,
+): NonNullable<PipelineCard["rework"]> {
+  const seat = store.run(review.authorRunId)?.agentId ?? null;
+  return {
+    round: review.round,
+    blockers: review.blocking,
+    seat,
+    seatBusy: seat !== null && agentStates.get(seat) === "running",
+  };
+}
+
 /**
  * The delivery pipeline: each open ticket's stage from its live run, PR and board column, plus
  * tickets merged since `doneSince`. `runs` must include every open run; `prs` every open PR and
@@ -250,6 +268,7 @@ export function pipelineStages(
   }
   const checks = (pr: PullRequestView | undefined): PipelineCard["ci"] =>
     pr?.checks?.length ? pr.checks.map((c) => CI[c.state]) : pr?.ci ? [CI[pr.ci]] : [];
+  const agentStates = store.latestAgentStates();
   for (const repoId of pipelineRepos) {
     const readyMoves = store.overviewReadyMoves(repoId);
     const board = store.board(repoId);
@@ -285,10 +304,14 @@ export function pipelineStages(
       const pr = candidates.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))[0];
       const phase = run?.loop?.phase;
       const column = item.column;
+      // Review found blocking problems on the PR's head: a developer owes a fix, so it is building
+      const review = pr ? reworkReview(store, pr) : null;
       const stage =
         run?.loop?.merging && phase !== "done"
           ? "merging"
-          : phase === "working" || (phase === "parked" && column !== "In review")
+          : phase === "working" ||
+              (phase === "parked" && column !== "In review") ||
+              (phase === "review" && review !== null)
             ? "building"
             : phase === "ci"
               ? "checks"
@@ -311,6 +334,7 @@ export function pipelineStages(
         who: run?.agentId ?? null,
         priority: item.priority,
         size: item.size,
+        ...(review === null ? {} : { rework: reworkFacts(store, review, agentStates) }),
       });
     }
   }

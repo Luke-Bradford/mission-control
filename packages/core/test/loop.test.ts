@@ -2034,6 +2034,39 @@ describe("review decisions", () => {
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
+  it("a reported review with blocking findings moves the card to In progress, a clean one does not", () => {
+    const blocked = reconcile(inReview(withReview([fact({ id: 5, blocking: 2 })], [finding])));
+    expect(kinds(blocked.actions, "move-card")).toEqual([
+      { kind: "move-card", column: "In progress", mark: "rework:0" },
+    ]);
+    const clean = reconcile(inReview(withReview([fact({ id: 5, blocking: 0 })])));
+    expect(kinds(clean.actions, "move-card")).toEqual([]);
+    // once per state: the mark is set, so the next pass leaves the card alone
+    const done = inReview(withReview([fact({ id: 5, blocking: 2 })], [finding]), {}, { cardFor: "rework:0" });
+    expect(kinds(reconcile(done).actions, "move-card")).toEqual([]);
+  });
+
+  it("a new push after rework moves the card back to In review", () => {
+    const NEW = "b".repeat(40);
+    const pushed = inReview(
+      withReview([fact({ id: 5, blocking: 2 })], [finding]),
+      { headCommit: NEW, pushed: { sha: NEW, at: NOW }, pr: pr({ ci: "passing", headSha: NEW }) },
+      { cardFor: "rework:0" },
+    );
+    expect(kinds(reconcile(pushed).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "In review" },
+    ]);
+  });
+
+  it("an ended run with blocking findings sends its card to Ready, not Blocked", () => {
+    const ended = inReview(withReview([fact({ id: 5, blocking: 1 })], [finding]), {
+      ended: { reason: "stopped" },
+    });
+    expect(kinds(reconcile(ended).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Ready" },
+    ]);
+  });
+
   it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
     const rows = [fact({ id: 5, blocking: 1 })];
     const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");
