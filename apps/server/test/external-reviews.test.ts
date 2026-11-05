@@ -187,6 +187,33 @@ describe("external PR review subjects", () => {
     expect(service.wanted(queued)).toBe(false);
   });
 
+  it("queues a later round, avoiding the ended author's seat, after a crew review of an older head", async () => {
+    buildRun({ endedAt: 2 });
+    const crew = store.requestReview({
+      authorRunId: "builder:old",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: NEXT,
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    })!;
+    store.setReviewState(crew, ["queued"], "running", { runId: "retro:x", at: 2 });
+    store.recordFindings(crew, "retro:x", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "findings",
+      findings: [],
+      at: 3,
+    });
+    const h = harness();
+    const reviewer = vi.fn((_repo: string, _author?: string) => "retro");
+    await createExternalReviews({ ...h.deps, reviewer }).sync();
+    expect(reviewer).toHaveBeenCalledWith("sample", "builder");
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))[0]).toMatchObject({ round: 2 });
+  });
+
   describe("branchOwned", () => {
     it("holds a branch a seat has claimed the handoff of before its run row exists", () => {
       buildRun({ endedAt: 2 });

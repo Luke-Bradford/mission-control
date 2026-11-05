@@ -325,6 +325,28 @@ describe("prepareCheckout", () => {
     expect(git(adopted.path, "rev-parse", "HEAD")).toBe(tip);
   });
 
+  it("gives a PR back to the seat that wrote it when its head is another ref", async () => {
+    const old = await prepareCheckout(input());
+    commit(old.path, { "pr.txt": "pr\n" }, "pr");
+    git(old.path, "push", "-q", "origin", "HEAD:refs/heads/feature/pr-head");
+    const back = await prepareCheckout({
+      ...input(),
+      handoff: { branch: "feature/pr-head", worktree: null },
+    });
+    expect(back.branch).toBe("feature/pr-head");
+    expect(git(back.path, "symbolic-ref", "HEAD")).toBe("refs/heads/feature/pr-head");
+  });
+
+  it("refuses to move a seat's worktree with unpushed work onto the PR's ref", async () => {
+    const old = await prepareCheckout(input());
+    commit(old.path, { "pr.txt": "pr\n" }, "pr");
+    git(old.path, "push", "-q", "origin", "HEAD:refs/heads/feature/pr-head");
+    commit(old.path, { "more.txt": "unpushed\n" }, "unpushed");
+    await expect(
+      prepareCheckout({ ...input(), handoff: { branch: "feature/pr-head", worktree: null } }),
+    ).rejects.toThrow("unpushed work");
+  });
+
   it("refuses a handed-over branch that diverged from origin's", async () => {
     const old = await prepareCheckout(input());
     commit(old.path, { "a.txt": "origin\n" }, "origin side");

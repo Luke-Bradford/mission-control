@@ -299,7 +299,13 @@ export function createExternalReviews(deps: {
                   !store.runsOnBranch(repo.id, pr.branch).some((run) => run.reviewId == null)
                 )
                   continue;
-                const seat = deps.reviewer(repo.id);
+                // the ended author's seat is the one the reviewer must avoid, as on a crew review
+                const author = store
+                  .runsOnBranch(repo.id, pr.branch)
+                  .filter((run) => run.reviewId == null)
+                  .sort((a, b) => (a.endedAt ?? Infinity) - (b.endedAt ?? Infinity))
+                  .at(-1)?.agentId;
+                const seat = deps.reviewer(repo.id, author);
                 if (
                   !seat ||
                   !(await readExternalSubject(deps.gh, deps.cwd, repo, pr.number, pr.headSha))
@@ -348,7 +354,11 @@ export function createExternalReviews(deps: {
                   sha: pr.headSha,
                   epoch: 0,
                   attempt: reviews.filter((review) => review.sha === pr.headSha).length + 1,
-                  round: reviews.filter((review) => review.state === "reported").length + 1,
+                  // every review of the PR counts, the crew's own on older heads too
+                  round:
+                    store
+                      .reviewsOfPr(repo.id, pr.number)
+                      .filter((review) => review.state === "reported").length + 1,
                   at: deps.now(),
                 });
                 row = id === null ? undefined : (store.review(id) ?? undefined);

@@ -661,11 +661,15 @@ export async function main(): Promise<void> {
       store,
       gh,
       cwd: hubRoot ?? process.cwd(),
-      reviewer: (repoId) => {
+      reviewer: (repoId, author) => {
         const session = config.crew?.sessions.find((value) => value.repoId === repoId);
         const first = session?.seats[0];
         return first
-          ? (reviewerOf(config, first.id, undefined, { store, now: Date.now() })?.id ?? null)
+          ? (reviewerOf(config, first.id, undefined, {
+              store,
+              now: Date.now(),
+              ...(author === undefined ? {} : { avoid: new Set([author]) }),
+            })?.id ?? null)
           : null;
       },
       ...(prEvidence === undefined ? {} : { evidence: prEvidence }),

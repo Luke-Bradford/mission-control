@@ -160,3 +160,51 @@ it("inherits only source-owned commits that are on the preserved branch", async 
   expect(store.runCommits(second.runId)).toEqual([sha]);
   expect(git(clone, "rev-parse", first.branch)).toBe(sha);
 });
+
+it("starts the returned seat on the open PR's own ref, not the ended run's local branch", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const path = store.seatSession("guido-1")?.worktree;
+  if (!path) throw new Error("missing checkout");
+  writeFileSync(join(path, "pr.txt"), "pr");
+  git(path, "add", "pr.txt");
+  git(path, "commit", "-m", "pr work");
+  const tip = git(path, "rev-parse", "HEAD");
+  const head = "feature/42-pr-head";
+  git(path, "push", "origin", `HEAD:refs/heads/${head}`);
+  store.setRunLoop(first.runId, { ...NEW_LOOP, prNumber: 9 });
+  store.upsertPullRequests(
+    "mc",
+    [
+      {
+        repoId: "mc",
+        number: 9,
+        title: "PR",
+        url: "u",
+        branch: head,
+        ticket: "mc#42",
+        state: "open",
+        isDraft: false,
+        review: null,
+        ci: "pending",
+        createdAt: 1,
+        updatedAt: 1,
+        mergedAt: null,
+        headSha: tip,
+        mergeable: null,
+      },
+    ],
+    1,
+  );
+  await sup.endRun("guido-1");
+  const second = await sup.startRun("guido-2", 42);
+  expect(first.branch).not.toBe(head);
+  expect(second.branch).toBe(head);
+  expect(store.run(second.runId)?.branch).toBe(head);
+  const worktree = store.seatSession("guido-2")?.worktree;
+  if (!worktree) throw new Error("missing checkout");
+  expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${head}`);
+  expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
+});
