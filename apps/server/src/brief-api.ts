@@ -17,6 +17,7 @@ export function registerBriefChoiceRoutes(
   deps: AppDeps,
   actorOf: (request: FastifyRequest) => BriefActor | null,
 ): void {
+  // Reader: docs/superpowers/plans/2026-11-03-complete-briefs-759/published-web-child.md (#1390 adds the web buttons)
   api.post<{ Params: { key: string } }>("/attention/:key/choice", async (request, reply) => {
     const parsed = BriefChoiceInput.safeParse(request.body);
     if (!parsed.success)
