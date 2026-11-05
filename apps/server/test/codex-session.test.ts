@@ -287,6 +287,7 @@ describe("Codex session", () => {
         kind: "tool-result",
         toolUseId: "command-approval",
         ok: false,
+        wrapped: false,
       }),
     );
     expect(events).toContainEqual({
