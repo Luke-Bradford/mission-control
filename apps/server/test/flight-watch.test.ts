@@ -7,6 +7,7 @@ import {
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
   carriedFrom,
+  FLIGHT_BATCH_MS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -18,6 +19,7 @@ import {
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_IDLE_NO_WORK_MS,
+  FLIGHT_ITEM_STALE_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_LOOPS_SETTING,
@@ -2426,11 +2428,11 @@ describe("the FLIGHT watcher", () => {
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
         text: null,
       });
-      context(301_000);
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
       expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
-        tokens: 301_000,
+        tokens: FLIGHT_CONTEXT_ROTATE_TOKENS + 1000,
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-        text: "context 301K · fresh session at 300K",
+        text: `context ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000 + 1}K · fresh session at ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K`,
       });
     });
   });
@@ -4819,6 +4821,241 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await tick();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("a free seat right after a wake waits for the batch window, and a question does not", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    await watch.check();
+    ask("inco-1", "r-inco");
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
+    await tick();
+    // routine, and the last wake was only minutes ago
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await tick();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("a batch timer does not hold back a question that arrives inside the gap", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    watch.start();
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const wokeAt = nowMs;
+    nowMs += 30_000;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    nowMs += 30_000;
+    ask("inco-1", "r-inco");
+    await watch.check();
+    for (let i = 0; i < 8 && sendCalls.length < 2; i++) {
+      nowMs += 30_000;
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    expect(sendCalls).toHaveLength(2);
+    expect(nowMs).toBeLessThanOrEqual(wokeAt + FLIGHT_MIN_WAKE_GAP_MS + 30_000);
+  });
+
+  it("an item FLIGHT already waits on does not wake it as stale", async () => {
+    liveCrew();
+    store.raiseNote({
+      key: "blocked:r1:0",
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#7 parked",
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    recordFlightWait(store, "note:blocked:r1:0", {
+      on: "the seat",
+      until: nowMs + 6 * FLIGHT_HOUR_MS,
+      at: nowMs,
+    });
+    nowMs += FLIGHT_ITEM_STALE_MS + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("settling a question does not send the next routine fact at once", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a plain message from the operator wakes FLIGHT within the gap", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "hello" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
+  });
+
+  it("reading the operator's message does not wake FLIGHT a second time", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const sent = store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "hello",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    store.markCommsInboxRead("flight-1", [String(sent?.id)]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("answering a question does not wake FLIGHT again for a seat that stays free", async () => {
+    live("flight-1", "r-flight");
+    live("guido-1", "r-guido");
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    store.setSeatSession(row("inco-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a disk hold lifting wakes FLIGHT at once while a seat and a ticket stay listed", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    const disk = (freeGb: number) =>
+      store.addMachineSample({
+        at: nowMs,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes: freeGb * 1024 ** 3,
+        diskTotalBytes: 100 * 1024 ** 3,
+        swapUsedBytes: 0,
+        memTotalBytes: 100 * 1024 ** 3,
+        memoryPressureFreePct: 90,
+        load1: 0,
+        cores: 8,
+        agents: null,
+      });
+    disk(10);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 20 * MIN;
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a hold lifting wakes FLIGHT at once even while a routine fact waits in the batch", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    const disk = (freeGb: number) =>
+      store.addMachineSample({
+        at: nowMs,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes: freeGb * 1024 ** 3,
+        diskTotalBytes: 100 * 1024 ** 3,
+        swapUsedBytes: 0,
+        memTotalBytes: 100 * 1024 ** 3,
+        memoryPressureFreePct: 90,
+        load1: 0,
+        cores: 8,
+        agents: null,
+      });
+    disk(10);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += MIN;
+    disk(50);
+    await watch.check();
+    nowMs += 2 * MIN;
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready" }),
+      triageCard({ status: "Ready", issueNumber: 777 }),
+    ]);
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 4 * MIN;
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("shows the end of the batch window as the next wake while routine facts wait", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    const wokeAt = nowMs;
+    nowMs += 3 * MIN;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
+      wokeAt + FLIGHT_BATCH_MS,
+    );
+  });
+
+  it("a breaker lift wakes FLIGHT at once while a seat and a ticket stay listed", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("an acked Needs-you item is not listed for FLIGHT to triage again", () => {
+    liveCrew();
+    ask();
+    const items = () => flightState({ config, store, busy: [], now: nowMs }).items;
+    expect(items()).toHaveLength(1);
+    store.ack([items()[0]?.key ?? ""], nowMs + 1);
+    nowMs += 2;
+    expect(items()).toHaveLength(0);
   });
 
   it("the hour re-wake fires for a fact left unhandled, not for a digest change", async () => {

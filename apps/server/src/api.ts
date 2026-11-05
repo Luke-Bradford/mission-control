@@ -4236,7 +4236,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await sendComms(
+            let delivered = false;
+            const sent = await sendComms(
               {
                 store,
                 crew: commsCrew,
@@ -4245,6 +4246,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 seatSender: false,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                  delivered = true;
                 },
               },
               COMMS_CAPCOM,
@@ -4255,6 +4257,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
+            if (delivered) store.markCommsInboxRead(id, [sent.id]);
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(

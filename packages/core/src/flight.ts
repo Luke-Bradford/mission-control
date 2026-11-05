@@ -124,6 +124,10 @@ export interface FlightView {
   wake?: FlightWakeStatus;
   /** The last day's wakes by reason and by hour, for the FLIGHT page. */
   wakeHistory?: FlightWakeHistory;
+  /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
+  wakeCost?: FlightWakeCost;
+  /** How long an operator message or a blocker waited for a wake, per day. */
+  wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
   blocked?: FlightBlocked[];
   /** What each of FLIGHT's last-day prompts took by section, newest first. */
@@ -181,6 +185,34 @@ export interface FlightWakeHistory {
   idle: number;
   byReason: { reason: string; n: number }[];
   perHour: { at: number; n: number; byReason: Record<string, number> }[];
+}
+
+export interface FlightWakeCost {
+  since: number;
+  /** FLIGHT's API-equivalent cost in the window, and the whole crew's. */
+  totalUsd: number;
+  crewUsd: number;
+  /** FLIGHT's fraction of the crew's cost (0..1); null when the crew spent nothing. */
+  share: number | null;
+  /** The same over the last 7 days only: read this against the 20% target after a week. */
+  weekShare: number | null;
+  /** Per 24 hours, oldest first, the last ending at `now`. */
+  byDay: { at: number; usd: number; crewUsd: number }[];
+  /** A wake's cost split evenly over its reasons; "start" is the turn before the first wake. */
+  byReason: { reason: string; usd: number; wakes: number }[];
+}
+
+export interface FlightWakeWaits {
+  since: number;
+  operatorMedianMs: number | null;
+  blockerMedianMs: number | null;
+  byDay: {
+    at: number;
+    operatorMedianMs: number | null;
+    operatorN: number;
+    blockerMedianMs: number | null;
+    blockerN: number;
+  }[];
 }
 
 /** A wake with no decision this soon after it led to nothing. */
@@ -1120,6 +1152,8 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
+  operator?: string[];
 }
 
 export interface FlightWakeList<T> {
@@ -1185,10 +1219,19 @@ export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
  * second or two. A wake due sooner waits for the gap.
  */
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
+/**
+ * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
+ * together. Anything else wakes at once.
+ */
+export const FLIGHT_BATCH_MS = 15 * 60_000;
+/** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
+export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
+/** How many days back the cost and wait telemetry looks. */
+export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
-export const FLIGHT_CONTEXT_ROTATE_TOKENS = 300_000;
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1203,7 +1246,7 @@ export const freshStartLine = (handover: { body: string; updatedAt: number } | n
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
   }`;
-/** "context 142K · fresh session at 300K"; null while the context is unknown. */
+/** "context 142K · fresh session at 150K"; null while the context is unknown. */
 export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
   tokens === null
     ? null

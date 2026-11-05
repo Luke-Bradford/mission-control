@@ -106,6 +106,7 @@ import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
+import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
@@ -6609,6 +6610,13 @@ describe("crew routes", () => {
     });
   });
 
+  it("marks an interrupting message read, as its text reached the seat", async () => {
+    expect((await post5("message", { text: "now", interrupt: true })).statusCode).toBe(200);
+    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toEqual([]);
+    expect((await post5("message", { text: "fyi" })).statusCode).toBe(200);
+    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toHaveLength(1);
+  });
+
   it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
@@ -7026,6 +7034,32 @@ describe("crew routes", () => {
         "tool_results",
       ]);
       expect(body.promptWakes?.[1]?.sections).toEqual(sections(100));
+    });
+
+    it("GET /api/flight carries FLIGHT's cost and how long a seat's call waited", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      store.upsertRun(
+        run({ id: "flight-run", agentId: "flight-1", costUsd: 7, startedAt: now - 3600_000 }),
+      );
+      const repoId = config.crew?.sessions[0]?.repoId ?? "";
+      recordSeatCall(store, repoId, {
+        seat: "guido-1",
+        ref: null,
+        reason: "stuck",
+        at: now - 600_000,
+      });
+      store.addFlightWake("flight-run", now - 540_000, ["signals"]);
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
+      expect(body.wakeCost?.weekShare).toBeCloseTo(1);
+      expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
