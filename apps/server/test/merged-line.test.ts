@@ -1,7 +1,7 @@
 import { flightMergedLine } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { sendFlightMergedLine } from "../src/flight/merged-line.ts";
+import { recordExternalMerge, sendFlightMergedLine } from "../src/flight/merged-line.ts";
 import { Store } from "../src/store.ts";
 
 let store: Store;
@@ -48,5 +48,28 @@ describe("sendFlightMergedLine", () => {
     const line = flightMergedLine(15, ["touches CLAUDE.md"], "/flight");
     const sent = store.commsOnTicket("", "#0", ["PR 15"], 10).find((m) => m.ref === "PR 15");
     expect(sent?.text).toBe(`${line} ${"b".repeat(300)}`);
+  });
+
+  it("recordExternalMerge gives the decision its ticket ref and links it in the line", () => {
+    const seen: { ref: string | null }[] = [];
+    const record = (d: { ref: string | null }) => {
+      seen.push(d);
+      return 77;
+    };
+    recordExternalMerge(
+      { store, config, log: () => {}, record: record as never },
+      {
+        at: 1,
+        pr: 15,
+        repoId: "mc",
+        text: "Merged",
+        basis: "Read it",
+        seatId: null,
+        reasons: ["touches CLAUDE.md"],
+        ticket: 9,
+      },
+    );
+    expect(seen[0]?.ref).toBe("mc#9");
+    expect(rows()[0]?.text).toContain("/tickets/mc/9#decision-77");
   });
 });

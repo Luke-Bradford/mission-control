@@ -281,6 +281,28 @@ describe("external PR controller merge", () => {
     expect(result.isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
     expect(result.ticket).toBeUndefined();
+    // a linked ticket comes back with the result, for the decision's ref and the operator's link
+    const linked = harness();
+    linked.deps.config = superuser;
+    linked.deps.repo = superuser.repos[0]!;
+    linked.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
+    linked.facts.closingIssuesReferences = [
+      { number: 9, url: "https://github.com/example/sample/issues/9" },
+    ];
+    linked.deps.fetchTicket = async () =>
+      ({
+        number: 9,
+        title: "t",
+        url: "u",
+        state: "open",
+        body: "",
+        bodyTruncated: false,
+        labels: [],
+      }) as unknown as TicketView;
+    const withTicket = await mergeExternalPr(linked.deps);
+    expect(withTicket.isError).toBeUndefined();
+    expect(withTicket.ticket).toBe(9);
+    expect(withTicket.reasons).toEqual(["touches .github/workflows/ci.yml"]);
     expect(result.reasons).toEqual([
       "touches .github/workflows/ci.yml, apps/server/src/guard/rules.ts",
     ]);

@@ -364,7 +364,7 @@ import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
-import { sendFlightMergedLine } from "./merged-line.ts";
+import { recordExternalMerge, sendFlightMergedLine } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
@@ -3530,32 +3530,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             now,
             fetchTicket: deps.fetchTicket,
           });
-          if (!result.isError) {
-            const ref = result.ticket === undefined ? null : `${repo.id}#${result.ticket}`;
-            const id = record(now(), {
-              kind: "merge",
-              ref,
-              about: `External PR #${a.pr}`,
-              decision: result.text,
-              basis: a.basis,
-              seatId: ctx.seatId,
-            });
-            // the operator hears of a merge that needed FLIGHT's call, once
-            if (result.reasons !== undefined && result.reasons.length > 0)
-              sendFlightMergedLine(
-                { store, config, log: (line) => deps.log?.(line) },
-                {
-                  at: now(),
-                  pr: a.pr,
-                  reasons: result.reasons,
-                  ticket:
-                    ref === null || result.ticket === undefined
-                      ? null
-                      : { ref, repoId: repo.id, issue: result.ticket },
-                  decision: { id, basis: a.basis },
-                },
-              );
-          }
+          if (!result.isError)
+            recordExternalMerge(
+              { store, config, log: (line) => deps.log?.(line), record },
+              {
+                at: now(),
+                pr: a.pr,
+                repoId: repo.id,
+                text: result.text,
+                basis: a.basis,
+                seatId: ctx.seatId,
+                ...(result.reasons === undefined ? {} : { reasons: result.reasons }),
+                ...(result.ticket === undefined ? {} : { ticket: result.ticket }),
+              },
+            );
           return result;
         }
         if (!deps.engine?.clearFlight) return fail("No awaiting-flight run PR in your lane.");

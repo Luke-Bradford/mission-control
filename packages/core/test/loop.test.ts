@@ -2870,7 +2870,21 @@ describe("merge workspace", () => {
     const cleared = { ...base.loop, flightClearedSha: SHA };
     expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
     expect(flightClearanceReasons(cleared, SHA)).toEqual(["a head adopted from outside the run"]);
-    expect(flightClearanceReasons(cleared, SHA2)).toEqual([]);
+  });
+
+  it.each([
+    ["a later head pushed by the seat", {}],
+    ["the hub's merge of main into the adopted head", { carry: { from: SHA2, to: SHA } }],
+  ])("an adopted head keeps every later head waiting for FLIGHT: %s", (_name, extra) => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      { touches: { sha: SHA, paths: [] }, adopted: { sha: SHA2, epoch: 0 }, ...extra },
+    );
+    expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
+    expect(flightClearanceReasons(base.loop, SHA)).toContain(
+      "a head adopted from outside the run",
+    );
   });
 
   it("flightClearanceReasons names what needed FLIGHT's call, for this head only", () => {

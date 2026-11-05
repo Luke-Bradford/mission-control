@@ -46,3 +46,54 @@ export function sendFlightMergedLine(
     return false;
   }
 }
+
+/**
+ * An external PR's merge, logged as a decision. With a linked ticket the decision carries its ref,
+ * so the ticket page shows it; when FLIGHT's call covered protected paths, the operator's line
+ * links that decision. Returns the decision's id.
+ */
+export function recordExternalMerge(
+  i: {
+    store: Store;
+    config: CcConfig;
+    log: (line: string) => void;
+    record: (d: {
+      kind: "merge";
+      about: string;
+      ref: string | null;
+      decision: string;
+      basis: string;
+      seatId: string | null;
+    }) => number;
+  },
+  m: {
+    at: number;
+    pr: number;
+    repoId: string;
+    text: string;
+    basis: string;
+    seatId: string | null;
+    reasons?: readonly string[];
+    ticket?: number;
+  },
+): number {
+  const ref = m.ticket === undefined ? null : `${m.repoId}#${m.ticket}`;
+  const id = i.record({
+    kind: "merge",
+    about: `External PR #${m.pr}`,
+    ref,
+    decision: m.text,
+    basis: m.basis,
+    seatId: m.seatId,
+  });
+  if (m.reasons !== undefined && m.reasons.length > 0)
+    sendFlightMergedLine(i, {
+      at: m.at,
+      pr: m.pr,
+      reasons: m.reasons,
+      ticket:
+        ref === null || m.ticket === undefined ? null : { ref, repoId: m.repoId, issue: m.ticket },
+      decision: { id, basis: m.basis },
+    });
+  return id;
+}
