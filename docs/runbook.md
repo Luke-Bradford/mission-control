@@ -233,10 +233,11 @@ profiles:
 
 ## Reviews of controller and personal PRs
 
-In a `merge` workspace, an open PR without a crew author run enters the existing scratch review
-queue after its CI passes. The PR must come from the same repository and target its default branch.
-Drafts, forks and PRs labelled `skip-review` are excluded. Existing crew branches retain their normal
-author-run review path. An existing `mc/review` status from another reviewer is respected.
+In a `merge` workspace, an open PR with no live or parked build run enters the existing scratch review
+queue after its CI passes. That covers a PR whose build run has ended. The PR must come from the same
+repository and target its default branch. Drafts, forks and PRs labelled `skip-review` are excluded.
+A branch with a live or parked build run keeps its author-run review path. An `mc/review` status is
+respected as another reviewer's when this hub has no review of that head.
 
 The reviewer uses the exact head SHA. Before launch and before publishing, the hub checks the PR
 again. A later push needs a new review; a closed, drafted, opted-out or changed PR cannot receive an
@@ -1400,8 +1401,13 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A crew-owned branch keeps its normal
-engine path. No build run is invented and no board card is marked Done by this path.
+with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
+run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
+ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
+latest build run still refuses the merge after that run ends, until the hold is released. An operator's
+Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+No build run is invented and no board card is marked Done by this path.
 
 Protected repository rules require the existing head-bound `merge-floor` controller approval.
 Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is

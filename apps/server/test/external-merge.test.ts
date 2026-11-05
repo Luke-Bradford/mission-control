@@ -1,10 +1,14 @@
 import { Buffer } from "node:buffer";
-import { DEFAULT_REPO_RULES, type PullRequestView, type TicketView } from "@mc/core";
+import { DEFAULT_REPO_RULES, NEW_LOOP, type PullRequestView, type TicketView } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { externalPrControl, setExternalMergeHold } from "../src/external-pr-control.ts";
+import {
+  externalMergeHold,
+  externalPrControl,
+  setExternalMergeHold,
+} from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
@@ -110,7 +114,7 @@ function harness() {
       ...DEFAULT_REPO_RULES,
       hardRules: [] as string[],
       hardRulesSet: true,
-      hardRulesBy: "controller" as const,
+      hardRulesBy: "controller" as "controller" | "operator",
       uat: { labels: [] as string[], paths: [] as string[] },
     },
     clock: 100,
@@ -170,6 +174,142 @@ describe("external PR controller merge", () => {
       ["pr", "merge", "7", "--repo=example/sample", "--merge", `--match-head-commit=${SHA}`],
     ]);
     expect(store.run(externalReviewKey("sample", 7))).toBeNull();
+  });
+
+  const buildRun = (endedAt: number | null) =>
+    store.upsertRun({
+      id: "builder:old",
+      agentId: "builder",
+      repoId: "sample",
+      seq: 1,
+      startedAt: 1,
+      endedAt,
+      status: "ok",
+      model: null,
+      sessionId: null,
+      branch: pr.branch,
+      ticket: "sample#1",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+
+  it("merges a PR whose build run ended, and still refuses one whose run is unfinished", async () => {
+    const h = harness();
+    buildRun(null);
+    expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
+    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("serves the PR control routes for an ended run and refuses an unfinished one", async () => {
+    const h = harness();
+    buildRun(2);
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    const hold = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/merge-hold",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA, action: "hold", reason: "x" }),
+      });
+    try {
+      expect((await hold()).statusCode).toBe(200);
+      expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await hold()).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses a PR whose ended run still has a merge hold, until the hold is released", async () => {
+    const h = harness();
+    buildRun(2);
+    const hold = { by: "CAPCOM" as const, reason: "wait for the demo", at: 1 };
+    store.setRunLoop("builder:old", { ...NEW_LOOP, mergeHold: hold });
+    expect((await mergeExternalPr(h.deps)).text).toContain("merge hold from CAPCOM");
+    expect(h.merges).toHaveLength(0);
+    store.setRunLoop("builder:old", { ...NEW_LOOP });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("clears a hard-rule PR with an ended run only on a controller's approval for the head", async () => {
+    const h = harness();
+    buildRun(2);
+    h.state.files = [{ filename: "docs/hard/x.md", status: "modified" }];
+    h.state.rules = {
+      ...h.state.rules,
+      hardRules: ["docs/hard/**"],
+      hardRulesBy: "operator" as const,
+    };
+    expect((await mergeExternalPr(h.deps)).text).toContain("requires controller approval");
+    grantApproval(
+      store,
+      { rule: "merge-floor", scope: mergeFloorScope(7, SHA), until: 150, reason: "Reviewed." },
+      90,
+    );
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("needs an external review row on a crew branch's head, even with a passing mc/review status", async () => {
+    store.close();
+    store = new Store(":memory:");
+    store.upsertPullRequests("sample", [pr], 1);
+    buildRun(2);
+    const h = harness();
+    expect((await mergeExternalPr(h.deps)).text).toContain("independent clean QA report");
+    expect(h.merges).toHaveLength(0);
+  });
+
+  describe("a crew review row on the same head", () => {
+    const crewRow = (blocking: number) => {
+      buildRun(2);
+      const id = store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: 5,
+      });
+      if (id === null) throw new Error("review fixture missing");
+      store.setReviewState(id, ["queued"], "running", { at: 6, runId: "retro:crew" });
+      store.recordFindings(id, "retro:crew", {
+        verdict: blocking ? { spec: "fail", quality: "pass" } : { spec: "pass", quality: "pass" },
+        summary: "Checked.",
+        findings: [],
+        at: 7,
+      });
+    };
+
+    it("does not undo a clean external review", async () => {
+      crewRow(0);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+      expect(h.merges).toHaveLength(1);
+    });
+
+    it("blocks when it reported a failing verdict after the external one", async () => {
+      crewRow(1);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBe(true);
+      expect(h.merges).toHaveLength(0);
+    });
   });
 
   it("respects a real external mc/review sign-off without inventing a scratch report", async () => {
