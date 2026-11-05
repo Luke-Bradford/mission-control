@@ -31,11 +31,14 @@ const chosen = (c: Choice): string[] => (c.kind === "some" ? c.values : []);
 export function BoardViewEditor({
   applied,
   options,
+  loading,
   onSave,
   onCancel,
 }: {
   applied: BoardView;
   options: Record<ViewField, string[]>;
+  /** The cards have not all arrived: the lists are not known yet, so nothing is called absent. */
+  loading: boolean;
   /** Returns whether the browser kept the view; false leaves the form open with a notice. */
   onSave: (view: BoardView) => boolean;
   onCancel: () => void;
@@ -141,7 +144,9 @@ export function BoardViewEditor({
               )}
             </div>
             <FieldError id={idOf(field, "some")} error={error} />
-            {listed.length + absent.length === 0 ? (
+            {loading ? (
+              <p className="fhint muted s">Loading the cards…</p>
+            ) : listed.length + absent.length === 0 ? (
               <p className="fhint muted s">No cards carry a {g.noun} yet.</p>
             ) : (
               <ul className="bv-options" aria-label={`${g.legend} values`}>

@@ -265,6 +265,24 @@ describe("the Board view editor", () => {
   });
 });
 
+describe("while the cards load", () => {
+  it("says it is loading and calls no saved value absent", async () => {
+    writeKey(BOARD_VIEW_KEY, JSON.stringify(view({ assignee: some("Alice") })));
+    const routed = stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG });
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+      input === "/api/boards/shop-app" ? new Promise<Response>(() => {}) : routed(input, init),
+    );
+    render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Board view/ })).toBeTruthy());
+    openEditor();
+    const form = editor();
+    expect(within(form).getAllByText("Loading the cards…").length).toBe(4);
+    expect(within(form).queryByText("not on any current card")).toBeNull();
+    expect(within(form).queryByText(/No cards carry/)).toBeNull();
+    expect(within(form).getByRole("radio", { name: "Unassigned" })).toBeTruthy();
+  });
+});
+
 describe("storage failures", () => {
   it("an unreadable saved view shows all cards and says so", async () => {
     writeKey(BOARD_VIEW_KEY, "{not json");

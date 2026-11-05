@@ -330,6 +330,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         <BoardViewEditor
           applied={view ?? DEFAULT_VIEW}
           options={viewOptions}
+          loading={loading}
           onSave={saveView}
           onCancel={closeView}
         />

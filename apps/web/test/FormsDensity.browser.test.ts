@@ -748,6 +748,53 @@ describeRendered("F13 Board view editor, rendered in the Board page", () => {
   }
 
   it(
+    "F13 wraps a 300-character label whole instead of cutting it",
+    async () => {
+      const long = `long-${"x".repeat(295)}`;
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 900,
+        search: "?dock=folded&at=/board",
+        colorScheme: "light",
+        api: {
+          ...F13_API,
+          [RESOURCES.boards("shop-app").path]: [
+            ...F13_CARDS,
+            boardItem({ issueNumber: 200, status: "Todo", state: "planned", labels: [long] }),
+          ],
+        },
+      });
+      await page.box("#page-board .kcol");
+      await page.evaluate(async () => {
+        const button = [...document.querySelectorAll("button")].find((b) =>
+          b.textContent?.startsWith("Board view"),
+        );
+        button?.click();
+      }, null);
+      await page.box(F13.form);
+      const seen = await page.evaluate((selector) => {
+        const root = document.querySelector(selector);
+        const value = [...(root?.querySelectorAll<HTMLElement>(".bv-value") ?? [])].find((e) =>
+          e.textContent?.startsWith("long-"),
+        );
+        return {
+          found: Boolean(value),
+          fits: value ? value.scrollWidth <= value.clientWidth + 1 : false,
+          formOverflow: root ? root.scrollWidth - root.clientWidth : 99,
+          pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      }, F13.form);
+      expect(seen.found).toBe(true);
+      expect(seen.fits).toBe(true);
+      expect(seen.formOverflow).toBeLessThanOrEqual(1);
+      expect(seen.pageOverflow).toBeLessThanOrEqual(1);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "F13: Tab shows focus on 24x24 targets and brings the final action into view at 1600x700",
     async () => {
       const page = await openF13({ width: 1600, height: 700 });
