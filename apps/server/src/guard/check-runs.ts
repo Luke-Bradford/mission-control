@@ -18,12 +18,9 @@ import { seatPlace } from "../mcp/tools.ts";
 import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import type { Store } from "../store.ts";
+import { NOT_PLAIN, plainCall } from "./plain-call.ts";
 
-/** A command that chains, pipes, or runs on after a failure can pass without the check passing. */
-const NOT_PLAIN = /[|;\n\r]/;
-
-/** A command with no pipe, `||`, `;` or line break: its exit status is its last step's own. */
-export const plainCall = (command: string): boolean => !NOT_PLAIN.test(command);
+export { plainCall };
 
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when

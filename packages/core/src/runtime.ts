@@ -1403,6 +1403,8 @@ export type SessionEvent =
       toolUseId: string;
       ok?: boolean;
       exitCode?: number | null;
+      /** The command pipes or chains past its first step, so its exit says little of a check (#1411). */
+      wrapped?: boolean;
       /** Exact completed Codex command facts, supplied only for FLIGHT audit. */
       command?: string;
       cwd?: string;

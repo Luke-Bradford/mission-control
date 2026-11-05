@@ -2323,8 +2323,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
             // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
             const wrapped = typeof command === "string" && !plainCall(command);
-            lock?.release(key, failed ? true : wrapped ? undefined : false);
-            await checks?.end(key, !failed);
+            // the hook sends a null exit code for an interrupted or background call: unknown, so
+            // it neither passes the lock row nor counts toward the push gate
+            const unknown = body.data.exit_code === null;
+            lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
+            await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (
               fullAccess &&

@@ -50,11 +50,14 @@ describe("a Codex seat's check records", () => {
 
 describe("a Codex seat's test-lock outcome (#1411)", () => {
   it.each([
-    [0, "pass"],
-    [1, "fail"],
-  ])("ends the lock row with exit %s as %s", async (exitCode, outcome) => {
+    ["pnpm -s test", 0, "pass"],
+    ["pnpm -s test", 1, "fail"],
+    // tail's status, not the suite's: never pass
+    ["pnpm -s test | tail -5", 0, "done"],
+    ["pnpm -s test | tail -5", 1, "fail"],
+  ])("ends the lock row for `%s` with exit %s as %s", async (command, exitCode, outcome) => {
     const lock = new TestLock({ holds: store });
-    const { sup } = codexSupervisor({ command: "pnpm -s test", exitCode }, { lock });
+    const { sup } = codexSupervisor({ command, exitCode }, { lock });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(store.lockRuns(0)[0]?.outcome).toBe(outcome));

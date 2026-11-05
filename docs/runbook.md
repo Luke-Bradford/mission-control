@@ -2386,7 +2386,10 @@ that succeeded, and `done` (never `pass`) for a call that pipes or chains past t
 `pnpm -s test; echo exit=$?` or `... | tail`, because its status is the last step's. That is the
 path that fits the 4 Nov report (lock `pass`, the seat saw exit 1, no check record, since a chain
 with `;` or `|` is never counted as a check). A Codex command releases as `fail` when it did not
-succeed.
+succeed, and as `done` when it succeeded but piped or chained past the check. A Post whose hook
+exit code is null (interrupted or background) is unknown: the lock row ends `done` and the check
+recorder stores not-ok, so it never counts toward the push gate. A review run's `done` locked call
+still shows in the QA report as a hub receipt, with no pass claimed.
 
 Not covered by a test in a seat: the Codex release outcome (`supervisor-checks.test.ts`, which
 needs a crew run and so skips in a seat; CI runs it), and whether Codex's own sandbox passes

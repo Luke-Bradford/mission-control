@@ -289,7 +289,12 @@ describe("Codex session", () => {
         ok: false,
       }),
     );
-    expect(events).toContainEqual({ kind: "tool-result", toolUseId: "item-1", ok: false });
+    expect(events).toContainEqual({
+      kind: "tool-result",
+      toolUseId: "item-1",
+      ok: false,
+      wrapped: false,
+    });
     expect(recorded()).toContainEqual({ id: "approval-1", result: { decision: "accept" } });
   });
 
@@ -307,7 +312,17 @@ describe("Codex session", () => {
         toolUseId: "item-1",
         ok,
         ...(exitCode === undefined ? {} : { exitCode }),
+        wrapped: false,
       },
+    ]);
+  });
+
+  it("marks a command that pipes past the check as wrapped (#1411)", async () => {
+    const { session, events } = start();
+    session.send(JSON.stringify({ command: "pnpm -s test | tail -5", exitCode: 0 }));
+    await until(() => expect(events.some((e) => e.kind === "tool-result")).toBe(true));
+    expect(events.filter((e) => e.kind === "tool-result")).toEqual([
+      { kind: "tool-result", toolUseId: "item-1", ok: true, exitCode: 0, wrapped: true },
     ]);
   });
 

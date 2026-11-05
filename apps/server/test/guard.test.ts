@@ -1258,6 +1258,31 @@ describe("POST /api/guard/check", () => {
     expect(await run(tokB, "b2", "pnpm -s test | tail -5", "PostToolUse")).toBe("done");
   });
 
+  it("treats a null exit code (an interrupted or background call) as unknown: done, and not ok for the recorder (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        lockedBy: async () => null,
+        dropRun: () => {},
+        drops: () => [],
+      },
+    });
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, {
+      ...post("a1", "PostToolUse"),
+      tool_input: { command: "pnpm -s test" },
+      exit_code: null,
+    });
+    expect(store.lockRuns(0)[0]?.outcome).toBe("done");
+    expect(ends).toEqual([[false, null]]);
+  });
+
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
     const b = check(tokB, bash("b1", "pnpm -s test"));
