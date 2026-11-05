@@ -36,6 +36,8 @@ import {
   type BriefOption,
   type ChosenProfile,
   type CiRunView,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
   COMMS_CHATTER_ROUNDS,
   COMMS_CHATTER_WINDOW_MS,
@@ -142,6 +144,7 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
   gitFileMetrics,
@@ -151,16 +154,23 @@ import {
   recordGitFileSource,
 } from "./code-health/git-store.ts";
 import {
+  installMergedReviews,
+  mergedReviewRecords,
+  recordMergedReviews,
+} from "./code-health/merged-reviews.ts";
+import {
   installRecommendations,
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
+  RecommendationMutation,
   recommendationProposals,
   recommendationRow,
   recommendationRows,
   recommendationRowsForFiles,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
+import { remeasureDue } from "./code-health/remeasure.ts";
 import {
   aggregateDatedRisk,
   datedPrFiles,
@@ -1284,6 +1294,7 @@ export class Store {
     installGitFileSources(this.db);
     installFileSizes(this.db);
     installRecommendations(this.db);
+    installMergedReviews(this.db);
     installTestReports(this.db);
     installTestQa(this.db);
     installCodeHealthRevisions(this.db);
@@ -1407,6 +1418,47 @@ export class Store {
     }, true);
     if (!response) throw new Error("Recommendation transaction returned no result");
     return response;
+  }
+  /**
+   * FLIGHT's own accept: only a FLIGHT-tier rule, with the seat as owner and the default review
+   * date. The same transition, decision record and idempotency as the operator's accept.
+   */
+  flightAcceptCodeHealth(repoId: string, id: string, seatId: string, basis: string, at: number) {
+    const row = recommendationRow(this.db, repoId, id);
+    if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation.");
+    if (!CODE_HEALTH_FLIGHT_TIER_RULES.includes(row.rule))
+      throw new CodeHealthReadError(
+        403,
+        "FLIGHT may not accept this kind of proposal; it stays with the operator.",
+      );
+    const request = RecommendationMutation.parse({
+      requestId: randomUUID(),
+      basis,
+      expectedUpdatedAt: row.updatedAt,
+      change: {
+        action: "accept",
+        owner: `FLIGHT (${seatId})`,
+        reviewAt: at + CODE_HEALTH_FLIGHT_REVIEW_DAYS * DAY_MS,
+      },
+    });
+    return this.decideCodeHealthRecommendation(repoId, id, request, seatId, at);
+  }
+  recordCodeHealthMergedReviews(repoId: string, at: number) {
+    let changed = 0;
+    this.transaction(() => {
+      changed = recordMergedReviews(this.db, repoId, at);
+    }, true);
+    return changed;
+  }
+  codeHealthMergedReviews(repoId: string) {
+    return mergedReviewRecords(this.db, repoId);
+  }
+  remeasureCodeHealth(repoId: string, at: number, checkout?: string) {
+    let done: string[] = [];
+    this.transaction(() => {
+      done = remeasureDue(this, this.db, repoId, at, checkout);
+    }, true);
+    return done;
   }
   linkCodeHealthRecommendation(
     repoId: string,

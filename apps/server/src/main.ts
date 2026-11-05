@@ -39,6 +39,7 @@ import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.t
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
+import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
 import { createFileContext } from "./code-health/file-context.ts";
 import { createGitFileCollector } from "./code-health/git-collector.ts";
 import {
@@ -1048,6 +1049,16 @@ export async function main(): Promise<void> {
     setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
     setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
   }
+  // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
+  const audit = () => {
+    try {
+      runCodeHealthAudit({ store, config, now: Date.now });
+    } catch (e) {
+      log(`code-health audit failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
+  setTimeout(audit, 60_000).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

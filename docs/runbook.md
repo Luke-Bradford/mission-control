@@ -52,6 +52,23 @@ service does not risk a second issue. Partial recovery writes count toward the r
 changes still need their existing proposal and approval paths. No recommendation action
 applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
 
+**FLIGHT's own accept.** When `create_ticket` is given a `recommendationId` whose proposal is still
+`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `code-health.ts`; today
+`repeatedly-changed-large-file`), the hub accepts it for FLIGHT first: owner `FLIGHT (<seat>)`, review
+date 30 days on, the call's `basis` as the reason, recorded in the flight decision audit with the
+seat as actor. Any other rule is left proposed and the call is refused; the operator's token, typed
+owner and date stay the only way to accept it. This is no new GitHub write.
+
+**Unprompted audit work.** Once an hour (and a minute after start) the hub runs `runCodeHealthAudit`.
+It records every merged PR in `code_health_merged_reviews`: how it merged (`crew-run`, `ended-run` or
+`hand`) and the last review the hub reported for it (`reviewId`, null when none exists; a review that
+lands later is linked on the next pass). It also re-measures each accepted proposal whose review date
+has passed, once, against its accepted baseline, and stores the result as `remeasure`
+(`improved`, `unchanged`, `worse` or `unmeasured`, with the baseline, current value and a note).
+Re-measuring never ends the work; `assess` stays a manual, evidence-backed decision.
+The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
+with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
+
 Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
 issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
 read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and

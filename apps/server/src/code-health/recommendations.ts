@@ -21,6 +21,8 @@ export interface RecommendationScope {
   file?: string;
   category?: string;
   pr?: number;
+  /** What the PR's review findings mostly concerned; one-per-PR proposals with one cause group. */
+  cause?: string;
   observedFrom: number | null;
   observedUntil: number | null;
 }
@@ -45,17 +47,33 @@ export interface RecommendationRecord extends CodeHealthRecommendation {
   owner: string | null;
   reviewAt: number | null;
   linkedWork: string | null;
+  /** The automatic re-measure against the accepted baseline; set once, on or after the review date. */
+  remeasure: Remeasure | null;
+}
+export interface Remeasure {
+  at: number;
+  baseline: number | null;
+  current: number | null;
+  change: "improved" | "unchanged" | "worse" | "unmeasured";
+  note: string;
 }
 export function installRecommendations(db: Db) {
   db.exec(`CREATE TABLE IF NOT EXISTS code_health_recommendations (
     id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, proposal TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT '{"kind":"proposed"}', baseline TEXT,
-    active INTEGER NOT NULL DEFAULT 1, work_ready INTEGER NOT NULL DEFAULT 0, work_attempt TEXT, owner TEXT, review_at INTEGER, linked_work TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    active INTEGER NOT NULL DEFAULT 1, work_ready INTEGER NOT NULL DEFAULT 0, work_attempt TEXT, owner TEXT, review_at INTEGER, linked_work TEXT, remeasure TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   ); CREATE INDEX IF NOT EXISTS code_health_recommendations_repo ON code_health_recommendations(repo_id);
   CREATE TABLE IF NOT EXISTS code_health_recommendation_requests (
     repo_id TEXT NOT NULL, request_id TEXT NOT NULL, payload TEXT NOT NULL, response TEXT NOT NULL,
     PRIMARY KEY(repo_id,request_id)
   );`);
+  if (
+    !db
+      .prepare("PRAGMA table_info(code_health_recommendations)")
+      .all()
+      .some((c) => c.name === "remeasure")
+  )
+    db.exec("ALTER TABLE code_health_recommendations ADD COLUMN remeasure TEXT");
 }
 function decode(row: Record<string, unknown>): RecommendationRecord {
   return {
@@ -68,6 +86,7 @@ function decode(row: Record<string, unknown>): RecommendationRecord {
     owner: row.owner as string | null,
     reviewAt: row.review_at as number | null,
     linkedWork: row.linked_work as string | null,
+    remeasure: row.remeasure === null ? null : JSON.parse(String(row.remeasure)),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
     evidence: [],
@@ -340,6 +359,19 @@ export function recommendationProposals(
     group.reviews.push(r);
     prs.set(r.pr, group);
   }
+  /** The category most of the PR's distinct findings carry (ties: first alphabetically). */
+  function causeOf(pr: number): string {
+    const counts = new Map<string, number>(),
+      seen = new Set<string>();
+    for (const f of source.findings)
+      if (f.pr === pr && f.category !== null && !seen.has(f.findingId)) {
+        seen.add(f.findingId);
+        counts.set(f.category, (counts.get(f.category) ?? 0) + 1);
+      }
+    return (
+      [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? "uncategorised"
+    );
+  }
   for (const [pr, group] of prs)
     if (group.round >= CODE_HEALTH_RULES.repeatedRounds.reportedRounds)
       add(
@@ -351,7 +383,7 @@ export function recommendationProposals(
         "maximum reported review round for this PR",
         group.round,
         "Recent cohorts are provisional; round counts do not establish a production defect.",
-        { pr },
+        { pr, cause: causeOf(pr) },
       );
   const files = fileRecommendationProposals(store, repoId, at, checkout);
   proposals.push(...files.proposals);

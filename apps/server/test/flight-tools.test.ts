@@ -132,6 +132,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
@@ -4324,6 +4325,38 @@ describe("create_ticket", () => {
     expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
     expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
     expect(creates).toBe(1);
+  });
+  function proposed(rule: string) {
+    const id = `chr_${(rule.length.toString(16).padStart(2, "0")).repeat(16)}`;
+    upsertRecommendation(
+      (store as unknown as { db: DatabaseSync }).db,
+      {
+        id,
+        repoId: "mc",
+        rule,
+        ruleVersion: 1,
+        scope: null,
+        evidenceFingerprint: "f",
+        observation: "o",
+        proposal: "p",
+        uncertainty: "u",
+        rankingReason: "r",
+        target: { metric: "m", direction: "decrease", baseline: 5 },
+      },
+      NOW,
+    );
+    return id;
+  }
+  it("accepts a proposal of FLIGHT's own tier by filing its work, and leaves the others for the operator", async () => {
+    readImpl = (n) => card(n, { status: "" });
+    const other = proposed("recurring-correction");
+    expect((await call("create_ticket", C({ recommendationId: other }))).isError).toBe(true);
+    expect(store.codeHealthRecommendation("mc", other)?.state.kind).toBe("proposed");
+    const mine = proposed("repeatedly-changed-large-file");
+    await call("create_ticket", C({ recommendationId: mine }));
+    const row = store.codeHealthRecommendation("mc", mine);
+    expect(row?.state.kind).toBe("accepted");
+    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
   });
   it("recovers a created issue marker after a lost response without a second issue write", async () => {
     const recommendationId = acceptedRecommendation();

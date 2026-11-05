@@ -39,6 +39,7 @@ import {
   CLOSE_DESCRIPTION,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_HEADING,
@@ -2049,7 +2050,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         workReady = false,
         workAttempt = false;
       if (recommendationId) {
-        const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        let recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        // FLIGHT accepts a proposal of its own tier by filing its work; every other rule waits for the operator.
+        if (
+          recommendation?.state.kind === "proposed" &&
+          CODE_HEALTH_FLIGHT_TIER_RULES.includes(recommendation.rule)
+        ) {
+          try {
+            recommendation = store.flightAcceptCodeHealth(
+              repo.id,
+              recommendationId,
+              ctx.seatId,
+              basis,
+              now(),
+            );
+          } catch {
+            return fail("That recommendation changed while FLIGHT accepted it. Read it again.");
+          }
+        }
         if (
           !recommendation ||
           !(
