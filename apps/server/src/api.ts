@@ -4248,6 +4248,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (b.question !== undefined && (named === null || named.answeredAt !== null)) {
             throw new SupervisorError(409, "That question is already closed.");
           }
+          if (named !== null && named.agentId !== id) {
+            throw new SupervisorError(409, "That question belongs to another seat.");
+          }
+          // A message that names no question must not land in the run on the seat while another
+          // run waits off the seat on a passed question: it may be that question's answer.
+          if (
+            b.question === undefined &&
+            store
+              .openQuestions()
+              .some(
+                (q) =>
+                  q.agentId === id &&
+                  q.passedAt !== null &&
+                  q.runId !== runId &&
+                  store.run(q.runId)?.endedAt === null &&
+                  store.run(q.runId)?.loop?.aside != null,
+              )
+          ) {
+            throw new SupervisorError(
+              409,
+              "This seat has a question waiting from another ticket; answer it from its Needs-you card.",
+            );
+          }
           const parked =
             named !== null &&
             named.agentId === id &&

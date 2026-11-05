@@ -8019,16 +8019,38 @@ describe("the first loop's engine", () => {
     const post = (a: FastifyInstance, payload: Record<string, unknown>) =>
       a.inject({ method: "POST", url: "/api/seats/guido-1/message", headers: json, payload });
 
-    it("a message that names no question goes to the run on the seat and closes nothing", async () => {
+    it("refuses a message that names no question while a run waits off the seat on one", async () => {
       parkedRun("parked", "shop-app#9");
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
       const q = passed("parked", "Which provider?");
       const { a, reconciled } = appOnSeat();
       const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
-      expect(r.statusCode).toBe(200);
-      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("answer it from its Needs-you card");
+      expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
       expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
       expect(reconciled).toEqual([]);
+      await a.close();
+    });
+
+    it("sends a message that names no question to the run on the seat when none waits", async () => {
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
+      expect(r.statusCode).toBe(200);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
+      await a.close();
+    });
+
+    it("refuses an answer that names another seat's question", async () => {
+      store.upsertRun(run({ id: "other", agentId: "inco-1", ticket: "shop-app#12" }));
+      const q = store.addQuestion({ agentId: "inco-1", runId: "other", text: "Hm?", at: NOW });
+      store.passQuestion(q, NOW);
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "yes", question: q });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("another seat");
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
       await a.close();
     });
 
