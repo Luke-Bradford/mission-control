@@ -1,0 +1,177 @@
+/* Grouped forms (opt-in). Groups 16px apart inside, sections 24px. Width caps: fform-480, -640, -800. */
+.fform {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.fgroup {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fgroup > legend {
+  padding: 0;
+  margin-bottom: var(--sp-4);
+  color: var(--fg-2);
+  font-weight: 600;
+}
+
+.ffield {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.ffield > label {
+  color: var(--fg);
+}
+
+.ffield input:not([type="checkbox"]):not([type="radio"]),
+.ffield select,
+.ffield textarea {
+  text-overflow: ellipsis;
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--sp-6);
+}
+
+.ffield .fhint {
+  color: var(--muted);
+}
+
+.ffield .ferr {
+  margin: 0;
+}
+
+.ffield-check {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 24px;
+}
+
+.fpair {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.fpair-wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.fsum {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--crit);
+  border-radius: var(--r-s);
+  background: var(--crit-soft);
+  overflow-wrap: anywhere;
+  scroll-margin: var(--sp-5);
+}
+
+.fsum ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+
+.fsum-title {
+  margin: 0;
+  color: var(--fg);
+}
+
+.fform-480 {
+  max-width: 480px;
+}
+
+.fform-640 {
+  max-width: 640px;
+}
+
+.fform-800 {
+  max-width: 800px;
+}
+
+.fstatus {
+  overflow-wrap: anywhere;
+}
+
+.feffect {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  overflow-wrap: anywhere;
+}
+
+.fcontent {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* A short ordered list of steps: reached steps are bold, the current one is marked for assistive tech. */
+.fsteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.fsteps .on {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* One row per real request: what it checks, and whether it has run, is running, passed or failed. */
+.fchecks {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fchecks li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+
+.feffect ul {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4);
+}
+
+/* Links in the error summary are targets of their own: at least 24px square. */
+.fsum a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}

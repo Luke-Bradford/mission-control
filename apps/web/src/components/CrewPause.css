@@ -13,7 +13,7 @@
   right: 16px;
   z-index: 1000;
   width: min(300px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
+  max-height: calc(calc(100 * var(--dvh)) - 32px);
   overflow-y: auto;
   box-sizing: border-box;
   padding: var(--sp-3);

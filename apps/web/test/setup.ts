@@ -1,6 +1,7 @@
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { setDemo } from "../src/demo/mode.ts";
 import { resetOverlays } from "../src/shell/overlays.ts";
 import { resetSelection } from "../src/shell/selection.ts";
 import { resetSession } from "../src/shell/session.ts";
@@ -39,6 +40,7 @@ afterEach(() => {
   resetSelection();
   clearToast();
   resetTheme();
+  setDemo(false); // the mode is a module singleton too
   // viteConfig.test.ts runs in node, with no window
   if (typeof window !== "undefined") window.history.replaceState(null, "", "/");
 });

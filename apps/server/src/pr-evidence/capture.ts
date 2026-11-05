@@ -134,18 +134,29 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     };
   }
 
-  async function render(side: EvidenceSide, pages: EvidencePage[], signal: AbortSignal) {
+  async function render(
+    side: EvidenceSide,
+    name: string,
+    pages: EvidencePage[],
+    signal: AbortSignal,
+  ) {
     const shots = new Map<string, Buffer>();
     for (const page of pages)
       for (const scheme of EVIDENCE_SCHEMES) {
         signal.throwIfAborted();
-        shots.set(
-          `${page}:${scheme}`,
-          await abortable(
-            deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
-            signal,
-          ),
-        );
+        try {
+          shots.set(
+            `${page}:${scheme}`,
+            await abortable(
+              deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
+              signal,
+            ),
+          );
+        } catch (e) {
+          // Say which render failed: the render's own message names neither page nor side.
+          const why = e instanceof Error ? e.message : String(e);
+          throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
+        }
       }
     return shots;
   }
@@ -165,7 +176,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      return await render(side, pages, signal);
+      return await render(side, name, pages, signal);
     } finally {
       await side.stop().catch(() => {});
     }

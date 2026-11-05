@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
+import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
 import { ago, dayMonth, hhmm } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -29,6 +30,7 @@ import {
   navigate,
   ticketPath,
 } from "../router.ts";
+import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
@@ -148,13 +150,13 @@ function MessageActions({ message, onReply }: { message: CommsMessage; onReply: 
     if (reaction === "cant" && !reason) return;
     void apiPost(`/api/comms/${encodeURIComponent(message.id)}/reactions`, { reaction, reason })
       .then(() => hub.refetchTopic("agents"))
-      .catch(() => setError("Could not add reaction."));
+      .catch((e: unknown) => setError(writeFailure(e, "Could not add reaction.")));
   };
   const pin = () => {
     const call = message.pinned ? apiDelete : apiPut;
     void call(`/api/comms/${encodeURIComponent(message.id)}/pin`, {})
       .then(() => hub.refetchTopic("agents"))
-      .catch(() => setError("Could not change pin."));
+      .catch((e: unknown) => setError(writeFailure(e, "Could not change pin.")));
   };
   return (
     <span className="comms-actions">
@@ -385,7 +387,7 @@ function Composer({
         hub.refetchTopic("agents");
         onSent?.();
       })
-      .catch(() => setError("Could not send message."));
+      .catch((e: unknown) => setError(writeFailure(e, "Could not send message.")));
   };
   return (
     <form className="comms-composer" onSubmit={send}>
@@ -430,9 +432,11 @@ function MentionsBell({
     const el = panel.current;
     if (!open || !el) return;
     const fit = () => {
-      const top = el.getBoundingClientRect().top;
+      const box = el.getBoundingClientRect();
       const host = el.closest("#chatP")?.getBoundingClientRect().bottom ?? window.innerHeight;
-      const room = Math.min(host, window.innerHeight) - top - MENTIONS_GAP_PX;
+      // The rects are zoomed and the height this sets gets zoomed again.
+      const zoom = box.height > 0 && el.offsetHeight > 0 ? box.height / el.offsetHeight : 1;
+      const room = (Math.min(host, window.innerHeight) - box.top) / zoom - MENTIONS_GAP_PX;
       el.style.setProperty("--mentions-room", `${Math.max(MENTIONS_MIN_PX, Math.floor(room))}px`);
     };
     fit();
@@ -448,7 +452,10 @@ function MentionsBell({
         setMarkError(null);
         hub.refetch(RESOURCES.commsMentions.path);
       })
-      .catch(() => setMarkError(ids));
+      .catch((e: unknown) => {
+        if (writeFailure(e, "") === DEMO_REFUSED) toast(DEMO_REFUSED);
+        else setMarkError(ids);
+      });
   };
   const openMention = (mention: CommsMention) => {
     setOpen(false);
@@ -564,7 +571,7 @@ function PinnedMessage({ message }: { message: CommsMessage }) {
   const unpin = () => {
     void apiDelete(`/api/comms/${encodeURIComponent(message.id)}/pin`)
       .then(() => hub.refetchTopic("agents"))
-      .catch(() => setError("Could not unpin message."));
+      .catch((e: unknown) => setError(writeFailure(e, "Could not unpin message.")));
   };
   return (
     <span>
@@ -681,7 +688,8 @@ function ModernConversation({
   const conversationScope =
     view.kind === "ticket" ? `ticket:${view.ref}:${view.ticket ?? ""}` : scope;
   useEffect(() => {
-    if (!scope || messages.length === 0) return;
+    // Demo has no read cursor to move: marking read would only show a fault.
+    if (!scope || messages.length === 0 || isDemo()) return;
     if (readRetry > 0) setReadError(null);
     const latest = messages.at(-1);
     const key = latest && `${scope}:${latest.id}`;

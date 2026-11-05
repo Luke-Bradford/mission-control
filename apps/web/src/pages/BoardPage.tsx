@@ -158,14 +158,26 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const todayStart = tz === null ? null : startOfLocalDay(now, tz);
   const inLane = all.filter((i) => {
     if (!lane.match(i)) return false;
-    if (cardColumn(i) === "Done") return daysAgo(i.updatedAt, now, tz, todayStart) <= doneDays;
+    // The Overview's Done lane opens here with its own 24-hour window.
+    if (cardColumn(i) === "Done" && stage !== "merged")
+      return daysAgo(i.updatedAt, now, tz, todayStart) <= doneDays;
     const agent = cardAgent(i, rows);
     return agent === null || inView(agent);
   });
   const shown = inLane.filter(
     (i) =>
       (stage === null ||
-        isInPipelineLane(stage, pipelineStage(i, rows, prs, now, todayStart, loopViews))) &&
+        isInPipelineLane(
+          stage,
+          pipelineStage(
+            i,
+            rows,
+            prs,
+            now,
+            stage === "merged" ? now - 24 * 60 * 60_000 : todayStart,
+            loopViews,
+          ),
+        )) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, needsYou, rows)),

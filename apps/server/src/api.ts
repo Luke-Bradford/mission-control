@@ -5926,6 +5926,17 @@ export function githubRate(store: Store): GithubRateState {
  * short for the 24h pace model), from the current window's samples only (`at >= resetAt - 7d`,
  * resetAt from the latest sample), so a previous window's pace never leaks into the projection.
  */
+
+/** A window's readings for a chart: the last in each hour, oldest first, so the reply stays small. */
+function hourlyReadings(samples: readonly UsageSample[]): { at: number; pct: number }[] {
+  const hours = new Map<number, { at: number; pct: number }>();
+  for (const sample of samples) {
+    const hour = Math.floor(sample.at / 3_600_000);
+    const kept = hours.get(hour);
+    if (!kept || sample.at >= kept.at) hours.set(hour, { at: sample.at, pct: sample.pct });
+  }
+  return [...hours.values()].sort((a, b) => a.at - b.at);
+}
 export function limitRows(config: CcConfig, store: Store, now: number): LimitRow[] {
   const rows: LimitRow[] = [];
   for (const acct of config.accounts) {
@@ -5980,6 +5991,7 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         projected: projectAtReset(samples, resetAt),
         stopForecast: stopForecast(samples, acct.stopAt, resetAt),
         fullAt: stopForecast(samples, METER_FULL_PCT, resetAt),
+        history: hourlyReadings(samples),
       });
     }
   }

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { RESOURCES, useResource } from "./data.ts";
+import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 
 import {
@@ -29,7 +30,7 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
-import { Dock } from "./shell/Dock.tsx";
+import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
 import { HelpModal } from "./shell/HelpModal.tsx";
@@ -72,12 +73,47 @@ const QaReadiness = lazy(() =>
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
 
+/** The document title in Demo; the same mark as the chip, in the tab. */
+const DEMO_TITLE = `DEMO · ${TITLE}`;
+
+/** The app, remounted on a switch between Live and Demo: page state and the Map start afresh. */
+export function App(
+  props: { onRender?: () => void; onPageRender?: ProfilerOnRenderCallback } = {},
+) {
+  const demo = useDemo();
+  return <Shell key={demo ? "demo" : "live"} {...props} />;
+}
+
+/**
+ * In Demo a same-origin `/api/` link would open the real hub in a new tab: stop it, and say why.
+ */
+function useDemoLinkGuard(demo: boolean) {
+  useEffect(() => {
+    if (!demo) return;
+    const guard = (e: MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.("a[href]");
+      if (!link) return;
+      const url = new URL((link as HTMLAnchorElement).href, window.location.href);
+      if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toast(DEMO_REFUSED);
+    };
+    document.addEventListener("click", guard, true);
+    document.addEventListener("auxclick", guard, true);
+    return () => {
+      document.removeEventListener("click", guard, true);
+      document.removeEventListener("auxclick", guard, true);
+    };
+  }, [demo]);
+}
+
 /**
  * The HUD shell: header, the page, FLIGHT's dock beside it, the footer, and the overlays; a
  * popped-out window (`?popout=1`) shows the Agent page alone. An old path is redirected to where
  * it now lives; any other unknown path goes to Overview.
  */
-export function App({
+function Shell({
   onRender,
   onPageRender,
 }: {
@@ -85,6 +121,8 @@ export function App({
   onPageRender?: ProfilerOnRenderCallback;
 } = {}) {
   onRender?.();
+  const demo = useDemo();
+  useDemoLinkGuard(demo);
   useHudReady();
   const path = usePath();
   const search = useSearch();
@@ -107,12 +145,16 @@ export function App({
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
+  const overview = shown.page === "overview";
+  const overviewOverlay = useOverviewDockOverlay(overview, dock);
   // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
   // keeps its own workspace instead of duplicating it beside the page.
   const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
+    overview && "overview-shell",
+    overviewOverlay && "overview-flight-overlay",
     dock.wide && !dock.visible && "dock-hidden",
     dock.visible && dock.collapsed && "dock-collapsed",
     !dock.wide && dock.visible && "dock-open",
@@ -122,16 +164,28 @@ export function App({
     .join(" ");
   const agentId = shown.page === "agent" ? shown.id : null;
   useEffect(() => {
-    if (!popout) return;
-    document.title = agentId === null ? TITLE : `${agentId} · ${TITLE}`;
+    const base = demo ? DEMO_TITLE : TITLE;
+    if (!popout && !demo) return;
+    document.title = popout && agentId !== null ? `${agentId} · ${base}` : base;
     return () => {
       document.title = TITLE;
     };
-  }, [popout, agentId]);
+  }, [popout, agentId, demo]);
   // Popped out (the Agent header's Pop out): the Agent page alone, with its toasts.
   if (popout) {
     return (
       <div className={`${cls} popout`}>
+        {demo && <div className="demo-frame" aria-hidden="true" />}
+        {demo && (
+          <span
+            className="demo-marker demo-marker-popout"
+            role="img"
+            aria-label={DEMO_MARKER_TEXT}
+            title={DEMO_MARKER_TEXT}
+          >
+            DEMO
+          </span>
+        )}
         <main>
           <PopoutContext.Provider value={true}>
             <Suspense fallback={<p>Loading…</p>}>
@@ -145,6 +199,7 @@ export function App({
   }
   return (
     <div className={cls}>
+      {demo && <div className="demo-frame" aria-hidden="true" />}
       {shown.page === "board" && (
         // biome-ignore lint/a11y/useValidAnchor: this fragment link moves focus to the Board heading.
         <a
@@ -171,7 +226,7 @@ export function App({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock />}
+        {showDock && <Dock coversPage={overviewOverlay} />}
       </div>
       <Footer />
       <Toast />

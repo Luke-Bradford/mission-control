@@ -57,7 +57,7 @@ export function LoopStep({
       >
         {!compact && <>{loopTemplate(loop)} › </>}
         <b>{loopStepLabel(loop)}</b>
-        {!compact && loopTryText(loop)}
+        {loopTryText(loop)}
         {elapsed !== undefined && (
           <>
             {" "}

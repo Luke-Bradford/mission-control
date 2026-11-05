@@ -167,8 +167,8 @@ function useSize() {
     const el = ref.current;
     if (!el) return;
     const update = () => {
-      const r = el.getBoundingClientRect();
-      const next = { width: r.width || 1000, height: r.height || 700 };
+      // Layout pixels: the root zoom scales what this writes, so a zoomed rect would scale twice.
+      const next = { width: el.clientWidth || 1000, height: el.clientHeight || 700 };
       setSize((current) =>
         current?.width === next.width && current.height === next.height ? current : next,
       );

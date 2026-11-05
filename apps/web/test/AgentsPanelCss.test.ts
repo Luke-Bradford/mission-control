@@ -89,10 +89,49 @@ it("lets phone users scroll every Crew column while keeping the agent pinned", (
 
 it("constrains the crew pause portal to the viewport with scrolling", () => {
   expect(css).toMatch(/\.crew-pause-form \{[^}]*position: fixed/);
-  expect(css).toMatch(/\.crew-pause-form \{[^}]*max-height: calc\(100dvh - 32px\)/);
+  expect(css).toMatch(
+    /\.crew-pause-form \{[^}]*max-height: calc\(calc\(100 \* var\(--dvh\)\) - 32px\)/,
+  );
   expect(css).toMatch(/\.crew-pause-form \{[^}]*overflow-y: auto/);
 });
 
 it("sizes the review-waiver menu from spacing tokens", () => {
   expect(css).toMatch(/\.waive-compact > select \{[^}]*min-height: var\(--sp-5\)/);
+});
+
+it("grows Crew columns with the text, scrolls them sideways and holds State and Seat", () => {
+  // Each track is its accepted pixel width or the same width in em, so normal text keeps the pixels.
+  expect(css).toMatch(
+    /#agentsList \.trow \{[^}]*grid-template-columns:\s*var\(--crew-state-w\) max\(168px, 12\.9em\)\s*minmax\(max\(0px, calc\(\(1em - 13px\) \* 16\)\), 1fr\)\s*max\(104px, 7\.9em\) max\(168px, 12\.9em\) max\(44px, 3\.3em\) max\(40px, 3em\) max\(48px, 3\.6em\)/,
+  );
+  expect(css).toMatch(/--crew-state-w: max\(88px, 6\.7em\)/);
+  expect(css).toMatch(
+    /#agentsList \.trow \{[^}]*font-size: var\(--fs\);[^}]*min-width: min-content/,
+  );
+  expect(css).toMatch(/#agentsList \{\s*overflow-x: auto/);
+  expect(css).toMatch(/#agentsList \.trow\.head \{\s*height: auto/);
+  expect(css).toMatch(/#agentsList \.state-cell \.pill > span \{\s*overflow: visible/);
+  expect(css).toMatch(
+    /#agentsList \.trow > :first-child,\s*#agentsList \.trow > :nth-child\(2\) \{\s*position: sticky/,
+  );
+});
+
+it("keeps the accepted scrollbar gutter, holds cells over their whole row, and keeps the FLIGHT tint", () => {
+  const from = css.indexOf("/* Crew under enlarged text.");
+  const block = css.slice(from, css.indexOf("The seat stays beside its State.", from) + 200);
+  expect(block).not.toContain("scrollbar-gutter");
+  expect(block).toMatch(/align-self: stretch/);
+  expect(block).toMatch(
+    /#agentsList \.trow > :first-child \{\s*left: 0;\s*margin-left: calc\(-1 \* var\(--sp-3\)\)/,
+  );
+  expect(block).toMatch(
+    /#agentsList \.trow\.flight > :first-child,[^{]*\{[^}]*color-mix\(in srgb, var\(--accent-soft\) 45%, transparent\)/,
+  );
+  expect(block).toMatch(/#agentsList \.trow\.needs::before,[^{]*\{\s*z-index: 2/);
+});
+
+it("centres the held headings and loading bars like the other columns", () => {
+  expect(css).toMatch(
+    /#agentsList \.trow\.head > :first-child,\s*#agentsList \.trow\.head > :nth-child\(2\),\s*#agentsList \.crew-skeleton > :first-child,\s*#agentsList \.crew-skeleton > :nth-child\(2\) \{\s*display: flex;\s*flex-direction: column;\s*justify-content: center/,
+  );
 });
