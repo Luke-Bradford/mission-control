@@ -16,6 +16,7 @@ import {
   AWAY_WRITES_REFUSED,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
+  COMMS_MESSAGE_MAX,
   DEFAULT_AWAY,
   EVIDENCE_HEADING,
   MC_PR_BODY_MAX,
@@ -35,6 +36,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { ciSeatText } from "../src/engine/engine.ts";
 import {
   CI_LOG_UNREADABLE,
   cleanLog,
@@ -591,6 +593,55 @@ describe("ciExcerpt", () => {
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(CI_LOG_UNREADABLE);
     expect(CI_LOG_UNREADABLE).toBe("(the CI log could not be read)");
+  });
+
+  it("keeps every failing test and assertion line of a web-core-sized log, ahead of passing ones", async () => {
+    const stamp = "2026-11-05T04:59:02.0350000Z";
+    const line = (job: string, text: string) => `${job}\tRun vitest\t${stamp} ${text}`;
+    const passing = Array.from({ length: 6000 }, (_, i) =>
+      line("web-core", ` ✓ test/page${i}.test.ts (3 tests) 12ms`),
+    );
+    const fails = [1, 2, 3].flatMap((n) => [
+      line("web-core", ` FAIL  web-core  test/page${n}.test.ts > page ${n} > shows it`),
+      line("web-core", `AssertionError: expected ${n} to be ${n + 1}`),
+    ]);
+    const log = [
+      ...passing.slice(0, 3000),
+      ...fails,
+      ...passing.slice(3000),
+      line("check", "test web-core = success"),
+      line("check", "Error: Process completed with exit code 1."),
+    ].join("\n");
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    const seen = ciSeatText("CI failed.\n", out);
+    expect(Array.from(seen).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    for (const n of [1, 2, 3]) {
+      expect(seen).toContain(`FAIL  web-core  test/page${n}.test.ts > page ${n} > shows it`);
+      expect(seen).toContain(`AssertionError: expected ${n} to be ${n + 1}`);
+    }
+    expect(seen).not.toContain("exit code 1");
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    expect(out.indexOf("FAIL")).toBeLessThan(out.indexOf("✓"));
+  });
+
+  it("puts the real job's lines ahead of the summary job's when several failed", async () => {
+    const log = [
+      "web-core\tRun\t2026-11-05T04:59:02.0Z  FAIL  a.test.ts > it works",
+      "web-core\tRun\t2026-11-05T04:59:02.0Z AssertionError: expected 1 to be 2",
+      "check\tVerify\t2026-11-05T04:59:03.0Z Error: Process completed with exit code 1.",
+    ].join("\n");
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toBe(
+      "CI:\n[web-core]\nFAIL  a.test.ts > it works\nAssertionError: expected 1 to be 2",
+    );
   });
 
   it("asks for a 16 MiB log buffer", async () => {

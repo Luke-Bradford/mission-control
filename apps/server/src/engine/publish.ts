@@ -331,6 +331,65 @@ function tailBytes(text: string, max: number): string {
     .replace(/^�+/, "");
 }
 
+/** The first `max` bytes of `text`, not ending inside a character. */
+function headBytes(text: string, max: number): string {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= max) return text;
+  return bytes.subarray(0, max).toString("utf8").replace(/�+$/, "");
+}
+
+/** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
+export const CI_SUMMARY_JOB = "check";
+/** A line a failure prints: a test's name, an assertion, a type or lint error. */
+const FAILING_LINE =
+  /(?:^|\s)(?:FAIL|FAILED)\b|AssertionError|^\s*[×✗✕]\s|\bError:|\berror TS\d+|^\s*\d+:\d+\s+error\s/;
+const NOT_A_CAUSE = /Process completed with exit code/;
+/** One failing line is cut here. */
+const FAILING_LINE_MAX = 300;
+/** A job's failing lines are kept up to this many, then its last lines follow. */
+const FAILING_LINES_MAX = 100;
+/** How many of a job's last lines follow its failing lines. */
+const CONTEXT_LINES = 10;
+/** `gh run view --log-failed` lines: job, step, then the text behind a timestamp. */
+const LOG_LINE = /^([^\t]*)\t[^\t]*\t(?:\d{4}-\d\d-\d\dT[\d:.]+Z ?)?(.*)$/;
+
+/**
+ * The part of a failed run's log a seat is shown: each job's failing lines (test names, assertion
+ * lines) first, then the job's last lines; a log without any failing line is its last lines alone.
+ * The summary job stands aside when another job has lines.
+ */
+export function ciLogBody(log: string, max: number): string {
+  const jobs = new Map<string, { failing: string[]; rest: string[] }>();
+  for (const raw of log.split("\n")) {
+    const m = LOG_LINE.exec(raw);
+    const job = m === null ? "" : (m[1] ?? "");
+    const text = (m === null ? raw : (m[2] ?? "")).trim();
+    if (text === "") continue;
+    const g = jobs.get(job) ?? { failing: [], rest: [] };
+    jobs.set(job, g);
+    if (FAILING_LINE.test(text) && !NOT_A_CAUSE.test(text)) {
+      const line = Array.from(text).slice(0, FAILING_LINE_MAX).join("");
+      if (!g.failing.includes(line)) g.failing.push(line);
+    } else g.rest.push(text);
+  }
+  if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
+  const groups = [...jobs.entries()].sort(([, a], [, b]) => b.failing.length - a.failing.length);
+  const anyFailing = groups.some(([, g]) => g.failing.length > 0);
+  if (!anyFailing) {
+    const lines = log.trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
+    return tailBytes(lines.join("\n"), max);
+  }
+  const named = groups.length > 1 || groups[0]?.[0] !== "";
+  const parts = groups.map(([job, g]) => {
+    const lines = [
+      ...g.failing.slice(0, FAILING_LINES_MAX),
+      ...g.rest.slice(-(g.failing.length > 0 ? CONTEXT_LINES : CI_EXCERPT_LINES)),
+    ];
+    return (named && job !== "" ? `[${job}]\n` : "") + lines.join("\n");
+  });
+  return headBytes(parts.join("\n"), max);
+}
+
 /** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
 export function runPrBody(
   ticket: { issue: number; title: string },
@@ -721,8 +780,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
           );
           if (viewed.code !== 0) return CI_LOG_UNREADABLE;
-          const lines = cleanLog(viewed.stdout).trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
-          const body = tailBytes(lines.join("\n"), room);
+          const body = ciLogBody(cleanLog(viewed.stdout).trimEnd(), room);
           if (body === "") continue;
           const section = head + body;
           budget -= byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);
