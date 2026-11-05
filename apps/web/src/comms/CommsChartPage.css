@@ -1,0 +1,129 @@
+/* The Comms chart on its own route: the head row, the chart, and a pane for the filtered conversation. */
+.comms-chart-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: var(--sp-3);
+}
+.comms-chart-head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.comms-chart-title {
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.comms-chart-sum {
+  flex: 1 1 auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+}
+.comms-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--accent);
+  font-size: var(--fs-s);
+}
+.comms-chart-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+  min-height: 0;
+}
+.comms-chart-body.with-pane {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+}
+.comms-chart-main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.comms-chart-main > .comms-rails {
+  position: absolute;
+  inset: var(--sp-2);
+  height: auto;
+}
+.comms-chart-note {
+  margin: var(--sp-4);
+  color: var(--muted);
+}
+
+.comms-chart-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.comms-pane-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--fs-panel);
+  overflow-wrap: anywhere;
+}
+.comms-pane-open {
+  align-self: flex-start;
+  min-height: 24px;
+  color: var(--accent);
+  font-size: var(--fs-s);
+}
+.comms-chart-pane h3 {
+  margin: var(--sp-2) 0 var(--sp-1);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.comms-chart-pane ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.comms-chart-pane li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-s);
+}
+.comms-chart-pane q {
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+  quotes: none;
+}
+.comms-pane-meta {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.comms-pane-wait b {
+  color: var(--warn);
+}
+.comms-pane-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}

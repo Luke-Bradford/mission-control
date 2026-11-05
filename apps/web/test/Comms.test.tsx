@@ -1093,7 +1093,7 @@ describe("Comms routes", () => {
     );
     // The loop sits on the graph's loops spoke (#790), but has no conversation of its own.
     expect(
-      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-spider")),
+      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-rails")),
     ).toEqual([]);
   });
 

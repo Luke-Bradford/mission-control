@@ -1,0 +1,294 @@
+/* The Comms chart: two facing rails, the centre line between them. */
+.comms-rails {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.comms-rails-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.comms-rails-canvas {
+  position: relative;
+  max-width: 100%;
+}
+.comms-rails-svg {
+  display: block;
+  overflow: visible;
+}
+.comms-centre-line {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.comms-rail-head {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* The filter chip: what the chart is narrowed to, and the way out. */
+.comms-filter-chip {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+}
+.comms-filter-chip b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.comms-filter-chip button {
+  min-height: 24px;
+  padding: 0 var(--sp-2);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+.comms-filter-chip kbd {
+  margin-left: var(--sp-1);
+  color: var(--muted);
+  font: inherit;
+}
+
+/* Links: width and brightness follow the message count. */
+.comms-edge {
+  cursor: pointer;
+  outline: none;
+}
+.comms-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+}
+.comms-edge-line {
+  fill: none;
+  stroke: var(--fg-2);
+  stroke-linecap: round;
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.comms-edge:hover .comms-edge-line,
+.comms-edge:focus-visible .comms-edge-line {
+  stroke: var(--fg);
+  opacity: 0.95;
+}
+.comms-edge.focus .comms-edge-line,
+.comms-edge.live .comms-edge-line {
+  stroke: var(--accent);
+  opacity: 0.95;
+}
+.comms-edge.waiting .comms-edge-line {
+  stroke: var(--warn);
+  opacity: 0.9;
+}
+.comms-edge.dim .comms-edge-line,
+.comms-edge.dim .comms-wait-mark {
+  opacity: 0.1;
+}
+.comms-edge:focus-visible .comms-edge-hit {
+  stroke: var(--accent);
+  stroke-opacity: 0.35;
+}
+/* The wait in words, on the line: the dashes and these words carry it as well as the colour. */
+.comms-wait-mark rect {
+  fill: var(--surface);
+  stroke: var(--warn);
+  stroke-width: 1;
+}
+.comms-wait-mark text {
+  fill: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* A message in flight rides its line. Under reduced motion none is drawn. */
+.comms-particle {
+  offset-rotate: 0deg;
+  animation: comms-travel 1150ms linear both;
+  filter: drop-shadow(0 0 3px var(--accent));
+  pointer-events: none;
+}
+@keyframes comms-travel {
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .comms-particle {
+    display: none;
+  }
+}
+
+/* Seats: colour is identity; presence sets fill. A waiting asker has a dashed ring as well. */
+.comms-node {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 300ms ease;
+}
+.comms-node-hit {
+  fill: transparent;
+}
+.comms-node-core {
+  fill: color-mix(in srgb, var(--node-color) 30%, var(--surface));
+  stroke: color-mix(in srgb, var(--node-color) 80%, var(--surface));
+  stroke-width: 1.25;
+}
+.comms-node-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0;
+}
+.comms-node:focus-visible .comms-node-ring,
+.comms-node.selected .comms-node-ring {
+  opacity: 1;
+}
+.comms-node.waiting .comms-node-ring {
+  stroke: var(--warn);
+  stroke-dasharray: 3 2;
+  opacity: 1;
+}
+.comms-node-name {
+  fill: var(--fg-2);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.comms-node.presence-running .comms-node-core {
+  fill: var(--node-color);
+}
+.comms-node.presence-running .comms-node-name {
+  fill: var(--fg);
+}
+.comms-node.presence-stopped {
+  opacity: 0.62;
+}
+.comms-node.presence-stopped .comms-node-core {
+  fill: var(--surface);
+  stroke-dasharray: 2 2;
+}
+.comms-node.alert .comms-node-core {
+  stroke: var(--crit);
+  stroke-width: 2;
+}
+.comms-node.hub .comms-node-core {
+  fill: var(--surface);
+  stroke: var(--node-color);
+  stroke-width: 1.5;
+}
+.comms-node.hub .hub-name {
+  fill: var(--fg);
+  stroke: none;
+}
+.comms-node.hub:focus-visible .comms-node-core,
+.comms-node.hub.selected .comms-node-core {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.comms-node.dim {
+  opacity: 0.25;
+}
+
+/* Hover card. */
+.comms-rails-tip {
+  position: absolute;
+  z-index: 3;
+  width: 240px;
+  padding: var(--sp-2);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.comms-rails-tip p {
+  margin: 0 0 var(--sp-1);
+}
+.comms-rails-tip .tip-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.comms-rails-tip .tip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.comms-rails-tip .tip-name {
+  color: var(--fg);
+}
+.tip-state {
+  font-size: var(--fs-s);
+}
+.comms-rails-tip .tip-role,
+.comms-rails-tip .tip-meta {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.comms-rails-tip q {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  quotes: none;
+}
+.comms-rails-tip .tip-wait b {
+  display: block;
+  color: var(--warn);
+}
+.comms-rails .comms-empty {
+  position: absolute;
+  inset: auto 0 var(--sp-3);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  text-align: center;
+  pointer-events: none;
+}

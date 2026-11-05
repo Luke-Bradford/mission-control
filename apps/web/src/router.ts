@@ -87,13 +87,16 @@ export type Route =
   /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
   | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
+  /** The Comms chart on its own, filling the window (`/comms/chart`); the Comms tab stays lit. */
+  | { page: "commsChart" }
   | { page: "telemetry" }
   | { page: "qa" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
 /** The header tab a route belongs under: a ticket is the Board's. */
-export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page);
+export const tabOf = (r: Route): Page =>
+  r.page === "ticket" ? "board" : r.page === "commsChart" ? "comms" : r.page;
 
 /**
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
@@ -123,6 +126,8 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
+/** The Comms chart popped out to its own window; the filter rides in `?focus=`. */
+export const COMMS_CHART_PATH = "/comms/chart";
 export const commsCrewPath = (): string => "/comms/crew";
 export const commsTicketPath = (ref: string, ticket?: string | null): string =>
   `/comms/tickets/${enc(ref)}${ticket && COMMS_TICKET.test(ticket) ? `?ticket=${enc(ticket)}` : ""}`;
@@ -229,6 +234,7 @@ export function route(path: string, search = ""): Route | null {
   const map = withId(path, "map");
   if (map) return { page: "map", repoId: map.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
+  if (p === COMMS_CHART_PATH) return { page: "commsChart" };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
   const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
   if (commsTicket) {
