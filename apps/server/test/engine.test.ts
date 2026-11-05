@@ -110,6 +110,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { writeCrewPause } from "../src/crew-pause.ts";
+import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
   type Engine,
@@ -7417,6 +7418,32 @@ describe("the engine runs reviews", () => {
       expect(h.sent).toEqual([]);
     });
 
+    it("a review parked on the operator's question does not displace the ticket being built", async () => {
+      await setAside();
+      const id = store.addQuestion({
+        agentId: SEAT,
+        runId: RUN,
+        text: "Which provider?",
+        at: clock,
+      });
+      store.passQuestion(id, clock);
+      setLoop({ aside: { worktree: WT, wake: false, ask: id } });
+      const b = "guido-1:b";
+      building(b, 7);
+      reported(first().id, [finding("Important")]);
+      for (const r of [RUN, b, RUN, b]) await h.engine.reconcileRun(r);
+      // the findings wait for the answer: the seat keeps building b, and nothing is woken
+      expect(h.asides).toEqual([RUN]);
+      expect(h.wakes).toEqual([]);
+      expect(store.run(b)?.loop?.aside ?? null).toBeNull();
+      // answered: the parked run is due back, and the findings follow it
+      // (the seat is busy with b, so the wake is refused and the mark stays)
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      store.answerQuestion(id, clock);
+      await h.engine.reconcileRun(RUN);
+      expect(asideRun()?.wake).toBe(true);
+    });
+
     it("two set-aside reworks come back oldest first", async () => {
       await setAside();
       const younger = "guido-1:younger";
@@ -7459,6 +7486,22 @@ describe("the engine runs reviews", () => {
       setPr({ ci: "pending" });
       await h.engine.reconcileRun(RUN);
     }
+
+    it("a CI failure on a run parked on the operator's question is not due back until it is answered", async () => {
+      await inCi();
+      const id = store.addQuestion({
+        agentId: SEAT,
+        runId: RUN,
+        text: "Which provider?",
+        at: clock,
+      });
+      store.passQuestion(id, clock);
+      setLoop({ aside: { worktree: join(dir, "wt"), wake: false, ask: id }, ciFailedSha: SHA });
+      setPr({ ci: "failing" });
+      expect(asideWakeDue(store, need(store.run(RUN)))).toBe(false);
+      setLoop({ aside: { worktree: join(dir, "wt"), wake: false } });
+      expect(asideWakeDue(store, need(store.run(RUN)))).toBe(true);
+    });
 
     it("freed in CI: the seat takes its next ticket", async () => {
       await inCi();
