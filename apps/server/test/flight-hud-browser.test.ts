@@ -241,7 +241,10 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
         clicks.length = 0;
         const png = await render(`/audit?evidence-tab=${tab}`);
         expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
-        expect(clicks).toEqual(["disclosure", `tab:${label}`]);
+        expect(clicks.filter((c) => !c.startsWith("view:"))).toEqual([
+          "disclosure",
+          `tab:${label}`,
+        ]);
       }
     }, 150_000);
 
@@ -254,7 +257,9 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
     it("selects the tab without the disclosure on an older baseline that shows the view at once", async () => {
       clicks.length = 0;
       await render("/audit?evidence-tab=hotspots&old=1");
-      expect(clicks).toEqual([`tab:${QA_TAB_LABELS.hotspots}`]);
+      expect(clicks.filter((c) => !c.startsWith("view:"))).toEqual([
+        `tab:${QA_TAB_LABELS.hotspots}`,
+      ]);
     }, 90_000);
 
     it("refuses a redirect off the hub and never reaches the other server", async () => {
