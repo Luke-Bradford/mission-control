@@ -7,6 +7,7 @@ import {
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
   carriedFrom,
+  FLIGHT_BATCH_MS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -2426,11 +2427,11 @@ describe("the FLIGHT watcher", () => {
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
         text: null,
       });
-      context(301_000);
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
       expect(flightView(config, store, nowMs, () => true).seat?.context).toEqual({
-        tokens: 301_000,
+        tokens: FLIGHT_CONTEXT_ROTATE_TOKENS + 1000,
         rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-        text: "context 301K · fresh session at 300K",
+        text: `context ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000 + 1}K · fresh session at ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K`,
       });
     });
   });
@@ -4819,6 +4820,34 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await tick();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("a free seat right after a wake waits for the batch window, and a question does not", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    await watch.check();
+    ask("inco-1", "r-inco");
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
+    await tick();
+    // routine, and the last wake was only minutes ago
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await tick();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("an acked Needs-you item is not listed for FLIGHT to triage again", () => {
+    liveCrew();
+    ask();
+    const items = () => flightState({ config, store, busy: [], now: nowMs }).items;
+    expect(items()).toHaveLength(1);
+    store.ack([items()[0]?.key ?? ""], nowMs + 1);
+    nowMs += 2;
+    expect(items()).toHaveLength(0);
   });
 
   it("the hour re-wake fires for a fact left unhandled, not for a digest change", async () => {

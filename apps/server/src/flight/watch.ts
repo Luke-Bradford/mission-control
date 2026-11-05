@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
+  FLIGHT_BATCH_MS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -66,6 +67,7 @@ import {
   recordFlightWake,
   recordNextFlightWake,
   recordWakeReasons,
+  routineOnly,
   unhandledReasons,
   type WakeReason,
   wakeFacts,
@@ -587,9 +589,18 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
     }
     settleLeft(state, t);
+    // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
+    const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
+    const batched =
+      left === null &&
+      wake !== lastFacts &&
+      listed &&
+      t < batchEnds &&
+      routineOnly(lastFacts, wake);
+    if (batched) later(batchEnds - t);
     const due =
       left !== null ||
-      (wake !== lastFacts && listed) ||
+      (wake !== lastFacts && listed && !batched) ||
       (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
     if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {

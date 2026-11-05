@@ -6330,6 +6330,15 @@ export class Store {
     })) as CommsRow[];
   }
 
+  /** Messages to `to` at or after `since`, with their label: the times FLIGHT's callers began to wait. */
+  commsTo(to: string, since: number): { at: number; from: string; label: string | null }[] {
+    return (
+      this.db
+        .prepare("SELECT at, from_id, label FROM comms WHERE to_id = ? AND at >= ? ORDER BY at, id")
+        .all(to, since) as { at: number; from_id: string; label: string | null }[]
+    ).map((r) => ({ at: r.at, from: r.from_id, label: r.label }));
+  }
+
   /** How many hand-offs `from` sent `to` at or after `since`. */
   commsCountTo(from: string, to: string, since: number): number {
     const r = this.statement(
