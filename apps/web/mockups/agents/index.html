@@ -82,7 +82,7 @@
       .meter{height:4px;margin-top:var(--sp-1);background:var(--line-2);border-radius:2px}.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
       /* loop: one row */
       .loop{padding:var(--sp-2) var(--sp-4);flex-direction:row;align-items:center;gap:var(--sp-2);white-space:nowrap}
-      .loop .cap{font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);flex:none}
+      .loop .cap{display:inline-flex;align-items:center;min-height:24px;font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);flex:none}
       .loop .step{font:12px/16px var(--mono);color:var(--muted);display:inline-flex;gap:var(--sp-1);align-items:center;min-height:24px;padding:0 var(--sp-2);border:1px solid var(--line);border-radius:3px;flex:none}
       .loop .step.done{color:var(--fg-2)}.loop .step.done::before{content:"✓";color:var(--ok)}
       .loop .step.now{color:var(--fg);border-color:var(--accent)}.loop .step.now::before{content:"●";color:var(--accent)}

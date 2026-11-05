@@ -32,7 +32,7 @@ describeRendered("Agents mockup in a browser", () => {
             const r = await page.evaluate(() => {
               const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
               const act = rect("#activity");
-              const right = rect(".right");
+              const right = rect(".right > .tabs");
               const doc = document.documentElement;
               const panels = [...document.querySelectorAll<HTMLElement>(".cols .panel")]
                 .filter((el) => el.id !== "activity" && el.offsetParent !== null)
@@ -73,9 +73,14 @@ describeRendered("Agents mockup in a browser", () => {
                   lastEl && queue ? bottom - lastEl.getBoundingClientRect().bottom - 8 : 0,
                 );
               }
+              // One row means every child sits on the same centre line; a shorter caption has a different top.
               const rows = loop
-                ? new Set([...loop.children].map((c) => Math.round(c.getBoundingClientRect().top)))
-                    .size
+                ? new Set(
+                    [...loop.children].map((c) => {
+                      const b = c.getBoundingClientRect();
+                      return Math.round((b.top + b.bottom) / 2 / 4);
+                    }),
+                  ).size
                 : 0;
               const cutNotFocusable = [...document.querySelectorAll<HTMLElement>("[data-full]")]
                 .filter((el) => el.offsetParent !== null && el.tabIndex < 0)
@@ -153,6 +158,8 @@ describeRendered("Agents mockup in a browser", () => {
             continue;
           }
           el.focus();
+          // Page focus is not guaranteed in a headless window, so send the event the tip listens to.
+          el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
           out.push({
             want: el.dataset.full ?? "",
             got: document.querySelector<HTMLElement>("#tip")?.textContent ?? "",
