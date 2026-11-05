@@ -353,16 +353,18 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 
 /**
  * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
- * planned entry.
+ * planned entry, or the end of the batch window while routine facts wait in it (`batchAt`).
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   lastWakeAt: number,
   now: number,
+  batchAt?: number,
 ): number | null {
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
+  if (batchAt !== undefined) times.push(batchAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
 
@@ -1674,6 +1676,9 @@ export function wakeReasons(
   });
 }
 
+/** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
+const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
+
 /** Fact categories that are routine pipeline steps: they wait for the batch window. */
 const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
   "free",
@@ -1700,7 +1705,8 @@ export function routineOnly(previous: string, current: string): boolean {
     if (added.length === 0 && removed.length === 0) continue;
     // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
     // breaker's lift is, as a lift alone wakes FLIGHT
-    if (added.length === 0 && category !== "breaker" && !ROUTINE_CATEGORIES.has(category)) continue;
+    if (added.length === 0 && !LIFTS_WAKE.has(category) && !ROUTINE_CATEGORIES.has(category))
+      continue;
     changed = true;
     if (category === "items") {
       // a PR's own steps are routine; any other item (a message, a blocker) is not
@@ -1724,7 +1730,7 @@ export function onlySettled(previous: string, current: string): boolean {
     const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
     if ([...now].some((v) => !old.has(v))) return false;
     if ([...old].some((v) => !now.has(v))) {
-      if (category === "breaker" || category === "holdsInForce") return false;
+      if (LIFTS_WAKE.has(category)) return false;
       removed = true;
     }
   }

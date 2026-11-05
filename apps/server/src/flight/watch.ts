@@ -600,7 +600,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       listed &&
       t < batchEnds &&
       routineOnly(lastFacts, wake);
-    if (batched) later(batchEnds - t);
+    if (batched) {
+      later(batchEnds - t);
+      recordNextFlightWake(
+        store,
+        found.session.repoId,
+        nextWakeAt(state, lastWakeAt, t, batchEnds),
+      );
+    }
     const due =
       left !== null ||
       (wake !== lastFacts && listed && !batched) ||

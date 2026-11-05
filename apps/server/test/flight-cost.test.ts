@@ -205,6 +205,14 @@ describe("routine wakes wait for the batch window", () => {
     );
     expect(onlySettled(facts({ q: [3] }), facts({ q: [] }))).toBe(true);
   });
+  it("treats a hold lifting as urgent even next to a new routine fact", () => {
+    expect(
+      routineOnly(
+        facts({ holdsInForce: ["disk"], free: [] }),
+        facts({ holdsInForce: [], free: ["guido-1"] }),
+      ),
+    ).toBe(false);
+  });
   it("treats an unread operator message as urgent", () => {
     expect(routineOnly(facts({}), facts({ operator: ["12"] }))).toBe(false);
   });

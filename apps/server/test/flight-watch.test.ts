@@ -4979,6 +4979,59 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
+  it("a hold lifting wakes FLIGHT at once even while a routine fact waits in the batch", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    const disk = (freeGb: number) =>
+      store.addMachineSample({
+        at: nowMs,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes: freeGb * 1024 ** 3,
+        diskTotalBytes: 100 * 1024 ** 3,
+        swapUsedBytes: 0,
+        memTotalBytes: 100 * 1024 ** 3,
+        memoryPressureFreePct: 90,
+        load1: 0,
+        cores: 8,
+        agents: null,
+      });
+    disk(10);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += MIN;
+    disk(50);
+    await watch.check();
+    nowMs += 2 * MIN;
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready" }),
+      triageCard({ status: "Ready", issueNumber: 777 }),
+    ]);
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 4 * MIN;
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("shows the end of the batch window as the next wake while routine facts wait", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    const wokeAt = nowMs;
+    nowMs += 3 * MIN;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
+      wokeAt + FLIGHT_BATCH_MS,
+    );
+  });
+
   it("a breaker lift wakes FLIGHT at once while a seat and a ticket stay listed", async () => {
     flightOnly();
     store.setSeatSession(row("guido-1", null));
