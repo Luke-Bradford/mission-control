@@ -260,7 +260,7 @@ import {
   setExternalMergeHold,
   setExternalPrControl,
 } from "./external-pr-control.ts";
-import { readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -289,7 +289,7 @@ import {
   useApproval,
 } from "./flight-approvals.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
-import type { CheckRecorder } from "./guard/check-runs.ts";
+import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
@@ -2322,9 +2322,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            lock?.release(key, failed);
-            await checks?.end(key, !failed);
             const command = body.data.tool_input?.command;
+            // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
+            // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
+            const wrapped = typeof command === "string" && !plainCall(command);
+            // the hook sends a null exit code for an interrupted or background call: unknown, so
+            // it neither passes the lock row nor counts toward the push gate
+            const unknown = body.data.exit_code === null;
+            lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
+            await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (
               fullAccess &&
@@ -5010,7 +5016,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+          branchOwned(config, store, repoId, pr.branch)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;

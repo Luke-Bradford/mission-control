@@ -3517,7 +3517,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge, or merge an eligible controller PR without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
+      "Clear a crew PR for engine merge, or merge an eligible PR with no unfinished crew run without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {

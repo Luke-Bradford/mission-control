@@ -1,4 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { capabilityBlocked } from "./sandbox-gaps.ts";
+
+// where `ps` is denied (a seat) every process test is skipped, so none started
+const psBlocked = await capabilityBlocked("ps");
 
 /** The pid and command of every running process whose command line names `root`. */
 function running(root: string): string[] {
@@ -15,6 +19,7 @@ function running(root: string): string[] {
  * files running in parallel do not see each other's.
  */
 export async function expectNoLeftovers(root: string): Promise<void> {
+  if (psBlocked) return;
   let left = running(root);
   for (const t0 = Date.now(); left.length > 0 && Date.now() - t0 < 3000; left = running(root)) {
     await new Promise((r) => setTimeout(r, 100));

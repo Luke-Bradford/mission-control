@@ -17,7 +17,9 @@ import {
 } from "../src/engine/publish.ts";
 import type { McToolsDeps } from "../src/mcp/tools.ts";
 import { Store } from "../src/store.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
+const installBlocked = await blockedHere("install");
 const BRANCH = "feature/7-fix-the-thing";
 const START = Date.parse("2026-10-21T10:00:00Z");
 
@@ -176,7 +178,7 @@ describe("updateBranch (real git)", () => {
     expect(store.runCommits(working.id)).toEqual([]);
   });
 
-  it.each(["installed", "unsafe", "failed"])(
+  it.each(installBlocked ? ["unsafe", "failed"] : ["installed", "unsafe", "failed"])(
     "handles dependency changes after a recorded merge: %s",
     async (outcome) => {
       setup((root) => {

@@ -22,6 +22,7 @@ import {
   restoreWorktreeFile,
   runRestoreSandbox,
 } from "../src/mcp/restore.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 let dir: string;
 let root: string;
@@ -137,81 +138,83 @@ it("fails closed on other platforms and when the sandbox runner fails", async ()
   expect(readFileSync(join(root, "file"), "utf8")).toBe("experiment");
 });
 
-describe.skipIf(process.platform !== "darwin")("Seatbelt confinement", () => {
-  beforeEach(async () => {
-    await probe("process.stdout.write('sandbox ready')");
-  });
-
-  const probe = (program: string) =>
-    runRestoreSandbox({
-      cwd: root,
-      profile: restoreProfile(root, [
-        boundary.gitCommonDir,
-        boundary.worktreeGitDir,
-        boundary.dataDir,
-      ]),
-      args: ["--input-type=module", "-e", program],
-      input: entry.body,
+describe.skipIf(process.platform !== "darwin" || (await blockedHere("seatbelt")))(
+  "Seatbelt confinement",
+  () => {
+    beforeEach(async () => {
+      await probe("process.stdout.write('sandbox ready')");
     });
-  const write = (path: string) =>
-    `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(path)}, fs.readFileSync(0));`;
 
-  it("allows the scratch file and denies outside symlinks, .git, both Git directories and hub data", async () => {
-    await probe(write(join(root, "file")));
-    expect(readFileSync(join(root, "file"))).toEqual(entry.body);
-    symlinkSync(outside, join(root, "linked"));
-    for (const path of [
-      join(root, "linked/file"),
-      join(root, ".git/file"),
-      join(boundary.gitCommonDir, "file"),
-      join(boundary.worktreeGitDir, "file"),
-      join(boundary.dataDir, "file"),
-    ]) {
-      await expect(probe(write(path))).rejects.toThrow(
-        /operation not permitted|permission denied/i,
-      );
-    }
-    expect(readFileSync(join(outside, "file"), "utf8")).toBe("outside");
-    expect(existsSync(join(root, ".git/file"))).toBe(false);
-  });
-
-  it("refuses an invalid profile without running the command", async () => {
-    await expect(
+    const probe = (program: string) =>
       runRestoreSandbox({
         cwd: root,
-        profile: "invalid profile",
-        args: ["-e", write(join(root, "file"))],
+        profile: restoreProfile(root, [
+          boundary.gitCommonDir,
+          boundary.worktreeGitDir,
+          boundary.dataDir,
+        ]),
+        args: ["--input-type=module", "-e", program],
         input: entry.body,
-      }),
-    ).rejects.toThrow("sandboxed restore failed");
-    expect(readFileSync(join(root, "file"), "utf8")).toBe("experiment");
-  });
+      });
+    const write = (path: string) =>
+      `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(path)}, fs.readFileSync(0));`;
 
-  it.each(["root", "parent", "git-parent"])(
-    "confines a %s substitution after the hub's checks",
-    async (kind) => {
-      mkdirSync(join(root, "parent"));
-      writeFileSync(join(root, "parent/file"), "experiment");
-      const path = kind === "root" ? "file" : "parent/file";
-      await expect(
-        restoreWorktreeFile(root, path, entry, boundary, async (call) => {
-          const from = kind === "root" ? root : join(root, "parent");
-          renameSync(from, `${from}-old`);
-          symlinkSync(kind === "git-parent" ? boundary.worktreeGitDir : outside, from);
-          await runRestoreSandbox(call);
-        }),
-      ).rejects.toThrow(/operation not permitted|permission denied/i);
+    it("allows the scratch file and denies outside symlinks, .git, both Git directories and hub data", async () => {
+      await probe(write(join(root, "file")));
+      expect(readFileSync(join(root, "file"))).toEqual(entry.body);
+      symlinkSync(outside, join(root, "linked"));
+      for (const path of [
+        join(root, "linked/file"),
+        join(root, ".git/file"),
+        join(boundary.gitCommonDir, "file"),
+        join(boundary.worktreeGitDir, "file"),
+        join(boundary.dataDir, "file"),
+      ]) {
+        await expect(probe(write(path))).rejects.toThrow(
+          /operation not permitted|permission denied/i,
+        );
+      }
       expect(readFileSync(join(outside, "file"), "utf8")).toBe("outside");
-      expect(existsSync(join(boundary.worktreeGitDir, "file"))).toBe(false);
-    },
-  );
+      expect(existsSync(join(root, ".git/file"))).toBe(false);
+    });
 
-  it.each(["temp", "target"])(
-    "keeps outside bytes intact after %s substitution in the helper",
-    async (kind) => {
-      const helper = new URL("../src/mcp/restore-helper.ts", import.meta.url).href;
-      const outsideFile = join(outside, "file");
-      const program = `
+    it("refuses an invalid profile without running the command", async () => {
+      await expect(
+        runRestoreSandbox({
+          cwd: root,
+          profile: "invalid profile",
+          args: ["-e", write(join(root, "file"))],
+          input: entry.body,
+        }),
+      ).rejects.toThrow("sandboxed restore failed");
+      expect(readFileSync(join(root, "file"), "utf8")).toBe("experiment");
+    });
+
+    it.each(["root", "parent", "git-parent"])(
+      "confines a %s substitution after the hub's checks",
+      async (kind) => {
+        mkdirSync(join(root, "parent"));
+        writeFileSync(join(root, "parent/file"), "experiment");
+        const path = kind === "root" ? "file" : "parent/file";
+        await expect(
+          restoreWorktreeFile(root, path, entry, boundary, async (call) => {
+            const from = kind === "root" ? root : join(root, "parent");
+            renameSync(from, `${from}-old`);
+            symlinkSync(kind === "git-parent" ? boundary.worktreeGitDir : outside, from);
+            await runRestoreSandbox(call);
+          }),
+        ).rejects.toThrow(/operation not permitted|permission denied/i);
+        expect(readFileSync(join(outside, "file"), "utf8")).toBe("outside");
+        expect(existsSync(join(boundary.worktreeGitDir, "file"))).toBe(false);
+      },
+    );
+
+    it.each(["temp", "target"])(
+      "keeps outside bytes intact after %s substitution in the helper",
+      async (kind) => {
+        const helper = new URL("../src/mcp/restore-helper.ts", import.meta.url).href;
+        const outsideFile = join(outside, "file");
+        const program = `
       import fs from 'node:fs';
       import { mutateRestore } from ${JSON.stringify(helper)};
       const unlink = fs.unlinkSync;
@@ -233,21 +236,21 @@ describe.skipIf(process.platform !== "darwin")("Seatbelt confinement", () => {
       }
       mutateRestore('file', '100644', ${JSON.stringify(kind === "temp" ? "restore" : "delete")});
     `;
-      await probe(program);
-      expect(readFileSync(outsideFile, "utf8")).toBe("outside");
-      expect(existsSync(join(root, ".git/file"))).toBe(false);
-    },
-  );
+        await probe(program);
+        expect(readFileSync(outsideFile, "utf8")).toBe("outside");
+        expect(existsSync(join(root, ".git/file"))).toBe(false);
+      },
+    );
 
-  it.each(["outside", "git"])(
-    "denies writes after the helper's cwd is relocated into %s",
-    async (target) => {
-      const parent = join(root, "parent");
-      mkdirSync(parent);
-      writeFileSync(join(parent, "file"), "experiment");
-      const moved = join(target === "outside" ? outside : boundary.gitCommonDir, "moved");
-      const helper = new URL("../src/mcp/restore-helper.ts", import.meta.url).href;
-      const program = `
+    it.each(["outside", "git"])(
+      "denies writes after the helper's cwd is relocated into %s",
+      async (target) => {
+        const parent = join(root, "parent");
+        mkdirSync(parent);
+        writeFileSync(join(parent, "file"), "experiment");
+        const moved = join(target === "outside" ? outside : boundary.gitCommonDir, "moved");
+        const helper = new URL("../src/mcp/restore-helper.ts", import.meta.url).href;
+        const program = `
       import fs from 'node:fs';
       import { mutateRestore } from ${JSON.stringify(helper)};
       const read = fs.readFileSync;
@@ -257,39 +260,44 @@ describe.skipIf(process.platform !== "darwin")("Seatbelt confinement", () => {
       };
       mutateRestore('parent/file', '100644', 'restore');
     `;
-      const child = promisify(execFile)(
-        "/usr/bin/sandbox-exec",
-        [
-          "-p",
-          restoreProfile(root, [boundary.gitCommonDir, boundary.worktreeGitDir, boundary.dataDir]),
-          process.execPath,
-          "--experimental-strip-types",
-          "--input-type=module",
-          "-e",
-          program,
-        ],
-        { cwd: root, timeout: 5000 },
-      );
-      const movedWhenReady = new Promise<void>((resolve, reject) => {
-        child.child.once("error", reject);
-        child.child.once("exit", () => reject(new Error("helper exited before relocation")));
-        child.child.stdout?.once("data", () => {
-          try {
-            renameSync(parent, moved);
-            child.child.stdin?.end(entry.body);
-            resolve();
-          } catch (e) {
-            child.child.stdin?.end();
-            reject(e);
-          }
+        const child = promisify(execFile)(
+          "/usr/bin/sandbox-exec",
+          [
+            "-p",
+            restoreProfile(root, [
+              boundary.gitCommonDir,
+              boundary.worktreeGitDir,
+              boundary.dataDir,
+            ]),
+            process.execPath,
+            "--experimental-strip-types",
+            "--input-type=module",
+            "-e",
+            program,
+          ],
+          { cwd: root, timeout: 5000 },
+        );
+        const movedWhenReady = new Promise<void>((resolve, reject) => {
+          child.child.once("error", reject);
+          child.child.once("exit", () => reject(new Error("helper exited before relocation")));
+          child.child.stdout?.once("data", () => {
+            try {
+              renameSync(parent, moved);
+              child.child.stdin?.end(entry.body);
+              resolve();
+            } catch (e) {
+              child.child.stdin?.end();
+              reject(e);
+            }
+          });
         });
-      });
-      child.child.stdin?.on("error", () => {});
-      await expect(Promise.all([child, movedWhenReady])).rejects.toThrow(
-        /operation not permitted|permission denied/i,
-      );
-      expect(readFileSync(join(moved, "file"), "utf8")).toBe("experiment");
-      expect(readFileSync(join(outside, "file"), "utf8")).toBe("outside");
-    },
-  );
-});
+        child.child.stdin?.on("error", () => {});
+        await expect(Promise.all([child, movedWhenReady])).rejects.toThrow(
+          /operation not permitted|permission denied/i,
+        );
+        expect(readFileSync(join(moved, "file"), "utf8")).toBe("experiment");
+        expect(readFileSync(join(outside, "file"), "utf8")).toBe("outside");
+      },
+    );
+  },
+);

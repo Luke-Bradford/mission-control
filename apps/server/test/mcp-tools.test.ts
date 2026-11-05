@@ -133,6 +133,7 @@ import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
 const BRANCH = "feature/42-fix-the-stop-race";
@@ -341,6 +342,8 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
+
+const seatbeltBlocked = await blockedHere("seatbelt");
 
 describe("the mc tools", () => {
   it("confines code_health reads to the live session repo and fails closed on secret lookup", async () => {
@@ -5999,7 +6002,7 @@ describe("restore_file", () => {
     expect(restoreSandbox).not.toHaveBeenCalled();
   });
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
     "Seatbelt tool restore and delete use the default sandbox runner",
     async () => {
       const ts = make({ config: cfg });

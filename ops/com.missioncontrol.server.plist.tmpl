@@ -4,7 +4,7 @@
   Mission Control server LaunchAgent (template; nothing installs or loads it automatically).
   Runs the server entry point with node directly (not through pnpm, so launchd's SIGTERM
   reaches the server process and it shuts down cleanly). It serves the API and the built web
-  app on 127.0.0.1:7420. Node >= 25 is expected at /opt/homebrew/bin/node; edit the first
+  app on 127.0.0.1:7420. Node >= 26 is expected at /opt/homebrew/bin/node; edit the first
   ProgramArguments entry if yours is elsewhere. The bind address is fixed in apps/server/src/main.ts (loopback only in Plan 1);
   there is no setting here that can widen it.
 
