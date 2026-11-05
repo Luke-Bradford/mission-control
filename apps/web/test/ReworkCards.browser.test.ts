@@ -96,7 +96,12 @@ describeRendered("Rework labels on cards, rendered", () => {
     async (width) => {
       const desk = desktopFixture();
       const items: BoardItem[] = [
-        boardItem({ issueNumber: 11, title: "Fictional ready ticket", status: "Todo" }),
+        boardItem({
+          issueNumber: 11,
+          title: "Fictional ready ticket",
+          status: "Todo",
+          state: "planned",
+        }),
         boardItem({ issueNumber: 12, title: "Fictional rework ticket", status: "In progress" }),
         boardItem({ issueNumber: 13, title: "Fictional queued ticket", status: "In progress" }),
       ];
