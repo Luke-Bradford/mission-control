@@ -58,7 +58,7 @@ deletes the oldest that is not running. A restart keeps the builds with nothing 
 
 The preview is on its own origin (port 7440, loopback only) with no operator token and no proxy to the
 hub. Its security headers let the page talk to itself only, and the hub refuses any `/api/` request
-marked `same-site`, so the branch's script cannot read or change anything in the hub. If port 7440 is
+marked `same-site`, so the branch's script cannot read or change anything in the hub. Every ticket's preview shares that origin, so the listener allows no service worker and tells the browser to keep nothing (`cache-control: no-cache`): one build's files cannot stand in for the next, or outlive a closed PR. If port 7440 is
 taken, the hub logs that and starts without previews.
 
 ## Build stable evidence

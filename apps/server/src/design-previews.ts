@@ -57,7 +57,7 @@ export function previewCsp(hubPort: number): string {
     "font-src 'self' data:",
     "connect-src 'self'",
     "manifest-src 'self'",
-    "worker-src 'self'",
+    "worker-src 'none'",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
@@ -255,12 +255,17 @@ export class DesignPreviews {
         return reply.code(405).header("allow", "GET, HEAD").send("method not allowed");
       }
       if (!hosts.has(req.headers.host ?? "")) return reply.code(421).send("misdirected request");
+      // All previews share this origin: a service worker from one ticket's build would keep
+      // answering for the next, and for a closed PR's. No build may register one.
+      if (req.headers["service-worker"] !== undefined) return reply.code(404).send("not found");
     });
     app.addHook("onSend", async (_req, reply, payload) => {
       reply.header("content-security-policy", this.csp);
       reply.header("x-content-type-options", "nosniff");
       reply.header("referrer-policy", "no-referrer");
       reply.header("cross-origin-opener-policy", "same-origin");
+      // the origin is shared by every ticket's build, so the browser keeps nothing as immutable
+      reply.header("cache-control", "no-cache");
       return payload;
     });
     const noHub = async (_req: unknown, reply: import("fastify").FastifyReply) =>

@@ -110,6 +110,28 @@ describe("DesignPreviews", () => {
     expect((await get(p, "/assets/app-1.js")).body).toBe("console.log(1)");
   });
 
+  it("keeps one ticket's preview from outliving or replacing another's in the browser", async () => {
+    const p = newPreviews();
+    await p.publish(
+      input(
+        1,
+        worktree("w1", "one", (d) => writeFileSync(join(d, "sw.js"), "self.skipWaiting()")),
+      ),
+    );
+    const page = await get(p, "/");
+    expect(page.headers["content-security-policy"]).toContain("worker-src 'none'");
+    // a service worker script fetch is refused, whatever the file is
+    const sw = await p.app().inject({
+      url: "/sw.js",
+      headers: { host: HOST, "service-worker": "script" },
+    });
+    expect(sw.statusCode).toBe(404);
+    // nothing on this shared origin is cached as immutable
+    for (const url of ["/", "/assets/app-1.js", "/mc-preview-boot"]) {
+      expect((await get(p, url)).headers["cache-control"], url).toBe("no-cache");
+    }
+  });
+
   it("answers the listener's refusals", async () => {
     const p = newPreviews();
     expect((await get(p, "/")).body).toBe("No preview is running. Open one from Needs you.");
