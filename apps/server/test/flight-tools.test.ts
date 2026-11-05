@@ -1877,6 +1877,46 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     },
   );
+  it("returns an ended run's open PR to a seat when the PR's head is not the run's branch", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    board(sc(7, { status: "In review" }));
+    store.upsertRun(
+      run("old", "guido-cx", {
+        ticket: "mc#7",
+        branch: "feature/7-local",
+        endedAt: NOW - 1000,
+        loop: { ...NEW_LOOP, prNumber: 9 },
+      }),
+    );
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-pr-head",
+          ticket: "mc#7",
+          state: "open" as const,
+          isDraft: false,
+          review: null,
+          ci: "pending" as const,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the findings" }))
+        .isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+  });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [

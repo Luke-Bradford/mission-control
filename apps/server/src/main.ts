@@ -516,7 +516,10 @@ export async function main(): Promise<void> {
       );
       if (!subject) return null;
       const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
-      if (pr?.headSha !== review.sha || branchOwned(config, store, repo.id, subject.branch))
+      if (
+        pr?.headSha !== review.sha ||
+        branchOwned(config, store, repo.id, subject.branch, pr?.ticket)
+      )
         return null;
       const linked = pr?.ticket?.startsWith(`${repo.id}#`)
         ? Number(pr.ticket.slice(repo.id.length + 1))
@@ -708,11 +711,15 @@ export async function main(): Promise<void> {
       store,
       gh,
       cwd: hubRoot ?? process.cwd(),
-      reviewer: (repoId) => {
+      reviewer: (repoId, pick) => {
         const session = config.crew?.sessions.find((value) => value.repoId === repoId);
         const first = session?.seats[0];
         return first
-          ? (reviewerOf(config, first.id, undefined, { store, now: Date.now() })?.id ?? null)
+          ? (reviewerOf(config, first.id, pick?.role, {
+              store,
+              now: Date.now(),
+              ...(pick?.avoid === undefined ? {} : { avoid: pick.avoid }),
+            })?.id ?? null)
           : null;
       },
       ...(prEvidence === undefined ? {} : { evidence: prEvidence }),

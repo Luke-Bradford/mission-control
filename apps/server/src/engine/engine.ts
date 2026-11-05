@@ -2870,15 +2870,26 @@ export function createEngine(deps: EngineDeps): Engine {
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
-          const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
+          // A push the push gate refused and a person made later is never recorded on a CI step.
+          // When the PR's head is the run's newest commit, origin holds exactly what the seat has,
+          // so a stuck lift records it.
+          if (opts.action === "lift" && kind === "stuck") {
+            const newest = store.newestRunCommit(run.id)?.sha;
+            if (newest && pr?.state === "open" && pr.headSha === newest)
+              store.setRunPush({ runId: run.id, sha: newest, at: now() });
+          }
+          const pushed = store.runPush(run.id);
           if (!pushed) return refuse("head-moved");
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
             if (kind !== "stuck") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
-            if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
+            if (
+              !head ||
+              (head !== pushed.sha && !(await publisher.isDescendant(run, pushed.sha, head)))
+            )
               return refuse("head-moved");
           } else if (
             kind !== "review" &&

@@ -4836,6 +4836,18 @@ export class Store {
     );
   }
 
+  /** Handoffs a seat has claimed and not yet accepted into a run row: a seat is starting on them. */
+  claimedHandoffs(repoId: string): RunHandoff[] {
+    return (
+      this.statement(
+        "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND claim_token IS NOT NULL AND accepted_run_id IS NULL",
+      ).all(repoId) as Row[]
+    ).flatMap((r) => {
+      const h = this.handoff(r.run_id as string);
+      return h ? [h] : [];
+    });
+  }
+
   releaseHandoff(runId: string, token: string): void {
     this.statement(
       "UPDATE run_handoffs SET claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",

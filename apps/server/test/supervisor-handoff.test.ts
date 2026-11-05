@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
 import { expect, it } from "vitest";
+import { externalReviewKey } from "../src/external-reviews.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
 
@@ -159,4 +160,85 @@ it("inherits only source-owned commits that are on the preserved branch", async 
   const second = await sup.startRun("guido-2", 42);
   expect(store.runCommits(second.runId)).toEqual([sha]);
   expect(git(clone, "rev-parse", first.branch)).toBe(sha);
+});
+
+it("starts the returned seat on the open PR's own ref, not the ended run's local branch", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const path = store.seatSession("guido-1")?.worktree;
+  if (!path) throw new Error("missing checkout");
+  writeFileSync(join(path, "pr.txt"), "pr");
+  git(path, "add", "pr.txt");
+  git(path, "commit", "-m", "pr work");
+  const tip = git(path, "rev-parse", "HEAD");
+  const head = "feature/42-pr-head";
+  git(path, "push", "origin", `HEAD:refs/heads/${head}`);
+  store.setRunLoop(first.runId, { ...NEW_LOOP, prNumber: 9 });
+  store.upsertPullRequests(
+    "mc",
+    [
+      {
+        repoId: "mc",
+        number: 9,
+        title: "PR",
+        url: "u",
+        branch: head,
+        ticket: "mc#42",
+        state: "open",
+        isDraft: false,
+        review: null,
+        ci: "pending",
+        createdAt: 1,
+        updatedAt: 1,
+        mergedAt: null,
+        headSha: tip,
+        mergeable: null,
+      },
+    ],
+    1,
+  );
+  // the hub's own review of the PR head reported after the first author ended
+  const reviewId = store.requestReview({
+    authorRunId: externalReviewKey("mc", 9),
+    repoId: "mc",
+    seatId: "retro",
+    prNumber: 9,
+    sha: tip,
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 2,
+  });
+  if (reviewId === null) throw new Error("review not queued");
+  store.setReviewState(reviewId, ["queued"], "running", { runId: "retro:x", at: 3 });
+  store.recordFindings(reviewId, "retro:x", {
+    verdict: { spec: "pass", quality: "fail" },
+    summary: "one finding",
+    findings: [
+      {
+        severity: "Important",
+        file: "pr.txt",
+        line: 1,
+        summary: "the pr file is wrong",
+        scenario: "it breaks",
+        fix: "fix the pr file",
+      },
+    ],
+    at: 4,
+  });
+  await sup.endRun("guido-1");
+  const second = await sup.startRun("guido-2", 42);
+  await until(() => expect(userLines().some((l) => l.includes("the pr file is wrong"))).toBe(true));
+  const brief = userLines().find((l) => l.includes("the pr file is wrong")) ?? "";
+  expect(brief).toContain(`Branch: ${head}`);
+  expect(brief).not.toContain(`Branch: ${first.branch}`);
+  expect(first.branch).not.toBe(head);
+  expect(second.branch).toBe(head);
+  expect(store.run(second.runId)?.branch).toBe(head);
+  const worktree = store.seatSession("guido-2")?.worktree;
+  if (!worktree) throw new Error("missing checkout");
+  expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${head}`);
+  expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
 });

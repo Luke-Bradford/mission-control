@@ -5034,7 +5034,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          branchOwned(config, store, repoId, pr.branch)
+          branchOwned(config, store, repoId, pr.branch, pr.ticket)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;

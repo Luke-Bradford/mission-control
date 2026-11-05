@@ -355,6 +355,7 @@ import {
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
+import { handoffTarget } from "../run-handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
@@ -1557,7 +1558,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return startSeat(
       ctx,
       { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
-      { fromSeat: source.agentId, branch: source.branch },
+      {
+        fromSeat: source.agentId,
+        // the open PR's head is the branch to push to; it can differ from the ended run's
+        branch: handoffTarget(store, {
+          runId: source.id,
+          repoId: repo.id,
+          ticket: ref,
+          branch: source.branch,
+          worktree: null,
+        }).branch,
+      },
     );
   }
 
