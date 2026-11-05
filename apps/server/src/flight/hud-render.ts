@@ -2,7 +2,14 @@
 import { type ChildProcess, fork } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HUD_PAGE_PATHS, HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import {
+  HUD_PAGE_PATHS,
+  HUD_RENDERER_HEADER,
+  OPERATOR_BOOTSTRAP_PATH,
+  QA_DISCLOSURE_LABEL,
+  QA_TAB_LABELS,
+  QA_VIEW_LABEL,
+} from "@mc/core";
 import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 
 /**
@@ -16,8 +23,9 @@ const HUD_SEGMENTS = [
 const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
-const HUD_QA_VIEW = '[aria-label="QA view"]';
-const HUD_QA_DISCLOSURE = 'button:text-is("Workflow history and earlier proposals")';
+// The labels are the page's own (mc/core): a rename there reaches this capture and its tests.
+const HUD_QA_VIEW = `[aria-label="${QA_VIEW_LABEL}"]`;
+const HUD_QA_DISCLOSURE = `button:text-is("${QA_DISCLOSURE_LABEL}")`;
 const HUD_READY = "html[data-hud-ready='1']";
 /**
  * The requested page itself has rendered: the app shell's lazy-route Suspense fallback
@@ -82,8 +90,8 @@ interface BrowserRoute {
 export type HudColorScheme = "light" | "dark";
 
 interface HudPage {
-  click?(selector: string, options: { timeout: number }): Promise<void>;
-  locator?(selector: string): { count(): Promise<number> };
+  click(selector: string, options: { timeout: number }): Promise<void>;
+  locator(selector: string): { count(): Promise<number> };
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
     selector: string,
@@ -200,8 +208,9 @@ function watchNetwork(page: HudPage): {
 
 /**
  * Starts the hub-only proxy, launches a sandboxed system Chrome behind it, confines one explicit
- * context, and returns a bounded PNG. This runs inside the owned helper process (renderHudInHelper),
- * which the parent kills as a group, so a Chrome that will not close cannot outlive the call.
+ * context, and returns a bounded PNG. This runs inside the owned helper process (renderHudInHelper).
+ * The parent signals that process's group to stop; Playwright starts Chrome in a group of its own,
+ * so it is the helper's Playwright (on SIGTERM) that closes Chrome, not the group signal itself.
  */
 export async function renderHudWithPlaywright(
   url: string,
@@ -223,8 +232,13 @@ export async function renderHudWithPlaywright(
   let context: HudBrowserContext | undefined;
   let cleanup: Promise<void> | undefined;
   let expired = false;
+  /** The selector the render is waiting on, so a timeout can say which one never came. */
+  let waiting: string | undefined;
   const timeoutError = (): Error =>
-    new Error(`HUD screenshot timed out: the ${deadlineMs} ms deadline expired.`);
+    new Error(
+      `HUD screenshot timed out: the ${deadlineMs} ms deadline expired` +
+        (waiting === undefined ? "." : ` while waiting for ${waiting}.`),
+    );
 
   const ensureActive = (): void => {
     if (!expired) return;
@@ -324,8 +338,11 @@ export async function renderHudWithPlaywright(
     const network = watchNetwork(page);
     await page.goto(url, { waitUntil: "load", timeout: remaining() });
     ensureActive();
-    const wait = (selector: string, state: "attached" | "detached"): Promise<unknown> =>
-      page.waitForSelector(selector, { state, timeout: remaining() });
+    const wait = async (selector: string, state: "attached" | "detached"): Promise<void> => {
+      waiting = `${selector} (${state})`;
+      await page.waitForSelector(selector, { state, timeout: remaining() });
+      waiting = undefined;
+    };
     await wait(HUD_READY, "attached");
     ensureActive();
     // The shell is ready; now the requested (lazy) page and its data: wait for the placeholder to
@@ -346,21 +363,17 @@ export async function renderHudWithPlaywright(
       tab = "readiness";
     }
     if (new URL(page.url()).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
-      const label = tab === "readiness" ? "PR readiness" : "Hotspots";
-      if (!page.click) throw new Error("HUD screenshot cannot select the Audit view.");
+      const label = QA_TAB_LABELS[tab];
       // Audit now leads with code health and keeps the QA views behind a disclosure; an older
-      // baseline shows them at once, so open the disclosure only when the control is absent.
-      if (page.locator && (await page.locator(HUD_QA_VIEW).count()) === 0) {
+      // baseline shows them at once. Wait until the page shows one or the other (the page may
+      // still be drawing), then open the disclosure only when the view itself is absent.
+      await wait(`${HUD_QA_VIEW}, ${HUD_QA_DISCLOSURE}`, "attached");
+      if ((await page.locator(HUD_QA_VIEW).count()) === 0) {
         await page.click(HUD_QA_DISCLOSURE, { timeout: remaining() });
         await wait(HUD_QA_VIEW, "attached");
       }
-      await page.click(`[aria-label="QA view"] button:text-is("${label}")`, {
-        timeout: remaining(),
-      });
-      await wait(
-        `[aria-label="QA view"] button[aria-pressed="true"]:text-is("${label}")`,
-        "attached",
-      );
+      await page.click(`${HUD_QA_VIEW} button:text-is("${label}")`, { timeout: remaining() });
+      await wait(`${HUD_QA_VIEW} button[aria-pressed="true"]:text-is("${label}")`, "attached");
     }
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
@@ -381,7 +394,7 @@ export async function renderHudWithPlaywright(
   try {
     return await Promise.race([work(), deadline]);
   } catch (error) {
-    // A Playwright call limited to the time remaining can time out just before the deadline timer
+    // A Playwright call limited to the time remaining can time out just before the deadline timer.
     // Likewise the deadline's own cleanup closes the browser under a call still in flight (a slow
     // Chrome start), which then fails with "has been closed": the cause is the deadline.
     if (expired || (error as { name?: unknown })?.name === "TimeoutError") throw timeoutError();
@@ -412,24 +425,47 @@ export interface HudHelperOptions {
   colorScheme?: HudColorScheme;
   /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
   graceMs?: number;
+  /** How long the helper gets to close Chrome after SIGTERM before the group is killed. */
+  closeMs?: number;
 }
 
 const HELPER_PATH = fileURLToPath(new URL("./hud-helper.ts", import.meta.url));
 /** What the helper (and so Chrome) may inherit: no tokens, only what a browser needs to run. */
 const HELPER_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "LANG", "MC_BROWSER_EXECUTABLE"];
 
-/** Kills the helper's whole process group (the helper and the Chrome it launched). */
-function killGroup(child: ChildProcess): void {
+const signalGroup = (child: ChildProcess, signal: NodeJS.Signals): void => {
   try {
-    if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+    if (child.pid !== undefined) process.kill(-child.pid, signal);
   } catch {
     // The group already exited.
   }
+};
+
+/**
+ * Stops the helper: SIGTERM to its group, which makes the helper's Playwright close the Chrome it
+ * launched (Chrome is in a group of its own, so a signal to the helper's group never reaches it),
+ * then SIGKILL to the group once the helper has exited or `closeMs` has passed.
+ */
+async function stopHelper(child: ChildProcess, closeMs: number): Promise<void> {
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    signalGroup(child, "SIGTERM");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, closeMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+  }
+  signalGroup(child, "SIGKILL");
 }
 
 /**
  * Renders in an owned helper process, started in its own process group. However the render ends
- * (a PNG, an error, the deadline, a crash) the group is killed afterwards, so no Chrome survives.
+ * (a PNG, an error, the deadline, a crash) the helper is stopped afterwards and the call settles
+ * only once it has been, so a stopped render leaves no helper and no Chrome running.
  */
 export function renderHudInHelper(
   url: string,
@@ -438,7 +474,8 @@ export function renderHudInHelper(
 ): Promise<Buffer> {
   options.signal?.throwIfAborted();
   const deadlineMs = options.deadlineMs ?? HUD_RENDER_DEADLINE_MS;
-  const graceMs = options.graceMs ?? HUD_RENDER_CLOSE_MS + 2_000;
+  const closeMs = options.closeMs ?? HUD_RENDER_CLOSE_MS;
+  const graceMs = options.graceMs ?? closeMs + 2_000;
   const env: Record<string, string> = {};
   for (const key of HELPER_ENV_KEYS) {
     const value = process.env[key];
@@ -457,8 +494,7 @@ export function renderHudInHelper(
       done = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
-      killGroup(child);
-      settle();
+      void stopHelper(child, closeMs).then(settle);
     };
     const timer = setTimeout(
       () => finish(() => reject(new Error(`HUD screenshot timed out after ${deadlineMs} ms.`))),

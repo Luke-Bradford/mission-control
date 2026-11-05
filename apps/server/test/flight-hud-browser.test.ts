@@ -6,7 +6,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
-import type { Run, SeatSessionRow } from "@mc/core";
+import {
+  QA_DISCLOSURE_LABEL,
+  QA_TAB_LABELS,
+  QA_VIEW_LABEL,
+  type Run,
+  type SeatSessionRow,
+} from "@mc/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -68,6 +74,35 @@ const html = (body: string, script = "") => {
 let hub: Awaited<ReturnType<typeof listen>>;
 let other: Awaited<ReturnType<typeof listen>>;
 const ready: string[] = [];
+/** What the fixture Audit page was clicked on: the disclosure, then a tab. */
+const clicks: string[] = [];
+
+/**
+ * The Audit page as the capture sees it, built from the shared labels: the QA view with its tabs
+ * is drawn 1.2 s after load (a lazy page), behind a disclosure button unless `old` (the older
+ * baseline, which shows the view at once). A click is reported to /api/click.
+ */
+const auditScript = (old: boolean): string => `
+const report = (what) => fetch('/api/click?what=' + encodeURIComponent(what));
+const drawView = () => {
+  const view = document.createElement('div');
+  view.setAttribute('aria-label', ${JSON.stringify(QA_VIEW_LABEL)});
+  for (const label of ${JSON.stringify(Object.values(QA_TAB_LABELS))}) {
+    const tab = document.createElement('button');
+    tab.textContent = label;
+    tab.setAttribute('aria-pressed', 'false');
+    tab.onclick = () => { tab.setAttribute('aria-pressed', 'true'); report('tab:' + label); };
+    view.append(tab);
+  }
+  document.querySelector('main').append(view);
+};
+setTimeout(() => {
+  if (${old}) return drawView();
+  const open = document.createElement('button');
+  open.textContent = ${JSON.stringify(QA_DISCLOSURE_LABEL)};
+  open.onclick = () => { report('disclosure'); drawView(); };
+  document.querySelector('main').append(open);
+}, 1200);`;
 
 const startServers = async (): Promise<void> => {
   other = await listen((_req, res) => res.end("off-hub"));
@@ -93,6 +128,11 @@ const startServers = async (): Promise<void> => {
         );
       case "/api/slow":
         return void setTimeout(() => res.end("{}"), 600);
+      case "/audit":
+        return send(html("<h1>Audit</h1>", auditScript(url.searchParams.has("old"))));
+      case "/api/click":
+        clicks.push(url.searchParams.get("what") ?? "");
+        return void res.end("{}");
       case "/api/beacon":
         ready.push(url.search);
         return void res.end("{}");
@@ -182,6 +222,21 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
       expect(ready).toEqual(["?page=map"]);
     }, 90_000);
 
+    it("opens the Audit disclosure, once the lazy page has drawn it, and selects the tab", async () => {
+      for (const [tab, label] of Object.entries(QA_TAB_LABELS)) {
+        clicks.length = 0;
+        const png = await render(`/audit?evidence-tab=${tab}`);
+        expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+        expect(clicks).toEqual(["disclosure", `tab:${label}`]);
+      }
+    }, 150_000);
+
+    it("selects the tab without the disclosure on an older baseline that shows the view at once", async () => {
+      clicks.length = 0;
+      await render("/audit?evidence-tab=hotspots&old=1");
+      expect(clicks).toEqual([`tab:${QA_TAB_LABELS.hotspots}`]);
+    }, 90_000);
+
     it("refuses a redirect off the hub and never reaches the other server", async () => {
       await expect(render("/board")).rejects.toThrow();
       expect(other.requests).toEqual([]);
@@ -228,6 +283,27 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
           deadlineMs: 3_000,
         }),
       ).rejects.toThrow("timed out");
+      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+    }, 150_000);
+
+    it("leaves no Chrome behind when a render is stopped in the owned helper", async () => {
+      const baseline = chromeCount();
+      const guard = hudRenderRequest(hub.origin);
+      const stop = new AbortController();
+      const job = renderHudInHelper(guard.page("/setup"), guard, {
+        executablePath: CHROME as string,
+        deadlineMs: COLD_START_DEADLINE_MS,
+        signal: stop.signal,
+      });
+      const settled = job.then(
+        () => "rendered",
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      // /setup never answers, so the render is parked on a running Chrome until it is stopped
+      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
+      stop.abort(new Error("stopped by the test"));
+      expect(await settled).toBe("stopped by the test");
+      // the call settles only after the helper is stopped; Chrome goes with it
       await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
     }, 150_000);
 
