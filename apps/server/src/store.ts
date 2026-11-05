@@ -6295,6 +6295,17 @@ export class Store {
         .get(seatId, id) !== undefined
     );
   }
+  /** Ids of messages `from` sent `to` at or after `since` that `to` has not read, oldest first. */
+  unreadCommsFrom(from: string, to: string, since: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?
+           AND id NOT IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
+         ORDER BY id`,
+      )
+      .all(from, to, since, to) as { id: number }[];
+    return rows.map((r) => String(r.id));
+  }
   markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
@@ -6337,6 +6348,15 @@ export class Store {
       ticket: r.ticket as string | null,
       text: r.text as string,
     })) as CommsRow[];
+  }
+
+  /** Messages to `to` at or after `since`, with their label: the times FLIGHT's callers began to wait. */
+  commsTo(to: string, since: number): { at: number; from: string; label: string | null }[] {
+    return (
+      this.db
+        .prepare("SELECT at, from_id, label FROM comms WHERE to_id = ? AND at >= ? ORDER BY at, id")
+        .all(to, since) as { at: number; from_id: string; label: string | null }[]
+    ).map((r) => ({ at: r.at, from: r.from_id, label: r.label }));
   }
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
