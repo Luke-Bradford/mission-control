@@ -1728,7 +1728,10 @@ describe("answer_question", () => {
       text: "Answered GUIDO-1.",
     });
     expect(store.question(second)?.answeredAt).toBe(NOW);
-    expect(messageCalls.map((m) => m[1])).toEqual(["FLIGHT answers: Lane 2", "FLIGHT answers: main"]);
+    expect(messageCalls.map((m) => m[1])).toEqual([
+      "FLIGHT answers: Lane 2",
+      "FLIGHT answers: main",
+    ]);
   });
 
   it("refuses FLIGHT's own question", async () => {
