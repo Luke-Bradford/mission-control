@@ -1,4 +1,4 @@
-/** Reviews for same-repository PRs without a crew author. No build run is invented. */
+/** Reviews for same-repository PRs with no unfinished crew run. No build run is invented. */
 import {
   type EvidenceManifest,
   evidenceSectionText,
@@ -263,7 +263,9 @@ export function createExternalReviews(deps: {
               if (row === undefined && pr.ci === "passing") {
                 if (
                   reviews.length === 0 &&
-                  pr.checks?.some((check) => check.name === REVIEW_STATUS_CONTEXT)
+                  pr.checks?.some((check) => check.name === REVIEW_STATUS_CONTEXT) &&
+                  // the status is another reviewer's only when this hub has no review of this head
+                  !store.reviewsOfPr(repo.id, pr.number).some((r) => r.sha === pr.headSha)
                 )
                   continue;
                 const seat = deps.reviewer(repo.id);

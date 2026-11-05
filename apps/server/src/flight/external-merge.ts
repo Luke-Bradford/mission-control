@@ -1,4 +1,4 @@
-/** The controller merge path for a PR without a crew author. No synthetic run or gate waiver. */
+/** The controller merge path for a PR with no unfinished crew run. No synthetic run or gate waiver. */
 import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
@@ -45,6 +45,8 @@ export async function mergeExternalPr(i: {
     return fail("No open external PR in this merge workspace.");
   if (store.hasUnfinishedBuildRun(repo.id, cached.branch))
     return fail("This branch belongs to a crew run; use its normal merge path.");
+  const runHold = store.branchMergeHold(repo.id, cached.branch);
+  if (runHold) return fail(`This PR has a merge hold from ${runHold.by}: ${runHold.reason}`);
   let rules: RepoRules;
   try {
     const loaded = await i.rules();
@@ -285,7 +287,8 @@ export async function mergeExternalPr(i: {
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
       store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
-      store.hasUnfinishedBuildRun(repo.id, finalSubject.branch)
+      store.hasUnfinishedBuildRun(repo.id, finalSubject.branch) ||
+      store.branchMergeHold(repo.id, finalSubject.branch)
     )
       return fail("The PR head, checks, ownership or hold changed before merge.");
     const merged = await i.gh(

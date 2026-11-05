@@ -177,6 +177,42 @@ describe("external PR review subjects", () => {
     expect(h.writes).toHaveLength(0);
   });
 
+  it("reviews an ended run's PR when the mc/review status on its head is this hub's own", async () => {
+    buildRun({ id: "builder:ended", endedAt: 2 });
+    store.requestReview({
+      authorRunId: "builder:ended",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    });
+    store.upsertPullRequests(
+      "sample",
+      [
+        pr({
+          checks: [
+            {
+              name: "mc/review",
+              state: "passing",
+              kind: "status",
+              conclusion: "success",
+              attempt: null,
+              url: null,
+            },
+          ],
+        }),
+      ],
+      2,
+    );
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
   it("requeues on a new SHA and never carries an old verdict onto it", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);

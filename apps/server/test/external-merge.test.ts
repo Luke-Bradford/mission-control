@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { DEFAULT_REPO_RULES, type PullRequestView, type TicketView } from "@mc/core";
+import { DEFAULT_REPO_RULES, NEW_LOOP, type PullRequestView, type TicketView } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -197,6 +197,18 @@ describe("external PR controller merge", () => {
     buildRun(null);
     expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
     store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("refuses a PR whose ended run still has a merge hold, until the hold is released", async () => {
+    const h = harness();
+    buildRun(2);
+    const hold = { by: "CAPCOM" as const, reason: "wait for the demo", at: 1 };
+    store.setRunLoop("builder:old", { ...NEW_LOOP, mergeHold: hold });
+    expect((await mergeExternalPr(h.deps)).text).toContain("merge hold from CAPCOM");
+    expect(h.merges).toHaveLength(0);
+    store.setRunLoop("builder:old", { ...NEW_LOOP });
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
   });

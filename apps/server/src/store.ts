@@ -2332,6 +2332,15 @@ export class Store {
     );
   }
 
+  /**
+   * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
+   * someone releases it. A follow-on run gets a copy (run-handoffs.ts), so only the latest one counts.
+   */
+  branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
+    const latest = this.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
+    return latest?.loop?.mergeHold ?? null;
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db
