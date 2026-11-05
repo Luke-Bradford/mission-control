@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
-import { routineOnly, unhandledReasons, wakeReasons } from "../src/flight/state.ts";
+import { onlySettled, routineOnly, unhandledReasons, wakeReasons } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;
@@ -197,6 +197,13 @@ describe("routine wakes wait for the batch window", () => {
   it("treats a breaker lift and a new hold in force as urgent", () => {
     expect(routineOnly(facts({ breaker: ["x"] }), facts({ breaker: [], free: ["g"] }))).toBe(false);
     expect(routineOnly(facts({}), facts({ holdsInForce: ["approval"] }))).toBe(false);
+  });
+  it("does not call a lifted breaker or hold settled", () => {
+    expect(onlySettled(facts({ breaker: ["x"] }), facts({ breaker: [] }))).toBe(false);
+    expect(onlySettled(facts({ holdsInForce: ["machine"] }), facts({ holdsInForce: [] }))).toBe(
+      false,
+    );
+    expect(onlySettled(facts({ q: [3] }), facts({ q: [] }))).toBe(true);
   });
   it("treats an unread operator message as urgent", () => {
     expect(routineOnly(facts({}), facts({ operator: ["12"] }))).toBe(false);

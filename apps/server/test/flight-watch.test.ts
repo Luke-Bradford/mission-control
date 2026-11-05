@@ -4952,6 +4952,49 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("a disk hold lifting wakes FLIGHT at once while a seat and a ticket stay listed", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    const disk = (freeGb: number) =>
+      store.addMachineSample({
+        at: nowMs,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes: freeGb * 1024 ** 3,
+        diskTotalBytes: 100 * 1024 ** 3,
+        swapUsedBytes: 0,
+        memTotalBytes: 100 * 1024 ** 3,
+        memoryPressureFreePct: 90,
+        load1: 0,
+        cores: 8,
+        agents: null,
+      });
+    disk(10);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 20 * MIN;
+    disk(50);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a breaker lift wakes FLIGHT at once while a seat and a ticket stay listed", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("an acked Needs-you item is not listed for FLIGHT to triage again", () => {
     liveCrew();
     ask();

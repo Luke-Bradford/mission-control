@@ -1712,8 +1712,8 @@ export function routineOnly(previous: string, current: string): boolean {
 
 /**
  * Whether the only differences between two wake facts are things that went away (a question
- * answered, a message read, a park lifted): nothing new to tell FLIGHT. A breaker lift is not
- * settled, as a lift alone wakes FLIGHT.
+ * answered, a message read, a park lifted): nothing new to tell FLIGHT. A breaker lift or a hold
+ * lifting is not settled: either one frees work FLIGHT can act on, so it wakes FLIGHT at once.
  */
 export function onlySettled(previous: string, current: string): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
@@ -1724,7 +1724,7 @@ export function onlySettled(previous: string, current: string): boolean {
     const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
     if ([...now].some((v) => !old.has(v))) return false;
     if ([...old].some((v) => !now.has(v))) {
-      if (category === "breaker") return false;
+      if (category === "breaker" || category === "holdsInForce") return false;
       removed = true;
     }
   }
