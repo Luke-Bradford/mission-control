@@ -69,9 +69,7 @@ describe("DesignPreviews", () => {
       "Not published: run.sh in the build is not a file type the preview serves. Remove it and publish again.",
     );
     expect(
-      await refused(
-        worktree("link", "b", (d) => symlinkSync("/etc/hosts", join(d, "hosts.html"))),
-      ),
+      await refused(worktree("link", "b", (d) => symlinkSync("/etc/hosts", join(d, "hosts.html")))),
     ).toContain("hosts.html in the build");
     const outside = join(dir, "outside");
     mkdirSync(outside);
@@ -101,7 +99,9 @@ describe("DesignPreviews", () => {
     expect(view).toMatchObject({ ticket: 1, running: true, url: `http://127.0.0.1:${PORT}/` });
     const page = await get(p, "/");
     expect(page.body).toContain('<head><script src="/mc-preview-boot"></script>');
-    expect(page.headers["content-security-policy"]).toContain("frame-ancestors http://127.0.0.1:7420");
+    expect(page.headers["content-security-policy"]).toContain(
+      "frame-ancestors http://127.0.0.1:7420",
+    );
     expect(page.headers["x-content-type-options"]).toBe("nosniff");
     expect(page.headers["cross-origin-opener-policy"]).toBe("same-origin");
     const boot = await get(p, "/mc-preview-boot");
@@ -136,7 +136,12 @@ describe("DesignPreviews", () => {
 
     expect((await p.open(2))?.running).toBe(true);
     expect((await get(p, "/")).body).toContain("page-two");
-    expect(p.list().filter((v) => v.running).map((v) => v.ticket)).toEqual([2]);
+    expect(
+      p
+        .list()
+        .filter((v) => v.running)
+        .map((v) => v.ticket),
+    ).toEqual([2]);
 
     clock += 61 * 60_000;
     expect((await get(p, "/")).body).toBe("No preview is running. Open one from Needs you.");
@@ -159,9 +164,19 @@ describe("DesignPreviews", () => {
       clock += 1000;
       await p.publish(input(t, worktree(`w${t}`, `p${t}`)));
     }
-    expect(p.list().map((v) => v.ticket).sort()).toEqual([1, 3, 4, 5, 6]);
+    expect(
+      p
+        .list()
+        .map((v) => v.ticket)
+        .sort(),
+    ).toEqual([1, 3, 4, 5, 6]);
     const again = newPreviews();
-    expect(again.list().map((v) => v.ticket).sort()).toEqual([1, 3, 4, 5, 6]);
+    expect(
+      again
+        .list()
+        .map((v) => v.ticket)
+        .sort(),
+    ).toEqual([1, 3, 4, 5, 6]);
     expect(again.list().every((v) => !v.running)).toBe(true);
     expect((await again.open(3))?.running).toBe(true);
     expect((await get(again, "/")).body).toContain("p3");

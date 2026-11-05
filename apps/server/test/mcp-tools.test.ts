@@ -112,9 +112,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { PreviewRefused } from "../src/design-previews.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
+import { PreviewRefused } from "../src/design-previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
@@ -512,7 +512,9 @@ describe("publish_preview", () => {
     });
     expect(published).toEqual([]);
     git(wt, "checkout", "--", "apps/a.ts");
-    expect(await call({ designPreviews: previews(true, "Not published: x.sh in the build.") })).toEqual({
+    expect(
+      await call({ designPreviews: previews(true, "Not published: x.sh in the build.") }),
+    ).toEqual({
       text: "Not published: x.sh in the build.",
       isError: true,
     });
@@ -525,10 +527,12 @@ describe("publish_preview", () => {
     );
     liveSeat("retro", "retro:1");
     expect(
-      (await tool(MC_TOOL_NAMES.publishPreview, make({ designPreviews: previews(true) })).call(
-        { seatId: "retro", runId: "retro:1" },
-        {},
-      )).isError,
+      (
+        await tool(MC_TOOL_NAMES.publishPreview, make({ designPreviews: previews(true) })).call(
+          { seatId: "retro", runId: "retro:1" },
+          {},
+        )
+      ).isError,
     ).toBe(true);
   });
 });

@@ -66,6 +66,7 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
+import { DESIGN_PREVIEW_PORT, DESIGN_PREVIEW_SWEEP_MS, DesignPreviews } from "./design-previews.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -103,11 +104,6 @@ import { createPrEvidence } from "./pr-evidence/capture.ts";
 import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
-import {
-  DESIGN_PREVIEW_PORT,
-  DESIGN_PREVIEW_SWEEP_MS,
-  DesignPreviews,
-} from "./design-previews.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
 import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";

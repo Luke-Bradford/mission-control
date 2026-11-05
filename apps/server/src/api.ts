@@ -248,6 +248,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -325,7 +326,6 @@ import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
-import type { DesignPreviews } from "./design-previews.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
@@ -1241,7 +1241,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const path = req.routeOptions.url ?? req.url;
     if (
       path.startsWith("/api/") &&
-      (req.headers["sec-fetch-site"] === "cross-site" || req.headers["sec-fetch-site"] === "same-site")
+      (req.headers["sec-fetch-site"] === "cross-site" ||
+        req.headers["sec-fetch-site"] === "same-site")
     ) {
       return reply.code(403).send({ error: "cross-site request refused" });
     }
@@ -3422,17 +3423,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
-      api.post<{ Params: { ticket: string } }>("/design-previews/:ticket/open", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
-        const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
-        if (view === null) return reply.code(404).send({ error: "No stored preview for this ticket." });
-        return view;
-      });
+      api.post<{ Params: { ticket: string } }>(
+        "/design-previews/:ticket/open",
+        async (req, reply) => {
+          if (
+            operatorToken !== undefined &&
+            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+          )
+            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
+          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
+          if (view === null)
+            return reply.code(404).send({ error: "No stored preview for this ticket." });
+          return view;
+        },
+      );
 
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {

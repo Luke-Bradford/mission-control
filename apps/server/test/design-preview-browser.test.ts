@@ -13,7 +13,6 @@ import { chromium } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import type { CcConfig } from "../src/config.ts";
 import { DesignPreviews } from "../src/design-previews.ts";
 import { Store } from "../src/store.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -127,7 +126,8 @@ describe("design previews in a real browser", () => {
         seen.push({ method: req.method, url: req.url, status: reply.statusCode });
     });
     hub.addHook("onRequest", async (req) => {
-      if (req.url.startsWith("/api/")) seen.push({ method: req.method, url: req.url, status: null });
+      if (req.url.startsWith("/api/"))
+        seen.push({ method: req.method, url: req.url, status: null });
     });
     await hub.listen({ host: "127.0.0.1", port: 0 });
     const hubPort = (hub.server.address() as { port: number }).port;

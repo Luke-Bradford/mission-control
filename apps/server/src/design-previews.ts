@@ -121,14 +121,16 @@ export class DesignPreviews {
     for (const name of readdirSync(this.deps.root)) {
       if (!/^[1-9]\d*$/.test(name)) {
         // a publish that did not finish
-        if (name.startsWith(".")) rmSync(join(this.deps.root, name), { recursive: true, force: true });
+        if (name.startsWith("."))
+          rmSync(join(this.deps.root, name), { recursive: true, force: true });
         continue;
       }
       try {
         const m = JSON.parse(
           readFileSync(join(this.deps.root, name, "manifest.json"), "utf8"),
         ) as Manifest;
-        if (m.ticket === Number(name) && existsSync(this.siteDir(m.ticket))) this.stored.set(m.ticket, m);
+        if (m.ticket === Number(name) && existsSync(this.siteDir(m.ticket)))
+          this.stored.set(m.ticket, m);
       } catch {
         rmSync(join(this.deps.root, name), { recursive: true, force: true });
       }
@@ -261,7 +263,10 @@ export class DesignPreviews {
     app.all("/api", noHub);
     app.all("/api/*", noHub);
     app.get(BOOT_PATH, async (_req, reply) =>
-      reply.type("text/javascript; charset=utf-8").header("cache-control", "no-cache").send(PREVIEW_BOOT_SCRIPT),
+      reply
+        .type("text/javascript; charset=utf-8")
+        .header("cache-control", "no-cache")
+        .send(PREVIEW_BOOT_SCRIPT),
     );
     app.setNotFoundHandler(async (req, reply) => {
       await this.sweep();
@@ -357,7 +362,8 @@ async function copyBuild(worktree: string, dest: string): Promise<void> {
     if (f.rel === "index.html") {
       const html = body.toString("utf8");
       const head = /<head(\s[^>]*)?>/i.exec(html);
-      if (head === null) throw new PreviewRefused("Not published: index.html in the build has no <head>.");
+      if (head === null)
+        throw new PreviewRefused("Not published: index.html in the build has no <head>.");
       const at = head.index + head[0].length;
       body = Buffer.from(`${html.slice(0, at)}${BOOT_TAG}${html.slice(at)}`);
     }

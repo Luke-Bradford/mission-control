@@ -42,6 +42,7 @@ import {
   commsCutMarker,
   crewAuthorName,
   DEFAULT_PROFILES,
+  type DesignPreviewView,
   DONE_WHEN_STATUSES,
   type DoneWhenEntry,
   doneWhenBadLineText,
@@ -97,7 +98,6 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_PROFILE_ONLY,
-  type DesignPreviewView,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_EMPTY,
@@ -199,11 +199,11 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
-import { PreviewRefused } from "../design-previews.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import { PreviewRefused } from "../design-previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
@@ -1945,9 +1945,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       if (changedPaths(status).length > 0) return { text: MC_PREVIEW_UNCOMMITTED, isError: true };
       const sha = (
-        await git(worktree, ["rev-parse", "--verify", "-q", `refs/heads/${branch}^{commit}`], common, {
-          gitDir,
-        })
+        await git(
+          worktree,
+          ["rev-parse", "--verify", "-q", `refs/heads/${branch}^{commit}`],
+          common,
+          {
+            gitDir,
+          },
+        )
       ).trim();
       try {
         const view = await previews.publish({ ticket: issue, branch, sha, worktree });

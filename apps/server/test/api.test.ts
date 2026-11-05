@@ -100,9 +100,9 @@ import {
 } from "../src/collectors/notifications.ts";
 import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
-import { DesignPreviews } from "../src/design-previews.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { DesignPreviews } from "../src/design-previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
@@ -10191,8 +10191,14 @@ describe("design preview routes", () => {
       const key = { [OPERATOR_HEADER]: "tok" };
       expect((await a.inject("/api/design-previews")).statusCode).toBe(401);
       expect(
-        (await a.inject({ method: "POST", url: "/api/design-previews/1/open", headers: json, payload: {} }))
-          .statusCode,
+        (
+          await a.inject({
+            method: "POST",
+            url: "/api/design-previews/1/open",
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
       ).toBe(401);
       expect((await a.inject({ url: "/api/design-previews", headers: key })).json()).toEqual([]);
       const none = await a.inject({
