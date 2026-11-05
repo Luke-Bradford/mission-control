@@ -1567,7 +1567,11 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
-        cur.aside = { worktree, wake: cur.phase === "working" };
+        cur.aside = {
+          worktree,
+          wake: cur.phase === "working" || a.displaced === true,
+          ...(a.displaced ? { displaced: true as const } : {}),
+        };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1579,7 +1583,7 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working"
+          cur.phase === "working" || a.displaced
             ? asideForReworkEventText(call)
             : cur.phase === "ci"
               ? asideInCiEventText(call)

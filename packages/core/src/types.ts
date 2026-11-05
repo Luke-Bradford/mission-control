@@ -186,8 +186,12 @@ export interface RunLoop {
   reviewReplyTo?: number | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
-  /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
-  aside?: { worktree: string; wake: boolean } | null;
+  /**
+   * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
+   * `displaced`: it left to make way for rework on the seat (a pushed run holds a refused newer
+   * commit), so that rework comes back before it.
+   */
+  aside?: { worktree: string; wake: boolean; displaced?: true } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed

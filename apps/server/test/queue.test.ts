@@ -27,7 +27,7 @@ import type { CardNow } from "../src/collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import type { CcConfig } from "../src/config.ts";
 import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
-import { wakeDueAsideRun } from "../src/engine/aside.ts";
+import { reworkDueBesides, wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
   awayQuotaReserve,
@@ -1068,6 +1068,36 @@ describe("takeNext", () => {
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-younger");
     store.setRunLoop("r-younger", { ...aside, aside: { worktree: "/w/x", wake: false } });
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-displaced");
+  });
+
+  it("rework first: a pushed run displaced with a refused commit waits behind the rework, and keeps its worktree", () => {
+    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
+    const at = (n: number) => NOW - n * 60_000;
+    // the refused run is the oldest, but waits behind the rework it made way for
+    store.upsertRun(
+      run({
+        id: "r-refused",
+        agentId: SERVER,
+        ticket: `${REPO}#7`,
+        startedAt: at(30),
+        loop: {
+          ...aside,
+          phase: "ci",
+          aside: { worktree: "/w/refused", wake: true, displaced: true },
+        },
+      }),
+    );
+    store.setRunPush({ runId: "r-refused", sha: "a".repeat(40), at: NOW });
+    store.upsertRun(
+      run({ id: "r-rework", agentId: SERVER, ticket: `${REPO}#9`, startedAt: at(10), loop: aside }),
+    );
+    store.setRunPush({ runId: "r-rework", sha: "b".repeat(40), at: NOW });
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-rework");
+    // the refused run does not hold up the rework (two reworks never displace each other)
+    expect(reworkDueBesides(store, store.run("r-rework") as Run)).toBe(false);
+    store.setRunLoop("r-rework", { ...aside, aside: { worktree: "/w/x", wake: false } });
+    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-refused");
+    expect(store.run("r-refused")?.loop?.aside?.worktree).toBe("/w/refused");
   });
 
   it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {

@@ -705,7 +705,7 @@ export type LoopAction =
   | { kind: "request-review"; sha: string; attempt: number }
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
-  | { kind: "set-aside" }
+  | { kind: "set-aside"; displaced?: true }
   | { kind: "wake" }
   | { kind: "update-branch"; mainSha: string }
   | { kind: "mark-ready" }
@@ -1452,16 +1452,33 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 }
 
 /**
- * Whether the run being built leaves its seat at this turn end because rework is due on another of
- * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
+ * Whether a run that has pushed holds a newer commit the push gate refused (in ci with a refusal
+ * recorded, or parked as refused or stuck). A fresh commit in ci whose push is not yet tried is not. The commit stays in its worktree, unpushed; the seat's other run may hold
+ * the rework that fixes the refusal.
+ */
+function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
+  return (
+    s.pushed !== null &&
+    s.headCommit !== null &&
+    s.headCommit !== s.pushed.sha &&
+    ((loop.phase === "ci" && loop.lastRefusal !== null) ||
+      (loop.phase === "parked" &&
+        (loop.parked?.kind === "refused" || loop.parked?.kind === STUCK_PARK)))
+  );
+}
+
+/**
+ * Whether the run leaves its seat at this turn end because rework is due on another of the seat's
+ * runs: one being built, or one that pushed and holds a refused newer commit. Its worktree is kept
+ * as it is; it comes back once the rework is out of the way.
  */
 function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat } = s;
   return (
     s.reworkDue === true &&
-    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
-    s.pushed === null &&
-    loop.phase === "working" &&
+    // a run in review or working on a pushed sha is rework itself (or in flight); two reworks must
+    // not displace each other
+    ((s.pushed === null && loop.phase === "working") || refusedPush(s, loop)) &&
     !loop.aside &&
     s.ended === null &&
     seat.holdsRun &&
@@ -1724,9 +1741,11 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop) || displaceDue(s, loop)
-            ? { kind: "set-aside" }
-            : dueLine(s, loop);
+          : displaceDue(s, loop)
+            ? { kind: "set-aside", displaced: true }
+            : asideDue(s, loop)
+              ? { kind: "set-aside" }
+              : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;

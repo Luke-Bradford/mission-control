@@ -8,6 +8,7 @@ import {
   AWAY_SETTING,
   type AwayDiff,
   asideEventText,
+  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   type BoardItem,
@@ -7448,6 +7449,50 @@ describe("the engine runs reviews", () => {
       expect(loopOf().aside).toBeNull();
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toEqual([SEAT]);
+    });
+
+    it("a pushed run whose newer commit was refused gives way to rework on its seat, and comes back after it", async () => {
+      h.asideOn = true;
+      report();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "pending" });
+      seatIdle(RUN);
+      // a newer commit the push gate refused: it stays unpushed
+      commit(SHA_B);
+      setLoop({
+        pushFor: SHA_B,
+        pushStartedAt: clock,
+        transient: 1,
+        lastRefusal: "the gate refused",
+      });
+      const b = "guido-1:b";
+      store.upsertRun(
+        run({
+          id: b,
+          startedAt: START + MIN,
+          seq: 3,
+          ticket: `${REPO}#8`,
+          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/b", wake: true } },
+        }),
+      );
+      store.setRunPush({ runId: b, sha: SHA_C, at: clock });
+      h.asides.length = 0;
+      await h.engine.reconcileRun(RUN);
+      expect(h.asides).toEqual([RUN]);
+      expect(loopOf().aside).toEqual({ worktree: join(dir, "wt"), wake: true, displaced: true });
+      expect(loopTexts()).toContain(asideForReworkEventText("GUIDO-1"));
+      // the rework it made way for comes back first
+      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+      // the rework is out of the way: the seat is free and the refused run comes back
+      store.setRunLoop(b, {
+        ...NEW_LOOP,
+        phase: "review",
+        aside: { worktree: "/w/b", wake: false },
+      });
+      seatIdle(null);
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.wakes).toContain(RUN));
+      expect(loopOf().aside).toBeNull();
     });
 
     it("two reworks on one seat do not set each other aside at every turn end", async () => {
