@@ -357,6 +357,15 @@ describe("an ended run with the hub's own external review", () => {
     expect(row()).toMatchObject({ stage: "merge" });
   });
 
+  it("ignores the ended run's stale loop", () => {
+    store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
+    store.upsertRun(
+      run("author", { endedAt: T + M, loop: { ...NEW_LOOP, phase: "review", epoch: 3 } }),
+    );
+    external(true);
+    expect(row()).toMatchObject({ stage: "merge" });
+  });
+
   it("keeps the merge hold of the ended run as clearance", () => {
     store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
     store.upsertRun(
