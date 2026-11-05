@@ -7,6 +7,15 @@ import type {
   RunDigest,
 } from "@mc/core";
 import { agentView } from "./agentV2Fixture.ts";
+import {
+  DEMO_REPO,
+  DEMO_TICKETS,
+  demoPageAnswers,
+  pipelineStages,
+  prFlowView,
+  SEAT_ROLES,
+  ticketHistory,
+} from "./demoSeedPages.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
 import {
   CONFIG,
@@ -21,6 +30,7 @@ import {
   OVERVIEW,
   seatRow,
 } from "./fixtures.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
 
 export type OverviewScenario =
   | "default"
@@ -514,4 +524,183 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
     })),
   };
   return { api, rows, config, attention, timeline, summary };
+}
+
+/**
+ * The busy crew Demo plays and the tests render: the Overview's "default" scenario with every seat
+ * working, the pipeline built from one ticket list, and an answer for every other page. All of it
+ * is fictional, fixed at `NOW`; Demo moves it to the present.
+ */
+export function demoSeed() {
+  const base = overviewDensityFixture("default");
+  const rows = base.rows.map((row, index): CrewRow => {
+    const ticket = DEMO_TICKETS.find((t) => t.seat === row.id);
+    const blocked = row.id === "dev-4";
+    return {
+      ...row,
+      hudState: blocked ? "blocked" : "running",
+      paused: false,
+      stop: null,
+      queuedReview: null,
+      note: blocked ? "Waiting for the breakpoint decision." : null,
+      role: SEAT_ROLES[row.id] ?? "GUIDO",
+      mode: row.id === "dev-9" ? "read-only" : "writer",
+      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+      ticketTitle: ticket?.title ?? null,
+      loop: ticket ? demoLoop() : null,
+      run: {
+        ...(seatRow().run as NonNullable<CrewRow["run"]>),
+        id: `demo-run-${index}`,
+        status: "running",
+        endedAt: null,
+      },
+    };
+  });
+  const config = structuredClone(base.config);
+  for (const session of config.crew?.sessions ?? [])
+    for (const seat of session.seats) seat.role = SEAT_ROLES[seat.id] ?? seat.role;
+  const attention = base.attention.map((entry, i) => ({
+    ...entry,
+    ticket: i === 0 ? `${DEMO_REPO}#104` : entry.ticket,
+    agentId: i === 0 ? "dev-4" : entry.agentId,
+    text: [
+      "Which breakpoint should the address form use: 600 or 720 pixels?",
+      "Confirm the import scope for the order export.",
+      "Choose the retry policy for failed payment webhooks.",
+    ][i] as string,
+  }));
+  const summary: OverviewSummary = {
+    ...base.summary,
+    pipeline: pipelineStages(DEMO_TICKETS),
+    kpis: {
+      ...base.summary.kpis,
+      inFlight: { ...base.summary.kpis.inFlight, count: 9 },
+      needsYou: { ...base.summary.kpis.needsYou, count: attention.length },
+    },
+  };
+  const api: Record<string, unknown> = {
+    ...base.api,
+    ...demoPageAnswers(),
+    ...Object.fromEntries(
+      rows.flatMap((row, index) => {
+        const view = demoAgentView(row, index);
+        return [
+          [`/api/agents/${row.id}`, view],
+          [`/api/crew/${row.id}`, view.row],
+          [`/api/agents/${row.id}/stream?limit=20`, demoStream(row, index)],
+        ];
+      }),
+    ),
+    "/api/crew?shape=summary": { rows, firstRunToday: NOW - 3 * 60 * MIN },
+    "/api/attention": attention,
+    "/api/config": config,
+    "/api/overview": summary,
+    "/api/overview?session=demo": summary,
+    "/api/prs/flow": prFlowView(),
+    "/api/flight/summary": flightSummary(),
+    "/api/settings/away": {
+      on: false,
+      until: "",
+      may: { pickUp: true, research: false, check: true, status: true, safePr: false },
+    },
+  };
+  for (const t of DEMO_TICKETS) api[`/api/tickets/${DEMO_REPO}/${t.n}`] = ticketHistory(t);
+  return { ...base, rows, attention, config, summary, api };
+}
+
+const DEMO_TOOLS = ["Read", "Edit", "Bash", "Grep", "Write"] as const;
+
+/** A seat's page: tools used so far, a build loop part-way through, a story and a next step. */
+function demoAgentView(row: CrewRow, index: number) {
+  const view = agentView(row);
+  const calls = 14 + index * 3;
+  view.tools = {
+    total: calls,
+    failed: 0,
+    byTool: DEMO_TOOLS.map((name, i) => ({
+      name,
+      calls: Math.floor(calls / 5) + (i < calls % 5 ? 1 : 0),
+      failed: 0,
+    })),
+  };
+  view.health = { label: "Running", blocking: null, failedTools: 0 };
+  view.steps = ["plan", "go/no-go", "build", "checks", "review", "draft PR"].map((label, i) => ({
+    id: label,
+    label,
+    state: i < 2 ? "done" : i === 2 ? "current" : "todo",
+    tries: i === 2 ? 1 : null,
+    failures: null,
+    limit: i === 3 || i === 4 ? 3 : null,
+    durationMs: i < 2 ? 4 * MIN : null,
+    since: null,
+    reason: null,
+  }));
+  if (row.digest) {
+    row.digest.toolCalls = calls;
+    row.digest.turns = 6 + index;
+  }
+  view.row = row;
+  return view;
+}
+
+/** What a seat has just done, newest last: reads, edits and a note to the crew. */
+function demoStream(row: CrewRow, index: number) {
+  const tool = (i: number) => {
+    const name = DEMO_TOOLS[(i + index) % DEMO_TOOLS.length] ?? "Read";
+    return {
+      id: `${row.id}:${i}:0`,
+      at: NOW - (8 - i) * MIN,
+      kind: "tool" as const,
+      text: `${name} src/${row.id}/work-${i}.ts`,
+      tool: {
+        name,
+        input: `src/${row.id}/work-${i}.ts`,
+        result: "ok",
+        ms: 120 + i * 40,
+        error: false,
+      },
+    };
+  };
+  return {
+    runId: row.run?.id ?? null,
+    events: [
+      {
+        id: `${row.id}:m`,
+        at: NOW - 9 * MIN,
+        kind: "msg" as const,
+        text: `Starting on ${row.ticketTitle ?? "the next ticket"}.`,
+      },
+      ...Array.from({ length: 6 }, (_, i) => tool(i)),
+    ],
+    tasks: [
+      { id: "t1", text: "Read the module", status: "done" as const },
+      { id: "t2", text: "Make the change", status: "in_progress" as const },
+      { id: "t3", text: "Run the tests", status: "pending" as const },
+    ],
+    truncated: false,
+    hasMore: false,
+    lastOutputAt: NOW - MIN,
+    reason: null,
+  };
+}
+
+/** A running seat's loop: where it is in plan, build, checks and review. */
+export function demoLoop() {
+  return {
+    phase: "working" as const,
+    text: "Building",
+    prNumber: null,
+    parked: null,
+    profile: "feature",
+    step: "build",
+    steps: [
+      { name: "plan", phase: null },
+      { name: "build", phase: "working" as const },
+      { name: "checks", phase: "ci" as const },
+      { name: "review", phase: "review" as const },
+    ],
+    planned: true,
+    tries: { n: 1, max: 3 },
+    wait: null,
+  };
 }

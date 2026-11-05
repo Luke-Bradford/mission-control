@@ -1,9 +1,11 @@
 /**
- * Opt-in pieces for the Setup agent, session and account forms: a named, focusable summary of what
- * stopped a save, per-field error wiring, and a guard against a second submit while one is out.
+ * Opt-in pieces for grouped forms (Setup's agent, session, account, repo and seat forms, and the
+ * Agent page's account switch): a named, focusable summary of what stopped a save, per-field error
+ * wiring, and a guard against a second submit while one is out.
  * It carries no request, cache or authorisation logic: callers keep using apiPost/apiPut.
  */
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import "./forms.css";
 
 /** One known local problem: the id of the field it belongs to, and what to tell the operator. */
 export interface FieldIssue {
