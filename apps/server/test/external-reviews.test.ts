@@ -213,6 +213,31 @@ describe("external PR review subjects", () => {
     expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
   });
 
+  it("reviews an ended run's PR whose head carries a mc/review status with no review row", async () => {
+    buildRun({ endedAt: 2 });
+    store.upsertPullRequests(
+      "sample",
+      [
+        pr({
+          checks: [
+            {
+              name: "mc/review",
+              state: "passing",
+              kind: "status",
+              conclusion: "success",
+              attempt: null,
+              url: null,
+            },
+          ],
+        }),
+      ],
+      2,
+    );
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
   it("requeues on a new SHA and never carries an old verdict onto it", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);

@@ -264,8 +264,10 @@ export function createExternalReviews(deps: {
                 if (
                   reviews.length === 0 &&
                   pr.checks?.some((check) => check.name === REVIEW_STATUS_CONTEXT) &&
-                  // the status is another reviewer's only when this hub has no review of this head
-                  !store.reviewsOfPr(repo.id, pr.number).some((r) => r.sha === pr.headSha)
+                  // the status is another reviewer's only when this hub has no review of this head,
+                  // and the branch has no crew run (its own mc/review may be waived or carried)
+                  !store.reviewsOfPr(repo.id, pr.number).some((r) => r.sha === pr.headSha) &&
+                  !store.runsOnBranch(repo.id, pr.branch).some((run) => run.reviewId == null)
                 )
                   continue;
                 const seat = deps.reviewer(repo.id);

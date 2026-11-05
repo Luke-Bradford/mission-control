@@ -232,6 +232,55 @@ describe("external PR controller merge", () => {
     expect(h.merges).toHaveLength(1);
   });
 
+  it("needs an external review row on a crew branch's head, even with a passing mc/review status", async () => {
+    store.close();
+    store = new Store(":memory:");
+    store.upsertPullRequests("sample", [pr], 1);
+    buildRun(2);
+    const h = harness();
+    expect((await mergeExternalPr(h.deps)).text).toContain("independent clean QA report");
+    expect(h.merges).toHaveLength(0);
+  });
+
+  describe("a crew review row on the same head", () => {
+    const crewRow = (blocking: number) => {
+      buildRun(2);
+      const id = store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: 5,
+      });
+      if (id === null) throw new Error("review fixture missing");
+      store.setReviewState(id, ["queued"], "running", { at: 6, runId: "retro:crew" });
+      store.recordFindings(id, "retro:crew", {
+        verdict: blocking ? { spec: "fail", quality: "pass" } : { spec: "pass", quality: "pass" },
+        summary: "Checked.",
+        findings: [],
+        at: 7,
+      });
+    };
+
+    it("does not undo a clean external review", async () => {
+      crewRow(0);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+      expect(h.merges).toHaveLength(1);
+    });
+
+    it("blocks when it reported a failing verdict after the external one", async () => {
+      crewRow(1);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBe(true);
+      expect(h.merges).toHaveLength(0);
+    });
+  });
+
   it("respects a real external mc/review sign-off without inventing a scratch report", async () => {
     store.close();
     store = new Store(":memory:");

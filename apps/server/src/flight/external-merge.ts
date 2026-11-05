@@ -7,6 +7,7 @@ import {
   FLIGHT_FLOOR_PATHS,
   globMatches,
   REVIEW_STATUS_CONTEXT,
+  type ReviewRow,
   type TicketView,
   ticketControllerCheck,
 } from "@mc/core";
@@ -102,20 +103,29 @@ export async function mergeExternalPr(i: {
       !checks.some((check) => check.name === REVIEW_STATUS_CONTEXT && check.state === "passing")
     )
       return fail("CI and mc/review must pass on this exact head.");
+    const crewBranch = store
+      .runsOnBranch(repo.id, cached.branch)
+      .some((run) => run.reviewId == null);
+    const clean = (row: ReviewRow) =>
+      row.state === "reported" &&
+      row.blocking === 0 &&
+      row.verdict?.spec === "pass" &&
+      row.verdict.quality === "pass";
     const reviewProof = () => {
       const rows = store.reviewsOfPr(repo.id, number).filter((row) => row.sha === sha);
       // #91 respects a real external mc/review status when the hub has no attempt for this head.
       // Never manufacture a scratch report or revive a superseded/failed attempt to represent it.
-      if (rows.length === 0) return null;
-      const row = rows.findLast((value) => value.state !== "superseded");
-      return row &&
-        isExternalReview(row) &&
-        row.state === "reported" &&
-        row.blocking === 0 &&
-        row.verdict?.spec === "pass" &&
-        row.verdict.quality === "pass"
-        ? row
-        : undefined;
+      // A branch with a crew build run is different: its mc/review status may be the crew's own
+      // (waived or carried), so that head still needs an external review row.
+      if (rows.length === 0) return crewBranch ? undefined : null;
+      const live = rows.filter((value) => value.state !== "superseded");
+      const external = live.findLast((row) => isExternalReview(row) && clean(row));
+      if (!external) return undefined;
+      // a later row that reported a problem (or failed) still blocks; a later clean crew row does not
+      const blocked = live
+        .slice(live.indexOf(external) + 1)
+        .some((row) => row.state === "failed" || (row.state === "reported" && !clean(row)));
+      return blocked ? undefined : external;
     };
     const review = reviewProof();
     if (review === undefined)
