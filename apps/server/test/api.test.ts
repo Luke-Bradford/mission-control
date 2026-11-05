@@ -8024,10 +8024,23 @@ describe("the first loop's engine", () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
       const q = passed("parked", "Which provider?");
       const { a, reconciled } = appOnSeat();
-      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
+      const r = await post(a, { text: "Carry on with the migration." });
       expect(r.statusCode).toBe(409);
       expect(r.json().error).toContain("answer it from its Needs-you card");
       expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
+      expect(reconciled).toEqual([]);
+      await a.close();
+    });
+
+    it("still sends an interrupt to the run on the seat while a question waits", async () => {
+      parkedRun("parked", "shop-app#9");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q = passed("parked", "Which provider?");
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
+      expect(r.statusCode).toBe(200);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
       expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
       expect(reconciled).toEqual([]);
       await a.close();

@@ -4252,9 +4252,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             throw new SupervisorError(409, "That question belongs to another seat.");
           }
           // A message that names no question must not land in the run on the seat while another
-          // run waits off the seat on a passed question: it may be that question's answer.
+          // run waits off the seat on a passed question: it may be that question's answer. An
+          // interrupt is never an answer (a Needs-you reply sends none), so it still reaches the run.
           if (
             b.question === undefined &&
+            b.interrupt !== true &&
             store
               .openQuestions()
               .some(

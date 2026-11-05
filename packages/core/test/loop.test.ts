@@ -2544,6 +2544,35 @@ describe("set aside", () => {
       }
     });
 
+    it("sends the answer line before the woken run is set aside again", () => {
+      const pending = { key: "answer:r1:3", text: "x" };
+      const review = () => {
+        const s = base({ operatorAsk: false }, { pendingLine: pending });
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      const ci = () => {
+        const s = base(
+          { operatorAsk: false, pr: pr({ ci: "pending" }), review: facts([]) },
+          {
+            phase: "ci",
+            pushFor: SHA,
+            pushStartedAt: NOW - 60_000,
+            cardFor: "ci:0",
+            pendingLine: pending,
+          },
+        );
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      for (const [name, s] of [
+        ["review", review()],
+        ["ci", ci()],
+      ] as const) {
+        const kinds = kindsOf(reconcile(s).actions);
+        expect(kinds, name).toContain("send");
+        expect(kinds, name).not.toContain("set-aside");
+      }
+    });
+
     it("stays off the seat while the operator has not answered, and comes back after", () => {
       const parked = (operatorAsk: boolean) => {
         const s = off({ operatorAsk, review: null }, { phase: "working", ...asideOf() });

@@ -1463,6 +1463,11 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
+/** A line the engine owes the run (the answer to its parked question) goes before it leaves its seat again. */
+function pendingLineDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  return !loop.aside && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
+}
+
 /** Whether the run being built leaves its seat to wait for the operator's answer, not hold the seat idle. */
 function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat } = s;
@@ -1757,7 +1762,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop) || displaceDue(s, loop) || parkOnPersonDue(s, loop)
+          : !pendingLineDue(s, loop) &&
+              (asideDue(s, loop) || displaceDue(s, loop) || parkOnPersonDue(s, loop))
             ? { kind: "set-aside" }
             : dueLine(s, loop);
     if (line !== null) actions.push(line);
