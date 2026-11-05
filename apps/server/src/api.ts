@@ -608,6 +608,11 @@ const MessageBody = z.strictObject({
     .max(COMMS_MESSAGE_MAX)
     .refine((t) => t.trim() !== "", "must not be blank"),
   interrupt: z.boolean().optional(),
+  /**
+   * The seat question this text answers (a Needs-you reply to an ask item names it). Only then does
+   * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
+   */
+  question: z.number().int().positive().optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4236,19 +4241,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         MessageBody,
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
-          // A passed question whose run was set aside is answered by that run, not the seat's
-          // current one: the reply waits in the run's inbox, only its question closes, and the
-          // engine wakes it. Nothing is written to the run that holds the seat now.
-          const parked = store
-            .openQuestions()
-            .find(
-              (q) =>
-                q.agentId === id &&
-                q.passedAt !== null &&
-                q.runId !== runId &&
-                store.run(q.runId)?.endedAt === null &&
-                store.run(q.runId)?.loop?.aside != null,
-            );
+          // A reply that names a passed question whose run was set aside is that run's answer, not
+          // the run now on the seat's: the text waits in the run's inbox, only that question
+          // closes, and the engine wakes the run. Nothing is written to the run on the seat.
+          const named = b.question === undefined ? null : store.question(b.question);
+          if (b.question !== undefined && (named === null || named.answeredAt !== null)) {
+            throw new SupervisorError(409, "That question is already closed.");
+          }
+          const parked =
+            named !== null &&
+            named.agentId === id &&
+            named.passedAt !== null &&
+            named.runId !== runId &&
+            store.run(named.runId)?.endedAt === null &&
+            store.run(named.runId)?.loop?.aside != null
+              ? named
+              : undefined;
           if (parked !== undefined) {
             const asideRun = store.run(parked.runId);
             try {

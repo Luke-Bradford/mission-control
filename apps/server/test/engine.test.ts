@@ -7352,6 +7352,21 @@ describe("the engine runs reviews", () => {
       expect(sentKeys()).toEqual([answerLineKey(b, id)]);
     });
 
+    it("a question FLIGHT takes back wakes the run with no false answer line", async () => {
+      h.asideOn = true;
+      const b = "guido-1:b";
+      building(b, 7);
+      const id = store.addQuestion({ agentId: SEAT, runId: b, text: "Which provider?", at: clock });
+      store.passQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([b]);
+      store.unpassQuestion(id);
+      await h.engine.reconcileRun(b);
+      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+      await h.engine.reconcileRun(b);
+      expect(h.sent).toEqual([]);
+    });
+
     it("two set-aside reworks come back oldest first", async () => {
       await setAside();
       const younger = "guido-1:younger";

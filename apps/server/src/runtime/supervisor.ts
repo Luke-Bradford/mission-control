@@ -4343,6 +4343,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     removeRunFiles(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
+    // a run set aside on the operator's question leaves no one to answer it
+    store.answerRunQuestions(run.id, at);
+    bus.emit("attention");
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
     await dropScratch(info, run.id, run.seq, worktree);
   }
@@ -4521,6 +4524,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
+        store.answerRunQuestions(runId, at);
+        bus.emit("attention");
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };

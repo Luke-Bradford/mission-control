@@ -149,6 +149,39 @@ describe("questions and strays", () => {
     expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
   });
 
+  it("ending a set-aside run closes its question (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:parked",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, aside: { worktree: "/w/none", wake: false, ask: 1 } },
+    });
+    const q = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "which?",
+      at: 1,
+    });
+    store.passQuestion(q, 2);
+    await sup.endAsideRun("guido-1:parked");
+    expect(store.openQuestions()).toEqual([]);
+  });
+
   it("a run that crashes closes them too", async () => {
     const { sup } = make();
     sup.start();

@@ -1578,9 +1578,10 @@ uncommitted work, is kept as it is; nothing is pushed) and comes back after the 
 wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
 A ticket waiting on a person is parked the same way: when a seat's question has been passed to the
 operator and the seat is between turns, the run leaves its seat (worktree and commits kept) and the seat
-takes its next ticket. The run does not wake while the question is open. The operator's reply to the seat
-is stored for that run (not the run now on the seat), closes only that run's question, and the run comes back
-with one line telling it to read the answer. Another run's end or message on the seat leaves the question open.
+takes its next ticket. The run does not wake while the question is open. A reply that names the question
+(`question` on `POST /api/seats/:id/message`, sent with a Needs-you ask reply) is stored for that run, not the run now on
+the seat, and closes only that question; a message with no `question` goes to the run on the seat as before. The run
+comes back with one line telling it to read the answer, in any phase it was parked in (working, CI or review). Ending the parked run closes its question. Another run's end or message on the seat leaves the question open.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
 `300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;

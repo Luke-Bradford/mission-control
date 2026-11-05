@@ -1586,13 +1586,13 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working"
-            ? waitsOnPerson
-              ? asideForAnswerEventText(call)
-              : asideForReworkEventText(call)
-            : cur.phase === "ci"
-              ? asideInCiEventText(call)
-              : asideEventText(call),
+          waitsOnPerson
+            ? asideForAnswerEventText(call)
+            : cur.phase === "working"
+              ? asideForReworkEventText(call)
+              : cur.phase === "ci"
+                ? asideInCiEventText(call)
+                : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1646,7 +1646,9 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         }
         // a run parked on the operator's question gets one line to carry on with the answer
-        if (cur.aside?.ask !== undefined) {
+        // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
+        // on the seat as any other)
+        if (cur.aside?.ask !== undefined && store.question(cur.aside.ask)?.answeredAt != null) {
           cur.pendingLine = {
             key: answerLineKey(run.id, cur.aside.ask),
             text: answeredLineText,

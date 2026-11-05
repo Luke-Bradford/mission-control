@@ -1459,7 +1459,7 @@ function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
   return (
     s.operatorAsk === true &&
     seat.openQuestion &&
-    loop.phase === "working" &&
+    (loop.phase === "working" || loop.phase === "ci" || loop.phase === "review") &&
     !loop.aside &&
     s.ended === null &&
     seat.holdsRun &&
@@ -1525,7 +1525,13 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const working = loop.phase === "working";
   const reporting = working || loop.phase === "review";
 
-  if (working && !loop.aside && loop.pendingLine && free(loop.pendingLine.key)) {
+  // (in ci or review only the line that carries an answer to a parked question is ever pending)
+  if (
+    (working || loop.phase === "ci" || loop.phase === "review") &&
+    !loop.aside &&
+    loop.pendingLine &&
+    free(loop.pendingLine.key)
+  ) {
     return { kind: "send", key: loop.pendingLine.key, text: loop.pendingLine.text };
   }
 
@@ -1764,13 +1770,18 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
-      // (a working run parked on the operator's question waits for the answer, whatever else holds)
-      loop.aside.wake ||=
-        !(loop.phase === "working" && s.operatorAsk === true) &&
-        ((loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
+      // (a run parked on the operator's question waits for the answer, whatever else holds; once
+      // it is answered the run comes back in any phase)
+      const asked = loop.aside.ask !== undefined;
+      const held = s.operatorAsk === true && (asked || loop.phase === "working");
+      if (!held) {
+        loop.aside.wake ||=
+          asked ||
+          (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
           loop.phase === "working" ||
           !s.asideOk ||
-          fixDue(s, loop));
+          fixDue(s, loop);
+      }
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

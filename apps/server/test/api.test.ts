@@ -7926,7 +7926,7 @@ describe("the first loop's engine", () => {
       method: "POST",
       url: "/api/seats/guido-1/message",
       headers: json,
-      payload: { text: "Use Stripe." },
+      payload: { text: "Use Stripe.", question: qid },
     });
     expect(r.statusCode).toBe(200);
     // only the parked run's question closes, the reply is addressed to that run, and the run now
@@ -7939,6 +7939,93 @@ describe("the first loop's engine", () => {
     expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
     expect(reconciled).toEqual(["parked"]);
     await a.close();
+  });
+
+  describe("a reply while runs wait off the seat on passed questions (#1451)", () => {
+    const parkedRun = (id: string, ticket: string) =>
+      store.upsertRun(
+        run({
+          id,
+          agentId: "guido-1",
+          ticket,
+          loop: { ...loop, phase: "working", aside: { worktree: `/w/${id}`, wake: false } },
+        }),
+      );
+    const passed = (runId: string, text: string) => {
+      const q = store.addQuestion({ agentId: "guido-1", runId, text, at: NOW });
+      store.passQuestion(q, NOW);
+      return q;
+    };
+    const appOnSeat = () => {
+      const reconciled: string[] = [];
+      supervisorCalls.length = 0;
+      const sup = stubSupervisor();
+      sup.seat = () => ({
+        seatId: "guido-1",
+        runId: "next",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        supervisor: sup,
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+          reconcileRun: async (runId: string) => void reconciled.push(runId),
+        },
+      });
+      return { a, reconciled };
+    };
+    const post = (a: FastifyInstance, payload: Record<string, unknown>) =>
+      a.inject({ method: "POST", url: "/api/seats/guido-1/message", headers: json, payload });
+
+    it("a message that names no question goes to the run on the seat and closes nothing", async () => {
+      parkedRun("parked", "shop-app#9");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q = passed("parked", "Which provider?");
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
+      expect(r.statusCode).toBe(200);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
+      expect(reconciled).toEqual([]);
+      await a.close();
+    });
+
+    it("answers the question it names, with two runs waiting", async () => {
+      parkedRun("p1", "shop-app#9");
+      parkedRun("p2", "shop-app#11");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q1 = passed("p1", "Which provider?");
+      const q2 = passed("p2", "Delete the old table?");
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, { text: "Yes, delete it.", question: q2 });
+      expect(r.statusCode).toBe(200);
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q1]);
+      expect(store.comms(0, "p2").map((m) => m.text)).toEqual(["Yes, delete it."]);
+      expect(store.comms(0, "p1")).toEqual([]);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
+      expect(reconciled).toEqual(["p2"]);
+      await a.close();
+    });
+
+    it("refuses an answer to a question that has already closed", async () => {
+      parkedRun("p1", "shop-app#9");
+      const q = passed("p1", "Which provider?");
+      store.answerQuestion(q, NOW);
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "late", question: q });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("already closed");
+      expect(store.comms(0, "p1")).toEqual([]);
+      await a.close();
+    });
   });
 
   it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
