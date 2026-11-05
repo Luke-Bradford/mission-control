@@ -20,6 +20,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -52,6 +53,7 @@ import {
   type FlightBriefSection,
   type FlightBriefView,
   type FlightDecision,
+  type FlightIdleSeats,
   type FlightMemoryKind,
   type FlightMemoryNote,
   type FlightMemoryTitle,
@@ -68,6 +70,7 @@ import {
   flightContextText,
   hudColumnOf,
   type ItemDiscussion,
+  idlePeriod,
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_FLIGHT,
@@ -356,6 +359,7 @@ export function nextWakeAt(
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
+  if (s.wake?.idle) times.push(idleWakeAt(s.wake.idle));
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
 
@@ -654,7 +658,97 @@ function wakeInputs(i: {
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
-  return { fit, fresh };
+  const idle = idleSeats(i, waits, rules, fit);
+  return idle === undefined ? { fit, fresh } : { fit, fresh, idle };
+}
+
+/** The setting that keeps when a seat first stood idle with tickets open (the hub's own record). */
+export const FLIGHT_IDLE_SEAT_SETTING = "flight.idle-seat";
+
+const readIdleSince = (store: Store): number | null => {
+  try {
+    const v = JSON.parse(store.getSetting(FLIGHT_IDLE_SEAT_SETTING) ?? "null") as {
+      since?: unknown;
+    } | null;
+    return typeof v?.since === "number" ? v.since : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The free build seats that have open tickets near their area (Backlog, Refinement or Ready) and no
+ * FLIGHT wait on them or the ticket, read from the board with no FLIGHT tokens. A ticket is near a
+ * seat when its one area label is the seat's, or it has none or several (it needs triage).
+ */
+function idleSeats(
+  i: Parameters<typeof wakeInputs>[0],
+  waits: Record<string, { until: number }>,
+  rules: { areas: Record<string, string[]> } | null,
+  fit: Record<string, string[]>,
+): FlightIdleSeats | undefined {
+  // a ticket held behind an open PR is waiting by FLIGHT's own choice, not open work for a seat
+  const held = new Set(i.store.activeHolds().map((h) => h.ref));
+  const open = i.tickets.filter((t) => !held.has(t.ref) && !waitingOn(waits, t.ref, i.now));
+  const near = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
+    if (rules === null || Object.keys(rules.areas).length === 0) return true;
+    if (claimedByOther(t, i.hubLogin)) return false;
+    const label = areaLabelsOf(rules, t);
+    return label.length !== 1 || areaLabelsFor(rules, seat.area).includes(label[0] ?? "");
+  };
+  const seats = i.seats
+    .filter((x) => x.loop === "build" && x.free && !waitingOn(waits, x.id, i.now))
+    .map((x) => ({ id: x.id, near: open.filter((t) => near(x, t)) }))
+    .filter((x) => x.near.length > 0);
+  if (seats.length === 0) return undefined;
+  const tickets = [...new Map(seats.flatMap((x) => x.near).map((t) => [t.ref, t])).values()];
+  const since = readIdleSince(i.store) ?? i.now;
+  return {
+    seats: seats.map((x) => x.id).sort(),
+    open: tickets.map((t) => t.ref).sort(),
+    untriaged: tickets
+      .filter((t) => t.noStatus === true)
+      .map((t) => t.ref)
+      .sort(),
+    ready: [...new Set(seats.flatMap((x) => fit[x.id] ?? []))].sort(),
+    since,
+    ms: Math.max(0, i.now - since),
+  };
+}
+
+/**
+ * Keeps when the idle spell began: written when seats first idle with tickets open, cleared when
+ * none do. The watcher calls it on each look; reads of the state never write.
+ */
+export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: number): void {
+  const idle = s.wake?.idle;
+  const held = store.getSetting(FLIGHT_IDLE_SEAT_SETTING);
+  if (idle === undefined) {
+    if (held !== null && held !== "") store.setSetting(FLIGHT_IDLE_SEAT_SETTING, "");
+    return;
+  }
+  if (readIdleSince(store) === null) {
+    store.setSetting(FLIGHT_IDLE_SEAT_SETTING, JSON.stringify({ since: idle.since || now }));
+  }
+}
+
+/** The log line for an idle spell past one period: how long, and why nothing started. */
+export function idleSeatLine(idle: FlightIdleSeats): string {
+  const why =
+    idle.ready.length > 0
+      ? `Ready ${idle.ready.join(", ")} not started`
+      : "no Ready ticket fits; FLIGHT has promoted none and logged no wait";
+  const triage =
+    idle.untriaged.length > 0 ? ` (${idle.untriaged.length} with no board status)` : "";
+  return `flight watch: seat idle: ${idle.seats.join(", ")} for ${Math.floor(idle.ms / 60_000)} min with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
+}
+
+/** When FLIGHT is next woken about idle seats: a period boundary, or the first one. */
+export function idleWakeAt(idle: FlightIdleSeats): number {
+  const period = idlePeriod(idle);
+  return (
+    idle.since + FLIGHT_IDLE_MS + (period === null ? 0 : (period + 1) * FLIGHT_IDLE_SEAT_WAKE_MS)
+  );
 }
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
@@ -868,6 +962,7 @@ export function flightState(i: {
         priority: b.priority,
         labels: b.labels,
         ready: column === "Ready" || b.labels.includes(READY_LABEL),
+        ...(b.status.trim() === "" ? { noStatus: true } : {}),
         blockedBy: b.blockedBy.filter((x) => x.closed).map((x) => x.ref),
         laneLabel: b.labels.find((l) => l.startsWith(LANE_LABEL_PREFIX)) ?? null,
         assignees: b.assignees ?? [],
@@ -1431,6 +1526,8 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: startable.sort(),
+    // seats idle with tickets open: a new fact each 30 minutes, until one starts or FLIGHT logs a wait
+    idle: idleFacts(s.wake?.idle),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
       ...s.seats
@@ -1461,6 +1558,12 @@ export function wakeFacts(
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
+
+/** The idle-seat facts: each seat with the period of its spell, so a new period is a new fact. */
+const idleFacts = (idle: FlightIdleSeats | undefined): string[] => {
+  const period = idle === undefined ? null : idlePeriod(idle);
+  return idle === undefined || period === null ? [] : idle.seats.map((x) => `${x}:${period}`);
+};
 
 /** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
 export const itemFactId = (x: { kind: string; key: string; text: string }): string =>
@@ -1522,6 +1625,7 @@ export function pending(
     releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     startableFor(s).free.length > 0 ||
+    idleFacts(s.wake?.idle).length > 0 ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );

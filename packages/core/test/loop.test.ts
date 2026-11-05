@@ -2394,6 +2394,51 @@ describe("set aside", () => {
     });
   });
 
+  describe("a question the operator must answer", () => {
+    const waiting = (over: Partial<LoopSnapshot> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, operatorAsk: true, ...over },
+        { phase: "working", cardFor: "working:0" },
+      );
+      return {
+        ...s,
+        seat: { ...s.seat, state: "idle" as const, inTurn: false, openQuestion: true },
+      };
+    };
+
+    it("parks the ticket: the run leaves its seat so the seat can take the next one", () => {
+      const r = reconcile(waiting());
+      expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+    });
+
+    it("keeps a question that is not the operator's, a running turn or a missing seat", () => {
+      const w = waiting();
+      const cases: [string, LoopSnapshot][] = [
+        ["FLIGHT's question", waiting({ operatorAsk: false })],
+        ["in turn", { ...w, seat: { ...w.seat, inTurn: true } }],
+        ["not idle", { ...w, seat: { ...w.seat, state: "running" } }],
+        ["seat does not hold the run", { ...w, seat: { ...w.seat, holdsRun: false } }],
+        ["ended", waiting({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("stays off the seat while the operator has not answered, and comes back after", () => {
+      const parked = (operatorAsk: boolean) => {
+        const s = off({ operatorAsk, review: null }, { phase: "working", ...asideOf() });
+        return { ...s, seat: { ...s.seat, openQuestion: operatorAsk } };
+      };
+      const held = reconcile(parked(true));
+      expect(held.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+      expect(kindsOf(held.actions)).not.toContain("wake");
+      const answered = reconcile(parked(false));
+      expect(answered.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+      expect(kindsOf(answered.actions)).toContain("wake");
+    });
+  });
+
   it("not set aside", () => {
     const b = base();
     const cases: [string, LoopSnapshot][] = [

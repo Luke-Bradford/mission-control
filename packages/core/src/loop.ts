@@ -510,6 +510,8 @@ export const asideEventText = (call: string): string =>
 export const asideInCiEventText = (call: string): string =>
   `in CI; ${call} is free for its next ticket`;
 /** A run still being built leaves its seat for rework due on another of the seat's PRs. */
+export const asideForAnswerEventText = (call: string): string =>
+  `waiting on the operator's answer; ${call} is free for its next ticket and this one comes back once answered`;
 export const asideForReworkEventText = (call: string): string =>
   `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
@@ -629,6 +631,11 @@ export interface LoopSnapshot {
   };
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
+  /**
+   * The run has an open question that waits on the operator. Its seat is not held for the answer:
+   * the run is parked off the seat, which takes the next ticket, and the run comes back once answered.
+   */
+  operatorAsk?: boolean;
   /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
   reworkDue?: boolean;
   /** The latest evidence. */
@@ -1441,6 +1448,21 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
+/** Whether the run being built leaves its seat to wait for the operator's answer, not hold the seat idle. */
+function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat } = s;
+  return (
+    s.operatorAsk === true &&
+    seat.openQuestion &&
+    loop.phase === "working" &&
+    !loop.aside &&
+    s.ended === null &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn
+  );
+}
+
 /**
  * Whether the run being built leaves its seat at this turn end because rework is due on another of
  * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
@@ -1698,7 +1720,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop) || displaceDue(s, loop)
+          : asideDue(s, loop) || displaceDue(s, loop) || parkOnPersonDue(s, loop)
             ? { kind: "set-aside" }
             : dueLine(s, loop);
     if (line !== null) actions.push(line);
@@ -1737,11 +1759,13 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
+      // (a working run parked on the operator's question waits for the answer, whatever else holds)
       loop.aside.wake ||=
-        (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
-        loop.phase === "working" ||
-        !s.asideOk ||
-        fixDue(s, loop);
+        !(loop.phase === "working" && s.operatorAsk === true) &&
+        ((loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
+          loop.phase === "working" ||
+          !s.asideOk ||
+          fixDue(s, loop));
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

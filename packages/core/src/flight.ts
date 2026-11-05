@@ -919,6 +919,8 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** While a free build seat has open tickets near it and nothing starts, the hub wakes FLIGHT this often. */
+export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
 export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
@@ -1021,6 +1023,8 @@ export interface FlightState {
     priority: string | null;
     labels: string[];
     ready: boolean;
+    /** The ticket has no board status at all: it has not been triaged. */
+    noStatus?: boolean;
     blockedBy: string[];
     laneLabel: string | null;
     assignees: string[];
@@ -1120,7 +1124,36 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /**
+   * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
+   * that has stood. Absent when no seat is in that state.
+   */
+  idle?: FlightIdleSeats;
 }
+
+/** Free build seats that sit idle while tickets are open near them. */
+export interface FlightIdleSeats {
+  seats: string[];
+  /** Every open ticket near one of the seats. */
+  open: string[];
+  /** The open tickets with no board status: work to triage. */
+  untriaged: string[];
+  /** The Ready tickets among them that no seat has started. */
+  ready: string[];
+  /** When this began (the hub's own record); `ms` runs from it to now. */
+  since: number;
+  ms: number;
+}
+
+/** The 30-minute period an idle spell is in once it has stood FLIGHT_IDLE_MS; null before. */
+export const idlePeriod = (idle: Pick<FlightIdleSeats, "ms">): number | null =>
+  idle.ms < FLIGHT_IDLE_MS
+    ? null
+    : Math.floor((idle.ms - FLIGHT_IDLE_MS) / FLIGHT_IDLE_SEAT_WAKE_MS);
+
+/** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
+export const IDLE_SEAT_ASK =
+  "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
 export interface FlightWakeList<T> {
   entries: T[];
@@ -1304,6 +1337,9 @@ export function wakeSummary(s: FlightState): string {
     s.triage.length > 0 ? `${counted(s.triage.length, "ticket", "tickets")} to triage` : "",
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
+    s.wake?.idle && idlePeriod(s.wake.idle) !== null
+      ? `${counted(s.wake.idle.seats.length, "seat", "seats")} idle ${Math.floor(s.wake.idle.ms / 60_000)} min with ${counted(s.wake.idle.open.length, "open ticket", "open tickets")}${s.wake.idle.untriaged.length > 0 ? ` (${s.wake.idle.untriaged.length} with no board status to triage)` : ""}`
+      : "",
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
@@ -1327,7 +1363,8 @@ export function wakeLine(
     (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
       ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const idleSeats = s.wake?.idle && idlePeriod(s.wake.idle) !== null ? ` ${IDLE_SEAT_ASK}` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

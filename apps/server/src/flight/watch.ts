@@ -16,6 +16,7 @@ import {
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
@@ -57,6 +58,7 @@ import {
   flightState,
   flightWake,
   flightWakes,
+  idleSeatLine,
   markItemsShown,
   markPrsShown,
   nextWakeAt,
@@ -66,6 +68,7 @@ import {
   recordFlightWake,
   recordNextFlightWake,
   recordWakeReasons,
+  trackIdleSeat,
   unhandledReasons,
   type WakeReason,
   wakeFacts,
@@ -559,6 +562,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       lock: deps.lockState?.(),
       areas: await deps.areas?.(found.session.repoId),
     });
+    trackIdleSeat(store, state, t);
+    logIdleSeats(state);
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
@@ -665,6 +670,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   let gapTimer: NodeJS.Timeout | null = null;
+  /** The last 30-minute period of an idle spell that was logged: one line per period. */
+  let loggedIdle: { since: number; period: number } | null = null;
+  /** Every period over 30 minutes with a free seat and open tickets: how long, and why. */
+  function logIdleSeats(state: FlightState): void {
+    const idle = state.wake?.idle;
+    if (idle === undefined) {
+      loggedIdle = null;
+      return;
+    }
+    const period = Math.floor(idle.ms / FLIGHT_IDLE_SEAT_WAKE_MS);
+    if (period < 1) return;
+    if (loggedIdle?.since === idle.since && loggedIdle.period >= period) return;
+    loggedIdle = { since: idle.since, period };
+    log(idleSeatLine(idle));
+  }
+
   /** Checks again once the wake gap has passed; one pending re-check at a time. */
   function later(ms: number): void {
     if (gapTimer !== null || stopped) return;

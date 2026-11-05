@@ -7315,6 +7315,29 @@ describe("the engine runs reviews", () => {
       expect(store.seatSession(SEAT)?.runId).toBe(b);
     });
 
+    it("a ticket waiting on the operator's answer leaves its seat for the next ticket, and returns once answered", async () => {
+      h.asideOn = true;
+      const b = "guido-1:b";
+      building(b, 7);
+      const id = store.addQuestion({ agentId: SEAT, runId: b, text: "Which provider?", at: clock });
+      // asked, but FLIGHT has not passed it to the operator: the seat keeps the ticket
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([]);
+      // with the operator: the ticket is parked off the seat, which is offered the next ticket
+      store.passQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([b]);
+      await vi.waitFor(() =>
+        expect(store.run(b)?.loop?.aside).toEqual({ worktree: expect.any(String), wake: false }),
+      );
+      await h.engine.reconcileRun(b);
+      expect(h.wakes).toEqual([]);
+      // answered: the ticket comes back
+      store.answerQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+    });
+
     it("two set-aside reworks come back oldest first", async () => {
       await setAside();
       const younger = "guido-1:younger";

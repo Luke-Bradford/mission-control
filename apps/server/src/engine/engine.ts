@@ -20,6 +20,7 @@ import {
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
   asideEventText,
+  asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -952,6 +953,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      // a question FLIGHT passed to the operator: the run waits off its seat for the answer
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
@@ -1562,7 +1565,11 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
-        cur.aside = { worktree, wake: cur.phase === "working" };
+        // (not while the run waits for the operator's answer: that wakes it)
+        const waitsOnPerson = store
+          .openQuestions()
+          .some((q) => q.runId === run.id && q.passedAt !== null);
+        cur.aside = { worktree, wake: cur.phase === "working" && !waitsOnPerson };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1575,7 +1582,9 @@ export function createEngine(deps: EngineDeps): Engine {
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
           cur.phase === "working"
-            ? asideForReworkEventText(call)
+            ? waitsOnPerson
+              ? asideForAnswerEventText(call)
+              : asideForReworkEventText(call)
             : cur.phase === "ci"
               ? asideInCiEventText(call)
               : asideEventText(call),
