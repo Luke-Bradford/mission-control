@@ -127,8 +127,10 @@ describe("design previews in a real browser", () => {
     hub.server.on("request", (req) => {
       if (req.url?.startsWith("/api/")) arrived.push(`${req.method} ${req.url}`);
     });
-    hub.server.on("upgrade", (req) => {
+    hub.server.on("upgrade", (req, socket) => {
       if (req.url?.startsWith("/api/")) arrived.push(`UPGRADE ${req.url}`);
+      // the hub has no upgrade route: close it as Node does without a listener, so the page's WebSocket fails
+      socket.destroy();
     });
     hub.addHook("onResponse", async (req, reply) => {
       if (req.url.startsWith("/api/"))
@@ -161,7 +163,8 @@ const tries = [
   () => new Promise((ok) => { const i = new Image(); i.onload = () => ok("loaded"); i.onerror = () => ok("error"); i.src = HUB + "/api/crew"; }),
   () => new Promise((ok) => { try { const w = new WebSocket(HUB.replace("http", "ws") + "/api/stream"); w.onerror = () => ok("error"); w.onopen = () => { w.close(); ok("open"); }; } catch (e) { ok("threw"); } }),
 ];
-Promise.allSettled(tries.map((t, i) => t().then((v) => note("try" + i, "ok " + v), (e) => note("try" + i, "failed " + e)))).then(() => { document.documentElement.dataset.done = "1"; });
+const limit = (p) => Promise.race([p, new Promise((ok) => setTimeout(() => ok("no answer"), 10000))]);
+Promise.allSettled(tries.map((t, i) => limit(t()).then((v) => note("try" + i, "ok " + v), (e) => note("try" + i, "failed " + e)))).then(() => { document.documentElement.dataset.done = "1"; });
 `,
     );
 
