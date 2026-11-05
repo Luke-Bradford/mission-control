@@ -100,6 +100,7 @@ import {
 } from "../src/collectors/notifications.ts";
 import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
+import { DesignPreviews } from "../src/design-previews.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
@@ -1401,6 +1402,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
+  ["GET", "/api/design-previews"],
+  ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
   ["POST", "/api/previews/41/activity", {}],
@@ -2315,6 +2318,7 @@ describe("local access", () => {
     for (const [method, url, body] of API_ROUTES) {
       if (url.startsWith("/api/qa-reports") || url.startsWith("/api/qa-report-assets")) continue; // durable archive auth/reads have their own tests
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.startsWith("/api/design-previews")) continue; // the design preview tests below cover them
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
@@ -2639,6 +2643,15 @@ describe("local access", () => {
     expect(gqlCalls).toEqual([]);
   });
 
+  it("refuses a same-site request under /api (403): a design preview on another port is same-site", async () => {
+    const headers = { "sec-fetch-site": "same-site" };
+    for (const url of ["/api/crew", "/api/boards/shop-app/setup"]) {
+      const r = await app.inject({ method: "GET", url, headers });
+      expect(r.statusCode, url).toBe(403);
+      expect(r.json()).toEqual({ error: "cross-site request refused" });
+    }
+  });
+
   it("lets same-origin, none and header-less GETs reach the handler", async () => {
     for (const headers of [{ "sec-fetch-site": "same-origin" }, { "sec-fetch-site": "none" }, {}]) {
       const r = await app.inject({ method: "GET", url: "/api/boards/shop-app/setup", headers });
@@ -2729,6 +2742,7 @@ describe("local access", () => {
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
+            .replace("/design-previews/41/open", "/design-previews/:ticket/open")
             .replace("/previews/41/activity", "/previews/:pr/activity")
             .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
@@ -9466,6 +9480,7 @@ describe("operator token", () => {
     expect(bare.statusCode).toBe(403);
     expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    expect((await boot({ "sec-fetch-site": "same-site" })).statusCode).toBe(403);
     const fromAddress = (remoteAddress: string) =>
       guarded.inject({
         method: "GET",
@@ -10159,5 +10174,38 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
+  });
+});
+
+describe("design preview routes", () => {
+  it("list and open need the operator token, and open answers 404 for a ticket with no stored preview", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mc-dp-api-"));
+    const previews = new DesignPreviews({
+      root: join(dir, "store"),
+      port: 7440,
+      hubPort: 7420,
+      prOf: () => null,
+    });
+    const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });
+    try {
+      const key = { [OPERATOR_HEADER]: "tok" };
+      expect((await a.inject("/api/design-previews")).statusCode).toBe(401);
+      expect(
+        (await a.inject({ method: "POST", url: "/api/design-previews/1/open", headers: json, payload: {} }))
+          .statusCode,
+      ).toBe(401);
+      expect((await a.inject({ url: "/api/design-previews", headers: key })).json()).toEqual([]);
+      const none = await a.inject({
+        method: "POST",
+        url: "/api/design-previews/1/open",
+        headers: { ...key, ...json },
+        payload: {},
+      });
+      expect(none.statusCode).toBe(404);
+      expect(none.json()).toEqual({ error: "No stored preview for this ticket." });
+    } finally {
+      await a.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

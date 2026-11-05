@@ -258,6 +258,7 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -313,6 +314,7 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
+      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",

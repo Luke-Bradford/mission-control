@@ -112,6 +112,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { PreviewRefused } from "../src/design-previews.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
@@ -378,6 +379,7 @@ describe("the mc tools", () => {
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
       [MC_TOOL_NAMES.prBody, ["writer"]],
+      [MC_TOOL_NAMES.publishPreview, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
       ["report_evidence", ["writer", "read-only"]],
@@ -395,6 +397,7 @@ describe("the mc tools", () => {
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
       MC_TOOLS.prBody,
+      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
       MC_TOOLS.reportEvidence,
@@ -462,6 +465,71 @@ describe("sync_main", () => {
       isError: true,
     });
     expect(calls).toEqual([RUN]);
+  });
+});
+
+describe("publish_preview", () => {
+  const published: Array<{ ticket: number; branch: string; sha: string; worktree: string }> = [];
+  const previews = (running: boolean, refuse?: string): McToolsDeps["designPreviews"] => ({
+    repoId: "mc",
+    url: "http://127.0.0.1:7440/",
+    publish: async (input) => {
+      if (refuse !== undefined) throw new PreviewRefused(refuse);
+      published.push(input);
+      return {
+        ticket: input.ticket,
+        branch: input.branch,
+        sha: input.sha,
+        publishedAt: NOW,
+        pr: null,
+        running,
+        url: "http://127.0.0.1:7440/",
+      };
+    },
+  });
+  const call = (over: Partial<McToolsDeps>, args: unknown = {}) =>
+    tool(MC_TOOL_NAMES.publishPreview, make(over)).call(CTX, args);
+
+  it("publishes the committed branch, and says whether it is running", async () => {
+    published.length = 0;
+    const sha = head();
+    const r = await call({ designPreviews: previews(true) });
+    expect(r.text).toBe(
+      `Preview published for #42 at ${sha.slice(0, 7)} and running at http://127.0.0.1:7440/. It stops after an hour unused. It is deleted when the PR closes or after 7 days.`,
+    );
+    expect(published).toEqual([{ ticket: 42, branch: BRANCH, sha, worktree: wt }]);
+    expect((await call({ designPreviews: previews(false) })).text).toBe(
+      `Preview published for #42 at ${sha.slice(0, 7)}. Another preview is running, so this one waits until the operator opens it.`,
+    );
+  });
+
+  it("refuses a dirty tree, an unserved build and a hub without previews", async () => {
+    published.length = 0;
+    write("apps/a.ts", "dirty\n");
+    expect(await call({ designPreviews: previews(true) })).toEqual({
+      text: "Not published: commit your changes first, so the preview matches a commit.",
+      isError: true,
+    });
+    expect(published).toEqual([]);
+    git(wt, "checkout", "--", "apps/a.ts");
+    expect(await call({ designPreviews: previews(true, "Not published: x.sh in the build.") })).toEqual({
+      text: "Not published: x.sh in the build.",
+      isError: true,
+    });
+    expect(await call({})).toEqual({
+      text: "Not published: this hub cannot serve previews of this repo. Ask FLIGHT.",
+      isError: true,
+    });
+    expect((await call({ designPreviews: previews(true) }, { x: 1 })).text).toMatch(
+      /^Invalid arguments:/,
+    );
+    liveSeat("retro", "retro:1");
+    expect(
+      (await tool(MC_TOOL_NAMES.publishPreview, make({ designPreviews: previews(true) })).call(
+        { seatId: "retro", runId: "retro:1" },
+        {},
+      )).isError,
+    ).toBe(true);
   });
 });
 

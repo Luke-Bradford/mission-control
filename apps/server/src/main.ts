@@ -103,6 +103,11 @@ import { createPrEvidence } from "./pr-evidence/capture.ts";
 import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
+import {
+  DESIGN_PREVIEW_PORT,
+  DESIGN_PREVIEW_SWEEP_MS,
+  DesignPreviews,
+} from "./design-previews.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
 import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
@@ -356,6 +361,21 @@ export async function main(): Promise<void> {
     config.repos,
     config.crew?.sessions ?? [],
   );
+  // A seat's published design previews (its branch's built app, shown with Demo data): live hub only.
+  const designPreviews =
+    !preview && previewRepoId !== undefined
+      ? new DesignPreviews({
+          root: join(dirname(dbPath), "design-previews"),
+          port: DESIGN_PREVIEW_PORT,
+          hubPort: port,
+          // the newest PR of the branch decides: a closed one takes its preview with it
+          prOf: (branch) => {
+            const row = store.pullRequests(previewRepoId).find((pr) => pr.branch === branch);
+            return row === undefined ? null : { number: row.number, state: row.state };
+          },
+          log: (line) => log(line),
+        })
+      : undefined;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;
@@ -595,6 +615,15 @@ export async function main(): Promise<void> {
         );
       });
     },
+    ...(designPreviews === undefined || previewRepoId === undefined
+      ? {}
+      : {
+          designPreviews: {
+            repoId: previewRepoId,
+            url: `http://${HOST}:${DESIGN_PREVIEW_PORT}/`,
+            publish: (input) => designPreviews.publish(input),
+          },
+        }),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -906,6 +935,7 @@ export async function main(): Promise<void> {
     qaReports,
     previews,
     previewRepoId,
+    designPreviews,
     previewActivity,
     hudShots,
     prEvidence: evidenceStore,
@@ -992,6 +1022,18 @@ export async function main(): Promise<void> {
     if (r.tokens + r.holds > 0) {
       log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
     }
+  }
+  if (designPreviews !== undefined) {
+    const sweep = setInterval(() => void designPreviews.sweep(), DESIGN_PREVIEW_SWEEP_MS);
+    sweep.unref();
+    app.addHook("onClose", async () => {
+      clearInterval(sweep);
+      await designPreviews.close();
+    });
+    // a taken port must not stop the hub: previews just cannot be shown
+    await designPreviews.listen().catch((e: unknown) => {
+      log(`design previews: cannot listen on ${DESIGN_PREVIEW_PORT}: ${String(e)}`);
+    });
   }
   await app.listen({ host: HOST, port });
   // External service tooling can identify this hub without inspecting a process command line.
