@@ -1,4 +1,4 @@
-import { type RefObject, useLayoutEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 
 /** Actual layout feedback belongs to this note, never to the roster's clock/data projection. */
 export function CrewOverflowNote({
@@ -13,7 +13,7 @@ export function CrewOverflowNote({
   pending: boolean;
 }) {
   const [text, setText] = useState("");
-  useLayoutEffect(() => {
+  useEffect(() => {
     const region = table.current;
     if (!region) return;
     const measure = () => {

@@ -2738,3 +2738,119 @@ button.quota-details {
   align-items: center;
   min-height: var(--sp-5);
 }
+
+/* Crew under enlarged text. Every track is its accepted pixel width or the same width in em of the
+   row's own text size, whichever is larger: at normal text the pixels win and nothing moves; with
+   enlarged text the columns grow with the words in them. The table then scrolls sideways, with the
+   header and the State and Seat cells held in place. */
+@property --crew-state-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 88px;
+}
+#agentsList {
+  overflow-x: auto;
+}
+#agentsList .trow {
+  /* Head and body rows share one em, so their tracks line up whatever the text size. */
+  font-size: var(--fs);
+  --crew-state-w: max(88px, 6.7em);
+  min-width: min-content;
+  grid-template-columns:
+    var(--crew-state-w) max(168px, 12.9em)
+    minmax(max(0px, calc((1em - 13px) * 16)), 1fr)
+    max(104px, 7.9em) max(168px, 12.9em) max(44px, 3.3em) max(40px, 3em) max(48px, 3.6em);
+}
+@container agents (min-width: 1440px) {
+  #agentsList .trow {
+    grid-template-columns:
+      var(--crew-state-w) max(168px, 12.9em)
+      minmax(max(0px, calc((1em - 13px) * 16)), 1fr)
+      max(104px, 7.9em) max(224px, 17.2em) max(52px, 4em) max(52px, 4em) max(52px, 4em)
+      max(40px, 3em) max(60px, 4.6em) max(48px, 3.6em);
+  }
+}
+#agentsList .trow.head {
+  height: auto;
+  min-height: var(--sp-5);
+}
+#agentsList .trow.head > span {
+  font-size: var(--fs-s);
+}
+#agentsList .state-cell .pill,
+#agentsList .state-cell .pill > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+/* The held cells fill their row and reach the table's left edge, so scrolled content never shows
+   beside, above or below them. Their padding keeps the words where they were. */
+#agentsList .trow > :first-child,
+#agentsList .trow > :nth-child(2) {
+  position: sticky;
+  z-index: 1;
+  align-self: stretch;
+  justify-content: center;
+  background: var(--surface);
+}
+#agentsList .trow > :first-child {
+  left: 0;
+  margin-left: calc(-1 * var(--sp-3));
+  padding-left: var(--sp-3);
+  /* Reach over the column gap so nothing scrolls into view between State and Seat. */
+  margin-right: calc(-1 * var(--sp-2));
+  padding-right: var(--sp-2);
+}
+/* The heading rule caps cells at their track; State's heading must reach as far as its cells do. */
+#agentsList .trow.head > :first-child {
+  max-width: none;
+}
+/* The row's own tint is translucent: paint the same tint over an opaque surface. */
+#agentsList .trow.flight > :first-child,
+#agentsList .trow.flight > :nth-child(2) {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--accent-soft) 45%, transparent),
+      color-mix(in srgb, var(--accent-soft) 45%, transparent)
+    ),
+    var(--surface);
+}
+#agentsList .trow:not(.head):hover > :first-child,
+#agentsList .trow:not(.head):hover > :nth-child(2),
+#agentsList .trow.sel > :first-child,
+#agentsList .trow.sel > :nth-child(2) {
+  background: var(--surface-2);
+}
+#agentsList .trow.needs::before,
+#agentsList .trow.going::before {
+  z-index: 2;
+}
+/* Below 640px the Seat scrolls with the rest and only State is held. */
+@container agents (max-width: 639px) {
+  #agentsList .trow > :nth-child(2) {
+    position: static;
+    align-self: center;
+    background: none;
+  }
+  #agentsList .trow.flight > :nth-child(2),
+  #agentsList .trow:not(.head):hover > :nth-child(2),
+  #agentsList .trow.sel > :nth-child(2) {
+    background: none;
+  }
+}
+@container agents (min-width: 640px) {
+  /* The seat stays beside its State. */
+  #agentsList .trow > :nth-child(2) {
+    left: calc(var(--sp-3) + var(--crew-state-w) + var(--sp-2));
+  }
+}
+/* Headings and loading bars are plain blocks: centre the stretched held cells' content so it sits
+   where the other columns' does. */
+#agentsList .trow.head > :first-child,
+#agentsList .trow.head > :nth-child(2),
+#agentsList .crew-skeleton > :first-child,
+#agentsList .crew-skeleton > :nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+}

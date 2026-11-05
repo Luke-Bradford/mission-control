@@ -23,23 +23,9 @@
   max-width: 100%;
 }
 
+/* The Switch account form is a grouped form (components/forms.css) that takes its own row. */
 .account-chooser {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-1);
   flex-basis: 100%;
   min-width: 0;
-  max-width: 100%;
   overflow-wrap: anywhere;
-}
-
-.account-chooser label,
-.account-chooser select {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.account-chooser select {
-  width: 24ch;
 }

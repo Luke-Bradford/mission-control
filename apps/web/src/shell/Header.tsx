@@ -14,6 +14,7 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { DEMO_MARKER_TEXT, useDemo } from "../demo/mode.ts";
 import { hhmm, hms, MONTHS, percent, plural, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
@@ -39,9 +40,10 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
   const attention = useNeedsYou();
+  const demo = useDemo();
   return (
     <header className="top">
-      <span className="brand">MISSION CONTROL</span>
+      {demo ? <DemoMarker /> : <span className="brand">MISSION CONTROL</span>}
       <nav className="tabs" aria-label="Pages">
         {TABS.map((t) => (
           <Tab key={t.label} to={t.to} on={page === t.page}>
@@ -66,6 +68,20 @@ export function Header({ page }: { page: Page }) {
         <Met />
       </span>
     </header>
+  );
+}
+
+/** Says on every page that the crew is simulated: the word, not only the colour. */
+function DemoMarker() {
+  return (
+    <span
+      className="brand demo-marker"
+      role="img"
+      aria-label={DEMO_MARKER_TEXT}
+      title={DEMO_MARKER_TEXT}
+    >
+      DEMO
+    </span>
   );
 }
 
