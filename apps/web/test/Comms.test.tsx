@@ -1,3 +1,4 @@
+import { COMMS_CAPCOM } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
@@ -337,6 +338,20 @@ describe("Comms routes", () => {
       await open({ ...base, from: "sender", ticket: null, ref: null, text: "check #5" });
       const link = await screen.findByRole("link", { name: "#5" });
       expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+    });
+
+    it("uses the recipient's repo when the sender, CAPCOM, has none", async () => {
+      await open({
+        ...base,
+        from: COMMS_CAPCOM,
+        to: "sender",
+        ticket: null,
+        ref: null,
+        text: "check #5",
+      });
+      const link = await screen.findByRole("link", { name: "#5" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+      expect(screen.getByRole("button", { name: "Filter chat to #5" }).textContent).toBe("⌕");
     });
 
     it("leaves a number with no known repo as plain text with only the filter button", async () => {

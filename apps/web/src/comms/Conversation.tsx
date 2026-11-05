@@ -94,14 +94,17 @@ function RefChip({
   refText,
   ticket,
   from,
+  to,
 }: {
   refText: string;
   ticket: string | null;
   from: string;
+  to: string;
 }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const repoId = refRepo(ticket, crew?.rows.find((r) => r.id === from)?.repoId, config);
+  const repoOf = (id: string) => crew?.rows.find((r) => r.id === id)?.repoId;
+  const repoId = refRepo(ticket, repoOf(from) ?? repoOf(to), config);
   const target = repoId === null ? null : resolveRef(refText, repoId, config);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
   return (
@@ -138,7 +141,7 @@ function RefChip({
   );
 }
 
-/** The repo a bare `#n` or `PR n` in a message means: its ticket's, else its sender's, else the only one. */
+/** The repo a bare `#n` or `PR n` in a message means: its ticket's, else its sender's or recipient's, else the only one. */
 function refRepo(
   ticket: string | null,
   senderRepo: string | undefined,
@@ -167,10 +170,12 @@ function MessageRefs({
   text,
   ticket,
   from,
+  to,
 }: {
   text: string;
   ticket: string | null;
   from: string;
+  to: string;
 }) {
   const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
   const occurrences = new Map<string, number>();
@@ -181,7 +186,7 @@ function MessageRefs({
         occurrences.set(part, n + 1);
         const key = `${part}:${n}`;
         return /^(?:PR \d+|#\d+)$/.test(part) ? (
-          <RefChip key={key} refText={part} ticket={ticket} from={from} />
+          <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
         ) : (
           <MentionText key={key} text={part} />
         );
@@ -375,7 +380,12 @@ function MessagePane({
                   </Pill>
                 )}
                 {message.ref && (
-                  <RefChip refText={message.ref} ticket={message.ticket} from={message.from} />
+                  <RefChip
+                    refText={message.ref}
+                    ticket={message.ticket}
+                    from={message.from}
+                    to={message.to}
+                  />
                 )}
                 <MessageActions message={message} onReply={() => onReply(message)} />
               </div>
@@ -389,7 +399,12 @@ function MessagePane({
                 </button>
               )}
               <div className="comms-bubble-body">
-                <MessageRefs text={message.text} ticket={message.ticket} from={message.from} />
+                <MessageRefs
+                  text={message.text}
+                  ticket={message.ticket}
+                  from={message.from}
+                  to={message.to}
+                />
               </div>
               {message.reactions.length > 0 && (
                 <div className="comms-reactions">
