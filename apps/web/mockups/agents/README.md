@@ -54,6 +54,8 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 | Build loop panel and Steps list | One loop row: a "done" chip, the current step, and "later". Each chip's tries, limit, durations and reason show in full on hover or focus. |
 | "Not recorded" for steps that have not happened | Dropped. |
 | "Tokens this run" and "tokens so far" | Dropped: they leave out cached reads. Context now and Cost stay. |
+| Caption "API equivalent · N turns" under the cost | Kept on the figure row ("API equivalent · 20 turns"); it says the figure is not a bill. It wraps to two lines in the narrow figure cell. The estimate flag is dropped. |
+| Caption "latest saved reading" under context | Kept on the figure row, shortened to "latest reading" ("of 200k · 37% · latest reading"). |
 | Tools this run, with the per-tool breakdown | Tools count and failures stay in the figure row. Per-tool counts are in the Context tab, "Tools this run". |
 | Ask → result → next | The ask is the ticket title in the identity strip. The result is in the Report tab. Next move stays in the right column. |
 | "Left: …" (what remains) | Report tab, "Left". |

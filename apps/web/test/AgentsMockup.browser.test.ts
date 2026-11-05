@@ -79,12 +79,32 @@ describeRendered("Agents mockup in a browser", () => {
               const toolOpen = document.querySelectorAll(".ev.tool details[open] pre").length;
               const stackNow = inView("#stackPlan");
               const tabNow = inView('.tabbody[data-panel="plan"]');
+              // Every visible word of the main view, joined with spaces so that neighbouring cells
+              // never fuse; closed disclosures, hidden panels and diffs are left out.
+              const words: string[] = [];
+              const walker = document.createTreeWalker(
+                document.querySelector("main") as Node,
+                NodeFilter.SHOW_TEXT,
+              );
+              for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+                const el = n.parentElement;
+                if (!el || el.closest("pre, [hidden], option, script, style")) continue;
+                if (el.getClientRects().length === 0) continue;
+                const t = (n.textContent ?? "").trim();
+                if (t) words.push(t);
+              }
               const stateText = [
-                document.querySelector(".ident")?.textContent ?? "",
+                words.join(" "),
                 document.querySelector<HTMLSelectElement>("#seat")?.selectedOptions[0]
                   ?.textContent ?? "",
                 document.querySelector<HTMLInputElement>(".composer input")?.placeholder ?? "",
               ].join("\n");
+              const activityText = document.querySelector("#rows")?.textContent ?? "";
+              const doneSteps = [
+                ...document.querySelectorAll("#stackPlan .tr, .tabbody[data-panel=plan] .tr"),
+              ]
+                .filter((r) => r.querySelector(".ck")?.textContent === "✓")
+                .map((r) => r.textContent ?? "");
               const interrupt = [...document.querySelectorAll(".acts button")].some(
                 (b) => b.textContent === "Interrupt",
               );
@@ -167,6 +187,8 @@ describeRendered("Agents mockup in a browser", () => {
                 loopFull,
                 planOpen,
                 reportText,
+                activityText,
+                doneSteps,
                 composerButtons,
                 changeVisible,
                 upVisible,
@@ -215,6 +237,16 @@ describeRendered("Agents mockup in a browser", () => {
               );
             }
             const running = variant === "&state=running";
+            if (variant === "&state=review") {
+              expect(
+                r.activityText,
+                `${where}: the findings are not already delivered`,
+              ).not.toMatch(/Fix them|retro-1 → guido-1/);
+              expect(
+                r.doneSteps.join(" "),
+                `${where}: no done plan step mentions RETRO's findings`,
+              ).not.toMatch(/RETRO/);
+            }
             expect(r.stateWords, `${where}: the state shows once on the first screen`).toEqual([
               running ? "Running" : "Parked",
             ]);

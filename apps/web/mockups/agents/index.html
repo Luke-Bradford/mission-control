@@ -78,7 +78,7 @@
       .fig{padding:var(--sp-2) var(--sp-4);border-right:1px solid var(--line);min-width:0}.fig:last-child{border-right:0}
       .fig label{display:block;font:11px/16px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
       .fig b{display:block;font:600 20px/28px var(--display);letter-spacing:.02em}
-      .fig small{display:block;font:12px/16px var(--mono);color:var(--fg-2)}
+      .fig small{display:block;white-space:normal;font:12px/16px var(--mono);color:var(--fg-2)}
       .meter{height:4px;margin-top:var(--sp-1);background:var(--line-2);border-radius:2px}.meter i{display:block;height:100%;background:var(--ok);border-radius:2px}
       /* loop: one row */
       .loop{padding:var(--sp-2) var(--sp-4);flex-direction:row;align-items:center;gap:var(--sp-2);white-space:nowrap}
@@ -216,8 +216,8 @@
             <section class="panel next" id="next" aria-label="Next move"></section>
 
             <section class="panel figs" aria-label="Run figures">
-              <div class="fig"><label>Cost this run</label><b>$0.71</b><small>est. · 20 turns</small></div>
-              <div class="fig"><label>Context now</label><b>73.8k</b><small>of 200k · 37%</small><div class="meter"><i style="width:37%"></i></div></div>
+              <div class="fig"><label>Cost this run</label><b>$0.71</b><small>API equivalent · 20 turns</small></div>
+              <div class="fig"><label>Context now</label><b>73.8k</b><small>of 200k · 37% · latest reading</small><div class="meter"><i style="width:37%"></i></div></div>
               <div class="fig"><label>Tools</label><b>28</b><small class="crit">3 failed</small></div>
             </section>
 
@@ -367,12 +367,13 @@
       k("23:51", "sys", "Push refused at 117f67b");
       if (REV) {
         E.splice(-4, 4);
-        k("23:49", "a2a", "retro-1 → guido-1: RETRO-1 reviewed the current PR head: 5 Important, 2 Minor. Findings are in RETRO-1's report_findings record.");
+        E[0] = { at: "23:31", kind: "you", text: "Work on mission-control#1411: test:related can't pass in a seat's sandbox when a change selects most of the suite. Plan first, then build; check with pnpm -s test:related before you push." };
+        k("23:49", "sys", "Review recorded: RETRO-1 found 5 blocking findings");
         k("23:50", "sys", "Held for rework: 5 blocking findings");
       }
       if (RUN) {
         E.splice(-4, 4);
-        E.push({ at: "23:49", kind: "tool", name: "Bash", target: "pnpm -s test:related", result: "running…", ms: null, err: false, now: true });
+        E.push({ at: "23:49", kind: "tool", name: "Bash", target: "pnpm -s test:related", result: "no result yet", ms: null, err: false, now: true });
       }
       const WHO = { tool: ["⌘", "tool"], think: ["·", "thinking"], msg: ["↳", "to you"], you: ["·", "prompt"], a2a: ["↳", "agents"], guard: ["!", "guard"], sys: ["◇", "system"] };
       const rows = document.getElementById("rows");
@@ -406,7 +407,7 @@
       document.getElementById("count").textContent = `${E.length} events · ${c((e) => e.err)} failed tools`;
 
       // ---- Plan and queue. A seat with no plan has no Plan panel or tab; the queue is shown on its own.
-      const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["✓", "Open the draft PR"], ["✓", "Request review"], ["✓", "Read RETRO's 5 blocking findings"], ...(RUN ? [["✓", "Fix the 5 findings"], ["●", "Re-run the three checks"], ["○", "Push the rework once and report the output"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]] : REV ? [["●", "Wait for the findings to be sent back for rework"], ["○", "Fix the 5 findings"], ["○", "Re-run the three checks"], ["○", "Push the rework"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]] : [["●", "Push the rework once and report the output"], ["○", "Wait for FLIGHT's ruling on the refused push"], ["○", "Answer the 5 findings"], ["○", "Re-run the three checks"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]])];
+      const plan = emptyPlan ? [] : [["✓", "Read the ticket and the test:related script"], ["✓", "List what the change selects with vitest list"], ["✓", "Find which selected files need a browser"], ["✓", "Read browserRunner.ts to see why Chrome fails"], ["✓", "Ask FLIGHT whether to skip the browser files"], ["✓", "Write what test:related needs into the runbook"], ["✓", "Run lint"], ["✓", "Run typecheck"], ["✓", "Commit the runbook change"], ["✓", "Open the draft PR"], ["✓", "Request review"], ...(REV ? [] : [["✓", "Read RETRO's 5 blocking findings"]]), ...(RUN ? [["✓", "Fix the 5 findings"], ["●", "Re-run the three checks"], ["○", "Push the rework once and report the output"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]] : REV ? [["●", "Wait for the findings to be sent back for rework"], ["○", "Fix the 5 findings"], ["○", "Re-run the three checks"], ["○", "Push the rework"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]] : [["●", "Push the rework once and report the output"], ["○", "Wait for FLIGHT's ruling on the refused push"], ["○", "Answer the 5 findings"], ["○", "Re-run the three checks"], ["○", "Request a fresh review"], ["○", "Report evidence for each done-when line"]])];
       const queue = [["mission-control#1434", "Agents page answers what a seat is doing on one screen, with Activity as the part that grows", "P0", false], ["mission-control#1433", "Overview Board shows whole cards, no dead blocks, scrolling only where needed", "P2", true]];
       const focusRow = `<div class="focusrow"><span class="lbl">Focus</span><span class="cut" tabindex="0" data-full="label:area:tests">label:area:tests</span><button type="button" style="margin-left:auto">Change</button></div>`;
       const doneN = plan.filter((p) => p[0] === "✓").length;
