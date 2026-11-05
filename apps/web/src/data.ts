@@ -24,7 +24,7 @@ import {
   unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { apiGet, apiOperatorGet } from "./api.ts";
+import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
 import { shareMap } from "./map/structural.ts";
 import { store } from "./shell/store.ts";
 
@@ -749,9 +749,10 @@ class Hub {
   /**
    * Forget cached data (the tests' reset between cases: the hub is a module singleton).
    * Requests still in flight are abandoned: their responses are dropped when they arrive.
-   * What is still on screen is fetched again at once, rather than left idle until the next event.
+   * What is still on screen is fetched again at once, rather than left idle until the next event,
+   * unless `refetch` is false (a switch between Live and Demo: the new tree fetches for itself).
    */
-  clear(): void {
+  clear({ refetch = true }: { refetch?: boolean } = {}): void {
     mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
@@ -763,7 +764,7 @@ class Hub {
       e.activityTimer = undefined;
       this.set(e, IDLE);
     }
-    this.refetchAll();
+    if (refetch) this.refetchAll();
   }
 }
 
@@ -877,7 +878,7 @@ const STREAM_OPEN_TIMEOUT_MS = 10_000;
  * is refused it retries after a pause.
  */
 export function startStream(): () => void {
-  let es: EventSource | null = null;
+  let es: StreamSource | null = null;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let connectedBefore = false;
   let stopped = false;
@@ -895,7 +896,7 @@ export function startStream(): () => void {
 
   const connect = () => {
     if (stopped) return;
-    const source = new EventSource("/api/stream");
+    const source = openStream("/api/stream");
     es = source;
     source.addEventListener("open", () => {
       if (stopped || source !== es || source.readyState !== EventSource.OPEN) return;

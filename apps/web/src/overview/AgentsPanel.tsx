@@ -79,19 +79,17 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
   if (!(control instanceof HTMLElement) || region.scrollWidth <= region.clientWidth) return;
   requestAnimationFrame(() => {
     if (!region.isConnected || region.ownerDocument.activeElement !== control) return;
-    const row = control.closest<HTMLElement>(".trow"),
-      identity = row?.querySelector<HTMLElement>(".agent-identity");
-    if (
-      !row ||
-      !identity ||
-      identity.contains(control) ||
-      getComputedStyle(identity).position !== "sticky"
-    )
-      return;
+    const row = control.closest<HTMLElement>(".trow");
+    // The State and Seat cells stay put while the rest scrolls; focus must land clear of both.
+    const held = [...(row?.children ?? [])]
+      .slice(0, 2)
+      .filter((cell) => getComputedStyle(cell).position === "sticky");
+    if (!row || !held.length || held.some((cell) => cell.contains(control))) return;
     const viewport = region.getBoundingClientRect(),
       target = control.getBoundingClientRect();
     const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
-    const left = Math.max(viewport.left, identity.getBoundingClientRect().right) + gap;
+    const left =
+      Math.max(viewport.left, ...held.map((cell) => cell.getBoundingClientRect().right)) + gap;
     const right = viewport.left + region.clientWidth - gap;
     if (target.left < left) region.scrollLeft -= left - target.left;
     else if (target.right > right) region.scrollLeft += target.right - right;

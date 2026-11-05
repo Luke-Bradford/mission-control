@@ -3,12 +3,6 @@ import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { copyText } from "../clipboard.ts";
 import { useNow, useTz } from "../clock.ts";
-import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { percent, plural, rel, wkdTime } from "../fmt.ts";
-import { GithubRateRow } from "../hud/GithubRateRow.tsx";
-import { Panel } from "../hud/Panel.tsx";
-import { popOverlay, pushOverlay, trapTab, useReturnFocus } from "../shell/overlays.ts";
-import { toast } from "../shell/Toast.tsx";
 import {
   ErrorSummary,
   FieldError,
@@ -18,7 +12,13 @@ import {
   isUncertain,
   UNCERTAIN_TEXT,
   useSubmitGuard,
-} from "./formSupport.tsx";
+} from "../components/formSupport.tsx";
+import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { percent, plural, rel, wkdTime } from "../fmt.ts";
+import { GithubRateRow } from "../hud/GithubRateRow.tsx";
+import { Panel } from "../hud/Panel.tsx";
+import { popOverlay, pushOverlay, trapTab, useReturnFocus } from "../shell/overlays.ts";
+import { toast } from "../shell/Toast.tsx";
 
 type Account = ConfigView["accounts"][number];
 type Models = {

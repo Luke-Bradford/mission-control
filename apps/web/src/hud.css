@@ -564,6 +564,33 @@ select {
   white-space: nowrap;
 }
 
+/* Demo: the chip replaces the brand words, and a frame marks every page; word and colour both. */
+.demo-marker {
+  padding: 0 var(--sp-2);
+  background: var(--think);
+  color: var(--surface);
+  border-radius: var(--r);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.demo-marker-popout {
+  position: fixed;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 25;
+}
+
+.demo-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  border: 3px solid var(--think);
+  pointer-events: none;
+}
+
 .tabs {
   display: flex;
   gap: 0;

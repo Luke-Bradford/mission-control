@@ -78,6 +78,11 @@
   border: 1px solid var(--line-2);
   box-shadow: 0 4px 12px var(--bg);
 }
+/* The account switch is a 480px grouped form: the menu grows to hold it while it is open. */
+.agent-v2-menu:has(.account-chooser) {
+  width: min(calc(480px + 2 * var(--sp-2) + 2px), calc(100vw - 2 * var(--sp-4)));
+  box-sizing: border-box;
+}
 .agent-v2-meta {
   display: flex;
   align-items: center;
