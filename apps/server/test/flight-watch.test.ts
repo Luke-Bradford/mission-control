@@ -19,6 +19,7 @@ import {
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_IDLE_NO_WORK_MS,
+  FLIGHT_ITEM_STALE_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_LOOPS_SETTING,
@@ -4838,6 +4839,80 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await tick();
     expect(sendCalls).toHaveLength(2);
     expect(sendCalls[1]?.text.split("\n")[0]).toContain("free");
+  });
+
+  it("a batch timer does not hold back a question that arrives inside the gap", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    watch.start();
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    const wokeAt = nowMs;
+    nowMs += 30_000;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    nowMs += 30_000;
+    ask("inco-1", "r-inco");
+    await watch.check();
+    for (let i = 0; i < 8 && sendCalls.length < 2; i++) {
+      nowMs += 30_000;
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    expect(sendCalls).toHaveLength(2);
+    expect(nowMs).toBeLessThanOrEqual(wokeAt + FLIGHT_MIN_WAKE_GAP_MS + 30_000);
+  });
+
+  it("an item FLIGHT already waits on does not wake it as stale", async () => {
+    liveCrew();
+    store.raiseNote({
+      key: "blocked:r1:0",
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#7 parked",
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    recordFlightWait(store, "note:blocked:r1:0", {
+      on: "the seat",
+      until: nowMs + 6 * FLIGHT_HOUR_MS,
+      at: nowMs,
+    });
+    nowMs += FLIGHT_ITEM_STALE_MS + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("settling a question does not send the next routine fact at once", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a plain message from the operator wakes FLIGHT within the gap", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "hello" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
   });
 
   it("an acked Needs-you item is not listed for FLIGHT to triage again", () => {

@@ -7,6 +7,7 @@ import {
 } from "@mc/core";
 import { runSpend } from "../spend.ts";
 import type { Store } from "../store.ts";
+import { flightSignalHistory } from "./signals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 /** The reason for cost before a run's first wake: its start brief. */
@@ -101,11 +102,14 @@ export function flightWakeCost(
       counted.add(wake.at);
     }
   }
+  const week = byDay.slice(-7);
+  const weekCrew = week.reduce((n, d) => n + d.crewUsd, 0);
   return {
     since,
     totalUsd,
     crewUsd,
     share: crewUsd > 0 ? totalUsd / crewUsd : null,
+    weekShare: weekCrew > 0 ? week.reduce((n, d) => n + d.usd, 0) / weekCrew : null,
     byDay,
     byReason: [...reasons]
       .map(([reason, v]) => ({ reason, ...v }))
@@ -114,27 +118,40 @@ export function flightWakeCost(
 }
 
 /**
- * How long each message from the operator, and each blocker, to FLIGHT waited for the first wake
- * at or after it. Messages with no wake yet are left out.
+ * How long each message from the operator, each blocker to FLIGHT and each seat call waited for
+ * FLIGHT to act: until the first wake at or after it, or the first message FLIGHT's run produced
+ * after it, whichever is earlier (a labelled blocker or an interrupting message reaches FLIGHT
+ * without a recorded wake). Waits not yet ended are left out. Seat calls are read from `repo`'s
+ * signal record, which keeps a week.
  */
 export function flightWakeWaits(
   store: Store,
   now: number,
   flightId: string,
+  repo?: string,
   days = FLIGHT_COST_DAYS,
 ): FlightWakeWaits {
   const since = now - days * DAY_MS;
-  const wakeTimes = [...new Set(store.flightWakes(since).map((w) => w.at))].sort((a, b) => a - b);
+  const seen = new Set(store.flightWakes(since).map((w) => w.at));
+  const flightRuns = store.runsOverlapping(since, now + 1).filter((r) => r.agentId === flightId);
+  const digests = store.digests(flightRuns.map((r) => r.id));
+  for (const run of flightRuns)
+    for (const u of digests.get(run.id)?.attemptUsage ?? []) if (u.at !== null) seen.add(u.at);
+  const times = [...seen].sort((a, b) => a - b);
   const operator: number[][] = Array.from({ length: days }, () => []);
   const blocker: number[][] = Array.from({ length: days }, () => []);
+  const record = (list: number[][], at: number) => {
+    const end = times.find((t) => t >= at);
+    if (end !== undefined) list[dayIndex(at, since, days)]?.push(end - at);
+  };
   for (const m of store.commsTo(flightId, since)) {
     if (m.at > now) continue;
-    const isOperator = m.from === COMMS_CAPCOM;
-    if (!isOperator && m.label !== "blocker") continue;
-    const wake = wakeTimes.find((t) => t >= m.at);
-    if (wake === undefined) continue;
-    (isOperator ? operator : blocker)[dayIndex(m.at, since, days)]?.push(wake - m.at);
+    if (m.from === COMMS_CAPCOM) record(operator, m.at);
+    else if (m.label === "blocker") record(blocker, m.at);
   }
+  if (repo !== undefined)
+    for (const s of flightSignalHistory(store, repo, now))
+      if (s.kind === "seat_call" && s.since >= since && s.since <= now) record(blocker, s.since);
   return {
     since,
     operatorMedianMs: median(operator.flat()),

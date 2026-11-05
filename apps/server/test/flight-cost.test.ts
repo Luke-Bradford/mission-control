@@ -10,6 +10,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
+import { recordSeatCall } from "../src/flight/signals.ts";
 import { routineOnly, unhandledReasons, wakeReasons } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
@@ -78,6 +79,23 @@ describe("what FLIGHT costs, per day and per wake reason", () => {
     expect(cost.byReason.reduce((n, r) => n + r.usd, 0)).toBeCloseTo(10);
   });
 
+  it("reads the last week alone as weekShare, apart from the blended share", () => {
+    const early = NOW - 10 * DAY;
+    store.upsertRun(run("r-f1", "flight-1", 40, { startedAt: early - DAY, endedAt: early + DAY }));
+    store.upsertRun(run("r-g1", "guido-1", 60, { startedAt: early - DAY, endedAt: early + DAY }));
+    usage("r-f1", [[early, 100]]);
+    store.upsertRun(
+      run("r-f2", "flight-1", 10, { startedAt: NOW - 3 * DAY, endedAt: NOW - 1 * DAY }),
+    );
+    store.upsertRun(
+      run("r-g2", "guido-1", 40, { startedAt: NOW - 3 * DAY, endedAt: NOW - 1 * DAY }),
+    );
+    usage("r-f2", [[NOW - 2 * DAY, 100]]);
+    const cost = flightWakeCost(store, NOW, "flight-1", new Set(["flight-1", "guido-1"]));
+    expect(cost.share).toBeCloseTo(50 / 150);
+    expect(cost.weekShare).toBeCloseTo(0.2);
+  });
+
   it("gives a share of null when the crew spent nothing", () => {
     expect(flightWakeCost(store, NOW, "flight-1", new Set(["flight-1"])).share).toBeNull();
   });
@@ -108,6 +126,34 @@ describe("how long an operator message or a blocker waits for a wake", () => {
   });
 });
 
+describe("how long FLIGHT took to see a blocker", () => {
+  it("ends the wait at FLIGHT's first message after it when that comes before the next wake", () => {
+    store.upsertRun(run("r-f", "flight-1", 5));
+    usage("r-f", [[NOW - 60 * MIN + 10_000, 10]]);
+    store.addFlightWake("r-f", NOW - 20 * MIN, ["q"]);
+    store.addComms({
+      at: NOW - 60 * MIN,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: null,
+      text: "x",
+      label: "blocker",
+    });
+    expect(flightWakeWaits(store, NOW, "flight-1").blockerMedianMs).toBe(10_000);
+  });
+
+  it("counts a seat's call to FLIGHT as a blocker", () => {
+    store.addFlightWake("r-f", NOW - 30 * MIN, ["signals"]);
+    recordSeatCall(store, "mc", {
+      seat: "guido-1",
+      ref: null,
+      reason: "stuck",
+      at: NOW - 40 * MIN,
+    });
+    expect(flightWakeWaits(store, NOW, "flight-1", "mc").blockerMedianMs).toBe(10 * MIN);
+  });
+});
+
 describe("the handover threshold", () => {
   it("is 150K tokens", () => {
     expect(FLIGHT_CONTEXT_ROTATE_TOKENS).toBe(150_000);
@@ -132,6 +178,19 @@ describe("routine wakes wait for the batch window", () => {
       { instructions: ["2"] },
     ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts({ free: ["guido-1"], ...o }))).toBe(false);
+  });
+  it("does not count a settled question or park as a change, only a new routine fact", () => {
+    expect(routineOnly(facts({ q: [3] }), facts({ q: [], free: ["g"] }))).toBe(true);
+    expect(routineOnly(facts({ parked: ["a:b:c"] }), facts({ parked: [], t: ["mc#1"] }))).toBe(
+      true,
+    );
+  });
+  it("treats a breaker lift and a new hold in force as urgent", () => {
+    expect(routineOnly(facts({ breaker: ["x"] }), facts({ breaker: [], free: ["g"] }))).toBe(false);
+    expect(routineOnly(facts({}), facts({ holdsInForce: ["approval"] }))).toBe(false);
+  });
+  it("treats an unread operator message as urgent", () => {
+    expect(routineOnly(facts({}), facts({ operator: ["12"] }))).toBe(false);
   });
   it("is not routine when nothing changed", () => {
     expect(routineOnly(facts({ free: ["a"] }), facts({ free: ["a"] }))).toBe(false);

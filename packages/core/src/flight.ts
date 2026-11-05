@@ -194,6 +194,8 @@ export interface FlightWakeCost {
   crewUsd: number;
   /** FLIGHT's fraction of the crew's cost (0..1); null when the crew spent nothing. */
   share: number | null;
+  /** The same over the last 7 days only: read this against the 20% target after a week. */
+  weekShare: number | null;
   /** Per 24 hours, oldest first, the last ending at `now`. */
   byDay: { at: number; usd: number; crewUsd: number }[];
   /** A wake's cost split evenly over its reasons; "start" is the turn before the first wake. */
@@ -1150,6 +1152,8 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /** Ids of the operator's plain messages to FLIGHT that its inbox has not read; they wake it at once. */
+  operator?: string[];
 }
 
 export interface FlightWakeList<T> {
@@ -1220,6 +1224,8 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
  * together. Anything else wakes at once.
  */
 export const FLIGHT_BATCH_MS = 15 * 60_000;
+/** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
+export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */
 export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */

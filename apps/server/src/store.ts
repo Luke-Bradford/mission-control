@@ -6286,6 +6286,17 @@ export class Store {
         .get(seatId, id) !== undefined
     );
   }
+  /** Ids of messages `from` sent `to` at or after `since` that `to` has not read, oldest first. */
+  unreadCommsFrom(from: string, to: string, since: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?
+           AND id NOT IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
+         ORDER BY id`,
+      )
+      .all(from, to, since, to) as { id: number }[];
+    return rows.map((r) => String(r.id));
+  }
   markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",

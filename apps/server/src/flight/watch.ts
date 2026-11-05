@@ -677,8 +677,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   let gapTimer: NodeJS.Timeout | null = null;
   /** Checks again once the wake gap has passed; one pending re-check at a time. */
+  /** When the pending timer fires, in the watch's clock. */
+  let gapDueAt = 0;
+  /** Re-checks in `ms`; a timer already set for sooner stays, a later one is replaced. */
   function later(ms: number): void {
-    if (gapTimer !== null || stopped) return;
+    if (stopped) return;
+    const due = now() + ms;
+    if (gapTimer !== null) {
+      if (gapDueAt <= due) return;
+      clearTimeout(gapTimer);
+    }
+    gapDueAt = due;
     gapTimer = setTimeout(() => {
       gapTimer = null;
       void check();

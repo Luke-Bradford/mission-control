@@ -683,9 +683,13 @@ export function flightSignals(i: {
       `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
     );
   }
+  const heldBy = flightWaits(store);
   for (const item of i.triageItems ?? []) {
     // a PR ready to merge has its own check, merge_stalled
     if (now - item.at < FLIGHT_ITEM_STALE_MS || item.kind === "ready") continue;
+    // an item FLIGHT waits on (by its full key or the signal's key) is not stale until the wait ends
+    if ([item.key, item.key.replace(/:\d+$/, "")].some((k) => (heldBy[k]?.until ?? 0) > now))
+      continue;
     raise(
       "item_stale",
       // an item's key ends in the time it was last raised, which a PR's update moves

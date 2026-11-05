@@ -10,6 +10,7 @@ import {
   areaLabelsFor,
   areaLabelsOf,
   type BoardItem,
+  COMMS_CAPCOM,
   carriedFrom,
   claimedByOther,
   clockHm,
@@ -34,6 +35,7 @@ import {
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_OPERATOR_UNREAD_MS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -422,7 +424,7 @@ export function flightView(
             found.seat.id,
             new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
           ),
-          wakeWaits: flightWakeWaits(store, now, found.seat.id),
+          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
         }),
     promptWakes:
       found === null
@@ -647,6 +649,7 @@ function wakeInputs(i: {
   items: FlightState["items"];
   areas: Record<string, string[]> | undefined;
   hubLogin: string | null;
+  flightId: string | null;
   now: number;
 }): FlightWakeInputs {
   const waits = flightWaits(i.store);
@@ -670,7 +673,11 @@ function wakeInputs(i: {
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
-  return { fit, fresh };
+  const operator =
+    i.flightId === null
+      ? []
+      : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
+  return { fit, fresh, operator };
 }
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
@@ -1211,6 +1218,7 @@ export function flightState(i: {
       items,
       areas: i.areas,
       hubLogin: i.hubLogin ?? null,
+      flightId: found?.seat.id ?? null,
       now,
     }),
     time: clockHm(now, tz),
@@ -1472,6 +1480,8 @@ export function wakeFacts(
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
       )
       .sort(),
+    // an unread plain message from the operator: never routine
+    operator: s.wake?.operator ?? [],
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1611,7 +1621,7 @@ const wordsOf = (text: string): Set<string> =>
 /** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
 const accountable = (category: string, item: unknown): boolean => {
   // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
-  if (category === "t" || category === "instructions") return false;
+  if (category === "t" || category === "instructions" || category === "operator") return false;
   if (category === "prs") {
     const [, , ready, state, awaiting, away] = String(item).split(":");
     return (ready === "true" && state === "open") || !!awaiting || !!away;
@@ -1670,7 +1680,6 @@ const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
   "t",
   "release",
   "reviews",
-  "holdsInForce",
   "prFlow",
 ]);
 
@@ -1689,6 +1698,9 @@ export function routineOnly(previous: string, current: string): boolean {
     const added = [...now].filter((v) => !old.has(v));
     const removed = [...old].filter((v) => !now.has(v));
     if (added.length === 0 && removed.length === 0) continue;
+    // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
+    // breaker's lift is, as a lift alone wakes FLIGHT
+    if (added.length === 0 && category !== "breaker" && !ROUTINE_CATEGORIES.has(category)) continue;
     changed = true;
     if (category === "items") {
       // a PR's own steps are routine; any other item (a message, a blocker) is not
