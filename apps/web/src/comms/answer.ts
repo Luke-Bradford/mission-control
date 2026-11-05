@@ -45,12 +45,7 @@ export async function sendAnswer(
   if (target.to === "github") return null;
   try {
     if (target.to === "seat") {
-      // a seat's parked question is answered by its id, so the reply reaches the parked run
-      const question = /^ask:(\d+)$/.exec(item.key)?.[1];
-      await apiPost(ACTIONS.seatMessage(target.seatId), {
-        text: body,
-        ...(question === undefined ? {} : { question: Number(question) }),
-      });
+      await apiPost(ACTIONS.seatMessage(target.seatId), { text: body });
     } else {
       if (!flight?.live) return flightOffText(flight);
       await apiPost(ACTIONS.seatMessage(flight.id), { text: flightText(item.key, about, body) });

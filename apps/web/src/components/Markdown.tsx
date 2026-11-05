@@ -230,7 +230,14 @@ const BARE_URL = /(https?:\/\/[^\s<>()[\]]*[^\s<>()[\].,;:!?'"])/g;
 
 function MdLink({ url, children }: { url: string; children: ReactNode }) {
   const open = useContext(OpenLinksContext);
-  return open ? <SafeLink url={url}>{children}</SafeLink> : <span title={url}>{children}</span>;
+  // The label is plain text: a URL written as the label of a link must not become a link inside it.
+  return open ? (
+    <SafeLink url={url}>
+      <OpenLinksContext.Provider value={false}>{children}</OpenLinksContext.Provider>
+    </SafeLink>
+  ) : (
+    <span title={url}>{children}</span>
+  );
 }
 
 /**

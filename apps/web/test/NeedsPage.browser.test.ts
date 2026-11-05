@@ -39,7 +39,7 @@ function messages(n: number) {
   }));
 }
 
-function api(n = 6) {
+function api(n = 6, optionCount = 2) {
   const asks = [
     item({
       key: KEY,
@@ -58,6 +58,12 @@ function api(n = 6) {
         options: [
           { id: "list", label: "List and open item", answer: "Use the list and open item." },
           { id: "column", label: "One long column", answer: "Use one long column." },
+          ...Array.from({ length: Math.max(0, optionCount - 2) }, (_, i) => ({
+            id: `extra${i}`,
+            label: `Another layout ${i + 1}`,
+            answer: `Use another layout ${i + 1}.`,
+            description: "A longer description of this option, so the card is more than one line. ".repeat(3),
+          })),
         ],
       }),
     }),
@@ -196,6 +202,32 @@ describeRendered("Needs you page", () => {
           expect(before.height, `${label}: the band stays within its limit`).toBeLessThanOrEqual(
             136,
           );
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "four options show in full and the conversation keeps its height",
+    async () => {
+      for (const [width, height] of [
+        [2560, 1200],
+        [1920, 940],
+      ] as const) {
+        const label = `${width}x${height}`;
+        const page = await renderAt({ page: "test/needsBrowser.html", width, height, api: api(6, 4), assets: ASSETS });
+        try {
+          await ready(page);
+          const side = await page.box(".needs-side");
+          const options = await page.boxes(".needs-answer .opt");
+          expect(options).toHaveLength(4);
+          const last = options[3] as { y: number; height: number };
+          expect(last.y + last.height, `${label}: the last option is inside the side column`).toBeLessThanOrEqual(side.y + side.height);
+          const log = await page.box("#needsMsgs");
+          expect(log.height, `${label}: the conversation log is tall enough`).toBeGreaterThanOrEqual(280);
         } finally {
           await page.close();
         }

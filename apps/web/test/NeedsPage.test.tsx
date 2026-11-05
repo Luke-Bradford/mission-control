@@ -3,9 +3,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Decisions } from "../src/comms/Decisions.tsx";
 import { hub } from "../src/data.ts";
+import { Markdown, OpenLinks } from "../src/components/Markdown.tsx";
 import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
 import { openableHref } from "../src/links.ts";
 import { briefLinks, briefPictures, pictureRoute } from "../src/needs/pictures.ts";
+import { Comms } from "../src/pages/Comms.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
 import { navigate } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
@@ -442,5 +444,133 @@ describe("other surfaces", () => {
     });
     expect(window.location.pathname).toBe("/needs-you");
     navigate("/");
+  });
+});
+
+describe("links inside links", () => {
+  it("a URL written as a link's label is one anchor with the host once", () => {
+    const { container } = render(
+      <OpenLinks>
+        <Markdown text="See [https://example.com/a](https://example.com/a) now" />
+      </OpenLinks>,
+    );
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+    expect(container.querySelectorAll("a a")).toHaveLength(0);
+    expect(container.textContent?.match(/example\.com(?!\/)/g)).toHaveLength(1);
+  });
+});
+
+const LIVE_FLIGHT = {
+  seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true, turns: null },
+  decisions: [],
+};
+const bodies = (fn: ReturnType<typeof stubFetch>, path: string) =>
+  fn.mock.calls
+    .filter(([p, init]) => p === path && init?.method === "POST")
+    .map(([, init]) => JSON.parse(String(init?.body)));
+
+describe("actions on the page", () => {
+  it("Hold posts the reason and the release condition for the open item", async () => {
+    const fn = routes([ask("q1")], { "POST /api/attention/q1/hold": { ok: true } });
+    render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Hold" }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Waiting for review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Hold item" }));
+    await waitFor(() =>
+      expect(bodies(fn, "/api/attention/q1/hold")).toEqual([
+        { reason: "Waiting for review", condition: { kind: "manual" } },
+      ]),
+    );
+  });
+
+  it("Ctrl or Cmd+Enter sends the answer; plain Enter does not", async () => {
+    const fn = routes([ask("q1", { agentId: "flight-1" })], {
+      "/api/flight": LIVE_FLIGHT,
+      "POST /api/seats/flight-1/message": { ok: true },
+    });
+    render(<Needs item="q1" />);
+    const box = (await screen.findByLabelText("Your answer", { selector: "textarea" })) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.disabled).toBe(false));
+    fireEvent.change(box, { target: { value: "Go with the list" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(bodies(fn, "/api/seats/flight-1/message")).toHaveLength(0);
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(bodies(fn, "/api/seats/flight-1/message")).toHaveLength(1));
+  });
+
+  it("Ctrl or Cmd+Enter sends the question to FLIGHT; plain Enter does not", async () => {
+    const fn = routes([ask("q1")], {
+      "/api/flight": LIVE_FLIGHT,
+      [`POST ${discussionPath("q1")}`]: { id: "d:q1", itemKey: "q1", version: "v2", messages: [] },
+    });
+    render(<Needs item="q1" />);
+    const box = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.disabled).toBe(false));
+    fireEvent.change(box, { target: { value: "Why this one?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(bodies(fn, discussionPath("q1"))).toHaveLength(0);
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(bodies(fn, discussionPath("q1"))).toHaveLength(1));
+  });
+
+  it("the log follows a new message only within 40 px of its end", async () => {
+    let messages = [1, 2].map((n) => ({
+      id: `m${n}`,
+      itemKey: "q1",
+      correlationId: "d:q1",
+      role: "flight",
+      text: `Message ${n}`,
+      at: NOW - n * MIN,
+    }));
+    const thread = () => ({ id: "d:q1", itemKey: "q1", version: "v1", messages });
+    routes([ask("q1")], {
+      [discussionPath("q1")]: () => ({ status: 200, body: thread() }),
+      [`${discussionPath("q1")}?id=d%3Aq1`]: () => ({ status: 200, body: thread() }),
+    });
+    render(<Needs item="q1" />);
+    const log = (await screen.findByRole("log")) as HTMLElement;
+    await screen.findByText("Message 2");
+    let top = 0;
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(log, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    const addMessage = async (n: number) => {
+      messages = [...messages, { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` }];
+      act(() => {
+        hub.refetch(`/api/attention/q1/discussion`);
+        hub.refetch(`/api/attention/q1/discussion?id=d%3Aq1`);
+      });
+      await screen.findByText(`Message ${n}`);
+    };
+    // read higher up (700 px from the end): a new message leaves it alone
+    top = 100;
+    fireEvent.scroll(log);
+    await addMessage(3);
+    expect(top).toBe(100);
+    // within 40 px of the end: it follows
+    top = 780;
+    fireEvent.scroll(log);
+    await addMessage(4);
+    expect(top).toBe(1000);
+  });
+});
+
+describe("the Comms redirect", () => {
+  it("/comms/<operator key> replaces itself with the Needs you page; another owner's key opens the flyout", async () => {
+    routes([ask("q1"), ask("f1", { owner: "flight" })]);
+    window.history.replaceState(null, "", "/comms/q1");
+    const { unmount } = render(<Comms item="q1" view={{ kind: "flight" }} />);
+    await waitFor(() => expect(window.location.pathname).toBe("/needs-you/q1"));
+    unmount();
+    window.history.replaceState(null, "", "/comms/f1");
+    render(<Comms item="f1" view={{ kind: "flight" }} />);
+    await waitFor(() => expect(window.location.pathname).toBe("/comms"));
+    await waitFor(() => expect(window.location.search).toContain("item=f1"));
   });
 });
