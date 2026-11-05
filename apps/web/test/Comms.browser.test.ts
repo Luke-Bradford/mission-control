@@ -103,8 +103,15 @@ describeRendered("Comms ticket numbers, rendered", () => {
       });
       const number = await page.box(".comms-message-meta a.comms-ref");
       const filter = await page.box(".comms-message-meta .comms-ref-filter");
+      const prLink = await page.box(".comms-bubble-body a.comms-ref");
+      const prFilter = await page.box(".comms-bubble-body .comms-ref-filter");
       expect(number.width).toBeGreaterThan(0);
       expect(filter.width).toBeGreaterThan(0);
+      // the number and the filter are each a 24px target, the number's link included
+      for (const box of [number, filter, prLink, prFilter]) {
+        expect(box.height).toBeGreaterThanOrEqual(24);
+        expect(box.width).toBeGreaterThanOrEqual(24);
+      }
       // two controls side by side, not one on top of the other
       expect(filter.x).toBeGreaterThanOrEqual(number.x + number.width - 1);
       await page.screenshot(join(SHOTS, `comms-refs-${width}x${height}.png`));

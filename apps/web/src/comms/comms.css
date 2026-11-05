@@ -730,7 +730,14 @@
 .comms-ref-pair {
   display: inline-flex;
   gap: var(--sp-1);
-  align-items: baseline;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.comms-ref-plain {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  font-family: var(--mono);
 }
 
 /* The filter is a quieter, outlined control so it never reads as the number's own link. */
@@ -753,6 +760,9 @@
 }
 
 a.comms-ref {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   text-decoration: none;
 }
 

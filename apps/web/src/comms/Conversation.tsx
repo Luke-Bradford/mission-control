@@ -10,6 +10,7 @@ import {
   type CommsReactionKind,
   type CommsTicketResponse,
   type ConfigView,
+  type Crew,
   type CrewRow,
   type FlightView,
 } from "@mc/core";
@@ -86,27 +87,28 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
 
 /**
  * A ticket or PR number in a message: the number opens the item, and a small separate button beside
- * it filters the chat to that item. A number that cannot be resolved to a page is the filter alone.
+ * it filters the chat to that item. A number that cannot be resolved to a repo is plain text with
+ * the filter button alone, so a tinted chip always means "opens the item".
  */
-function RefChip({ refText, ticket }: { refText: string; ticket: string | null }) {
+function RefChip({
+  refText,
+  ticket,
+  from,
+}: {
+  refText: string;
+  ticket: string | null;
+  from: string;
+}) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
-  const target = resolveRef(refText, ticket, config);
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const repoId = refRepo(ticket, crew?.rows.find((r) => r.id === from)?.repoId, config);
+  const target = repoId === null ? null : resolveRef(refText, repoId, config);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
-  if (!target) {
-    return (
-      <button
-        className="comms-ref"
-        type="button"
-        aria-label={`Filter chat to ${refText}`}
-        onClick={filter}
-      >
-        {refText}
-      </button>
-    );
-  }
   return (
     <span className="comms-ref-pair">
-      {target.to ? (
+      {target === null ? (
+        <span className="comms-ref-plain">{refText}</span>
+      ) : target.to ? (
         <a
           className="comms-ref"
           href={target.to}
@@ -136,26 +138,40 @@ function RefChip({ refText, ticket }: { refText: string; ticket: string | null }
   );
 }
 
+/** The repo a bare `#n` or `PR n` in a message means: its ticket's, else its sender's, else the only one. */
+function refRepo(
+  ticket: string | null,
+  senderRepo: string | undefined,
+  config: ConfigView | undefined,
+): string | null {
+  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
+  if (parsed) return parsed.repoId;
+  if (senderRepo) return senderRepo;
+  return config?.repos.length === 1 ? (config.repos[0]?.id ?? null) : null;
+}
+
 function resolveRef(
   refText: string,
-  ticket: string | null,
+  repoId: string,
   config: ConfigView | undefined,
 ): { to: string | null; github: string | null } | null {
-  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
-  if (!parsed) return null;
   const issue = /^#(\d+)$/.exec(refText)?.[1];
-  if (issue !== undefined) {
-    return parsed.number === Number(issue)
-      ? { to: ticketPath(parsed.repoId, parsed.number), github: null }
-      : null;
-  }
+  if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
-  const github = config?.repos.find((r) => r.id === parsed.repoId)?.github;
+  const github = config?.repos.find((r) => r.id === repoId)?.github;
   const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
   return href ? { to: null, github: href } : null;
 }
 
-function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {
+function MessageRefs({
+  text,
+  ticket,
+  from,
+}: {
+  text: string;
+  ticket: string | null;
+  from: string;
+}) {
   const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
   const occurrences = new Map<string, number>();
   return (
@@ -165,7 +181,7 @@ function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) 
         occurrences.set(part, n + 1);
         const key = `${part}:${n}`;
         return /^(?:PR \d+|#\d+)$/.test(part) ? (
-          <RefChip key={key} refText={part} ticket={ticket} />
+          <RefChip key={key} refText={part} ticket={ticket} from={from} />
         ) : (
           <MentionText key={key} text={part} />
         );
@@ -358,7 +374,9 @@ function MessagePane({
                     {message.label}
                   </Pill>
                 )}
-                {message.ref && <RefChip refText={message.ref} ticket={message.ticket} />}
+                {message.ref && (
+                  <RefChip refText={message.ref} ticket={message.ticket} from={message.from} />
+                )}
                 <MessageActions message={message} onReply={() => onReply(message)} />
               </div>
               {quote && (
@@ -371,7 +389,7 @@ function MessagePane({
                 </button>
               )}
               <div className="comms-bubble-body">
-                <MessageRefs text={message.text} ticket={message.ticket} />
+                <MessageRefs text={message.text} ticket={message.ticket} from={message.from} />
               </div>
               {message.reactions.length > 0 && (
                 <div className="comms-reactions">
