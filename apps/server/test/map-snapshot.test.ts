@@ -307,7 +307,7 @@ it("stops sending blobs past the read budget and still answers", async () => {
   for (let i = 0; i < 60; i++)
     writeFileSync(
       join(checkout, `bulk-${i}.ts`),
-      `export const n${i} = "${`${i}`.repeat(900 * 1024)}";\n`,
+      `export const n${i} = "${"x".repeat(900 * 1024)}";\n`,
     );
   git(checkout, "add", ".");
   git(checkout, "commit", "-qm", "bulk");
