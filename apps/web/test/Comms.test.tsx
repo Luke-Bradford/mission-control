@@ -255,7 +255,7 @@ describe("Comms routes", () => {
     const earlier = document.getElementById("comms-message-comms:earlier") as HTMLElement;
     const later = document.getElementById("comms-message-comms:later") as HTMLElement;
     expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(within(earlier).getAllByRole("button", { name: "PR 44" })[0]);
+    fireEvent.click(within(earlier).getAllByRole("button", { name: "Filter chat to PR 44" })[0]);
     expect(window.location.pathname).toBe("/comms/tickets/PR%2044");
     fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -266,6 +266,60 @@ describe("Comms routes", () => {
         text: "Ticket update",
         ref: "#707",
       });
+    });
+  });
+
+  describe("a ticket number in a message", () => {
+    const message = {
+      id: "comms:ref",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "Look at #707 now",
+      ticket: "shop-app#707",
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const stub = () =>
+      stubFetch({
+        "/api/comms/crew": { messages: [message] },
+        "/api/comms/mentions": { mentions: [] },
+        "/api/comms/pins": { messages: [] },
+        "/api/flight": { seat: null, decisions: [] },
+      });
+
+    it("opens the ticket and leaves the conversation filter alone", async () => {
+      stub();
+      window.history.replaceState(null, "", "/comms/crew");
+      render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+      await screen.findAllByRole("link", { name: "#707" });
+      const links = screen.getAllByRole("link", { name: "#707" });
+      expect(links.length).toBe(2);
+      for (const link of links) {
+        expect(link.getAttribute("href")).toBe("/tickets/shop-app/707");
+        fireEvent.click(link);
+        expect(window.location.pathname).toBe("/tickets/shop-app/707");
+        window.history.replaceState(null, "", "/comms/crew");
+      }
+      expect(window.location.pathname).not.toMatch(/^\/comms\/tickets/);
+    });
+
+    it("filters from a separate control and opens nothing", async () => {
+      stub();
+      window.history.replaceState(null, "", "/comms/crew");
+      render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+      await screen.findAllByRole("link", { name: "#707" });
+      const filters = screen.getAllByRole("button", { name: "Filter chat to #707" });
+      expect(filters.length).toBe(2);
+      expect(filters[0]?.textContent).not.toBe("#707");
+      fireEvent.click(filters[0] as HTMLElement);
+      expect(window.location.pathname).toBe("/comms/tickets/%23707");
+      expect(window.location.pathname).not.toMatch(/^\/tickets\//);
     });
   });
 
