@@ -3532,7 +3532,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
           if (!result.isError)
             recordExternalMerge(
-              { store, config, log: (line) => deps.log?.(line), record },
+              {
+                store,
+                config,
+                log: (line) => deps.log?.(line),
+                record: (d) => record(now(), d),
+              },
               {
                 at: now(),
                 pr: a.pr,
