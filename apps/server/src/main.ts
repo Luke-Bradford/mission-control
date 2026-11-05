@@ -80,7 +80,12 @@ import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
-import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
+import {
+  cloneState,
+  configuredChecks,
+  createCheckRecorder,
+  seatWorktree,
+} from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import {
@@ -445,6 +450,7 @@ export async function main(): Promise<void> {
     store,
     checks: runChecks,
     state: cloneState(config, store),
+    worktree: seatWorktree(store),
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
