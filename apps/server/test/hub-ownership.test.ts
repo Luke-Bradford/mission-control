@@ -79,7 +79,14 @@ const config = (): CcConfig =>
     crew: {
       worktrees: dir,
       maxSeats: 2,
-      sessions: [{ id: "s", repoId: "mc", checkout: dir, seats: [] }],
+      sessions: [
+        {
+          id: "s",
+          repoId: "mc",
+          checkout: dir,
+          seats: [{ id: "guido-1", role: "GUIDO", accountId: "a", model: "m", area: [] }],
+        },
+      ],
     },
     poll: { usageMinutes: 30, githubSeconds: 60 },
   }) as unknown as CcConfig;
@@ -487,6 +494,7 @@ async function runEveryTimer(
   } satisfies EngineDeps);
   engine.start();
   await engine.tick();
+  for (const r of store.loopRuns(0)) await engine.reconcileRun(r.id);
   engine.stop();
   void w;
 }
@@ -600,11 +608,12 @@ describe("a closed PR alone", () => {
           closingIssues: [21],
           state: "closed",
         }),
+        pr(203, "feature/a-watching", { ticket: "mc#22", closingIssues: [22], state: "closed" }),
       ],
-      cards: [card(20, "In Review"), card(21, "In Progress")],
+      cards: [card(20, "In Review"), card(21, "In Progress"), card(22, "In Progress")],
       branchAges: { "feature/just-closed": 1, "feature/a-parked-closed": 48 },
     };
-    const options = { 20: "O_review", 21: "O_prog" } as Record<number, string>;
+    const options = { 20: "O_review", 21: "O_prog", 22: "O_prog" } as Record<number, string>;
     const store = new Store(":memory:");
     seedWorld(store, w);
     if (hub === "hub A") {
@@ -618,11 +627,19 @@ describe("a closed PR alone", () => {
         phase: "parked",
         parked: { kind: "pr-closed", reason: "closed", ended: false },
       } as never);
+      // a live run whose open PR is then closed: the engine parks it and moves no card
+      store.upsertRun(run("watching", "feature/a-watching", "mc#22"));
+      store.setRunLoop("watching", {
+        ...NEW_LOOP,
+        phase: "ci",
+        prNumber: 203,
+        cardFor: "ci:0",
+      } as never);
     }
     const gh = fakeGithub(w, options);
     await runEveryTimer(store, w, gh, cfg, []);
     expect(gh.writes).toEqual([]);
-    expect(options).toEqual({ 20: "O_review", 21: "O_prog" });
+    expect(options).toEqual({ 20: "O_review", 21: "O_prog", 22: "O_prog" });
     expect(gh.deleted).toEqual([]);
     store.close();
   });

@@ -1950,7 +1950,7 @@ describe("The operator's message", () => {
     expect(noteKeys()).toEqual([`blocked:${RUN}:1`]);
   });
 
-  it("a closed PR parks the run and writes nothing but the run's own card move", async () => {
+  it("a closed PR parks the run and writes nothing", async () => {
     await parkOnCi();
     clock += MIN;
     await h.engine.onOperatorMessage(RUN);
@@ -1964,8 +1964,7 @@ describe("The operator's message", () => {
     expect(loopOf().parked?.kind).toBe("pr-closed");
     expect(h.pushes).toEqual([]);
     expect(h.steps).toEqual([]);
-    // the run parks its own card; it merges, closes, reopens and deletes nothing
-    expect(h.moves.map((m) => [m.runId, m.column])).toEqual([[RUN, "Blocked"]]);
+    expect(h.moves).toEqual([]);
     expect(h.statusCalls).toEqual([]);
   });
 
