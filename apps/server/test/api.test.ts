@@ -8033,7 +8033,7 @@ describe("the first loop's engine", () => {
         expect(r.statusCode).toBe(200);
         // an interrupt is a labelled handoff and wakes the seat; a plain message waits in its inbox
         expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(
-          payload.interrupt === true ? 1 : 0,
+          "interrupt" in payload ? 1 : 0,
         );
         expect(store.comms(0, "next").map((m) => m.text)).toEqual([payload.text]);
         expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
