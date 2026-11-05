@@ -87,7 +87,14 @@ describe("the check recorder", () => {
   const HEAD = "a".repeat(40);
   const KEY = { runId: "r1", toolUseId: "t1" };
   const WORKTREE = "/work/trees/guido-1-9";
-  let rows: { runId: string; command: string; headSha: string; ok: boolean; at: number }[];
+  let rows: {
+    runId: string;
+    command: string;
+    invokedCommand: string;
+    headSha: string;
+    ok: boolean;
+    at: number;
+  }[];
   let state: CloneState | null;
   let checks: readonly string[];
   const recorder = () =>
