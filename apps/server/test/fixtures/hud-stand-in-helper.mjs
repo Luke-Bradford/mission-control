@@ -15,5 +15,13 @@ process.once("message", (job) => {
     });
   else if (mode === "fail") process.send({ ok: false, error: "render exploded" });
   else if (mode === "crash") process.exit(3);
+  // "term-hang" and "term-exit": note the SIGTERM in the marker file, then keep running or exit
+  else if (mode === "term-hang" || mode === "term-exit") {
+    setInterval(() => {}, 1000); // the SIGTERM must not be what ends the process
+    process.on("SIGTERM", () => {
+      writeFileSync(url.searchParams.get("marker"), "SIGTERM");
+      if (mode === "term-exit") process.exit(0);
+    });
+  }
   // "hang": do nothing, the parent must kill the group
 });

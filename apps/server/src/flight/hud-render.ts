@@ -91,7 +91,10 @@ export type HudColorScheme = "light" | "dark";
 
 interface HudPage {
   click(selector: string, options: { timeout: number }): Promise<void>;
-  locator(selector: string): { count(): Promise<number> };
+  locator(selector: string): {
+    count(): Promise<number>;
+    scrollIntoViewIfNeeded(options: { timeout: number }): Promise<void>;
+  };
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
     selector: string,
@@ -210,7 +213,8 @@ function watchNetwork(page: HudPage): {
  * Starts the hub-only proxy, launches a sandboxed system Chrome behind it, confines one explicit
  * context, and returns a bounded PNG. This runs inside the owned helper process (renderHudInHelper).
  * The parent signals that process's group to stop; Playwright starts Chrome in a group of its own,
- * so it is the helper's Playwright (on SIGTERM) that closes Chrome, not the group signal itself.
+ * so the group signal never reaches Chrome. The helper must close it itself: on SIGTERM it exits
+ * (hud-helper.ts), and Playwright's exit handler then kills Chrome's group and removes its profile.
  */
 export async function renderHudWithPlaywright(
   url: string,
@@ -338,6 +342,11 @@ export async function renderHudWithPlaywright(
     const network = watchNetwork(page);
     await page.goto(url, { waitUntil: "load", timeout: remaining() });
     ensureActive();
+    const click = async (selector: string): Promise<void> => {
+      waiting = `click ${selector}`;
+      await page.click(selector, { timeout: remaining() });
+      waiting = undefined;
+    };
     const wait = async (selector: string, state: "attached" | "detached"): Promise<void> => {
       waiting = `${selector} (${state})`;
       await page.waitForSelector(selector, { state, timeout: remaining() });
@@ -369,11 +378,16 @@ export async function renderHudWithPlaywright(
       // still be drawing), then open the disclosure only when the view itself is absent.
       await wait(`${HUD_QA_VIEW}, ${HUD_QA_DISCLOSURE}`, "attached");
       if ((await page.locator(HUD_QA_VIEW).count()) === 0) {
-        await page.click(HUD_QA_DISCLOSURE, { timeout: remaining() });
+        await click(HUD_QA_DISCLOSURE);
         await wait(HUD_QA_VIEW, "attached");
       }
-      await page.click(`${HUD_QA_VIEW} button:text-is("${label}")`, { timeout: remaining() });
+      await click(`${HUD_QA_VIEW} button:text-is("${label}")`);
       await wait(`${HUD_QA_VIEW} button[aria-pressed="true"]:text-is("${label}")`, "attached");
+      // The view sits below Code Health and the shot is the viewport only: bring it on screen
+      // rather than rely on where the click happened to scroll.
+      waiting = `scroll ${HUD_QA_VIEW} into view`;
+      await page.locator(HUD_QA_VIEW).scrollIntoViewIfNeeded({ timeout: remaining() });
+      waiting = undefined;
     }
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
@@ -442,9 +456,11 @@ const signalGroup = (child: ChildProcess, signal: NodeJS.Signals): void => {
 };
 
 /**
- * Stops the helper: SIGTERM to its group, which makes the helper's Playwright close the Chrome it
- * launched (Chrome is in a group of its own, so a signal to the helper's group never reaches it),
- * then SIGKILL to the group once the helper has exited or `closeMs` has passed.
+ * Stops the helper: SIGTERM to its group, which makes the helper exit within about half of
+ * `closeMs` and, in exiting, close the Chrome it launched (Chrome is in a group of its own, so a
+ * signal to the helper's group never reaches it). Then SIGKILL to the group once the helper has
+ * exited or `closeMs` has passed: that backstop stops a stuck helper, but a Chrome that is still
+ * alive at that point (the helper died before closing it) is not reached.
  */
 async function stopHelper(child: ChildProcess, closeMs: number): Promise<void> {
   if (child.exitCode === null && child.signalCode === null) {
@@ -465,7 +481,7 @@ async function stopHelper(child: ChildProcess, closeMs: number): Promise<void> {
 /**
  * Renders in an owned helper process, started in its own process group. However the render ends
  * (a PNG, an error, the deadline, a crash) the helper is stopped afterwards and the call settles
- * only once it has been, so a stopped render leaves no helper and no Chrome running.
+ * only once it has been; the helper closes its Chrome on the way out, so none is left running.
  */
 export function renderHudInHelper(
   url: string,

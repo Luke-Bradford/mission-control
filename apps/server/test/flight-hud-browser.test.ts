@@ -82,7 +82,13 @@ const clicks: string[] = [];
  * is drawn 1.2 s after load (a lazy page), behind a disclosure button unless `old` (the older
  * baseline, which shows the view at once). A click is reported to /api/click.
  */
-const auditScript = (old: boolean): string => `
+const auditScript = (old: boolean, tall: boolean): string => `
+if (${tall}) {
+  // a block taller than the 1000 px viewport above the view, as Code Health is on the real page
+  const filler = document.createElement('div');
+  filler.style.height = '1500px';
+  document.querySelector('main').append(filler);
+}
 const report = (what) => fetch('/api/click?what=' + encodeURIComponent(what));
 const drawView = () => {
   const view = document.createElement('div');
@@ -95,6 +101,9 @@ const drawView = () => {
     view.append(tab);
   }
   document.querySelector('main').append(view);
+  new IntersectionObserver((entries) => {
+    for (const e of entries) report(e.isIntersecting ? 'view:visible' : 'view:hidden');
+  }).observe(view);
 };
 setTimeout(() => {
   if (${old}) return drawView();
@@ -129,7 +138,12 @@ const startServers = async (): Promise<void> => {
       case "/api/slow":
         return void setTimeout(() => res.end("{}"), 600);
       case "/audit":
-        return send(html("<h1>Audit</h1>", auditScript(url.searchParams.has("old"))));
+        return send(
+          html(
+            "<h1>Audit</h1>",
+            auditScript(url.searchParams.has("old"), url.searchParams.has("tall")),
+          ),
+        );
       case "/api/click":
         clicks.push(url.searchParams.get("what") ?? "");
         return void res.end("{}");
@@ -231,6 +245,12 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
       }
     }, 150_000);
 
+    it("has the QA view on screen when it is photographed, below a block taller than the viewport", async () => {
+      clicks.length = 0;
+      await render("/audit?evidence-tab=readiness&tall=1");
+      expect(clicks.filter((c) => c.startsWith("view:")).at(-1)).toBe("view:visible");
+    }, 90_000);
+
     it("selects the tab without the disclosure on an older baseline that shows the view at once", async () => {
       clicks.length = 0;
       await render("/audit?evidence-tab=hotspots&old=1");
@@ -304,6 +324,30 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
       stop.abort(new Error("stopped by the test"));
       expect(await settled).toBe("stopped by the test");
       // the call settles only after the helper is stopped; Chrome goes with it
+      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+    }, 150_000);
+
+    it("leaves no Chrome behind when the render is stopped while Chrome is frozen", async () => {
+      const baseline = chromeCount();
+      const guard = hudRenderRequest(hub.origin);
+      const stop = new AbortController();
+      const settled = renderHudInHelper(guard.page("/setup"), guard, {
+        executablePath: CHROME as string,
+        deadlineMs: COLD_START_DEADLINE_MS,
+        signal: stop.signal,
+      }).then(
+        () => "rendered",
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
+      // freeze every Chrome process, so its own graceful close cannot run
+      for (const line of execFileSync("ps", ["-axo", "pid,command"], { encoding: "utf8" }).split(
+        "\n",
+      ))
+        if (line.includes("playwright_chromiumdev_profile"))
+          process.kill(Number(line.trim().split(/\s+/)[0]), "SIGSTOP");
+      stop.abort(new Error("stopped by the test"));
+      expect(await settled).toBe("stopped by the test");
       await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
     }, 150_000);
 

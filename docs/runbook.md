@@ -1748,9 +1748,10 @@ scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 FLIGHT's `screenshot_hud` tool renders one HUD page at 1600×1000 in the
 system Chrome. The render runs in an owned helper process in its own process group with a minimal
 environment (no tokens); when the render ends, is stopped or its 30 s deadline passes, the hub sends SIGTERM to
-the helper's group (the helper's Playwright then closes Chrome, which runs in a group of its own, so
-the group signal alone never reaches it) and SIGKILL to the group after one second; the call settles
-only after that, so no Chrome outlives a call. A render that times out names the selector it was
+the helper's group. Chrome runs in a group of its own, so the helper must close it: it exits half a
+second later, and Playwright's exit handler kills Chrome and removes its profile folder. The hub
+sends SIGKILL to the helper's group after one second as a backstop for a stuck helper, and the call
+settles only after that, so the helper and, unless the helper was stuck, its Chrome are gone when a call returns. A render that times out names the selector it was
 waiting for. Chrome is started with `launch()` (a private pipe, no control
 socket) and every request it makes, loopback included, goes through a loopback-only proxy that
 connects to the hub's own host and port and refuses everything else, on top of the Playwright

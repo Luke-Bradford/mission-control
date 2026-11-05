@@ -88,7 +88,12 @@ function fakePlaywright(
       if (step === "pageReady") await over.pageReady;
     }),
     // a page that already shows the QA view (an older baseline), unless a test says otherwise
-    locator: vi.fn((_selector: string) => ({ count: async () => 1 })),
+    locator: vi.fn((_selector: string) => ({
+      count: async () => 1,
+      scrollIntoViewIfNeeded: async () => {
+        order.push("scroll");
+      },
+    })),
     on: vi.fn((event: string, handler: () => void) => {
       pageEvents.set(event, [...(pageEvents.get(event) ?? []), handler]);
     }),
@@ -203,6 +208,7 @@ describe("renderHudWithPlaywright", () => {
       "main",
       "click",
       "main",
+      "scroll",
       "pageReady",
     ]);
     // the QA view or its disclosure was waited for (the page may still be drawing) before the
@@ -223,6 +229,29 @@ describe("renderHudWithPlaywright", () => {
     ).rejects.toThrow(
       /timed out: the \d+ ms deadline expired while waiting for \[aria-label="QA view"\], button:text-is\("Workflow history and earlier proposals"\) \(attached\)\./,
     );
+  });
+  it("says which click timed out", async () => {
+    const url = "http://127.0.0.1:7420/audit?evidence-tab=hotspots";
+    const fake = fakePlaywright({ pageUrl: url });
+    fake.page.click.mockRejectedValue(
+      Object.assign(new Error("Timeout"), { name: "TimeoutError" }),
+    );
+    await expect(
+      renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright)),
+    ).rejects.toThrow(
+      /while waiting for click \[aria-label="QA view"\] button:text-is\("Hotspots"\)\./,
+    );
+  });
+  it("scrolls the QA view into sight after selecting its tab and before the screenshot", async () => {
+    const url = "http://127.0.0.1:7420/audit?evidence-tab=readiness";
+    const fake = fakePlaywright({ pageUrl: url });
+    fake.page.screenshot.mockImplementation(async () => {
+      fake.order.push("screenshot");
+      return Buffer.from("png");
+    });
+    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+    expect(fake.order.indexOf("scroll")).toBeGreaterThan(fake.order.indexOf("click"));
+    expect(fake.order.indexOf("scroll")).toBeLessThan(fake.order.indexOf("screenshot"));
   });
   it("selects non-default Audit views before capturing them", async () => {
     for (const [tab, label] of [
@@ -254,7 +283,10 @@ describe("renderHudWithPlaywright", () => {
         else if (!open) throw new Error("clicked a control that is not on the page");
       });
       Object.assign(fake.page, {
-        locator: vi.fn(() => ({ count: async () => (open ? 1 : 0) })),
+        locator: vi.fn(() => ({
+          count: async () => (open ? 1 : 0),
+          scrollIntoViewIfNeeded: async () => {},
+        })),
       });
       await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
       const clicks = fake.order.filter((step) => step.startsWith("click:"));
