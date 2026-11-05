@@ -3531,8 +3531,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             fetchTicket: deps.fetchTicket,
           });
           if (!result.isError) {
+            const ref = result.ticket === undefined ? null : `${repo.id}#${result.ticket}`;
             const id = record(now(), {
               kind: "merge",
+              ref,
               about: `External PR #${a.pr}`,
               decision: result.text,
               basis: a.basis,
@@ -3546,7 +3548,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
                   at: now(),
                   pr: a.pr,
                   reasons: result.reasons,
-                  ticket: null,
+                  ticket:
+                    ref === null || result.ticket === undefined
+                      ? null
+                      : { ref, repoId: repo.id, issue: result.ticket },
                   decision: { id, basis: a.basis },
                 },
               );

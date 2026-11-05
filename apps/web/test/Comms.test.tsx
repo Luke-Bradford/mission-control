@@ -25,6 +25,37 @@ afterEach(() => {
 });
 
 describe("Comms routes", () => {
+  it("a ticketless line's /flight is a link", async () => {
+    stubFetch({
+      "/api/comms/crew": {
+        messages: [
+          {
+            id: "comms:nt",
+            at: NOW - MIN,
+            from: "flight-1",
+            to: "CAPCOM",
+            text: "FLIGHT merged PR 12: touches CLAUDE.md. Reason: /flight Read the diff",
+            ticket: null,
+            label: null,
+            ref: "PR 12",
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            pinned: false,
+            operator: false,
+          },
+        ],
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    const link = await screen.findByRole("link", { name: "the logged decision" });
+    expect(link.getAttribute("href")).toBe("/flight");
+  });
+
   it("the line's reason is a link", async () => {
     const message = {
       id: "comms:merged",

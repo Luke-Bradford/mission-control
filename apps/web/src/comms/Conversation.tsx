@@ -80,10 +80,12 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
 }
 
 /** A link to a FLIGHT decision on a ticket's page. */
-const DECISION_LINK = /^\/tickets\/[\w.-]+\/\d+#decision-\d+$/;
+const DECISION_LINK = /^(?:\/tickets\/[\w.-]+\/\d+#decision-\d+|\/flight)$/;
 
 function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {
-  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b|\/tickets\/[\w.-]+\/\d+#decision-\d+)/g);
+  const parts = text.split(
+    /(\bPR \d+\b|(?<!\w)#\d+\b|\/tickets\/[\w.-]+\/\d+#decision-\d+|(?<=Reason: )\/flight\b)/g,
+  );
   const occurrences = new Map<string, number>();
   return (
     <>

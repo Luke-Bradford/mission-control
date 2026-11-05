@@ -38,7 +38,7 @@ export async function mergeExternalPr(i: {
   rules: () => Promise<RepoRules | Error>;
   now: () => number;
   fetchTicket(repo: CcConfig["repos"][number], number: number): Promise<TicketView | null>;
-}): Promise<{ text: string; isError?: boolean; reasons?: string[] }> {
+}): Promise<{ text: string; isError?: boolean; reasons?: string[]; ticket?: number }> {
   const fail = (text: string) => ({ text, isError: true as const });
   const { repo, store, number } = i;
   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
@@ -351,7 +351,10 @@ export async function mergeExternalPr(i: {
     return {
       text: `Merged external PR #${number} at ${sha}.${approval ? " Used the recorded approval." : ""}`,
       ...(superuser && protectedPaths.length > 0
-        ? { reasons: [touchesReason(protectedPaths)] }
+        ? {
+            reasons: [touchesReason(protectedPaths)],
+            ...(tickets[0] ? { ticket: tickets[0].number } : {}),
+          }
         : {}),
     };
   } catch {

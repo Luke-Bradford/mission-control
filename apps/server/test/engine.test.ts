@@ -4384,6 +4384,7 @@ describe("the engine runs reviews", () => {
           awaitingFlight: null,
         });
         expect(["ci", "review"]).toContain(loopOf().phase);
+        expect(loopOf().adopted).toMatchObject({ sha: SHA_B });
         expect(loopOf().gate?.sha ?? SHA_B).toBe(SHA_B);
         expect(loopTexts().some((t) => t.includes("adopted head"))).toBe(true);
         // a run that is working is refused

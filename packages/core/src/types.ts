@@ -144,6 +144,8 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
+  /** FLIGHT adopted this head from outside the run: it waits for FLIGHT's clearance after RETRO. */
+  adopted?: { sha: string; epoch: number } | null;
   /**
    * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
    * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.

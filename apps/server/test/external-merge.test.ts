@@ -280,6 +280,7 @@ describe("external PR controller merge", () => {
     const result = await mergeExternalPr(h.deps);
     expect(result.isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
+    expect(result.ticket).toBeUndefined();
     expect(result.reasons).toEqual([
       "touches .github/workflows/ci.yml, apps/server/src/guard/rules.ts",
     ]);

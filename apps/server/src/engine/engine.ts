@@ -3348,6 +3348,7 @@ export function createEngine(deps: EngineDeps): Engine {
           touches: null,
           flightClearedSha: null,
           awaitingFlight: null,
+          adopted: { sha: head, epoch: loop.epoch },
           transient: 0,
         });
         store.addLoopEvent(

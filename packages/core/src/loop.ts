@@ -864,7 +864,10 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
   const outside = gate !== null && (gate.strays.length > 0 || !gate.hubOnly);
   const flightCall =
     touches !== null &&
-    (touches.paths.length > 0 || gate?.missionControlChanged === true || outside);
+    (touches.paths.length > 0 ||
+      gate?.missionControlChanged === true ||
+      outside ||
+      (P !== null && loop.adopted?.sha === P));
   const clear = elevated
     ? touches !== null && (!flightCall || cleared)
     : touches !== null &&
@@ -894,7 +897,7 @@ export const touchesReason = (paths: readonly string[]): string =>
 
 /** Why this head needed FLIGHT's call. Empty: it did not. */
 export function flightClearanceReasons(
-  loop: Pick<RunLoop, "touches" | "gate">,
+  loop: Pick<RunLoop, "touches" | "gate"> & { adopted?: RunLoop["adopted"] },
   sha: string,
 ): string[] {
   const touches = loop.touches?.sha === sha ? loop.touches : null;
@@ -904,6 +907,7 @@ export function flightClearanceReasons(
   const strays = (gate?.strays ?? []).filter((p) => !(touches?.paths ?? []).includes(p));
   if (strays.length > 0) reasons.push(`files outside the seat's area: ${clearancePaths(strays)}`);
   if (gate !== null && !gate.hubOnly) reasons.push("a commit from outside the run");
+  if (loop.adopted?.sha === sha) reasons.push("a head adopted from outside the run");
   return reasons;
 }
 

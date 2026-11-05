@@ -2773,6 +2773,20 @@ describe("merge workspace", () => {
     expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
   });
 
+  it("a head FLIGHT adopted waits for its clearance even with nothing else to call, then merges", () => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      { touches: { sha: SHA, paths: [] }, adopted: { sha: SHA, epoch: 0 } },
+    );
+    const held = reconcile(base);
+    expect(held.loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(held.actions)).not.toContain("merge");
+    const cleared = { ...base.loop, flightClearedSha: SHA };
+    expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
+    expect(flightClearanceReasons(cleared, SHA)).toEqual(["a head adopted from outside the run"]);
+    expect(flightClearanceReasons(cleared, SHA2)).toEqual([]);
+  });
+
   it("flightClearanceReasons names what needed FLIGHT's call, for this head only", () => {
     const loop = {
       touches: { sha: SHA, paths: ["a", "b", "c", "d", "e", "f", "g"] },
