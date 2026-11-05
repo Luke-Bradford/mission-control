@@ -8019,32 +8019,28 @@ describe("the first loop's engine", () => {
     const post = (a: FastifyInstance, payload: Record<string, unknown>) =>
       a.inject({ method: "POST", url: "/api/seats/guido-1/message", headers: json, payload });
 
-    it("refuses a message that names no question while a run waits off the seat on one", async () => {
-      parkedRun("parked", "shop-app#9");
-      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
-      const q = passed("parked", "Which provider?");
-      const { a, reconciled } = appOnSeat();
-      const r = await post(a, { text: "Carry on with the migration." });
-      expect(r.statusCode).toBe(409);
-      expect(r.json().error).toContain("answer it from its Needs-you card");
-      expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
-      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
-      expect(reconciled).toEqual([]);
-      await a.close();
-    });
-
-    it("still sends an interrupt to the run on the seat while a question waits", async () => {
-      parkedRun("parked", "shop-app#9");
-      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
-      const q = passed("parked", "Which provider?");
-      const { a, reconciled } = appOnSeat();
-      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
-      expect(r.statusCode).toBe(200);
-      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
-      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
-      expect(reconciled).toEqual([]);
-      await a.close();
-    });
+    it.each([
+      ["a plain message", { text: "Carry on with the migration." }],
+      ["an interrupt", { text: "Stop, wrong branch.", interrupt: true }],
+    ])(
+      "sends %s that names no question to the run on the seat, leaving the parked question open",
+      async (_name, payload) => {
+        parkedRun("parked", "shop-app#9");
+        store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+        const q = passed("parked", "Which provider?");
+        const { a, reconciled } = appOnSeat();
+        const r = await post(a, payload);
+        expect(r.statusCode).toBe(200);
+        // an interrupt is a labelled handoff and wakes the seat; a plain message waits in its inbox
+        expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(
+          payload.interrupt === true ? 1 : 0,
+        );
+        expect(store.comms(0, "next").map((m) => m.text)).toEqual([payload.text]);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
+        expect(reconciled).toEqual([]);
+        await a.close();
+      },
+    );
 
     it("sends a message that names no question to the run on the seat when none waits", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));

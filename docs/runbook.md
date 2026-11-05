@@ -1590,7 +1590,7 @@ A ticket waiting on a person is parked the same way: when a seat's question has 
 operator and the seat is between turns, the run leaves its seat (worktree and commits kept) and the seat
 takes its next ticket. The run does not wake while the question is open. A reply that names the question
 (`question` on `POST /api/seats/:id/message`, sent with a Needs-you ask reply) is stored for that run, not the run now on
-the seat, and closes only that question; a message with no `question` goes to the run on the seat as before, unless another run waits off the seat on a passed question: then it is refused (409) so it cannot land in the wrong run, except an interrupt, which is never an answer. A question of another seat, or one already closed, is refused too. The run
+the seat, and closes only that question; a message with no `question` goes to the run on the seat as before, and leaves the parked question open (the web sends the id once ticket 1474 lands). A question of another seat, or one already closed, is refused too. The run
 comes back with one line telling it to read the answer, in any phase it was parked in (working, CI or review). Ending the parked run closes its question. Another run's end or message on the seat leaves the question open.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
