@@ -4,7 +4,6 @@ import {
   COMMS_CAPCOM,
   type CommsAgentResponse,
   type CrewRow,
-  HUD_PAGE_PATHS,
   type PullRequestView,
 } from "@mc/core";
 import { seatError } from "../agent/seat.ts";
@@ -21,6 +20,7 @@ import {
   commsFlightPath,
   commsTicketPath,
   navigate,
+  PAGE_PATHS,
   type Page,
   ticketPath,
 } from "../router.ts";
@@ -181,8 +181,8 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
     id: `page:${page}`,
     group: "Page",
     title: PAGE_TITLES[page],
-    hint: HUD_PAGE_PATHS[page],
-    run: () => navigate(HUD_PAGE_PATHS[page]),
+    hint: PAGE_PATHS[page],
+    run: () => navigate(PAGE_PATHS[page]),
   }));
   for (const row of src.rows ?? []) {
     const name = callSign(row);

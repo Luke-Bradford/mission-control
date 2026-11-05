@@ -12,7 +12,7 @@ import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
  */
 const HUD_SEGMENTS = [
   ...new Set([...Object.values(HUD_PAGE_PATHS).map((p) => p.slice(1)), "overview", "agents"]),
-].filter((s) => /^[a-z-]+$/.test(s));
+].filter((s) => /^[a-z]+$/.test(s));
 const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.

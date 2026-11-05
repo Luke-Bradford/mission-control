@@ -105,7 +105,7 @@ export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page
 export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight", "needs"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
-export const PAGE_PATHS: Record<Page, string> = HUD_PAGE_PATHS;
+export const PAGE_PATHS: Record<Page, string> = { ...HUD_PAGE_PATHS, needs: "/needs-you" };
 
 const enc = encodeURIComponent;
 /** Needs you's home, where the header's tab, the FLIGHT pulse and every "all of it" link lead. */

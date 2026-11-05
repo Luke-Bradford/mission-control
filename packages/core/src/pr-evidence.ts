@@ -62,7 +62,6 @@ const TEST_FILE = /(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]
 /** The directories under `apps/web/src` that belong to one page alone. */
 const PAGE_DIRS: Record<string, EvidencePage> = {
   overview: "overview",
-  needs: "needs",
   flight: "flight",
   board: "board",
   agent: "agent",
