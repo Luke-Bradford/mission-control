@@ -1283,6 +1283,36 @@ describe("POST /api/guard/check", () => {
     expect(ends).toEqual([[false, null]]);
   });
 
+  it("hands the hook's exit code to the check recorder (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        lockedBy: async () => null,
+        dropRun: () => {},
+        drops: () => [],
+      },
+    });
+    const command = "pnpm -s test";
+    await check(tokA, bash("a1", command));
+    await check(tokA, {
+      ...post("a1", "PostToolUseFailure"),
+      tool_input: { command },
+      exit_code: 1,
+    });
+    await check(tokA, bash("a2", command));
+    await check(tokA, { ...post("a2", "PostToolUse"), tool_input: { command }, exit_code: 0 });
+    expect(ends).toEqual([
+      [false, 1],
+      [true, 0],
+    ]);
+  });
+
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
     const b = check(tokB, bash("b1", "pnpm -s test"));
