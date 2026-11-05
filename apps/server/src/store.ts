@@ -6839,7 +6839,7 @@ export class Store {
       this.reviewOfRun(runId)?.sha === headSha
         ? (this.db
             .prepare(`SELECT command, started_at, ended_at, outcome
-      FROM test_lock_runs WHERE run_id = ? AND ended_at IS NOT NULL AND outcome IN ('pass', 'fail')
+      FROM test_lock_runs WHERE run_id = ? AND ended_at IS NOT NULL AND outcome IN ('pass', 'fail', 'done')
       ORDER BY ended_at DESC, id DESC LIMIT 100`)
             .all(runId) as Row[])
         : [];

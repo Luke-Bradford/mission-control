@@ -1,7 +1,10 @@
 import "./supervisor-harness.ts";
 import { expect, it } from "vitest";
 import { resolvedCommsReason } from "../src/comms.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { make, noKeepers, store, until } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 it("records a real confirmed same-run recovery and retires only its earlier blocker", async () => {
   const first = make();
