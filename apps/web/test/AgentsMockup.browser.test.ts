@@ -18,8 +18,8 @@ const HOLE_MAX = 200;
 describeRendered("Agents mockup in a browser", () => {
   for (const [width, height] of SIZES) {
     for (const rail of RAIL) {
-      for (const plan of ["", "&plan=empty"]) {
-        const where = `${width}x${height}${rail ? " FLIGHT open" : " FLIGHT folded"}${plan ? ", no plan" : ""}`;
+      for (const variant of ["", "&plan=empty", "&state=running"]) {
+        const where = `${width}x${height}${rail ? " FLIGHT open" : " FLIGHT folded"}${variant ? `, ${variant.slice(1).replace("=", " ")}` : ""}`;
         it(
           `answers the seat on one screen at ${where}`,
           async () => {
@@ -27,9 +27,30 @@ describeRendered("Agents mockup in a browser", () => {
               page: "test/agentsMockupBrowser.html",
               width,
               height,
-              search: `?x=1${rail}${plan}`,
+              search: `?x=1${rail}${variant}`,
             });
-            const r = await page.evaluate(() => {
+            const r = await page.evaluate(async () => {
+              // The current plan step is scrolled into view after the first layout.
+              await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+              const inView = (sel: string) => {
+                const list = document.querySelector<HTMLElement>(sel);
+                const now = list?.querySelector<HTMLElement>(".think");
+                if (!list || !now || list.offsetParent === null) return null;
+                const a = list.getBoundingClientRect();
+                const b = now.getBoundingClientRect();
+                return b.top >= a.top - 0.5 && b.bottom <= a.bottom + 0.5;
+              };
+              const stackNow = inView("#stackPlan");
+              const tabNow = inView('.tabbody[data-panel="plan"]');
+              const stateText = [
+                document.querySelector(".ident")?.textContent ?? "",
+                document.querySelector<HTMLSelectElement>("#seat")?.selectedOptions[0]
+                  ?.textContent ?? "",
+                document.querySelector<HTMLInputElement>(".composer input")?.placeholder ?? "",
+              ].join("\n");
+              const interrupt = [...document.querySelectorAll(".acts button")].some(
+                (b) => b.textContent === "Interrupt",
+              );
               const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
               const act = rect("#activity");
               const right = rect(".right > .tabs");
@@ -102,6 +123,10 @@ describeRendered("Agents mockup in a browser", () => {
                 loopRows: rows,
                 gaps,
                 stackGap,
+                stackNow,
+                tabNow,
+                stateWords: stateText.match(/\b(parked|running)\b/gi) ?? [],
+                interrupt,
                 cutNotFocusable,
               };
             }, null);
@@ -131,6 +156,17 @@ describeRendered("Agents mockup in a browser", () => {
               expect(r.stackGap, `${where}: Plan panel leaves an empty area`).toBeLessThanOrEqual(
                 HOLE_MAX,
               );
+            }
+            const running = variant === "&state=running";
+            expect(r.stateWords, `${where}: the state shows once on the first screen`).toEqual([
+              running ? "Running" : "Parked",
+            ]);
+            expect(r.interrupt, `${where}: Interrupt shows only while running`).toBe(running);
+            if (variant !== "&plan=empty") {
+              expect(
+                r.stackNow ?? r.tabNow,
+                `${where}: the current plan step is in view when the page opens`,
+              ).toBe(true);
             }
             expect(r.cutNotFocusable, `${where}: cut text must take focus`).toEqual([]);
           },

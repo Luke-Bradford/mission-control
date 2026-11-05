@@ -1,6 +1,13 @@
-# Agents page mockup (GUIDO-1, parked, busy)
+# Agents page mockup (GUIDO-1, busy)
 
-A static proposal for the Agents page. It is not product code. Open `index.html`; add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
+A static proposal for the Agents page. It is not product code. Open `index.html`. The default view is GUIDO-1 parked on a refused push; `?state=running` is the same seat running. Add `?flight=1` for the open FLIGHT dock, `?theme=light` for light, `?plan=empty` for a seat with no plan.
+
+**Render list** (each at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open):
+
+1. `index.html` (parked, with a plan)
+2. `index.html?state=running` (running: Interrupt, the live call bar waiting on the test lock, no Next move panel)
+3. `index.html?plan=empty` (no plan)
+4. `index.html?theme=light` (parked, light)
 
 Render at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open. `apps/web/test/AgentsMockup.browser.test.ts` measures the same sizes and states.
 
@@ -8,9 +15,9 @@ Render at 1920x940, 2560x1145 and 2560x1250, FLIGHT folded and open. `apps/web/t
 
 A seat's stream is not safe to commit, so none of this is copied from a live seat.
 
-- **Kept real, for GUIDO-1:** ticket mission-control#1411, "test:related can't pass in a seat's sandbox when a change selects most of the suite"; head 117f67b; parked on a refused push; prompt sections of 3,952 (standing orders), 1,398 (role prompt) and 16,299 (tool results); context 73.8k of 200k; cost about $0.71. These come from the #1434 ticket's Why section.
-- **Real shapes and limits:** each Activity row follows `StreamEvent` and `toolTarget` (target cut at 80 characters, result at 100, first line only), with `ms` for the time. Repeated thinking merges to `thinking ×N` with no summary, because the hub stores no summary. Guard and agents rows follow the live filters.
-- **Illustrative:** the branch name, the other four prompt sections (1,206 / 642 / 517 / 388), the plan, files, saved links, times, the counts of failed tools, and the previous runs (named by their real branches).
+- **Real, for GUIDO-1** (from the preview's live page and the #1434 ticket): ticket mission-control#1411 and its title, "test:related can't pass in a seat's sandbox when a change selects most of the suite"; head 117f67b; the role "Backend developer"; PR 1430; the chip "Held · hub"; the next move "Waiting on FLIGHT"; account claude-max; model claude-sonnet-5-5 at medium effort; CLI 2.1.318; area apps/server/**, packages/core/**, docs/**; the branch feature/1411-test-related-can-t-pass-in-a-seat-s; prompt sections of 3,952 (standing orders), 1,398 (role prompt) and 16,299 (tool results); context 73.8k of 200k; cost about $0.71.
+- **Real shapes and limits:** each Activity row follows `StreamEvent` and `toolTarget` (target cut at 80 characters, result at 100, first line only), with `ms` for the time. Repeated thinking merges to `thinking ×N` with no summary, because the hub stores no summary.
+- **Illustrative (invented here):** the reason wording and the Next move text, the other four prompt sections (1,206 / 642 / 517 / 388), the plan, the changed files, the saved links, the done-when evidence lines, the Left items, all times and counts (events, failed tools, 28 saved links), the Activity rows' content, the previous runs (named by their real branches), the FLIGHT dock text and the seat list in the picker.
 
 ## The question
 
@@ -24,11 +31,11 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 
 ## Layout
 
-- **Identity strip.** Seat, role, the state (the only place "Parked" or "Running" appears), review chip, the reason with a details control, seat picker, Stop and More. Second row: ticket, title (first claim on the width, never under 320 px), branch (shrinks), head and age. The role, account, model, effort, CLI and area line moved to the Context tab.
-- **Actions.** A crew seat gets Interrupt (while running), Stop and More; Pause only appears for an observed loop. Messaging the seat is the composer under Activity, as today.
-- **Activity (left, primary).** Time, kind, tool, target, result, duration. Filters All, Messages, Thinking, Tools, Guard with counts; Follow; link to the full trace. The live call bar shows while a tool runs. It takes all spare height; the rows scroll inside it.
-- **Right column (440 to 560 px).** Next move (only when there is one), Cost / Context / Tools, one loop row, Prompt sections (all seven), then the detail tabs.
-- **Plan at 2560 (changed after the first render).** From 2200 px wide, Plan and Queue stand in their own panel above the tabs, and the tabs lose Plan. At 1920, and below 2200, Plan and its queue stay one tab. The reason: at 2560 a single tab left about 390 px empty.
+- **Identity strip.** Seat, role, the state (the only place "Parked" or "Running" appears: the picker lists names only, the age reads "state changed 3m ago", the composer placeholder names no state), review chip, the reason with a details control, seat picker and actions. Second row: ticket, title (first claim on the width, never under 320 px), branch (shrinks), PR, head and age. The role, account, model, effort, CLI and area line moved to the Context tab.
+- **Actions.** A running crew seat gets Interrupt, Stop and More; a parked one gets Stop and More; Pause only appears for an observed loop. Messaging the seat is the composer under Activity, as today.
+- **Activity (left, primary).** Time, kind, tool, target, result, duration. Filters All, Messages, Thinking, Tools, Guard with counts; Follow; link to the full trace. The live call bar shows while a tool runs, or the wait for the test lock with the seat holding it (`?state=running`). It takes all spare height; the rows scroll inside it.
+- **Right column (440 to 560 px).** Next move (only when there is one; the running view has none and the tabs take its height), Cost / Context / Tools, one loop row, Prompt sections (all seven), then the detail tabs.
+- **Plan at 2560 (changed after the first render).** The current step opens in view, centred in the list. From 2200 px wide, Plan and Queue stand in their own panel above the tabs, and the tabs lose Plan. At 1920, and below 2200, Plan and its queue stay one tab. The reason: at 2560 a single tab left about 390 px empty.
 - **A seat with no plan** (`?plan=empty`): no Plan tab or panel. At 2560 the panel shows the queue alone, content-sized, and the tabs take the rest. At 1920 the queue sits at the top of the Runs tab.
 
 ## Dropped or moved
@@ -48,6 +55,11 @@ Vertical budget at 1920x940: 940 − 49 − 30 − 24 = 837 px of main. Identity
 | "Tokens this run" and "tokens so far" | Dropped: they leave out cached reads. Context now and Cost stay. |
 | Tools this run, with the per-tool breakdown | Tools count and failures stay in the figure row. Per-tool counts are in the Context tab, "Tools this run". |
 | Ask → result → next | The ask is the ticket title in the identity strip. The result is in the Report tab. Next move stays in the right column. |
+| "Left: …" (what remains) | Report tab, "Left". |
+| Evidence text under each acceptance check | Report tab, a second line under each "Done when" row. |
+| "Waiting for the test lock" line | The live call bar under Activity, with the seat that holds the lock. |
+| PR and FILE labels on deliverables | Report tab, "Saved links": each link carries its kind (PR, FILE, SHOT), and the PR link is first. |
+| "State changed … ago" | Identity strip, second row, without the state word. |
 | Reported result, acceptance checks | Report tab, labelled "Previous run" while a rework runs. The checks are listed under "Done when". |
 | FLIGHT recommends | Next move's full text (the "Read full" control). |
 | Deliverables | Report tab, "Saved links", with a "Show all" link past the first screen of them. |
