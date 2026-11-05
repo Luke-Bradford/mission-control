@@ -91,7 +91,11 @@ if (${tall}) {
 }
 const report = (what) => fetch('/api/click?what=' + encodeURIComponent(what));
 const drawView = () => {
-  const view = document.createElement('div');
+  // as on the real page: a small control in a toolbar, inside a section with a long tab body
+  const section = document.createElement('section');
+  const toolbar = document.createElement('div');
+  const view = document.createElement('span');
+  view.setAttribute('role', 'group');
   view.setAttribute('aria-label', ${JSON.stringify(QA_VIEW_LABEL)});
   for (const label of ${JSON.stringify(Object.values(QA_TAB_LABELS))}) {
     const tab = document.createElement('button');
@@ -100,10 +104,12 @@ const drawView = () => {
     tab.onclick = () => { tab.setAttribute('aria-pressed', 'true'); report('tab:' + label); };
     view.append(tab);
   }
-  document.querySelector('main').append(view);
-  new IntersectionObserver((entries) => {
-    for (const e of entries) report(e.isIntersecting ? 'view:visible' : 'view:hidden');
-  }).observe(view);
+  toolbar.append(view);
+  const body = document.createElement('div');
+  body.style.height = '2000px';
+  section.append(toolbar, body);
+  document.querySelector('main').append(section);
+  window.addEventListener('scroll', () => report('top:' + Math.round(section.getBoundingClientRect().top)));
 };
 setTimeout(() => {
   if (${old}) return drawView();
@@ -202,6 +208,28 @@ const chromeCount = (): number => {
   }
 };
 
+/** The pids of the Chrome processes started under this process (the helper's children, and theirs). */
+const ownChrome = (): number[] => {
+  const rows = execFileSync("ps", ["-axo", "pid=,ppid=,command="], { encoding: "utf8" })
+    .split("\n")
+    .flatMap((line) => {
+      const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] ?? "" }] : [];
+    });
+  const mine = new Set([process.pid]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of rows)
+      if (mine.has(r.ppid) && !mine.has(r.pid)) {
+        mine.add(r.pid);
+        grew = true;
+      }
+  }
+  return rows
+    .filter((r) => mine.has(r.pid) && r.command.includes("playwright_chromiumdev_profile"))
+    .map((r) => r.pid);
+};
+
 // A cold Chrome start on a loaded CI runner can take most of 20 s; the deadline covers launch too.
 // Every render's test timeout must exceed this.
 const COLD_START_DEADLINE_MS = 60_000;
@@ -241,23 +269,32 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
         clicks.length = 0;
         const png = await render(`/audit?evidence-tab=${tab}`);
         expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
-        expect(clicks.filter((c) => !c.startsWith("view:"))).toEqual([
+        expect(clicks.filter((c) => c === "disclosure" || c.startsWith("tab:"))).toEqual([
           "disclosure",
           `tab:${label}`,
         ]);
       }
     }, 150_000);
 
-    it("has the QA view on screen when it is photographed, below a block taller than the viewport", async () => {
+    it("scrolls the QA section to the top of the viewport, below a block taller than the viewport", async () => {
       clicks.length = 0;
       await render("/audit?evidence-tab=readiness&tall=1");
-      expect(clicks.filter((c) => c.startsWith("view:")).at(-1)).toBe("view:visible");
+      await expect
+        .poll(() =>
+          Number(
+            clicks
+              .filter((c) => c.startsWith("top:"))
+              .at(-1)
+              ?.slice(4) ?? 9999,
+          ),
+        )
+        .toBeLessThan(200);
     }, 90_000);
 
     it("selects the tab without the disclosure on an older baseline that shows the view at once", async () => {
       clicks.length = 0;
       await render("/audit?evidence-tab=hotspots&old=1");
-      expect(clicks.filter((c) => !c.startsWith("view:"))).toEqual([
+      expect(clicks.filter((c) => c === "disclosure" || c.startsWith("tab:"))).toEqual([
         `tab:${QA_TAB_LABELS.hotspots}`,
       ]);
     }, 90_000);
@@ -345,12 +382,15 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
         (e: unknown) => (e instanceof Error ? e.message : String(e)),
       );
       await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
-      // freeze every Chrome process, so its own graceful close cannot run
-      for (const line of execFileSync("ps", ["-axo", "pid,command"], { encoding: "utf8" }).split(
-        "\n",
-      ))
-        if (line.includes("playwright_chromiumdev_profile"))
-          process.kill(Number(line.trim().split(/\s+/)[0]), "SIGSTOP");
+      // freeze this test's own Chrome only (our descendants), so its graceful close cannot run
+      const mine = ownChrome();
+      expect(mine.length).toBeGreaterThan(0);
+      for (const pid of mine)
+        try {
+          process.kill(pid, "SIGSTOP");
+        } catch {
+          // it exited between the listing and the signal
+        }
       stop.abort(new Error("stopped by the test"));
       expect(await settled).toBe("stopped by the test");
       await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);

@@ -89,12 +89,18 @@ interface BrowserRoute {
 /** The `prefers-color-scheme` a render emulates; the HUD follows it unless the operator pinned a theme. */
 export type HudColorScheme = "light" | "dark";
 
+interface HudLocator {
+  count(): Promise<number>;
+  last(): HudLocator;
+  /** Runs `fn` on the element in the page (through the protocol, so the page's CSP does not apply). */
+  evaluate(
+    fn: (element: { scrollIntoView(options: { block: "start" }): void }) => void,
+  ): Promise<void>;
+}
+
 interface HudPage {
   click(selector: string, options: { timeout: number }): Promise<void>;
-  locator(selector: string): {
-    count(): Promise<number>;
-    scrollIntoViewIfNeeded(options: { timeout: number }): Promise<void>;
-  };
+  locator(selector: string): HudLocator;
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
     selector: string,
@@ -361,6 +367,7 @@ export async function renderHudWithPlaywright(
     // Evidence captures visit each Audit tab on both old and new commits. Only these fixed
     // local view selectors may be clicked; requests still cross the GET-only boundary.
     let tab = new URL(url).searchParams.get("evidence-tab");
+    let qaSelected = false;
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     // Older main commits kept QA inside Audit; photograph that equivalent baseline rather
     // than the Overview redirect when the standalone route has not been built yet.
@@ -383,16 +390,25 @@ export async function renderHudWithPlaywright(
       }
       await click(`${HUD_QA_VIEW} button:text-is("${label}")`);
       await wait(`${HUD_QA_VIEW} button[aria-pressed="true"]:text-is("${label}")`, "attached");
-      // The view sits below Code Health and the shot is the viewport only: bring it on screen
-      // rather than rely on where the click happened to scroll.
-      waiting = `scroll ${HUD_QA_VIEW} into view`;
-      await page.locator(HUD_QA_VIEW).scrollIntoViewIfNeeded({ timeout: remaining() });
-      waiting = undefined;
+      qaSelected = true;
     }
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
     await wait(PAGE_LOADING, "detached");
     ensureActive();
+    if (qaSelected) {
+      // The QA view sits below Code Health and the shot is the viewport only. The control matched
+      // by HUD_QA_VIEW is a small toolbar group, so scroll the section that holds it (its toolbar
+      // and the tab's content) to the top of the viewport; an older baseline with no such section
+      // keeps the control itself in sight. The tab's data has settled, so the layout is final.
+      waiting = `scroll the section of ${HUD_QA_VIEW} to the top`;
+      const sections = page.locator(`section:has(${HUD_QA_VIEW})`);
+      const target = (await sections.count()) > 0 ? sections.last() : page.locator(HUD_QA_VIEW);
+      await target.evaluate((element) => element.scrollIntoView({ block: "start" }));
+      waiting = undefined;
+      await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
+      ensureActive();
+    }
     try {
       guard.page(page.url());
     } catch {
