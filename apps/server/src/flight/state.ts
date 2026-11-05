@@ -617,6 +617,9 @@ export function markItemsShown(store: Store, s: FlightState): void {
   }
 }
 
+/** The wake fact for a queued review an idle review seat has not started; also FLIGHT's `wait_on` target for it. */
+export const REVIEW_FAULT_FACT = "idle-reviewers";
+
 /** Whether a recorded wait still holds `target` (a seat id or a ticket ref) back. */
 const waitingOn = (waits: Record<string, { until: number }>, target: string, now: number) =>
   Object.entries(waits).some(
@@ -651,10 +654,11 @@ function wakeInputs(i: {
     fit[seat.id] = ready.filter((t) => fits(seat, t)).map((t) => t.ref);
   }
   const seen = seenItems(i.store);
+  const reviewsWaited = waitingOn(waits, REVIEW_FAULT_FACT, i.now);
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
-  return { fit, fresh };
+  return { fit, fresh, reviewsWaited };
 }
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
@@ -824,8 +828,21 @@ export function flightState(i: {
         queued: reviews.filter((row) => row.state === "queued").length,
         running: reviews.filter((row) => row.state === "starting" || row.state === "running")
           .length,
+        // the oldest of this seat's own queued reviews: a review stays on the seat it was assigned to
+        waitMin: Math.max(
+          0,
+          ...reviews
+            .filter((row) => row.state === "queued")
+            .map((row) => Math.floor((now - row.createdAt) / 60_000)),
+        ),
         idle:
           !seatUnavailable(seat) &&
+          !accountAtStop(
+            config,
+            store,
+            runAccountId(store, held?.id ?? null, seat.accountId),
+            now,
+          ) &&
           pausedSeat(store, seat.id) === null &&
           store.seatSession(seat.id)?.state !== "stopped" &&
           held === null &&
@@ -1410,10 +1427,13 @@ export function wakeFacts(
 ): string {
   const { free, startable } = startableFor(s);
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
+  // A review runs only on the seat it was assigned to, so the fault is an idle seat with its own
+  // queued review that has stood still; a seat at its quota stop is not idle. A wait on it holds the fact.
   const reviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 &&
-    (s.reviewQueue?.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS &&
-    s.reviewQueue?.seats.some((seat) => seat.idle);
+    s.wake?.reviewsWaited !== true &&
+    s.reviewQueue?.seats.some(
+      (seat) => seat.idle && seat.queued > 0 && (seat.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
+    );
   return JSON.stringify({
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
@@ -1441,7 +1461,7 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
-    reviews: reviewFault ? ["idle-reviewers"] : [],
+    reviews: reviewFault ? [REVIEW_FAULT_FACT] : [],
     prFlow: prFlowFacts(s.prFlow),
     holdsInForce:
       s.flowHolds

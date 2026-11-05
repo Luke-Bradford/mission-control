@@ -767,8 +767,43 @@ describe("FLIGHT's flow queues", () => {
       queued: 0,
       waitMin: 0,
       running: 0,
-      seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+      seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
     });
+  });
+
+  it("a reviewer at its quota stop is not idle, and a wait on idle-reviewers holds the fault", () => {
+    store.requestReview({
+      authorRunId: "r-author-q",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 9,
+      sha: "sha-q",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    const later = T0 + 20 * MIN;
+    const seatState = () =>
+      flightState({ config, store, busy: [], now: later }).reviewQueue?.seats[0];
+    expect(seatState()).toMatchObject({ queued: 1, waitMin: 20, idle: true });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":["idle-reviewers"]',
+    );
+    recordFlightWait(store, "idle-reviewers", { on: "reviews", until: later + MIN, at: later });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":[]',
+    );
+    // over the account's stop, the seat cannot start the review: not idle, no fault
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: later,
+      pct: 96,
+      resetAt: later + 60 * MIN,
+      source: "test",
+    });
+    expect(seatState()).toMatchObject({ queued: 1, idle: false });
   });
 
   it("names a machine hold that leaves queued reviews without a reviewer", () => {
@@ -843,8 +878,8 @@ describe("FLIGHT's flow queues", () => {
       waitMin: 0,
       running: 0,
       seats: [
-        { seat: "retro-1", queued: 3, running: 0, idle: true },
-        { seat: "retro-2", queued: 2, running: 0, idle: true },
+        { seat: "retro-1", queued: 3, running: 0, waitMin: 0, idle: true },
+        { seat: "retro-2", queued: 2, running: 0, waitMin: 0, idle: true },
       ],
     });
     expect(result.flowHolds).toContainEqual({
@@ -2745,11 +2780,61 @@ describe("wakeSummary", () => {
             queued,
             running: 0,
             waitMin,
-            seats: [{ seat: "retro-1", queued, running: 0, idle: true }],
+            seats: [{ seat: "retro-1", queued, running: 0, waitMin, idle: true }],
           },
         });
       expect(wakeFacts(queue(1, 9))).toBe(wakeFacts(queue(0, 0)));
       expect(wakeFacts(queue(1, 10))).not.toBe(wakeFacts(queue(0, 0)));
+    });
+
+    it("does not raise it when the queued review is on a working seat and the idle one has none", () => {
+      const quiet = wakeFacts(state({}));
+      expect(
+        wakeFacts(
+          state({
+            reviewQueue: {
+              queued: 3,
+              running: 1,
+              waitMin: 30,
+              seats: [
+                { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+                { seat: "retro-cx", queued: 0, running: 0, waitMin: 0, idle: false },
+              ],
+            },
+          }),
+        ),
+      ).toBe(quiet);
+      // an idle seat with no queue of its own cannot take retro-1's review
+      expect(
+        wakeFacts(
+          state({
+            reviewQueue: {
+              queued: 3,
+              running: 1,
+              waitMin: 30,
+              seats: [
+                { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+                { seat: "retro-2", queued: 0, running: 0, waitMin: 0, idle: true },
+              ],
+            },
+          }),
+        ),
+      ).toBe(quiet);
+    });
+
+    it("holds the idle-reviewers fact while FLIGHT waits on it", () => {
+      const queue = (reviewsWaited: boolean) =>
+        state({
+          reviewQueue: {
+            queued: 1,
+            running: 0,
+            waitMin: 30,
+            seats: [{ seat: "retro-1", queued: 1, running: 0, waitMin: 30, idle: true }],
+          },
+          wake: { fit: {}, fresh: [], reviewsWaited },
+        });
+      expect(wakeFacts(queue(true))).toBe(wakeFacts(state({ wake: { fit: {}, fresh: [] } })));
+      expect(wakeFacts(queue(false))).not.toBe(wakeFacts(queue(true)));
     });
 
     it("ignores a free seat next to tickets that are not ready, until one is", () => {

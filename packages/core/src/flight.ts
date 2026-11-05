@@ -1081,7 +1081,15 @@ export interface FlightState {
     running: number;
     /** Minutes the oldest queued review has waited; 0 with none queued. */
     waitMin?: number;
-    seats: { seat: string; queued: number; running: number; idle: boolean }[];
+    seats: {
+      seat: string;
+      queued: number;
+      running: number;
+      /** Minutes this seat's oldest queued review has waited. */
+      waitMin?: number;
+      /** Free to start a review: not paused, stopped, busy or at its quota stop. */
+      idle: boolean;
+    }[];
   };
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
@@ -1120,6 +1128,8 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /** FLIGHT has a live `wait_on` for the idle-reviewers fault. */
+  reviewsWaited?: boolean;
 }
 
 export interface FlightWakeList<T> {
@@ -1324,7 +1334,8 @@ export function wakeLine(
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
   const idleReviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
+    (s.reviewQueue?.queued ?? 0) > 0 &&
+    s.reviewQueue?.seats.some((seat) => seat.idle && seat.queued > 0)
       ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
