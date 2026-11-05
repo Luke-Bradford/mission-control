@@ -51,6 +51,7 @@ import {
   type Run,
   type SeatSessionRow,
   STUCK_PARK,
+  wakeLine,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -791,6 +792,14 @@ describe("FLIGHT's flow queues", () => {
       '"reviews":["idle-reviewers"]',
     );
     recordFlightWait(store, "idle-reviewers", { on: "reviews", until: later + MIN, at: later });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":[]',
+    );
+    recordFlightWait(store, "reviews idle-reviewers", {
+      on: "reviews",
+      until: later + 60 * MIN,
+      at: later,
+    });
     expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
       '"reviews":[]',
     );
@@ -2820,6 +2829,21 @@ describe("wakeSummary", () => {
           }),
         ),
       ).toBe(quiet);
+    });
+
+    it("names the fault in the wake line only for an idle seat whose own review has waited", () => {
+      const fault = "Queued reviews with idle review seats are a fault";
+      const seats = (waited: number) => [
+        { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+        { seat: "retro-2", queued: waited > 0 ? 1 : 0, running: 0, waitMin: waited, idle: true },
+      ];
+      const line = (waited: number) =>
+        wakeLine(
+          state({ reviewQueue: { queued: 4, running: 1, waitMin: 30, seats: seats(waited) } }),
+        );
+      expect(line(0)).not.toContain(fault);
+      expect(line(5)).not.toContain(fault);
+      expect(line(10)).toContain(fault);
     });
 
     it("holds the idle-reviewers fact while FLIGHT waits on it", () => {

@@ -1333,11 +1333,11 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  const idleReviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 &&
-    s.reviewQueue?.seats.some((seat) => seat.idle && seat.queued > 0)
-      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
-      : "";
+  const idleReviewFault = s.reviewQueue?.seats.some(
+    (seat) => seat.idle && seat.queued > 0 && (seat.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
+  )
+    ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+    : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 

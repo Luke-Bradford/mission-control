@@ -3926,6 +3926,19 @@ describe("the engine runs reviews", () => {
     });
   });
 
+  it("a queued review on a working seat moves to an idle reviewer added later", async () => {
+    await toReview();
+    await secondAuthor();
+    const two = need(store.reviewsOfRun(RUN2)[0]);
+    expect(two).toMatchObject({ state: "queued", seatId: RETRO });
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    await h.engine.tick();
+    expect(store.review(two.id)?.state).toBe("superseded");
+    await vi.waitFor(() =>
+      expect(store.reviewsOfRun(RUN2)[1]).toMatchObject({ seatId: "retro-2" }),
+    );
+  });
+
   describe("a review's token budget is its account's", () => {
     const addCodexReviewer = (budget?: number): void => {
       config.accounts.push({
