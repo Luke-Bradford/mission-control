@@ -2882,9 +2882,7 @@ describe("merge workspace", () => {
     );
     expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
     expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
-    expect(flightClearanceReasons(base.loop, SHA)).toContain(
-      "a head adopted from outside the run",
-    );
+    expect(flightClearanceReasons(base.loop, SHA)).toContain("a head adopted from outside the run");
   });
 
   it("flightClearanceReasons names what needed FLIGHT's call, for this head only", () => {
