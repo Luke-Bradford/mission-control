@@ -701,3 +701,28 @@ it("names the seat that holds the ticket now, not the one that ended", () => {
     rework: { seat: "new-seat", seatBusy: true },
   });
 });
+
+it("a blocking review carried to a merged-in head is still rework", () => {
+  const NEW = "c".repeat(40);
+  store.replaceBoard("repo", [card(4, "In progress")]);
+  store.upsertRun(
+    run(4, {
+      loop: { ...NEW_LOOP, phase: "review", prNumber: 104, carry: { from: SHA, to: NEW } },
+    }),
+  );
+  store.replacePullRequests("repo", [pr(4, { headSha: NEW })], NOW);
+  reported("run-4", 104, SHA, 1, 2);
+  const result = summary();
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0]);
+  expect(result.pipeline[1]?.cards[0]?.rework).toMatchObject({ blockers: 2 });
+});
+
+it("a review of an earlier epoch is not rework for a resumed run", () => {
+  store.replaceBoard("repo", [card(4, "In review")]);
+  store.upsertRun(run(4, { loop: { ...NEW_LOOP, phase: "review", prNumber: 104, epoch: 1 } }));
+  store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
+  reported("run-4", 104, SHA, 1, 2);
+  const result = summary();
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
+  expect(result.pipeline[3]?.cards[0]?.rework).toBeUndefined();
+});

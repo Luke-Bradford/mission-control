@@ -2082,6 +2082,19 @@ describe("review decisions", () => {
     ]);
   });
 
+  it("an ended run whose PR was closed keeps its card Blocked", () => {
+    const closed = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" }, pr: pr({ ci: "passing", state: "closed" }) },
+      {
+        phase: "parked",
+        parked: { kind: "pr-closed", reason: "closed", ended: false },
+        cardFor: "parked:0",
+      },
+    );
+    expect(kinds(reconcile(closed).actions, "move-card")).toEqual([]);
+  });
+
   it("a run that parked on blocking findings and then ended moves its Blocked card to Ready", () => {
     const parked = inReview(
       withReview([fact({ id: 5, blocking: 1 })], [finding]),
