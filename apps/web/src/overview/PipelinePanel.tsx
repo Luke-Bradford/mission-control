@@ -1,5 +1,6 @@
 import type { Crew, OverviewSummary, PipelineCard, PipelineStage } from "@mc/core";
 import type { CSSProperties } from "react";
+import { cardAgent, reworkLabel } from "../board/cards.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -142,6 +143,17 @@ export function PipelinePanel() {
                 {cards.map((card) => {
                   const owner = assignee(card.who, crew);
                   const href = pipelineCardPath(card);
+                  const rework =
+                    card.rework &&
+                    reworkLabel(card.rework, {
+                      ready: lane === "ready",
+                      onTicket:
+                        cardAgent(
+                          { repoId: card.repoId, issueNumber: card.ticket },
+                          crew?.rows ?? [],
+                        )?.id === card.rework.seat,
+                      pr: card.pr,
+                    });
                   return (
                     <a
                       key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
@@ -152,6 +164,7 @@ export function PipelinePanel() {
                       <span className="board-title" title={card.title}>
                         <span className="board-ticket num">#{card.ticket}</span> {cardTitle(card)}
                       </span>
+                      {rework && <span className="board-rework">{rework}</span>}
                       <span className="board-meta">
                         {owner && (
                           <span className="pipeline-assignee" title={owner.name}>

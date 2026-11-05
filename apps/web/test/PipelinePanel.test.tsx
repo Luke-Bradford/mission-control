@@ -62,6 +62,37 @@ describe("Pipeline", () => {
     expect(container.textContent).not.toContain("total");
   });
 
+  it("shows the rework label on a building card, queued when its seat is busy, reviewed on a Ready card", async () => {
+    const facts = { round: 2, blockers: 1, seat: "guido-2", seatBusy: false };
+    const card = (ticket: number, rework: typeof facts) => ({
+      repoId: "sample-app",
+      ticket,
+      title: `Ticket ${ticket}`,
+      pr: 1432,
+      ci: [],
+      since: now - 120_000,
+      who: null,
+      rework,
+    });
+    stubFetch({
+      "/api/overview": summary([
+        { stage: "ready", count: 1, oldestAt: now, cards: [card(1, facts)] },
+        {
+          stage: "building",
+          count: 2,
+          oldestAt: now,
+          cards: [card(2, facts), card(3, { ...facts, seatBusy: true })],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    expect(await screen.findByText("Reviewed · 1 blocker · PR 1432")).toBeTruthy();
+    expect(screen.getByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+    expect(screen.getByText("Rework · queued for GUIDO-2")).toBeTruthy();
+  });
+
   it("opens cards on their ticket page while lane links keep their Board stage filter", async () => {
     const ready = pipeline[0] as PipelineStage;
     const building = pipeline[1] as PipelineStage;

@@ -6,6 +6,7 @@ import {
   DONE_RANGES,
   HUD_COLUMNS,
   type HudColumn,
+  type OverviewSummary,
   type PipelineStage,
   type PullRequestView,
   type RepoProfile,
@@ -18,6 +19,7 @@ import { needsYouItems } from "../attention.ts";
 import { BriefModal } from "../board/BriefModal.tsx";
 import { standup, weekly } from "../board/brief.ts";
 import {
+  type CardRework,
   cardAgent,
   cardColumn,
   cardQueue,
@@ -83,6 +85,14 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const crewRes = useResource<Crew>(RESOURCES.crew);
+  // The server's rework facts ride on the Overview's pipeline cards
+  const overviewRes = useResource<OverviewSummary>(RESOURCES.overview());
+  const rework = useMemo(() => {
+    const m = new Map<string, CardRework>();
+    for (const s of overviewRes.data?.pipeline ?? [])
+      for (const c of s.cards ?? []) if (c.rework) m.set(`${c.repoId}#${c.ticket}`, c.rework);
+    return m;
+  }, [overviewRes.data]);
   const crew = crewRes.data?.rows;
   const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
   const attention = attentionRes.data;
@@ -209,6 +219,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     now,
     tz,
     todayStart,
+    rework,
     metrics: {
       "In progress": {
         label: metricText("inProgress").label,
@@ -226,6 +237,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     boards.every((res) => Boolean(res.data || res.error)) &&
     prRes.every((res) => Boolean(res.data || res.error)) &&
     Boolean(crewRes.data || crewRes.error) &&
+    Boolean(overviewRes.data || overviewRes.error) &&
     Boolean(attentionRes.data || attentionRes.error) &&
     Boolean(configRes.data || configRes.error) &&
     Boolean(profilesRes.data || profilesRes.error) &&
