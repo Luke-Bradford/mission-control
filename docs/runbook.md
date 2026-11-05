@@ -2388,6 +2388,11 @@ path that fits the 4 Nov report (lock `pass`, the seat saw exit 1, no check reco
 with `;` or `|` is never counted as a check). A Codex command releases as `fail` when it did not
 succeed.
 
+Not covered by a test in a seat: the Codex release outcome (`supervisor-checks.test.ts`, which
+needs a crew run and so skips in a seat; CI runs it), and whether Codex's own sandbox passes
+`MC_SEAT_SANDBOX` on to its shell commands. A Codex seat that shows tests failing on `listen`,
+`ps` or `sandbox-exec` instead of skipping is the sign it does not; report it.
+
 
 ### Durable QA reports
 
