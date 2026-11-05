@@ -90,7 +90,7 @@ describe("the check recorder", () => {
   let rows: {
     runId: string;
     command: string;
-    invokedCommand: string;
+    invokedCommand?: string | undefined;
     headSha: string;
     ok: boolean;
     at: number;
