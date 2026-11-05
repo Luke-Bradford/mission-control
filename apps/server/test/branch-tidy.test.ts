@@ -126,7 +126,12 @@ const ref = (b: string) => `repos/o/mc/git/refs/heads/${b}`;
 
 it("a closed PR deletes nothing, even on a branch this hub's own run made", async () => {
   store.upsertRun(run("done", "feature/1-closed", { endedAt: NOW - 40 * HOUR, status: "ok" }));
-  store.upsertPullRequests("mc", [pr(1, "feature/1-closed", "closed")], NOW);
+  // its head is the branch tip, so only the PR's state (closed, not merged) can stop the delete
+  store.upsertPullRequests(
+    "mc",
+    [{ ...pr(1, "feature/1-closed", "closed"), headSha: "sha-feature/1-closed" }],
+    NOW,
+  );
   const { gh, deleted } = fakeGh({ "feature/1-closed": 48 }, []);
   const t = tidyWith(gh);
   expect("closedPass" in t).toBe(false);
