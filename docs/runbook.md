@@ -913,7 +913,11 @@ clone under your account:
      section.
 3. **Board moves, in a `merge` repo only:** the run's own card to *In progress*, *In review* or
    *Blocked*, through `updateProjectV2ItemFieldValue` (see `autonomy` below). A `draft` repo gets
-   none.
+   none. *In review* means a review is queued or running: once a review reports blocking findings
+   the card goes back to *In progress* with its seat (rework), and to *In review* again on the
+   next push or re-review. If the run ends first, the card goes to *Ready*. The pipeline cards
+   carry `rework` (round, blockers, seat, whether the seat is running) while the newest review
+   of the PR's head is blocking; the PR-following move never puts such a card back In review.
 4. **The run's own PR body:** `gh pr edit <number> --repo=<owner/name> --body-file=<0600 file>`,
    after the same text checks as the draft PR, when the engine adds RETRO's minor findings.
 5. **The review status:** `gh api repos/<owner/name>/statuses/<sha> -f state=… -f context=mc/review -f description=…`,
@@ -1490,7 +1494,7 @@ the setup action names the Owner field in its warning. Area labels (`area:server
 
 **Status moves (`autonomy`).** Each repo in the config has `autonomy: draft` (the default) or
 `autonomy: merge`. Only in a `merge` repo may Mission Control move a run's own card between Status
-columns (*In progress*, *In review*, *Blocked*), through GitHub's `updateProjectV2ItemFieldValue`;
+columns (*In progress*, *In review*, *Blocked*, and *Ready* for an ended run with review findings), through GitHub's `updateProjectV2ItemFieldValue`;
 `merge` needs a crew session for that repo (without one the config fails to load). In a `draft`
 repo it makes no call at all. The engine moves only a looped run's own card. Every move attempt that changes a card, or fails to, is recorded and shown in
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
