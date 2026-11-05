@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 
 // The server suites that spawn real keeper and fake-CLI process trees. Run side by side on a
@@ -19,7 +20,13 @@ export default defineConfig({
     passWithNoTests: true,
     // Several crew seats and the observed loops share one 10-core Mac: unbounded workers (about
     // nine per run) drove its load past 18. Off CI, a run uses at most 3 workers; CI keeps the default.
-    maxWorkers: process.env.CI ? undefined : 3,
+    //
+    // On CI a `server` shard failed with `[vitest-worker]: Timeout calling "onTaskUpdate"` after every
+    // test passed (#1468): a loaded runner left a worker's call to the main process unanswered for
+    // 60 s. Vitest 3.2.7 hardcodes that 60 s (no setting), so CI caps workers at 2 instead, which
+    // leaves the main process CPU to answer. Vitest's own default is cores - 1, so the cap never raises it.
+    // Not `dangerouslyIgnoreUnhandledErrors`: a real unhandled error must still fail the job.
+    maxWorkers: process.env.CI ? Math.max(1, Math.min(2, availableParallelism() - 1)) : 3,
     projects: [
       {
         test: {
