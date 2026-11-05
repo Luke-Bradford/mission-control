@@ -1185,7 +1185,7 @@ it("folds several free seats into one row that opens into full rows, and keeps b
   const { container } = render(<AgentsPanel />);
   const toggle = await screen.findByRole("button", { name: /3 free/ });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(container.querySelector(".free-seats")?.textContent).toContain("free-a");
+  expect(container.querySelector(".free-seats")?.textContent).toContain("FREE-A");
   expect(container.querySelectorAll(".trow:not(.head):not(.flight):not(.free-seats)")).toHaveLength(
     0,
   );
