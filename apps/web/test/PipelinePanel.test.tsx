@@ -5,7 +5,7 @@ import { hub } from "../src/data.ts";
 import { cardTitle, PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { METRICS_VIEW, OVERVIEW } from "./fixtures.ts";
+import { crewRow, METRICS_VIEW, OVERVIEW } from "./fixtures.ts";
 
 const stages: PipelineStage["stage"][] = [
   "ready",
@@ -93,6 +93,37 @@ describe("Pipeline", () => {
     expect(screen.getByText("Rework · queued for GUIDO-2")).toBeTruthy();
     // the Ready card's label names the PR, so its meta line does not repeat it
     expect(screen.getAllByText(/PR 1432/)).toHaveLength(3);
+  });
+
+  it("a seat busy on this very ticket is working it: the full label, not queued", async () => {
+    stubFetch({
+      "/api/overview": summary([
+        {
+          stage: "building",
+          count: 1,
+          oldestAt: now,
+          cards: [
+            {
+              repoId: "sample-app",
+              ticket: 3,
+              title: "Ticket 3",
+              pr: 1432,
+              ci: [],
+              since: now - 120_000,
+              who: "guido-2",
+              rework: { round: 2, blockers: 1, seat: "guido-2", seatBusy: true },
+            },
+          ],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "guido-2", repoId: "sample-app", ticket: "sample-app#3" })],
+      },
+    });
+    render(<PipelinePanel />);
+    expect(await screen.findByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+    expect(screen.queryByText(/queued/)).toBeNull();
   });
 
   it("opens cards on their ticket page while lane links keep their Board stage filter", async () => {

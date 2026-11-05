@@ -584,6 +584,20 @@ describe("cards", () => {
       ).toBeTruthy();
     });
 
+    it("a seat busy on this very ticket is working it: the full label, not queued", async () => {
+      const rework = { round: 2, blockers: 1, seat: "guido-2", seatBusy: true };
+      stub({
+        shopApp: [todo(7, { status: "In progress", state: "in progress" })],
+        crew: [crewRow({ id: "guido-2", ticket: "shop-app#7" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 70, rework }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      const inCard = within(card(container, "shop-app#7") as HTMLElement);
+      expect(inCard.getByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+      expect(inCard.queryByText(/queued/)).toBeNull();
+    });
+
     it("a Ready card from an ended run shows the reviewed label and its PR", async () => {
       const rework = { round: 1, blockers: 1, seat: "guido-2", seatBusy: false };
       stub({
