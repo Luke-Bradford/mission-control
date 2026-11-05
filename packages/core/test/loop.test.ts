@@ -2490,14 +2490,14 @@ describe("set aside", () => {
           "stuck",
           refused(
             {},
-            { phase: "parked", parked: { kind: "stuck", text: "not on GitHub", at: NOW - 1 } },
+            { phase: "parked", parked: { kind: "stuck", reason: "not on GitHub", ended: false } },
           ),
         ],
         [
           "refused park",
           refused(
             {},
-            { phase: "parked", parked: { kind: "refused", text: "refused", at: NOW - 1 } },
+            { phase: "parked", parked: { kind: "refused", reason: "refused", ended: false } },
           ),
         ],
       ];
