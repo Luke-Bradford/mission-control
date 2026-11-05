@@ -173,23 +173,21 @@
   overflow: auto;
 }
 
-/* The options come first and in full; the side column scrolls before they are cut. */
-.needs-answer {
-  flex: none;
+/* The decision comes first, in the wide column: the options sit side by side. */
+.needs-answer .optlist {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.needs-side > .composer {
-  flex: none;
-}
-
-.needs-side .composer textarea {
+.needs-answer .composer textarea {
   flex: 1;
   min-width: 0;
   resize: vertical;
 }
 
+/* The side column is the conversation alone, filling its height. */
 .needs-side .item-conversation.page {
-  flex: 1 0 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -199,8 +197,8 @@
 }
 
 .needs-side .needs-log {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 280px;
+  min-height: 280px;
   overflow: auto;
 }
 
@@ -229,7 +227,7 @@
     border-left: 0;
     border-top: 1px solid var(--line);
   }
-  .needs-side .item-conversation.page {
+  .needs-side .needs-log {
     flex-basis: 360px;
   }
 }
@@ -284,6 +282,5 @@
 
 .needs-hold {
   flex: none;
-  padding: var(--sp-2) var(--sp-3);
-  border-top: 1px solid var(--line);
+  margin-left: auto;
 }

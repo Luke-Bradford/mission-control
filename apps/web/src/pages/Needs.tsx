@@ -3,6 +3,7 @@ import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
 import { needsGroups } from "../flight/needsGroups.ts";
 import { Pending } from "../flight/Pending.tsx";
+import { HoldItem } from "../needs/HoldItem.tsx";
 import { NeedsList } from "../needs/NeedsList.tsx";
 import { QuestionBand } from "../needs/QuestionBand.tsx";
 import { handledLine, type NotificationsView } from "../notifications.ts";
@@ -23,7 +24,11 @@ function Open({ item, items }: { item: AttentionItem; items: readonly AttentionI
   const row = rows?.find((r) => r.id === item.agentId);
   return (
     <>
-      <QuestionBand item={item} row={row} />
+      <QuestionBand
+        item={item}
+        row={row}
+        actions={isNotTriaging(item) ? undefined : <HoldItem itemKey={item.key} />}
+      />
       {isNotTriaging(item) ? (
         <div className="needs-body">
           <div className="needs-main">

@@ -30,7 +30,6 @@ import { flightOffText } from "../flight/flightTypes.ts";
 import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
-import { HoldItem } from "../needs/HoldItem.tsx";
 import { LinksSection } from "../needs/LinksSection.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
 import {
@@ -546,14 +545,15 @@ export function ItemDetail({
     return (
       <div className="needs-body">
         <div className="needs-main" id="needsMain">
+          <div className="needs-answer">
+            {answerBlock}
+            {replyBlock}
+          </div>
           <Pictures item={item} />
           <LinksSection item={item} />
           {briefBlock}
         </div>
         <div className="needs-side" id="needsSide">
-          <div className="needs-answer">{answerBlock}</div>
-          {replyBlock}
-          <HoldItem itemKey={key} />
           {discussionBlock}
           {notesBlock}
         </div>

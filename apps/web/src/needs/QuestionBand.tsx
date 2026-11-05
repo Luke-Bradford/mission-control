@@ -23,7 +23,16 @@ function Age({ at }: { at: number }) {
  * The band over the open item: what is asked, by whom and how long ago, and FLIGHT's pick. It sits
  * outside the scrolling columns, so the question stays on screen while the rest scrolls.
  */
-export function QuestionBand({ item, row }: { item: AttentionItem; row: CrewRow | undefined }) {
+export function QuestionBand({
+  item,
+  row,
+  actions,
+}: {
+  item: AttentionItem;
+  row: CrewRow | undefined;
+  /** Controls that sit in the meta row (Hold). */
+  actions?: React.ReactNode;
+}) {
   const ticket = item.ticket?.match(/#\d+$/)?.[0] ?? item.ticket;
   const pick = recommendedLabel(item);
   return (
@@ -33,6 +42,7 @@ export function QuestionBand({ item, row }: { item: AttentionItem; row: CrewRow 
         <span className="needs-band-who">{row?.displayCallSign ?? item.agentId ?? "FLIGHT"}</span>
         {ticket && <span className="needs-band-ticket">{ticket}</span>}
         <Age at={item.at} />
+        {actions}
         {pick && (
           <span className="needs-band-pick">
             FLIGHT recommends: <b>{pick}</b>
