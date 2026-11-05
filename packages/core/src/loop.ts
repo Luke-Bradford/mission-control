@@ -1452,8 +1452,8 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 }
 
 /**
- * Whether a run that has pushed holds a newer commit the push gate refused (in ci, or parked
- * as refused or stuck). The commit stays in its worktree, unpushed; the seat's other run may hold
+ * Whether a run that has pushed holds a newer commit the push gate refused (in ci with a refusal
+ * recorded, or parked as refused or stuck). A fresh commit in ci whose push is not yet tried is not. The commit stays in its worktree, unpushed; the seat's other run may hold
  * the rework that fixes the refusal.
  */
 function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
@@ -1461,7 +1461,7 @@ function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
     s.pushed !== null &&
     s.headCommit !== null &&
     s.headCommit !== s.pushed.sha &&
-    (loop.phase === "ci" ||
+    ((loop.phase === "ci" && loop.lastRefusal !== null) ||
       (loop.phase === "parked" &&
         (loop.parked?.kind === "refused" || loop.parked?.kind === STUCK_PARK)))
   );

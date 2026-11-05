@@ -2523,10 +2523,26 @@ describe("set aside", () => {
         ["no commit read", refused({ headCommit: null })],
         ["in turn", refused({ seat: { ...refused().seat, inTurn: true } })],
         ["review phase", refused({}, { phase: "review" })],
+        // in ci with nothing refused: the push has not been tried yet
+        ["not refused yet", refused({}, { lastRefusal: null, transient: 0 })],
       ];
       for (const [name, s] of cases) {
         expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
       }
+    });
+
+    it("does not displace a rework run that has just reported its fix, before its push is tried", () => {
+      const s = base(
+        {
+          headCommit: SHA2,
+          reworkDue: true,
+          evidence: { id: 2, at: 3000, ruling: false },
+          evidenceCount: 2,
+        },
+        { phase: "working", reportedEvidenceId: 1 },
+      );
+      const idle = { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false } };
+      expect(reconcile(idle).actions).not.toContainEqual({ kind: "set-aside", displaced: true });
     });
 
     it("a run off its seat with a refused commit is due back, behind the rework", () => {
