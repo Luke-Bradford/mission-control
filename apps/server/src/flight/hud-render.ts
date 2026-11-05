@@ -16,6 +16,8 @@ const HUD_SEGMENTS = [
 const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
+const HUD_QA_VIEW = '[aria-label="QA view"]';
+const HUD_QA_DISCLOSURE = 'button:text-is("Workflow history and earlier proposals")';
 const HUD_READY = "html[data-hud-ready='1']";
 /**
  * The requested page itself has rendered: the app shell's lazy-route Suspense fallback
@@ -81,6 +83,7 @@ export type HudColorScheme = "light" | "dark";
 
 interface HudPage {
   click?(selector: string, options: { timeout: number }): Promise<void>;
+  locator?(selector: string): { count(): Promise<number> };
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   waitForSelector(
     selector: string,
@@ -345,6 +348,12 @@ export async function renderHudWithPlaywright(
     if (new URL(page.url()).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
       const label = tab === "readiness" ? "PR readiness" : "Hotspots";
       if (!page.click) throw new Error("HUD screenshot cannot select the Audit view.");
+      // Audit now leads with code health and keeps the QA views behind a disclosure; an older
+      // baseline shows them at once, so open the disclosure only when the control is absent.
+      if (page.locator && (await page.locator(HUD_QA_VIEW).count()) === 0) {
+        await page.click(HUD_QA_DISCLOSURE, { timeout: remaining() });
+        await wait(HUD_QA_VIEW, "attached");
+      }
       await page.click(`[aria-label="QA view"] button:text-is("${label}")`, {
         timeout: remaining(),
       });
