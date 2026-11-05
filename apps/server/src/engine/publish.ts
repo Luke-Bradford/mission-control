@@ -331,13 +331,6 @@ function tailBytes(text: string, max: number): string {
     .replace(/^�+/, "");
 }
 
-/** The first `max` bytes of `text`, not ending inside a character. */
-function headBytes(text: string, max: number): string {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= max) return text;
-  return bytes.subarray(0, max).toString("utf8").replace(/�+$/, "");
-}
-
 /** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
 export const CI_SUMMARY_JOB = "check";
 /** A test's name as vitest prints a failure. */
@@ -363,81 +356,193 @@ const CONTEXT_LINES = 10;
 /** `gh run view --log-failed` lines: job, step, then the text behind a timestamp. */
 const LOG_LINE = /^([^\t]*)\t[^\t]*\t(?:\d{4}-\d\d-\d\dT[\d:.]+Z ?)?(.*)$/;
 
+/** A Biome diagnostic's header: the file, position and rule, ending in a rule of box characters. */
+const BIOME_HEADER = /^\S+(?::\d+:\d+)? \S+.*━{3}/;
+
 type JobLines = {
-  causes: string[];
-  crosses: string[];
+  /** A FAIL line with the error lines under it, or a type or lint error alone. */
+  entries: string[][];
+  /** `×` lines and Biome headers, in log order. */
+  marks: string[];
+  /** Bare errors and console output. */
   noise: string[];
   rest: string[];
   fails: number;
 };
+type Group = {
+  job: string;
+  entries: string[][];
+  marks: string[];
+  noise: string[];
+  rest: string[];
+  /** Failing lines past FAILING_LINES_MAX, not kept at all. */
+  dropped: number;
+};
+type Tier = { name: string; units: (g: Group) => string[][]; shown: string[][][] };
+
+/** What a job's omitted failing lines are told as. */
+const omittedText = (n: number, job: string): string =>
+  `[${n} more failing lines${job === "" ? "" : ` in ${job}`} not shown; inspect the CI log.]`;
 
 /**
- * The part of a failed run's log a seat is shown. Every job's failing lines come first, ranked: a
- * test's FAIL name with the error line under it, then type and lint errors in log order; then
- * (only when the job has no FAIL line) the `×` lines; then bare errors and console output. The
- * last lines of each job follow. A log without any failing line is its last lines alone. The
- * summary job stands aside when another job has lines.
+ * The part of a failed run's log a seat is shown, at most `max` bytes. Ranked across every job:
+ * first each job's first failure (a FAIL name with the error lines under it, or a type error), then
+ * the rest of the failures, jobs taking turns; then (only for a job without a FAIL line) its `×`
+ * lines and Biome diagnostics; then bare errors and console output; then each job's last lines. A
+ * job's lines keep their log order under its `[job]` label. Failing lines left out are counted in
+ * a closing line. A log without any failing line is its last lines alone. The summary job stands
+ * aside when another job has lines.
  */
 export function ciLogBody(log: string, max: number): string {
   const jobs = new Map<string, JobLines>();
   const cut = (t: string) => Array.from(t).slice(0, FAILING_LINE_MAX).join("");
-  const add = (list: string[], line: string) => {
+  const seen = new Set<string>();
+  const once = (key: string) => {
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
+  const addOnce = (list: string[], line: string) => {
     if (!list.includes(line)) list.push(line);
   };
-  let sinceFail = Number.POSITIVE_INFINITY;
+  let open: string[] | null = null;
+  let sinceFail = 0;
   let stream = false;
   for (const raw of log.split("\n")) {
     const m = LOG_LINE.exec(raw);
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? { causes: [], crosses: [], noise: [], rest: [], fails: 0 };
+    const g = jobs.get(job) ?? { entries: [], marks: [], noise: [], rest: [], fails: 0 };
     jobs.set(job, g);
     if (STREAM_LINE.test(text)) stream = true;
     else if (BLOCK_END.test(text)) stream = false;
     if (NOT_A_CAUSE.test(text)) continue;
+    const line = cut(text);
     if (FAIL_LINE.test(text)) {
-      add(g.causes, cut(text));
-      g.fails++;
-      sinceFail = 0;
       stream = false;
-    } else if (!stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
-      add(g.causes, cut(text));
-      sinceFail++;
-    } else if (CHECK_ERROR.test(text)) {
-      add(g.causes, cut(text));
-      sinceFail++;
-    } else if (CROSS_LINE.test(text)) {
-      add(g.crosses, cut(text));
-      sinceFail++;
-    } else if (stream || ERROR_LINE.test(text)) {
-      add(g.noise, cut(text));
+      // a name printed twice (at the failure and in the summary) keeps its first error lines
+      if (once(`${job}\t${line}`)) {
+        open = [line];
+        g.entries.push(open);
+        g.fails++;
+        sinceFail = 0;
+      } else open = null;
+    } else if (open !== null && !stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
+      // under its FAIL line even when another test failed with the same words
+      open.push(line);
       sinceFail++;
     } else {
-      g.rest.push(text);
       sinceFail++;
+      if (CHECK_ERROR.test(text)) {
+        if (once(`${job}\t${line}`)) g.entries.push([line]);
+      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
+      else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
+      else g.rest.push(text);
     }
   }
   if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
-  const ranked = (g: JobLines) =>
-    [...g.causes, ...(g.fails > 0 ? [] : g.crosses), ...g.noise].slice(0, FAILING_LINES_MAX);
-  const groups = [...jobs.entries()]
-    .map(([job, g]) => ({ job, g, failing: ranked(g) }))
-    .sort((a, b) => b.g.causes.length - a.g.causes.length);
-  if (!groups.some((x) => x.failing.length > 0)) {
+  const groups: Group[] = [...jobs.entries()]
+    .map(([job, g]) => {
+      const allMarks = g.fails > 0 ? [] : g.marks;
+      const marks = allMarks.slice(0, FAILING_LINES_MAX);
+      const entries: string[][] = [];
+      let kept = 0;
+      for (const e of g.entries) {
+        kept += e.length;
+        if (kept > FAILING_LINES_MAX) break;
+        entries.push(e);
+      }
+      const dropped =
+        g.entries.reduce((n, e) => n + e.length, 0) -
+        entries.reduce((n, e) => n + e.length, 0) +
+        (allMarks.length - marks.length);
+      const failing = g.entries.length + marks.length > 0;
+      return {
+        job,
+        dropped,
+        entries,
+        marks,
+        noise: g.noise,
+        rest: g.rest.slice(-(failing ? CONTEXT_LINES : CI_EXCERPT_LINES)),
+      };
+    })
+    .sort((a, b) => b.entries.length - a.entries.length);
+  const failingOf = (x: Group) => x.entries.length + x.marks.length;
+  if (!groups.some((x) => failingOf(x) > 0)) {
     const lines = log.trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
     return tailBytes(lines.join("\n"), max);
   }
   const named = groups.length > 1 || groups[0]?.job !== "";
-  const label = (job: string, note: string) => (named && job !== "" ? [`[${job}${note}]`] : []);
-  const first = groups.flatMap(({ job, failing }) =>
-    failing.length > 0 ? [...label(job, ""), ...failing] : [],
-  );
-  const context = groups.flatMap(({ job, g, failing }) => {
-    const lines = g.rest.slice(-(failing.length > 0 ? CONTEXT_LINES : CI_EXCERPT_LINES));
-    return lines.length > 0 ? [...label(job, ": last lines"), ...lines] : [];
+  const label = (job: string, tier: string) =>
+    named && job !== "" ? `[${job}${tier === "" ? "" : `: ${tier}`}]` : null;
+
+  // room kept for each job's notice of what was left out
+  let budget = max;
+  for (const x of groups) {
+    if (failingOf(x) > 0) budget -= byteLength(omittedText(99999, x.job)) + 1;
+  }
+  const tiers: Tier[] = [
+    { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
+    { name: "", units: (x) => x.marks.map((l) => [l]), shown: groups.map(() => []) },
+    { name: "console", units: (x) => x.noise.map((l) => [l]), shown: groups.map(() => []) },
+    { name: "last lines", units: (x) => x.rest.map((l) => [l]), shown: groups.map(() => []) },
+  ];
+  const take = (t: Tier, gi: number, unit: string[]): boolean => {
+    const x = groups[gi] as Group;
+    const shown = t.shown[gi] as string[][];
+    let cost = unit.reduce((n, l) => n + byteLength(l) + 1, 0);
+    // a section's label is paid for with its first unit
+    const lab = label(x.job, t.name);
+    if (lab !== null && shown.length === 0) cost += byteLength(lab) + 1;
+    if (cost > budget) return false;
+    budget -= cost;
+    shown.push(unit);
+    return true;
+  };
+  // jobs take turns, one unit each: the first failure of every job, then the rest, then each
+  // lower tier; a job that stops fitting is closed for its tier
+  const fill = (t: Tier, from: number) => {
+    const closed = new Set<number>();
+    for (let i = from; ; i++) {
+      let any = false;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const units = t.units(groups[gi] as Group);
+        const unit = units[i];
+        if (closed.has(gi) || unit === undefined) continue;
+        any = true;
+        if (!take(t, gi, unit)) closed.add(gi);
+      }
+      if (!any) break;
+    }
+  };
+  const tier0 = tiers[0] as Tier;
+  // the first failure of every job, before any job's second
+  groups.forEach((x, gi) => {
+    const first = x.entries[0];
+    if (first !== undefined) take(tier0, gi, first);
   });
-  return headBytes([...first, ...context].join("\n"), max);
+  fill(tier0, 1);
+  for (const t of tiers.slice(1)) fill(t, 0);
+
+  const out: string[] = [];
+  for (const t of tiers) {
+    groups.forEach((x, gi) => {
+      const lines = (t.shown[gi] as string[][]).flat();
+      if (lines.length === 0) return;
+      const lab = label(x.job, t.name);
+      if (lab !== null) out.push(lab);
+      out.push(...lines);
+    });
+  }
+  groups.forEach((x, gi) => {
+    const total = x.entries.flat().length + x.marks.length + x.dropped;
+    const shown =
+      (tier0.shown[gi] as string[][]).flat().length +
+      ((tiers[1] as Tier).shown[gi] as string[][]).length;
+    if (total > shown) out.push(omittedText(total - shown, x.job));
+  });
+  return out.join("\n");
 }
 
 /** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */

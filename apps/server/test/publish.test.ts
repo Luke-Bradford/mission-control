@@ -643,7 +643,7 @@ describe("ciExcerpt", () => {
     const lastFail = seen.lastIndexOf("FAIL  ");
     expect(lastFail).toBeLessThan(seen.indexOf("Error: noise"));
     expect(lastFail).toBeLessThan(seen.indexOf("✓"));
-    expect(seen).not.toContain(" × test/x");
+    expect(seen).not.toContain("× test/x");
   });
 
   it("keeps the failing lines of every job ahead of any job's passing lines", async () => {
@@ -701,6 +701,106 @@ describe("ciExcerpt", () => {
     expect(out).toBe(
       "CI:\n[web-core]\nFAIL  a.test.ts > it works\nAssertionError: expected 1 to be 2",
     );
+  });
+
+  describe("ranking a failed log", () => {
+    const L = (text: string, job = "web-core") => `${job}\tRun\t2026-11-05T04:59:02.0Z ${text}`;
+    const excerpt = async (lines: string[]) => {
+      ghAnswers = [
+        runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+        () => ({ code: 0, stdout: lines.join("\n") }),
+      ];
+      return createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    };
+
+    it("keeps an error line under each FAIL name, even when the words repeat", async () => {
+      const out = await excerpt(
+        [1, 2, 3].flatMap((i) => [
+          L(` FAIL  a.test.ts > t${i}`),
+          L("AssertionError: expected true to be false"),
+        ]),
+      );
+      expect(out.match(/AssertionError/g)).toHaveLength(3);
+    });
+
+    it("keeps one job's console output from pushing out another job's FAIL names", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > one"),
+        L("AssertionError: expected 1 to be 2"),
+        L(" FAIL  a.test.ts > two"),
+        L("AssertionError: expected 2 to be 3"),
+        L("stderr | a.test.ts"),
+        ...Array.from({ length: 300 }, (_, i) => L(`Warning: ${"w".repeat(100)} ${i}`)),
+        L(" FAIL  s.test.ts > only one", "server (1)"),
+        L("AssertionError: expected 3 to be 4", "server (1)"),
+      ]);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("FAIL  s.test.ts > only one");
+      expect(out.indexOf("only one")).toBeLessThan(out.indexOf("Warning:"));
+    });
+
+    it("says how many failing lines it left out, and keeps each job's first failure", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 60 }, (_, i) => [
+          L(` FAIL  test/pages/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+          L(`AssertionError: expected ${i} to be ${i + 1}`),
+        ]).flat(),
+        L(" FAIL  s.test.ts > only one", "server (1)"),
+        L("AssertionError: expected x to be y", "server (1)"),
+      ]);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("only one");
+      expect(out).toMatch(/\[\d+ more failing lines in web-core not shown; inspect the CI log\.\]/);
+      expect(out).not.toMatch(/more failing lines in server/);
+      // cut at a line end: every FAIL name has its assertion line
+      expect(out.match(/FAIL/g)?.length).toBe(out.match(/AssertionError/g)?.length);
+    });
+
+    it("keeps the paths and rules of Biome diagnostics with their × lines", async () => {
+      const out = await excerpt(
+        [
+          "apps/server/src/zz.ts:2:34 lint/suspicious/noDoubleEquals  FIXABLE  ━━━━━━━━━━━━━",
+          "  × Using == may be unsafe if you are relying on type coercion.",
+          "  i Unsafe fix: Use ===.",
+          ...Array.from({ length: 30 }, (_, i) => `  line ${i}`),
+        ].map((t) => L(t, "validate")),
+      );
+      expect(out).toContain(
+        "apps/server/src/zz.ts:2:34 lint/suspicious/noDoubleEquals  FIXABLE  ━━━━━━━━━━━━━\n× Using == may be unsafe",
+      );
+    });
+
+    it("drops × lines when the job has a FAIL line, and keeps them when it has none", async () => {
+      const withFail = await excerpt([L(" × test/x.test.ts > x 4ms"), L(" FAIL  a.test.ts > t")]);
+      expect(withFail).not.toContain("× test/x");
+      const without = await excerpt([L(" × test/x.test.ts > x 4ms"), L(" ✓ ok")]);
+      expect(without).toContain("× test/x.test.ts > x");
+    });
+
+    it("does not rank a console block's Error: line, inside the FAIL window, as a cause", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > t"),
+        L("stderr | a.test.ts"),
+        L("Error: console noise"),
+        L("AssertionError: expected 1 to be 2"),
+        L(" FAIL  b.test.ts > u"),
+        L("AssertionError: expected 2 to be 3"),
+      ]);
+      expect(out.indexOf("FAIL  b.test.ts")).toBeLessThan(out.indexOf("Error: console noise"));
+    });
+
+    it("puts type errors ahead of passing lines, jobs with more failures first, and caps at 100 lines", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 30 }, (_, i) => L(` ok ${i}`, "typecheck")),
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+        L(" FAIL  a.test.ts > t", "few"),
+        ...Array.from({ length: 150 }, (_, i) => L(`src/b${i}.ts(1,2): error TS2322: bad`, "many")),
+      ]);
+      expect(out.indexOf("error TS2345")).toBeLessThan(out.indexOf("ok 29"));
+      expect(out.indexOf("[many]")).toBeLessThan(out.indexOf("[typecheck]"));
+      expect(out.match(/error TS2322/g)).toHaveLength(100);
+      expect(out).toContain("[50 more failing lines in many not shown; inspect the CI log.]");
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {
