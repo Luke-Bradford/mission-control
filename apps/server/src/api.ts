@@ -257,7 +257,7 @@ import {
   setExternalMergeHold,
   setExternalPrControl,
 } from "./external-pr-control.ts";
-import { readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -4288,7 +4288,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await sendComms(
+            let delivered = false;
+            const sent = await sendComms(
               {
                 store,
                 crew: commsCrew,
@@ -4297,6 +4298,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 seatSender: false,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                  delivered = true;
                 },
               },
               COMMS_CAPCOM,
@@ -4307,6 +4309,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
+            if (delivered) store.markCommsInboxRead(id, [sent.id]);
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
@@ -5046,7 +5050,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+          branchOwned(config, store, repoId, pr.branch)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;

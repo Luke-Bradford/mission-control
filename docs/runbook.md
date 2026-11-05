@@ -233,10 +233,11 @@ profiles:
 
 ## Reviews of controller and personal PRs
 
-In a `merge` workspace, an open PR without a crew author run enters the existing scratch review
-queue after its CI passes. The PR must come from the same repository and target its default branch.
-Drafts, forks and PRs labelled `skip-review` are excluded. Existing crew branches retain their normal
-author-run review path. An existing `mc/review` status from another reviewer is respected.
+In a `merge` workspace, an open PR with no live or parked build run enters the existing scratch review
+queue after its CI passes. That covers a PR whose build run has ended. The PR must come from the same
+repository and target its default branch. Drafts, forks and PRs labelled `skip-review` are excluded.
+A branch with a live or parked build run keeps its author-run review path. An `mc/review` status is
+respected as another reviewer's when this hub has no review of that head.
 
 The reviewer uses the exact head SHA. Before launch and before publishing, the hub checks the PR
 again. A later push needs a new review; a closed, drafted, opted-out or changed PR cannot receive an
@@ -913,7 +914,11 @@ clone under your account:
      section.
 3. **Board moves, in a `merge` repo only:** the run's own card to *In progress*, *In review* or
    *Blocked*, through `updateProjectV2ItemFieldValue` (see `autonomy` below). A `draft` repo gets
-   none.
+   none. *In review* means a review is queued or running: once a review reports blocking findings
+   the card goes back to *In progress* with its seat (rework), and to *In review* again on the
+   next push or re-review. If the run ends first, the card goes to *Ready*. The pipeline cards
+   carry `rework` (round, blockers, seat, whether the seat is running) while the newest review
+   of the PR's head is blocking; the PR-following move never puts such a card back In review.
 4. **The run's own PR body:** `gh pr edit <number> --repo=<owner/name> --body-file=<0600 file>`,
    after the same text checks as the draft PR, when the engine adds RETRO's minor findings.
 5. **The review status:** `gh api repos/<owner/name>/statuses/<sha> -f state=… -f context=mc/review -f description=…`,
@@ -1408,8 +1413,13 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A crew-owned branch keeps its normal
-engine path. No build run is invented and no board card is marked Done by this path.
+with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
+run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
+ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
+latest build run still refuses the merge after that run ends, until the hold is released. An operator's
+Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+No build run is invented and no board card is marked Done by this path.
 
 Protected repository rules require the existing head-bound `merge-floor` controller approval.
 Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
@@ -1502,7 +1512,7 @@ the setup action names the Owner field in its warning. Area labels (`area:server
 
 **Status moves (`autonomy`).** Each repo in the config has `autonomy: draft` (the default) or
 `autonomy: merge`. Only in a `merge` repo may Mission Control move a run's own card between Status
-columns (*In progress*, *In review*, *Blocked*), through GitHub's `updateProjectV2ItemFieldValue`;
+columns (*In progress*, *In review*, *Blocked*, and *Ready* for an ended run with review findings), through GitHub's `updateProjectV2ItemFieldValue`;
 `merge` needs a crew session for that repo (without one the config fails to load). In a `draft`
 repo it makes no call at all. The engine moves only a looped run's own card. Every move attempt that changes a card, or fails to, is recorded and shown in
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
@@ -2356,14 +2366,20 @@ branch previews do.
 
 The route only reads data the hub already stores.
 
+**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. Everything else wakes at once, under the 2-minute gap: an unread plain message from the operator (the `operator` wake fact, cleared once FLIGHT's inbox reads it), operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
+
+**Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list. An item FLIGHT has a live `wait_on` for (its full key) raises no `item_stale` signal until the wait ends. A `wait_on` whose target is a reason's whole key (an item's full key, or a `repeat_park` key with spaces) counts as handling that reason, including an `item_stale` signal for the item.
+
+**What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
+
 ## FLIGHT's fresh session
 
-FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (300K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
+FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
 
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
-- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).
+- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
 ## Repeating a suspected flaky test
 

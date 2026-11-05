@@ -334,6 +334,8 @@ interface Harness {
   /** The paths of a polled-after-merge request. */
   polls: number;
   moveFails: boolean;
+  /** Record each move as a done `board_moves` row, as the real board does. */
+  recordMoves: boolean;
   /** A push that never answers (a crash in the middle of a pass). */
   pushHang: boolean;
   /** Runs inside openPr, before it looks at the branch (a commit made meanwhile). */
@@ -428,6 +430,7 @@ function harness(): Harness {
     updateResults: [],
     polls: 0,
     moveFails: false,
+    recordMoves: false,
     pushHang: false,
     duringOpenPr: null,
     openCalls: 0,
@@ -679,6 +682,17 @@ function harness(): Harness {
           move: async (m) => {
             x.moves.push(m);
             if (x.moveFails) throw new Error("gh is down");
+            if (x.recordMoves) {
+              store.addBoardMove({
+                runId: m.runId,
+                repoId: m.repoId,
+                issue: m.issue,
+                column: m.column,
+                state: "done",
+                detail: null,
+                at: clock,
+              });
+            }
             return { ok: true, changed: true };
           },
         },
@@ -3120,6 +3134,40 @@ describe("the engine runs reviews", () => {
     expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toEqual([]);
     expect(h.sent[0]?.key).toMatch(/^fix:/);
     expect(h.sent[0]?.text).toContain("a Important thing");
+  });
+
+  /** A blocking review reported on the pushed head, then the author's passes. */
+  async function toRework(): Promise<void> {
+    await toReview();
+    await h.engine.tick();
+    store.recordFindings(first().id, need(store.review(first().id)?.runId), {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "broken",
+      findings: [finding("Important")],
+      at: clock,
+    });
+  }
+
+  it("moves the card to In progress once for a blocking review, and marks it rework", async () => {
+    await toRework();
+    h.moves.length = 0;
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(h.moves.map((m) => m.column)).toEqual(["In progress"]);
+    expect(loopOf().cardFor).toBe("rework:0");
+  });
+
+  it("a rework run that ends sends its card to Ready and leaves no open blocked note", async () => {
+    h.recordMoves = true;
+    await toRework();
+    await h.engine.reconcileRun(RUN);
+    h.moves.length = 0;
+    store.setRunEnded(RUN, clock, "ok", "operator");
+    seatIdle(null);
+    await h.engine.tick();
+    await h.engine.tick();
+    expect(h.moves.map((m) => m.column)).toEqual(["Ready"]);
+    expect(noteKeys().filter((k) => k.startsWith("blocked:"))).toEqual([]);
   });
 
   it("does not make a HUD design check a readiness gate", async () => {

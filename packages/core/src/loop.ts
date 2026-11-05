@@ -147,6 +147,8 @@ export const CI_EXCERPT_MAX = 8192;
 
 /** The `cardFor` mark of a phase and epoch: the card move for it is done. */
 export const cardMark = (phase: string, epoch: number): string => `${phase}:${epoch}`;
+/** The mark's phase for a review with blocking findings: the card is back In progress. */
+export const REWORK_PHASE = "rework";
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
 
@@ -705,7 +707,8 @@ export type LoopAction =
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
-  | { kind: "move-card"; column: MoveColumn }
+  /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
+  | { kind: "move-card"; column: MoveColumn; mark?: string }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
   | { kind: "clear-note"; key: string }
   | { kind: "end-run" }
@@ -753,6 +756,7 @@ function missingWhy(
   return `PR #${pr.number} has ${pr.headSha === null ? "no head" : `head ${sha7(pr.headSha)}`}, not ${sha7(pushed.sha)}`;
 }
 
+const READY = "Ready" satisfies MoveColumn;
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
 const BLOCKED = "Blocked" satisfies MoveColumn;
@@ -960,8 +964,14 @@ function stateStep(s: LoopSnapshot): Step {
         : capReason !== null
           ? { kind: "budget", reason: capReason, ended: true }
           : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+    // A park that ended with blocking findings owes its card the Ready move even if the park
+    // already moved it to Blocked: clear the mark so desiredStep plans it. A budget stop stays, and so
+    // does a closed PR (nobody wants that work restarted).
+    const reviewed = reviewView(s, loop);
+    const owesReady =
+      parked.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
     return {
-      loop: { ...loop, phase: "parked", parked },
+      loop: { ...loop, phase: "parked", parked, ...(owesReady ? { cardFor: null } : {}) },
       actions:
         capReason !== null && loop.parked?.kind !== "budget"
           ? [{ kind: "event", text: parkedEventText(capReason) }]
@@ -1671,10 +1681,26 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   const notes = loop.phase === "done" ? new Map<string, DesiredNote>() : desiredNotes(s, loop);
 
   if (loop.phase !== "done") {
+    // A review with blocking findings is rework: the card goes back In progress with its seat (In
+    // review means a review is queued or running). An ended run's reviewed card goes to Ready.
+    const reviewed = rv.blocked && !rv.waived;
+    const rework = loop.phase === "review" && s.ended === null && reviewed;
     const column =
-      loop.phase === "review" ? IN_REVIEW : loop.phase === "parked" ? BLOCKED : IN_PROGRESS;
-    if (loop.cardFor !== cardMark(loop.phase, loop.epoch))
-      actions.push({ kind: "move-card", column });
+      loop.phase === "review"
+        ? rework
+          ? IN_PROGRESS
+          : IN_REVIEW
+        : loop.phase === "parked"
+          ? loop.parked?.ended &&
+            loop.parked.kind !== "budget" &&
+            s.pr?.state === "open" &&
+            reviewed
+            ? READY
+            : BLOCKED
+          : IN_PROGRESS;
+    const mark = rework ? cardMark(REWORK_PHASE, loop.epoch) : cardMark(loop.phase, loop.epoch);
+    if (loop.cardFor !== mark)
+      actions.push(rework ? { kind: "move-card", column, mark } : { kind: "move-card", column });
   }
   for (const [key, { noteKind, text }] of notes) {
     if (!s.openNotes.includes(key)) actions.push({ kind: "note", key, noteKind, text });

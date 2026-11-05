@@ -1491,6 +1491,12 @@ export interface PipelineCard {
   /** The board item's Priority and Size, when the ticket has them. */
   priority?: string | null;
   size?: string | null;
+  /**
+   * Set while the PR's newest review found blocking problems on its current head: the ticket
+   * is in rework (In progress with its seat), or Ready after its run ended, and has been reviewed.
+   * `seat` is the seat running the ticket now, else the reviewed run's author; `seatBusy` is true while that seat is running.
+   */
+  rework?: { round: number; blockers: number; seat: string | null; seatBusy: boolean };
 }
 
 export type AttentionHoldCondition =

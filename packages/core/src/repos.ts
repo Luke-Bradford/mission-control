@@ -17,6 +17,7 @@ export const COLUMN_STATE: Record<HudColumn, TicketState> = {
 
 /** The columns the hub moves a run's card to. */
 export const MOVE_COLUMNS = [
+  "Ready",
   "In progress",
   "In review",
   "Blocked",

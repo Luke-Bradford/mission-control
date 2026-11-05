@@ -10,6 +10,7 @@ import {
   areaLabelsFor,
   areaLabelsOf,
   type BoardItem,
+  COMMS_CAPCOM,
   carriedFrom,
   claimedByOther,
   clockHm,
@@ -35,6 +36,7 @@ import {
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_OPERATOR_UNREAD_MS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -90,7 +92,7 @@ import {
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
-import { type CcConfig, seatUnavailable } from "../config.ts";
+import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -113,6 +115,7 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
+import { flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -179,15 +182,19 @@ export function flightTriageItems(
       .filter((q) => q.agentId !== flightId && store.run(q.runId)?.endedAt == null)
       .map((q) => `ask:${q.id}`),
   );
-  return operatorItems(config, store, now, hubLogin, rows, lock)
-    .filter(
-      (x) =>
-        // a released hold returns the item for a fresh brief: the old one predates the wait
-        (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
-        !ownReply(x, flightId) &&
-        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
-    )
-    .filter((item) => item.kind !== "message" || flightQuestion(item.text));
+  return (
+    operatorItems(config, store, now, hubLogin, rows, lock)
+      .filter(
+        (x) =>
+          // a released hold returns the item for a fresh brief: the old one predates the wait
+          (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
+          !ownReply(x, flightId) &&
+          (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
+      )
+      .filter((item) => item.kind !== "message" || flightQuestion(item.text))
+      // dismiss_item acks an item: as it was, it is dealt with
+      .filter((item) => item.acked !== true)
+  );
 }
 
 export function flightHeadline(
@@ -350,17 +357,19 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 
 /**
  * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
- * planned entry.
+ * planned entry, or the end of the batch window while routine facts wait in it (`batchAt`).
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   lastWakeAt: number,
   now: number,
+  batchAt?: number,
 ): number | null {
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   if (s.wake?.idle) times.push(idleWakeAt(s.wake.idle));
+  if (batchAt !== undefined) times.push(batchAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
 
@@ -413,6 +422,17 @@ export function flightView(
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
+    ...(found === null
+      ? {}
+      : {
+          wakeCost: flightWakeCost(
+            store,
+            now,
+            found.seat.id,
+            new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
+          ),
+          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
+        }),
     promptWakes:
       found === null
         ? []
@@ -638,6 +658,7 @@ function wakeInputs(i: {
   items: FlightState["items"];
   areas: Record<string, string[]> | undefined;
   hubLogin: string | null;
+  flightId: string | null;
   now: number;
 }): FlightWakeInputs {
   const waits = flightWaits(i.store);
@@ -661,8 +682,12 @@ function wakeInputs(i: {
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
+  const operator =
+    i.flightId === null
+      ? []
+      : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
   const idle = idleSeats(i, waits, rules, fit);
-  return idle === undefined ? { fit, fresh } : { fit, fresh, idle };
+  return idle === undefined ? { fit, fresh, operator } : { fit, fresh, operator, idle };
 }
 
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
@@ -1306,6 +1331,7 @@ export function flightState(i: {
       items,
       areas: i.areas,
       hubLogin: i.hubLogin ?? null,
+      flightId: found?.seat.id ?? null,
       now,
     }),
     time: clockHm(now, tz),
@@ -1569,6 +1595,8 @@ export function wakeFacts(
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
       )
       .sort(),
+    // an unread plain message from the operator: never routine
+    operator: s.wake?.operator ?? [],
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1713,7 +1741,7 @@ const wordsOf = (text: string): Set<string> =>
 /** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
 const accountable = (category: string, item: unknown): boolean => {
   // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
-  if (category === "t" || category === "instructions") return false;
+  if (category === "t" || category === "instructions" || category === "operator") return false;
   if (category === "prs") {
     const [, , ready, state, awaiting, away] = String(item).split(":");
     return (ready === "true" && state === "open") || !!awaiting || !!away;
@@ -1736,7 +1764,10 @@ const itemTickets = (
   const key = stale ? item.slice("item_stale:".length) : item;
   if (category !== "items" && !(category === "signals" && stale)) return [];
   return itemRefs.flatMap((x) =>
-    x.ticket !== null && (stale ? x.key.replace(/:\d+$/, "") : x.key) === key ? [x.ticket] : [],
+    (stale ? x.key.replace(/:\d+$/, "") : x.key) === key
+      ? // a stale signal's key drops the item key's last part: a wait on the full key handles it
+        [...(x.ticket === null ? [] : [x.ticket]), ...(stale ? [x.key] : [])]
+      : [],
   );
 };
 
@@ -1761,6 +1792,67 @@ export function wakeReasons(
         targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
       }));
   });
+}
+
+/** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
+const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
+
+/** Fact categories that are routine pipeline steps: they wait for the batch window. */
+const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
+  "free",
+  "t",
+  "release",
+  "reviews",
+  "prFlow",
+]);
+
+/**
+ * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
+ * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
+ * never routine, so those wake FLIGHT at once. False when nothing changed.
+ */
+export function routineOnly(previous: string, current: string): boolean {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  let changed = false;
+  for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+    const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
+    const added = [...now].filter((v) => !old.has(v));
+    const removed = [...old].filter((v) => !now.has(v));
+    if (added.length === 0 && removed.length === 0) continue;
+    // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
+    // breaker's lift is, as a lift alone wakes FLIGHT
+    if (added.length === 0 && !LIFTS_WAKE.has(category) && !ROUTINE_CATEGORIES.has(category))
+      continue;
+    changed = true;
+    if (category === "items") {
+      // a PR's own steps are routine; any other item (a message, a blocker) is not
+      if (!added.every((v) => String(JSON.parse(v)).startsWith("pr:"))) return false;
+    } else if (!ROUTINE_CATEGORIES.has(category)) return false;
+  }
+  return changed;
+}
+
+/**
+ * Whether the only differences between two wake facts are things that went away (a question
+ * answered, a message read, a park lifted): nothing new to tell FLIGHT. A breaker lift or a hold
+ * lifting is not settled: either one frees work FLIGHT can act on, so it wakes FLIGHT at once.
+ */
+export function onlySettled(previous: string, current: string): boolean {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  let removed = false;
+  for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+    const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
+    if ([...now].some((v) => !old.has(v))) return false;
+    if ([...old].some((v) => !now.has(v))) {
+      if (LIFTS_WAKE.has(category)) return false;
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 /** The ids of the reasons still open in this state; a delivered signal stays open while it holds. */
@@ -1793,6 +1885,9 @@ export function unhandledReasons(
     return !decisions.some((d, i) =>
       r.targets.some(
         (t) =>
+          // a wait names its target whole, before ": waiting on"; a key with spaces is no word
+          (d.kind === "wait" &&
+            d.about.toLowerCase().startsWith(`${t.toLowerCase()}: waiting on`)) ||
           d.ref === t ||
           d.seatId === t ||
           d.targetRunId === t ||

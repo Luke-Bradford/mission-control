@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
+  FLIGHT_BATCH_MS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -62,12 +63,14 @@ import {
   markItemsShown,
   markPrsShown,
   nextWakeAt,
+  onlySettled,
   openReasonIds,
   operatorItems,
   pending,
   recordFlightWake,
   recordNextFlightWake,
   recordWakeReasons,
+  routineOnly,
   trackIdleSeat,
   unhandledReasons,
   type WakeReason,
@@ -356,7 +359,42 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     return all.length === 0 ? null : { wokeAt, reasons: all };
   };
 
+  /**
+   * Seats idle with tickets open are timed and logged whether or not FLIGHT can be woken now: it
+   * may be in a turn, rate limited or rotating, and those hours still count. Runs after the
+   * pass, however it ended, so the pass reads the state in its usual order.
+   */
+  async function noteIdleSeats(): Promise<void> {
+    if (stopped || !enabled) return;
+    const found = flightSeat(config);
+    if (found === null) return;
+    const t = now();
+    try {
+      const state = flightState({
+        config,
+        store,
+        busy: supervisor.busy(),
+        now: t,
+        hubLogin: deps.login ?? null,
+        lock: deps.lockState?.(),
+        areas: await deps.areas?.(found.session.repoId),
+      });
+      trackIdleSeat(store, state, t);
+      logIdleSeats(state);
+    } catch (e) {
+      log(`flight watch: idle seats: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
   async function pass(): Promise<void> {
+    try {
+      await passOnce();
+    } finally {
+      await noteIdleSeats();
+    }
+  }
+
+  async function passOnce(): Promise<void> {
     if (stopped) return;
     const found = flightSeat(config);
     // with no FLIGHT seat or the watch off, there is no outage of its own to report
@@ -368,20 +406,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const t = now();
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
-    // Seats idle with tickets open are timed and logged whether or not FLIGHT can be woken now:
-    // it may be in a turn, rate limited or rotating, and the hours still count.
-    const idleState = flightState({
-      config,
-      store,
-      busy: supervisor.busy(),
-      now: t,
-      hubLogin: deps.login ?? null,
-      lock: deps.lockState?.(),
-      areas: await deps.areas?.(found.session.repoId),
-    });
-    trackIdleSeat(store, idleState, t);
-    logIdleSeats(idleState);
-
     let added = false;
     let nextDue = Infinity;
     for (const item of operatorItems(
@@ -603,9 +627,27 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
     }
     settleLeft(state, t);
+    // only things that went away since the last wake (a question answered, a message read) tell FLIGHT nothing new
+    if (left === null && onlySettled(lastFacts, wake)) lastFacts = wake;
+    // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
+    const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
+    const batched =
+      left === null &&
+      wake !== lastFacts &&
+      listed &&
+      t < batchEnds &&
+      routineOnly(lastFacts, wake);
+    if (batched) {
+      later(batchEnds - t);
+      recordNextFlightWake(
+        store,
+        found.session.repoId,
+        nextWakeAt(state, lastWakeAt, t, batchEnds),
+      );
+    }
     const due =
       left !== null ||
-      (wake !== lastFacts && listed) ||
+      (wake !== lastFacts && listed && !batched) ||
       (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
     if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {
@@ -700,8 +742,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   /** Checks again once the wake gap has passed; one pending re-check at a time. */
+  /** When the pending timer fires, in the watch's clock. */
+  let gapDueAt = 0;
+  /** Re-checks in `ms`; a timer already set for sooner stays, a later one is replaced. */
   function later(ms: number): void {
-    if (gapTimer !== null || stopped) return;
+    if (stopped) return;
+    const due = now() + ms;
+    if (gapTimer !== null) {
+      if (gapDueAt <= due) return;
+      clearTimeout(gapTimer);
+    }
+    gapDueAt = due;
     gapTimer = setTimeout(() => {
       gapTimer = null;
       void check();

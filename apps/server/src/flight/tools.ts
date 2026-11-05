@@ -1256,14 +1256,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
-        questions: "unpassed",
+        questions: "none",
       });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
-    // Passed without a brief (before #758): the message closed unpassed questions only, so hand
-    // this one back and close it too, once the answer is delivered.
-    if (q.passedAt !== null && store.unpassQuestion(id)) store.answerQuestion(id, at);
+    // The message closes no question: only this one, once the answer is delivered, so the seat's
+    // other open questions wait for their own answers. One passed without a brief (before #758)
+    // is handed back first.
+    if (q.passedAt !== null) store.unpassQuestion(id);
+    store.answerQuestion(id, at);
+    bus.emit("attention");
     store.addComms({
       at,
       from: ctx.seatId,
@@ -3442,7 +3445,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge, or merge an eligible controller PR without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
+      "Clear a crew PR for engine merge, or merge an eligible PR with no unfinished crew run without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {
