@@ -69,7 +69,6 @@ import {
   fixText,
   flightClearanceReasons,
   gateView,
-  globMatches,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,

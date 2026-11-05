@@ -2847,8 +2847,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ]);
     const head = value?.headRefOid;
     if (
-      !value ||
-      value.state !== "OPEN" ||
+      value?.state !== "OPEN" ||
       value.isCrossRepository !== false ||
       value.headRefName !== run.branch ||
       typeof head !== "string" ||
