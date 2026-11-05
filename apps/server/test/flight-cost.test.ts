@@ -130,7 +130,7 @@ describe("routine wakes wait for the batch window", () => {
       { items: ["comms-open:5"] },
       { parked: ["guido-1:mc#1:review-failed"] },
       { instructions: ["2"] },
-    ])
+    ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts({ free: ["guido-1"], ...o }))).toBe(false);
   });
   it("is not routine when nothing changed", () => {
