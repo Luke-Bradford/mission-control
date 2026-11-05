@@ -133,8 +133,8 @@
 
 .needs-band-question {
   margin: var(--sp-1) 0 0;
-  font-size: 20px;
-  line-height: 28px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
