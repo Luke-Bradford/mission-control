@@ -62,7 +62,8 @@ function api(n = 6, optionCount = 2) {
             id: `extra${i}`,
             label: `Another layout ${i + 1}`,
             answer: `Use another layout ${i + 1}.`,
-            description: "A longer description of this option, so the card is more than one line. ".repeat(3),
+            description:
+              "A longer description of this option, so the card is more than one line. ".repeat(3),
           })),
         ],
       }),
@@ -218,16 +219,28 @@ describeRendered("Needs you page", () => {
         [1920, 940],
       ] as const) {
         const label = `${width}x${height}`;
-        const page = await renderAt({ page: "test/needsBrowser.html", width, height, api: api(6, 4), assets: ASSETS });
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: api(6, 4),
+          assets: ASSETS,
+        });
         try {
           await ready(page);
           const side = await page.box(".needs-side");
           const options = await page.boxes(".needs-answer .opt");
           expect(options).toHaveLength(4);
           const last = options[3] as { y: number; height: number };
-          expect(last.y + last.height, `${label}: the last option is inside the side column`).toBeLessThanOrEqual(side.y + side.height);
+          expect(
+            last.y + last.height,
+            `${label}: the last option is inside the side column`,
+          ).toBeLessThanOrEqual(side.y + side.height);
           const log = await page.box("#needsMsgs");
-          expect(log.height, `${label}: the conversation log is tall enough`).toBeGreaterThanOrEqual(280);
+          expect(
+            log.height,
+            `${label}: the conversation log is tall enough`,
+          ).toBeGreaterThanOrEqual(280);
         } finally {
           await page.close();
         }

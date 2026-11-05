@@ -364,9 +364,7 @@ describe("ItemPanel, acting on an item", () => {
     const fn = acting([SEAT_Q]);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174." },
-      ]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174." }]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
@@ -402,9 +400,7 @@ describe("ItemPanel, acting on an item", () => {
     const fn = acting([SEAT_Q], STOPPED);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174." },
-      ]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174." }]),
     );
     const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
     expect(ask.disabled).toBe(true);

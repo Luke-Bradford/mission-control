@@ -2,8 +2,8 @@ import { type AttentionItem, DEFAULT_AWAY } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Decisions } from "../src/comms/Decisions.tsx";
-import { hub } from "../src/data.ts";
 import { Markdown, OpenLinks } from "../src/components/Markdown.tsx";
+import { hub } from "../src/data.ts";
 import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
 import { openableHref } from "../src/links.ts";
 import { briefLinks, briefPictures, pictureRoute } from "../src/needs/pictures.ts";
@@ -489,7 +489,9 @@ describe("actions on the page", () => {
       "POST /api/seats/flight-1/message": { ok: true },
     });
     render(<Needs item="q1" />);
-    const box = (await screen.findByLabelText("Your answer", { selector: "textarea" })) as HTMLTextAreaElement;
+    const box = (await screen.findByLabelText("Your answer", {
+      selector: "textarea",
+    })) as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: "Go with the list" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -541,7 +543,10 @@ describe("actions on the page", () => {
       },
     });
     const addMessage = async (n: number) => {
-      messages = [...messages, { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` }];
+      messages = [
+        ...messages,
+        { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` },
+      ];
       act(() => {
         hub.refetch(`/api/attention/q1/discussion`);
         hub.refetch(`/api/attention/q1/discussion?id=d%3Aq1`);
