@@ -4101,6 +4101,17 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */
+  pullRequestOfBranch(
+    repoId: RepoId,
+    branch: string,
+  ): { number: number; state: PullRequestView["state"] } | null {
+    const row = this.statement(
+      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
+    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    return row ?? null;
+  }
+
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
   openPullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.statement(

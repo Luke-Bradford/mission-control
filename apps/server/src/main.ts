@@ -67,6 +67,7 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
+import { DESIGN_PREVIEW_PORT, DESIGN_PREVIEW_SWEEP_MS, DesignPreviews } from "./design-previews.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -80,7 +81,12 @@ import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
-import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
+import {
+  cloneState,
+  configuredChecks,
+  createCheckRecorder,
+  seatWorktree,
+} from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import {
@@ -361,6 +367,18 @@ export async function main(): Promise<void> {
     config.repos,
     config.crew?.sessions ?? [],
   );
+  // A seat's published design previews (its branch's built app, shown with Demo data): live hub only.
+  const designPreviews =
+    !preview && previewRepoId !== undefined
+      ? new DesignPreviews({
+          root: join(dirname(dbPath), "design-previews"),
+          port: DESIGN_PREVIEW_PORT,
+          hubPort: port,
+          // the newest PR of the branch decides: a closed one takes its preview with it
+          prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
+          log: (line) => log(line),
+        })
+      : undefined;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;
@@ -445,6 +463,7 @@ export async function main(): Promise<void> {
     store,
     checks: runChecks,
     state: cloneState(config, store),
+    worktree: seatWorktree(store),
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
@@ -614,6 +633,15 @@ export async function main(): Promise<void> {
         );
       });
     },
+    ...(designPreviews === undefined || previewRepoId === undefined
+      ? {}
+      : {
+          designPreviews: {
+            repoId: previewRepoId,
+            url: `http://${HOST}:${DESIGN_PREVIEW_PORT}/`,
+            publish: (input) => designPreviews.publish(input),
+          },
+        }),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -925,6 +953,7 @@ export async function main(): Promise<void> {
     qaReports,
     previews,
     previewRepoId,
+    designPreviews,
     previewActivity,
     hudShots,
     prEvidence: evidenceStore,
@@ -1011,6 +1040,18 @@ export async function main(): Promise<void> {
     if (r.tokens + r.holds > 0) {
       log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
     }
+  }
+  if (designPreviews !== undefined) {
+    const sweep = setInterval(() => void designPreviews.sweep(), DESIGN_PREVIEW_SWEEP_MS);
+    sweep.unref();
+    app.addHook("onClose", async () => {
+      clearInterval(sweep);
+      await designPreviews.close();
+    });
+    // a taken port must not stop the hub: previews just cannot be shown
+    await designPreviews.listen().catch((e: unknown) => {
+      log(`design previews: cannot listen on ${DESIGN_PREVIEW_PORT}: ${String(e)}`);
+    });
   }
   await app.listen({ host: HOST, port });
   // External service tooling can identify this hub without inspecting a process command line.

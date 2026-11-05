@@ -248,6 +248,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -462,6 +463,8 @@ export interface AppDeps {
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
   previewRepoId?: RepoId;
+  /** The hub's design previews (a branch's built app, shown with Demo data); absent on preview hubs. */
+  designPreviews?: DesignPreviews;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -1196,6 +1199,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. A design preview runs on
+  // another port of this host, which browsers call same-site, so that is refused too; the HUD's
+  // own requests are same-origin. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path.startsWith("/api/") &&
+      (req.headers["sec-fetch-site"] === "cross-site" ||
+        req.headers["sec-fetch-site"] === "same-site")
+    ) {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
@@ -1224,18 +1245,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       !isLocalOrigin(origin)
     ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
-    }
-  });
-
-  // A cross-site no-cors GET (an <img>, fetch with
-  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
-  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
-  // callers that send no header (the guard hook, curl) are unaffected. The matched route is
-  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
-  app.addHook("onRequest", async (req, reply) => {
-    const path = req.routeOptions.url ?? req.url;
-    if (path.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
-      return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
 
@@ -3402,6 +3411,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
         return deps.previews?.list() ?? [];
       });
+
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you lists previews)
+      api.get("/design-previews", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return deps.designPreviews?.list() ?? [];
+      });
+
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
+      api.post<{ Params: { ticket: string } }>(
+        "/design-previews/:ticket/open",
+        async (req, reply) => {
+          if (
+            operatorToken !== undefined &&
+            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+          )
+            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
+          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
+          if (view === null)
+            return reply.code(404).send({ error: "No stored preview for this ticket." });
+          return view;
+        },
+      );
 
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
