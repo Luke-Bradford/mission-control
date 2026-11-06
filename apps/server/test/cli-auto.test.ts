@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
   autoUpdateCli,
+  CLI_CHECK_WAIT_MAX_MS,
   type CliToolOps,
   cliUpdateKind,
   heldCliVersion,
@@ -23,7 +24,7 @@ import {
   type SeatCheck,
   settlePending,
 } from "../src/cli-auto.ts";
-import { CliHold, type ExecFn } from "../src/cli-update.ts";
+import { CLI_RETRY_MS, CliHold, type ExecFn } from "../src/cli-update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { createScheduler } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
@@ -294,7 +295,7 @@ describe("autoUpdateCli", () => {
         v === "2.1.0" && broken ? { ok: false, error: "EACCES" } : ops.install(v),
     };
     expect(await run("claude", flaky)).toBe("rollback-failed");
-    expect(pendingCliUpdate(store, "claude")).toEqual({ from: "2.1.0", to: "2.1.1" });
+    expect(pendingCliUpdate(store, "claude")).toMatchObject({ from: "2.1.0", to: "2.1.1" });
     expect(hold.heldBy("cli-auto:claude")).toBe(true);
     broken = false;
     expect(await run("claude", flaky)).toBe("rolled-back");
@@ -511,7 +512,7 @@ describe("the live check through a seat's start path", () => {
     expect(world.version).toBe("2.1.1");
     expect(hold.reason).toMatch(/claude CLI 2\.1\.1 has not passed/);
     expect(heldCliVersion(store, "claude")).toBeNull();
-    expect(pendingCliUpdate(store, "claude")).toEqual({ from: "2.1.0", to: "2.1.1" });
+    expect(pendingCliUpdate(store, "claude")).toMatchObject({ from: "2.1.0", to: "2.1.1" });
     expect(store.notes()).toEqual([]);
     expect(items()).toEqual([]);
 
@@ -521,6 +522,39 @@ describe("the live check through a seat's start path", () => {
     expect(hold.reason).toBeNull();
     expect(pendingCliUpdate(store, "claude")).toBeNull();
     expect(items()).toMatchObject([{ kind: "cli-update", state: "done" }]);
+  });
+
+  it("gives the previous version back, unheld and unflagged, when the check cannot run for too long", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "busy" });
+    const ops = realCliOps("claude", exec, PREFIX, undefined, seatCheck);
+    let at = NOW;
+    const at$ = () =>
+      autoUpdateCli("claude", ops, { store, hold, log: (l) => lines.push(l), now: () => at });
+    expect(await at$()).toBe("waiting");
+    at += CLI_CHECK_WAIT_MAX_MS - 1;
+    expect(await at$()).toBe("waiting");
+    expect(hold.reason).not.toBeNull();
+    at += 1;
+    expect(await at$()).toBe("gave-up");
+    expect(world.version).toBe("2.1.0");
+    expect(hold.reason).toBeNull();
+    expect(heldCliVersion(store, "claude")).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    expect(store.notes()).toEqual([]);
+    expect(items()).toEqual([]);
+    expect(lines.some((l) => /trying again later/.test(l))).toBe(true);
+  });
+
+  it("treats a check that failed before the CLI started as unproven: it waits, with no held version and no note", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "unproven", detail: "git fetch failed" });
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe("waiting");
+    expect(world.version).toBe("2.1.1");
+    expect(heldCliVersion(store, "claude")).toBeNull();
+    expect(store.notes()).toEqual([]);
+    expect(items()).toEqual([]);
+    expect(lines.some((l) => /git fetch failed/.test(l))).toBe(true);
   });
 
   it("falls back to the bare check when no seat of the vendor is configured", async () => {
@@ -586,6 +620,54 @@ describe("the cliAuto job", () => {
     expect(claude.state.installed).toBe("2.1.1");
     expect(codex.state.installed).toBe("0.2.0");
     await scheduler.stop();
+  });
+
+  it("re-checks a waiting update after CLI_RETRY_MS, and stop() cancels the armed re-check", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ops } = fakeOps("2.1.0", "2.1.1");
+      let checks = 0;
+      const waiting: CliToolOps = {
+        ...ops,
+        check: async (v) => {
+          checks++;
+          return checks === 1
+            ? { ok: false, retry: true, detail: "every claude seat is busy" }
+            : ops.check(v);
+        },
+      };
+      const scheduler = make("between_runs", { claude: waiting });
+      await scheduler.tick("cliAuto");
+      expect(checks).toBe(1);
+      expect(hold.reason).toMatch(/claude/);
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS);
+      expect(checks).toBe(2);
+      expect(hold.reason).toBeNull();
+      expect(store.audit(0, Date.now() + 1000).items ?? []).toMatchObject([
+        { kind: "cli-update", state: "done" },
+      ]);
+      await scheduler.stop();
+
+      // a stopped scheduler does not re-check
+      store.deleteSetting("cli-auto-pending:claude");
+      const again = fakeOps("3.1.0", "3.1.1");
+      let n = 0;
+      const stuck: CliToolOps = {
+        ...again.ops,
+        check: async () => {
+          n++;
+          return { ok: false, retry: true, detail: "busy" };
+        },
+      };
+      const second = make("between_runs", { claude: stuck });
+      await second.tick("cliAuto");
+      expect(n).toBe(1);
+      await second.stop();
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS * 2);
+      expect(n).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does nothing when updates.cli is off", async () => {

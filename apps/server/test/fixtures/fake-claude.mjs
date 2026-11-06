@@ -198,6 +198,15 @@ function userTurn(text) {
     return;
   }
   const checkRead = /Read the file (\S+) in the current directory/.exec(text);
+  if (checkRead && existsSync(`${recordTo}.hold`) && !existsSync(`${recordTo}.go`)) {
+    // a check that has not answered yet (until `<record file>.go` exists)
+    const wait = setInterval(() => {
+      if (!existsSync(`${recordTo}.go`)) return;
+      clearInterval(wait);
+      userTurn(text);
+    }, 20);
+    return;
+  }
   if (checkRead) {
     const content = readFileSync(join(process.cwd(), checkRead[1]), "utf8");
     assistant(

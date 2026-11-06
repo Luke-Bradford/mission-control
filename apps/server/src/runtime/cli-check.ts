@@ -17,13 +17,15 @@ export const cliCheckCheckoutName = (seatId: string): string => `${seatId}-cli-c
 /**
  * What the supervisor made of a check. `ran`: a seat started on the new version and the task did
  * (`ok`) or did not pass. `no-seat`: no seat of that vendor is configured, so no run can break on
- * this tool. `busy`: seats of that vendor exist but all hold a run (or cannot start now), so
- * nothing was proven either way.
+ * this tool. `busy`: seats of that vendor exist but all hold a run, so nothing was proven either
+ * way. `unproven`: the start failed before the new CLI was invoked (git, checkout, pnpm store),
+ * which says nothing of the CLI.
  */
 export type CliCheckResult =
   | { kind: "ran"; ok: boolean; detail: string }
   | { kind: "no-seat" }
-  | { kind: "busy" };
+  | { kind: "busy" }
+  | { kind: "unproven"; detail: string };
 
 export interface CliCheckTask {
   /** The one line the seat is sent. */
@@ -113,3 +115,6 @@ export function judgeCliCheck(transcript: string, nonce: string): { ok: boolean;
   if (!answered) return say("the answer did not carry the file's contents");
   return { ok: true, detail: "a seat started on it, read a file with a tool and answered" };
 }
+
+/** The setting that names the check run a seat holds, so a restart can end it (it is no seat run). */
+export const cliCheckRunKey = (seatId: string): string => `cli-check-run:${seatId}`;

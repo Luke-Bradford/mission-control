@@ -240,6 +240,7 @@ import {
   CLI_CHECK_TIMEOUT_MS,
   type CliCheckResult,
   cliCheckCheckoutName,
+  cliCheckRunKey,
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
@@ -1709,6 +1710,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     keepPrompt = false,
     beforeLaunch?: () => Run | undefined,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
+    stage?: { cli: boolean },
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1732,6 +1734,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
+      if (stage) stage.cli = true;
       const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
       if (stopping) throw new Error(SHUTTING_DOWN);
       store.setRunCliVersionIfLive(run.id, cliVersion);
@@ -1761,6 +1764,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
+    if (stage) stage.cli = true;
     return launch(
       info,
       run,
@@ -3867,6 +3871,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
+      stage?: { cli: boolean };
     },
   ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
@@ -3933,7 +3939,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prs: [],
         summary: null,
       };
-      if (check !== undefined) checkRuns.set(runId, { stderr: null });
+      if (check !== undefined) {
+        checkRuns.set(runId, { stderr: null });
+        // a restart in the middle ends this run (it is nobody's to adopt); see endStaleChecks
+        store.setSetting(cliCheckRunKey(seatId), runId);
+      }
       store.upsertRun(run);
       const first = opts.first;
       const brief =
@@ -3972,6 +3982,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? undefined
             : (system) =>
                 recordPromptVersion(run, def.prompt, firstBrief, opts.firstPieces ?? [], system),
+          opts.stage,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -4034,7 +4045,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return { runId, worktree: checkout.path };
     } catch (e) {
       // a check leaves nothing behind: its worktree goes with a start that failed
-      if (check !== undefined && prepared !== null) await dropCheckWorktree(info, prepared);
+      if (check !== undefined) {
+        store.deleteSetting(cliCheckRunKey(seatId));
+        if (prepared !== null) await dropCheckWorktree(info, prepared);
+      }
       throw e;
     } finally {
       starting.delete(seatId);
@@ -4053,22 +4067,43 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /** The build seats of `vendor`, in config order, that a check may use now: nothing on them at all. */
-  function freeCheckSeats(vendor: CrewVendor): { configured: number; free: SeatInfo[] } {
-    let configured = 0;
+  function freeCheckSeats(vendor: CrewVendor): { runBusy: number; free: SeatInfo[] } {
+    let runBusy = 0;
     const free: SeatInfo[] = [];
     for (const session of crew?.sessions ?? []) {
       for (const seat of session.seats) {
         const info = findSeat(seat.id);
         if (info === undefined || seatDef(seat).loop !== "build" || seat.retiring) continue;
         if (config.accounts.find((a) => a.id === seat.accountId)?.vendor !== vendor) continue;
-        configured++;
-        if (starting.has(seat.id) || live.has(seat.id) || isActive(store.seatSession(seat.id)))
-          continue;
         if (pausedSeat(store, seat.id) || seatUnavailable(seat)) continue;
+        if (starting.has(seat.id) || live.has(seat.id) || isActive(store.seatSession(seat.id))) {
+          runBusy++;
+          continue;
+        }
         free.push(info);
       }
     }
-    return { configured, free };
+    return { runBusy, free };
+  }
+
+  /**
+   * A check run a restart cut off (its seat row still names it) is ended like any engine end: no
+   * note, the seat idle, its CLI and throwaway worktree gone. Before the reattach, which would
+   * otherwise take it back as the seat's own run.
+   */
+  async function endStaleChecks(): Promise<void> {
+    for (const session of crew?.sessions ?? []) {
+      for (const seat of session.seats) {
+        const runId = store.getSetting(cliCheckRunKey(seat.id));
+        if (runId === null) continue;
+        try {
+          await endRunByEngine(runId);
+        } catch (e) {
+          log(`${seat.id}: could not end a check run left by a restart: ${errText(e)}`);
+        }
+        store.deleteSetting(cliCheckRunKey(seat.id));
+      }
+    }
   }
 
   async function checkCli(vendor: CrewVendor): Promise<CliCheckResult> {
@@ -4077,8 +4112,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     for (const id of [...checkRuns.keys()]) {
       if (store.run(id)?.endedAt != null) checkRuns.delete(id);
     }
-    const { configured, free } = freeCheckSeats(vendor);
-    if (configured === 0) return { kind: "no-seat" };
+    const { runBusy, free } = freeCheckSeats(vendor);
+    // a seat that is paused or unavailable frees no time soon: waiting on it would never end
+    if (runBusy === 0 && free.length === 0) return { kind: "no-seat" };
     for (const info of free) {
       const seatId = info.seat.id;
       let nonce = "";
@@ -4092,8 +4128,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       listeners.add(heard);
       const off = () => listeners.delete(heard);
       let started: { runId: string; worktree: string };
+      const stage = { cli: false };
       try {
         started = await startDetached(seatId, {
+          stage,
           check: (dir) => {
             const task = writeCliCheckTask(dir);
             nonce = task.nonce;
@@ -4104,6 +4142,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         off();
         // another start took the seat first: try the next
         if (e instanceof SupervisorError && e.status === 409) continue;
+        // git, the checkout or the pnpm store failed before the new CLI was invoked: it says nothing of the CLI
+        if (!stage.cli) return { kind: "unproven", detail: errText(e) };
         return { kind: "ran", ok: false, detail: errText(e) };
       }
       const { runId, worktree } = started;
@@ -4153,6 +4193,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           await endRunByEngine(runId);
         } finally {
           checkRuns.delete(runId);
+          store.deleteSetting(cliCheckRunKey(seatId));
         }
         // a run that ended by itself left its worktree and maybe its seat row behind
         const row = store.seatSession(seatId);
@@ -5009,7 +5050,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             log(`could not resume paused crew runs: ${errText(e)}`),
           );
       });
-      reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
+      endStaleChecks()
+        .then(() => reattach())
+        .catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
     },
 
     async stopAll() {

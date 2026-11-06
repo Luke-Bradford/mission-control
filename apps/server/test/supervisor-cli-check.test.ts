@@ -1,10 +1,22 @@
 import "./supervisor-harness.ts";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
+import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
-import { make, recorded, root, store, until } from "./supervisor-harness.ts";
+import {
+  clone,
+  dir,
+  git,
+  make,
+  recorded,
+  recordFile,
+  root,
+  store,
+  until,
+} from "./supervisor-harness.ts";
 
 skipTestsIf(await blockedHere("crew-run"));
 
@@ -89,4 +101,55 @@ it("has no seat to try for a vendor no seat is configured for", async () => {
   const { sup } = make();
   sup.start();
   expect(await sup.checkCli("codex")).toEqual({ kind: "no-seat" });
+});
+
+it("does not call a failure before the CLI starts a failed version (the fetch cannot reach origin)", async () => {
+  const { sup } = make();
+  sup.start();
+  git(clone, "remote", "set-url", "origin", join(dir, "no-such-remote.git"));
+  const result = await sup.checkCli("claude");
+  expect(result.kind).toBe("unproven");
+  expect(recorded().filter((l) => l.argv)).toEqual([]);
+  expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+  expect(worktrees().filter((n) => n.includes("cli-check"))).toEqual([]);
+});
+
+it("ends a check a restart cut off, instead of adopting it as the seat's run", async () => {
+  writeFileSync(`${recordFile}.hold`, "");
+  const first = make();
+  first.sup.start();
+  const checking = first.sup.checkCli("claude");
+  await until(() => expect(store.seatSession("guido-1")?.runId).toBeTruthy());
+  const runId = store.seatSession("guido-1")?.runId as string;
+  const cwd = store.seatSession("guido-1")?.worktree as string;
+  expect(existsSync(cwd)).toBe(true);
+
+  // the hub restarts: a second supervisor on the same store takes the crew over
+  const second = make();
+  second.sup.start();
+  await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+  await until(() =>
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null }),
+  );
+  await until(() => expect(existsSync(cwd)).toBe(false));
+  expect(store.notes().filter((n) => n.seatId === "guido-1")).toEqual([]);
+  expect(store.getSetting("cli-check-run:guido-1")).toBeNull();
+
+  writeFileSync(`${recordFile}.go`, "");
+  await checking.catch(() => {});
+});
+
+it("passes a Codex seat through the app-server and leaves the seat idle", async () => {
+  const { sup } = codexSupervisor({ checkRead: true });
+  sup.start();
+  expect(await sup.checkCli("codex")).toMatchObject({ kind: "ran", ok: true });
+  expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+  expect(worktrees().filter((n) => n.includes("cli-check"))).toEqual([]);
+});
+
+it("fails a Codex turn that ends failed", async () => {
+  const { sup } = codexSupervisor({ checkRead: true, failed: true });
+  sup.start();
+  expect(await sup.checkCli("codex")).toMatchObject({ kind: "ran", ok: false });
+  expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
 });
