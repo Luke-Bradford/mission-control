@@ -32,6 +32,11 @@ import {
 } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
 
+function defined<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error("Test expected a value to exist");
+  return value;
+}
+
 export type OverviewScenario =
   | "default"
   | "mixed"
@@ -201,7 +206,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           Math.floor(tokens / count) + (index === 0 ? tokens % count : 0),
         ]),
       ),
-      stateSince: NOW - stateMinutes[index % stateMinutes.length]! * MIN,
+      stateSince: NOW - defined(stateMinutes[index % stateMinutes.length]) * MIN,
       contextWindow: index === 7 ? null : index % 3 === 0 ? 200_000 : 400_000,
       hudState: index === 0 || index % 4 === 0 ? "idle" : "running",
       ticket: index ? `shop-app#${100 + index}` : null,
@@ -211,7 +216,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
               5,
             )
           : `Recorded fixture work ${index}`,
-      run: { ...seatRow().run!, id: `fixture-run-${index}` },
+      run: { ...defined(seatRow().run), id: `fixture-run-${index}` },
     }),
   );
   if (rows[4])
@@ -276,7 +281,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
             }))
         : [],
     crew: {
-      ...CREW_CONFIG.crew!,
+      ...defined(CREW_CONFIG.crew),
       sessions: [
         {
           id: "demo",
