@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  BriefChoiceReceipt,
   ItemChatMessage,
   ItemDiscussion,
   PersonMessage,
@@ -1159,6 +1160,19 @@ const toCiRun = (r: Row): CiRunView => ({
   at: r.at as number,
 });
 
+const toEscalation = (r: Row): Escalation => ({
+  id: r.id as string,
+  repoId: r.repo_id as string,
+  issueNumber: r.issue_number as number,
+  title: r.title as string,
+  kind: r.kind as Escalation["kind"],
+  source: r.source === "title" ? "title" : "label",
+  openedAt: r.opened_at as number,
+  url: r.url as string,
+  question:
+    r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
+});
+
 const toReview = (r: Row): ReviewRow => ({
   id: r.id as number,
   authorRunId: r.author_run_id as string,
@@ -1872,6 +1886,9 @@ export class Store {
     this.addColumn("decision_defaults", "target", "TEXT");
     this.addColumn("decision_defaults", "answer", "TEXT");
     this.addColumn("decision_defaults", "delivered_at", "INTEGER");
+    this.addColumn("decision_defaults", "binding", "TEXT");
+    this.addColumn("decision_defaults", "delivery_state", "TEXT NOT NULL DEFAULT 'legacy'");
+    this.addColumn("decision_defaults", "delivery_note", "TEXT");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
@@ -3222,18 +3239,15 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM escalations ORDER BY opened_at ASC, id ASC")
       .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as string,
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      title: r.title as string,
-      kind: r.kind as Escalation["kind"],
-      source: r.source === "title" ? "title" : "label",
-      openedAt: r.opened_at as number,
-      url: r.url as string,
-      question:
-        r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
-    }));
+    return rows.map(toEscalation);
+  }
+
+  /** Indexed canonical source lookup; freshness reads never mutate the escalation set. */
+  escalation(id: string): Escalation | null {
+    const row = this.db.prepare("SELECT * FROM escalations WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? toEscalation(row) : null;
   }
 
   /** True when any stored row changed. */
@@ -4438,7 +4452,14 @@ export class Store {
         `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
          ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
       );
-      for (const k of keys) ins.run(k, at);
+      for (const k of keys) {
+        ins.run(k, at);
+        const epoch = this.briefs().get(k)?.binding?.epoch;
+        if (epoch) {
+          this.setSetting(`brief-ack:${k}`, epoch);
+          this.setSetting(`brief-default-cancel:${epoch}`, String(at));
+        }
+      }
     });
   }
 
@@ -4451,16 +4472,19 @@ export class Store {
       dueAt: number;
       target: string | null;
       answer: string;
+      choice?: { epoch: string; requestKey: string; fingerprint: string; record: string };
+      binding?: string;
     },
     message: NewCommsRow,
     at: number,
   ): boolean {
     let claimed = false;
     this.transaction(() => {
+      if (d.choice && this.getSetting(`brief-choice:${d.choice.epoch}`)) return;
       const r = this.db
         .prepare(
-          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at, binding, delivery_state)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           d.key,
@@ -4472,8 +4496,16 @@ export class Store {
           d.target,
           d.answer,
           d.target === null ? at : null,
+          d.binding ?? null,
+          d.binding ? "pending" : "legacy",
         );
       if (r.changes === 0) return;
+      if (d.choice) {
+        this.setSetting(`brief-choice:${d.choice.epoch}`, d.choice.record);
+        this.setSetting(d.choice.requestKey, d.choice.fingerprint);
+        this.setSetting(`${d.choice.requestKey}:epoch`, d.choice.epoch);
+        this.setSetting(`brief-ack:${d.key}`, d.choice.epoch);
+      }
       this.insertComms(message, cutCommsText(message.text), null);
       this.db
         .prepare(
@@ -4486,24 +4518,107 @@ export class Store {
     return claimed;
   }
 
-  pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
+  /** One local choice per semantic epoch, serialized across Store handles by SQLite. */
+  claimBriefChoice(
+    epoch: string,
+    requestKey: string,
+    fingerprint: string,
+    record: string,
+  ): boolean {
+    let claimed = false;
+    this.transaction(() => {
+      if (this.getSetting(`brief-choice:${epoch}`)) return;
+      const prior = this.getSetting(requestKey);
+      if (prior && prior !== fingerprint) return;
+      this.setSetting(requestKey, fingerprint);
+      this.setSetting(`${requestKey}:epoch`, epoch);
+      this.setSetting(`brief-choice:${epoch}`, record);
+      claimed = true;
+    }, true);
+    return claimed;
+  }
+
+  /** A confirmed authentication refusal performed no action and cannot consume the operator's decision. */
+  refuseBriefChoice(epoch: string, requestKey: string, fingerprint: string, record: string): void {
+    this.transaction(() => {
+      const raw = this.getSetting(`brief-choice:${epoch}`);
+      if (!raw || (JSON.parse(raw) as { fingerprint: string }).fingerprint !== fingerprint) return;
+      this.setSetting(`${requestKey}:receipt`, record);
+      this.setSetting(`brief-last-choice:${epoch}`, record);
+      this.deleteSetting(`brief-choice:${epoch}`);
+    }, true);
+  }
+
+  pendingDecisionDeliveries(): {
+    key: string;
+    briefAt: number;
+    target: string;
+    answer: string;
+    binding?: string;
+  }[] {
     return (
       this.db
-        .prepare(`SELECT key, brief_at, target, answer FROM decision_defaults
-      WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`)
+        .prepare(`SELECT key, brief_at, target, answer, binding FROM decision_defaults
+      WHERE delivered_at IS NULL AND target IS NOT NULL AND delivery_state = 'pending' ORDER BY applied_at, key`)
         .all() as Row[]
     ).map((r) => ({
       key: r.key as string,
       briefAt: r.brief_at as number,
       target: r.target as string,
       answer: r.answer as string,
+      ...(r.binding === null ? {} : { binding: r.binding as string }),
     }));
   }
 
   markDecisionDeliveryDone(key: string, briefAt: number, at: number): void {
     this.db
-      .prepare("UPDATE decision_defaults SET delivered_at = ? WHERE key = ? AND brief_at = ?")
+      .prepare(
+        "UPDATE decision_defaults SET delivered_at = ?, delivery_state = 'delivered' WHERE key = ? AND brief_at = ?",
+      )
       .run(at, key, briefAt);
+  }
+
+  stopDecisionDelivery(
+    key: string,
+    briefAt: number,
+    state: "canceled" | "unknown",
+    reason: string,
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE decision_defaults SET delivery_state = ?, delivery_note = ? WHERE key = ? AND brief_at = ? AND delivered_at IS NULL",
+      )
+      .run(state, reason, key, briefAt);
+  }
+
+  briefChoice(epoch: string): BriefChoiceReceipt | null {
+    const raw =
+      this.getSetting(`brief-choice:${epoch}`) ?? this.getSetting(`brief-last-choice:${epoch}`);
+    if (!raw) return null;
+    try {
+      return (JSON.parse(raw) as { receipt: BriefChoiceReceipt }).receipt;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Retained delivery outcomes include legacy/unverifiable rows; none is silently rebound. */
+  decisionDeliveryState(
+    key: string,
+    briefAt: number,
+  ): { state: string; deliveredAt: number | null; note: string | null } | null {
+    const row = this.db
+      .prepare(
+        "SELECT delivery_state, delivered_at, delivery_note FROM decision_defaults WHERE key = ? AND brief_at = ?",
+      )
+      .get(key, briefAt) as Row | undefined;
+    return row
+      ? {
+          state: row.delivery_state as string,
+          deliveredAt: row.delivered_at as number | null,
+          note: row.delivery_note as string | null,
+        }
+      : null;
   }
 
   /** Every ack: key → when it was acknowledged. */
@@ -8126,6 +8241,43 @@ export class Store {
   addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
     let id = 0;
     this.transaction(() => {
+      id = this.writeBrief(b);
+    });
+    return id;
+  }
+
+  /** Source handoff, audit and the prepared brief commit together or not at all. */
+  addPreparedBrief(
+    makeBrief: () => AttentionBrief & { key: string; defaultEligible?: boolean },
+    handoff: () => void,
+  ): number {
+    let id = 0;
+    this.transaction(() => {
+      handoff();
+      id = this.writeBrief(makeBrief());
+    }, true);
+    return id;
+  }
+
+  /** A hub-produced queue proposal and its validated brief become visible atomically. */
+  addQueueReorderBrief(
+    key: string,
+    proposal: string,
+    note: NoteInput,
+    makeBrief: () => AttentionBrief,
+  ): number {
+    let id = 0;
+    this.transaction(() => {
+      this.setSetting(key, proposal);
+      this.raiseNote(note);
+      id = this.writeBrief({ ...makeBrief(), key: `note:${key}`, defaultEligible: false });
+    }, true);
+    return id;
+  }
+
+  private writeBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
+    let id = 0;
+    {
       const {
         key,
         context,
@@ -8175,6 +8327,10 @@ export class Store {
           })),
         };
       }
+      // Read-model identities and receipts are derived, never producer-owned persisted content.
+      delete structured.id;
+      delete structured.state;
+      delete structured.choice;
       // A rebrief with the same ask (for the same reader) keeps when that ask began; a new or
       // changed ask begins at its own `at`, so it carries no askAt.
       delete structured.askAt;
@@ -8182,11 +8338,27 @@ export class Store {
         .prepare("SELECT at, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
         .get(key) as { at: number; structured: string | null } | undefined;
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
-      if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
+      if (
+        last !== undefined &&
+        prior?.for === structured.for &&
+        (structured.binding
+          ? structured.binding.epoch === prior?.binding?.epoch
+          : prior?.ask === structured.ask)
+      )
         structured.askAt = prior?.askAt ?? last.at;
       delete structured.defaultAt;
-      if (defaultEligible && structured.for !== "flight" && structured.recommendedOptionId) {
-        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
+      const eligibleBinding = structured.binding?.actions.some(
+        (action) => action.optionId === structured.recommendedOptionId && action.defaultable,
+      );
+      if (
+        defaultEligible &&
+        eligibleBinding &&
+        !structured.decision?.whyOperator &&
+        structured.for !== "flight" &&
+        structured.recommendedOptionId
+      ) {
+        const kept =
+          structured.binding?.epoch === prior?.binding?.epoch ? prior?.defaultAt : undefined;
         // The wait starts when a default is first stamped, never at an older ask's time: an ask
         // briefed before defaults existed must not come due the moment it is briefed again.
         structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
@@ -8204,7 +8376,13 @@ export class Store {
           JSON.stringify(structured),
         );
       id = Number(r.lastInsertRowid);
-    });
+      if (structured.binding && structured.binding.epochId === 0) {
+        structured.binding = { ...structured.binding, epochId: id };
+        this.db
+          .prepare("UPDATE briefs SET structured = ? WHERE id = ?")
+          .run(JSON.stringify(structured), id);
+      }
+    }
     return id;
   }
 
@@ -8242,6 +8420,7 @@ export class Store {
           r.key as string,
           {
             ...(r.structured ? JSON.parse(r.structured as string) : {}),
+            id: r.id as number,
             context: r.context as string,
             recommendation: r.recommendation as string,
             options: JSON.parse(r.options as string) as BriefOption[],

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  type AttentionBrief,
   type AttentionItem,
   AWAY_BUG_VERIFIED,
   AWAY_PLANNER_REFUSED,
@@ -308,6 +309,13 @@ import {
   releaseHold,
 } from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
+import {
+  type BriefPreparationDeps,
+  bindCompleteBrief,
+  bindPreparedBrief,
+  completeBriefError,
+} from "../brief-prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief-schema.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -396,6 +404,8 @@ export interface FlightToolsDeps {
     move: string,
     above: string,
   ) => Promise<{ ok: boolean; text: string }>;
+  /** Side-effect-free validation/snapshot of FLIGHT's own queue judgment. */
+  prepareQueueReorder?: BriefPreparationDeps["prepareQueue"];
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
@@ -511,6 +521,14 @@ const BriefOptionArgs = z.strictObject({
   label: text(BRIEF_LABEL_MAX),
   answer: text(BRIEF_INPUT_MAX),
   description: text(MC_TEXT_MAX).optional(),
+  consequence: text(BRIEF_INPUT_MAX).optional(),
+  reversibility: z
+    .strictObject({
+      kind: z.enum(["reversible", "partly-reversible", "irreversible"]),
+      detail: text(BRIEF_INPUT_MAX),
+    })
+    .optional(),
+  action: BriefActionInput.optional(),
 });
 const StructuredBriefArgs = z.strictObject({
   catchUp: z
@@ -560,6 +578,7 @@ const BriefItemArgs = z
     ...StructuredBriefArgs.shape,
     key: z.string().min(1).max(BRIEF_KEY_MAX),
     for: z.enum(["operator", "flight"]).default("operator"),
+    decision: BriefDecisionInput.optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -570,7 +589,7 @@ const BriefItemArgs = z
         }),
       )
       .max(20)
-      .default([]),
+      .optional(),
     ask: text(BRIEF_INPUT_MAX).optional(),
     recommendation: text(BRIEF_INPUT_MAX),
     options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
@@ -2679,6 +2698,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
     if (structured.for === "operator" && structured.ask === undefined)
       return fail("Give a non-empty ask when passing an item to the operator.");
+    const candidate = {
+      ...structured,
+      context: assessment,
+      assessment,
+      recommendation,
+      options: options ?? [],
+      basis,
+      at: now(),
+    };
+    if (structured.for === "operator") {
+      const problem = completeBriefError(candidate);
+      if (problem) return fail(problem);
+    }
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));
     if (
       new Set(ids).size !== ids.length ||
@@ -2723,42 +2755,86 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // whether the operator already had this item with FLIGHT's brief, before this one replaces it
     const prior = store.briefs().get(key);
     const wasOperators = prior !== undefined && prior.for !== "flight";
+    let briefedAt = at;
     try {
-      store.addBrief({
-        ...structured,
-        key,
-        original: originalItemText(item).slice(0, BRIEF_INPUT_MAX),
-        assessment,
-        context: assessment,
+      const content = {
+        ...candidate,
+        original: originalItemText(item),
         ask: structured.ask ?? "",
-        recommendation,
-        options: options ?? [],
-        basis,
         at,
-        defaultEligible: !protectedDecisionItem(store, item, config, at),
-      });
-    } catch {
-      return fail("Source changed; refresh the item before drafting.");
-    }
-    // A seat's question goes to the operator only this way (#758): briefed, it is passed, so the
-    // engine holds its run for the operator's answer, and the pass is in Decided without you.
-    const ask = /^ask:(\d+)$/.exec(key);
-    const question = ask === null ? null : store.question(Number(ask[1]));
-    // Kept for FLIGHT, a passed question is FLIGHT's again: answer_question can close it, and the
-    // engine no longer holds its run for the operator.
-    if (structured.for === "flight" && question !== null && question.passedAt !== null)
-      store.unpassQuestion(question.id);
-    // Handed to the operator now (passed here, or passed earlier without a brief): record the pass.
-    if (structured.for === "operator" && question !== null && !wasOperators) {
-      if (question.passedAt === null) store.passQuestion(question.id, at);
-      record(at, {
-        kind: "pass",
-        seatId: question.agentId,
-        questionId: question.id,
-        about: `${seatCallSign(question.agentId)}: ${question.text}`,
-        decision: PASSED_DECISION,
-        basis,
-      });
+      };
+      const bound: AttentionBrief =
+        structured.for === "operator"
+          ? await bindCompleteBrief(
+              {
+                config,
+                store,
+                now,
+                prepareQueue: deps.prepareQueueReorder,
+                actor: { seatId: ctx.seatId, runId: ctx.runId },
+              },
+              item,
+              content,
+              { seatId: ctx.seatId, runId: ctx.runId },
+            )
+          : content;
+      briefedAt = now();
+      store.addPreparedBrief(
+        () => ({
+          ...(bound.binding
+            ? bindPreparedBrief(
+                { config, store, now },
+                item,
+                { ...bound, at: briefedAt },
+                bound.binding.preparedBy,
+                bound.binding.actions,
+              )
+            : bound),
+          key,
+          at: briefedAt,
+          defaultEligible: !protectedDecisionItem(store, item, config, briefedAt),
+        }),
+        () => {
+          const ask = /^ask:(\d+)$/.exec(key);
+          const question = ask ? store.question(Number(ask[1])) : null;
+          if (structured.for === "flight" && question?.passedAt !== null && question)
+            store.unpassQuestion(question.id);
+          if (
+            structured.for === "operator" &&
+            structured.decision?.whyOperator &&
+            question &&
+            !wasOperators
+          ) {
+            if (question.passedAt === null) store.passQuestion(question.id, briefedAt);
+            record(briefedAt, {
+              kind: "pass",
+              seatId: question.agentId,
+              questionId: question.id,
+              about: `${seatCallSign(question.agentId)}: ${question.text}`,
+              decision: PASSED_DECISION,
+              basis,
+            });
+          }
+          if (
+            hold &&
+            !holdItem(
+              store,
+              key,
+              recommendation.slice(0, 1000),
+              hold.condition,
+              "FLIGHT",
+              briefedAt,
+            )
+          )
+            throw new Error(HOLD_CYCLE_REFUSED);
+        },
+      );
+    } catch (error) {
+      return fail(
+        error instanceof Error
+          ? error.message
+          : "Source changed; refresh the item before drafting.",
+      );
     }
     if (structured.person) {
       const match = /^person:(\d+):(\d+)$/.exec(key);
@@ -2775,13 +2851,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           arrivalId: n.id,
           version: structured.person.source.revision,
           arrivedAt: n.updatedAt,
-          at,
+          at: briefedAt,
           text: n.title,
           outcome: drafted ? "Reply drafted" : "Asked of you",
           detail: recommendation,
         });
     }
-    if (hold) holdItem(store, key, recommendation.slice(0, 1000), hold.condition, "FLIGHT", at);
     bus.emit("attention");
     bus.emit("flight");
     return {

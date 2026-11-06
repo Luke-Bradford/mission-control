@@ -161,6 +161,7 @@ import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { operatorDecisionFields } from "./brief-fixture.ts";
 
 it("cuts FLIGHT text by code points without splitting non-ASCII characters", () => {
   expect(cut("🚀🚀🚀", 3)).toBe("🚀🚀🚀");
@@ -1566,6 +1567,15 @@ describe("answer_question", () => {
       ask: "Which lane?",
       recommendation: "Lane 2.",
       basis,
+      ...operatorDecisionFields(
+        {
+          kind: "answer",
+          seatId: store.question(id)?.agentId ?? "guido-1",
+          runId: store.question(id)?.runId ?? "r-guido",
+          text: "Lane 2.",
+        },
+        "money",
+      ),
     });
 
   it("refuses a bare pass, pointing at brief_item, and changes nothing (#758)", async () => {
@@ -5050,21 +5060,126 @@ describe("brief_item", () => {
       at: NOW,
       ...over,
     });
-  const B = (over: Record<string, unknown> = {}) => ({
-    key: KEY,
-    context: "mc#7 is parked since 11:00.",
-    ask: "Should I un-park it?",
-    recommendation: "Un-park it.",
-    options: [
-      { label: "Un-park", answer: "go" },
-      { label: "Leave", answer: "wait" },
-    ],
-    basis: "read the park",
-    ...over,
-  });
+  const B = (over: Record<string, unknown> = {}) => {
+    const options = (
+      Object.hasOwn(over, "options")
+        ? over.options
+        : [
+            { label: "Un-park", answer: "go" },
+            { label: "Leave", answer: "wait" },
+          ]
+    ) as { id?: string; label: string; answer: string }[] | undefined;
+    const person = over.person as
+      | { source?: { kind: string }; replies?: { id: string }[] }
+      | undefined;
+    return {
+      key: KEY,
+      context: "mc#7 is parked since 11:00.",
+      ask: "Should I un-park it?",
+      recommendation: "Un-park it.",
+      basis: "read the park",
+      did: [],
+      checked: [],
+      decision: {
+        whyOperator: {
+          kind: "product-direction",
+          explanation: "The fixture asks for a direction decision.",
+        },
+        consulted: [],
+        costOfDelay: "The fixture remains waiting.",
+        waiting: "An explicit operator answer.",
+      },
+      recommendedOptionId: options ? (options[0]?.id ?? "option-0") : undefined,
+      ...over,
+      options: options?.map((option, index) => ({
+        id: `option-${index}`,
+        consequence: "Record an explicit wait; no underlying approval or unpark is executed.",
+        reversibility: { kind: "reversible", detail: "The operator can release this wait." },
+        action: person
+          ? {
+              kind: "person-handled",
+              how: person.source?.kind === "teams" && person.replies?.[0] ? "copied" : "marked",
+              ...(person.replies?.[0] ? { replyId: person.replies[0].id } : {}),
+            }
+          : {
+              kind: "attention-hold",
+              reason: "Wait for an explicit operator decision.",
+              condition: { kind: "manual" },
+            },
+        ...option,
+      })),
+    };
+  };
   beforeEach(() => {
     raise();
     seen.length = 0;
+  });
+
+  it("1389 refuses incomplete operator decision context before any brief or pass write", async () => {
+    const result = await call("brief_item", B({ decision: undefined }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("whyOperator");
+    expect(store.briefs().size).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it.each([
+    "ask",
+    "context",
+    "did",
+    "checked",
+    "recommendation",
+    "recommendedOptionId",
+    "decision",
+    "options",
+  ] as const)(
+    "1389 rejects missing %s on an operator brief without partial writes",
+    async (field) => {
+      const payload: Record<string, unknown> = B();
+      delete payload[field];
+      const result = await call("brief_item", payload);
+      expect(result.isError).toBe(true);
+      expect(store.briefs().size).toBe(0);
+      expect(store.drafts()).toEqual([]);
+      expect(decisions()).toEqual([]);
+      expect(seen).toEqual([]);
+    },
+  );
+  it("1389 refuses a forged FYI claim when the recommendation has no positive service proof", async () => {
+    const payload = B({ decision: { consulted: [], costOfDelay: "A brief wait." } });
+    expect((await call("brief_item", payload)).isError).toBe(true);
+    expect(store.briefs().size).toBe(0);
+    expect(seen).toEqual([]);
+  });
+  it("1389 rolls back a question pass and audit if atomic brief persistence refuses its source", async () => {
+    live("guido-1", "r-guido");
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "A genuine operator decision?",
+      at: NOW,
+    });
+    const payload: Record<string, unknown> = B({ key: `ask:${id}` });
+    payload.person = { source: { kind: "github", messageId: "missing", revision: "missing" } };
+    payload.hold = { condition: { kind: "date", at: NOW + 1000 } };
+    const result = await call("brief_item", payload);
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Source changed");
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect(store.briefs().has(`ask:${id}`)).toBe(false);
+    expect(decisions()).toEqual([]);
+    expect(holds(store)).toEqual({});
+    expect(store.drafts()).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it("1389 keeps ordinary for-flight triage lightweight", async () => {
+    const result = await call(
+      "brief_item",
+      B({ for: "flight", ask: undefined, options: undefined }),
+    );
+    expect(result.isError).toBeUndefined();
+    expect(store.briefs().get(KEY)?.for).toBe("flight");
   });
 
   it("refuses to triage FLIGHT's own question tag", async () => {
@@ -5086,10 +5201,10 @@ describe("brief_item", () => {
     }
   });
 
-  it("caps the original source text in a brief", async () => {
+  it("retains the full original source text in a brief", async () => {
     raise("large", { text: "X".repeat(BRIEF_INPUT_MAX * 2) });
     await call("brief_item", B({ key: "note:large" }));
-    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX);
+    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX * 2);
   });
 
   it("stores a brief on an operator item and emits attention", async () => {
@@ -5478,9 +5593,9 @@ describe("brief_item", () => {
     }
   });
 
-  it("keeps legacy context uncut, allows no options, and rejects oversized text", async () => {
+  it("keeps lightweight flight context uncut, allows no options, and rejects oversized text", async () => {
     const long = "x".repeat(BRIEF_INPUT_MAX);
-    await call("brief_item", B({ context: long, options: undefined }));
+    await call("brief_item", B({ for: "flight", context: long, options: undefined }));
     expect(store.briefs().get(KEY)).toMatchObject({ context: long, assessment: long, options: [] });
     for (const field of ["context", "assessment", "ask", "recommendation"]) {
       expect((await call("brief_item", B({ [field]: `${long}x` }))).isError).toBe(true);
@@ -6647,6 +6762,7 @@ it.each([
             recommendation: "Check it",
             basis: "Read message",
             person: { source, assessment: ["Needs review"] },
+            ...operatorDecisionFields({ kind: "person-handled", how: "marked" }),
           })
         ).isError,
       ).toBeUndefined();
@@ -8924,6 +9040,40 @@ describe("brief_item with a hold (#760)", () => {
     ask: "Leave it parked?",
     recommendation: "Leave it until the condition is met.",
     basis: "read the park",
+    did: [],
+    checked: [],
+    recommendedOptionId: "wait",
+    decision: {
+      whyOperator: {
+        kind: "product-direction",
+        explanation: "The operator must choose when this work proceeds.",
+      },
+      consulted: [],
+      costOfDelay: "The work remains held.",
+      waiting: "The displayed wait condition.",
+    },
+    options: [
+      {
+        id: "wait",
+        label: "Wait",
+        answer: "Wait for the displayed condition.",
+        consequence: "Keep the item held.",
+        reversibility: { kind: "reversible", detail: "Refresh after release." },
+        action: {
+          kind: "attention-hold",
+          reason: "Wait for the operator.",
+          condition: { kind: "manual" },
+        },
+      },
+      {
+        id: "review",
+        label: "Review later",
+        answer: "Keep this decision open.",
+        consequence: "Record the decision without un-parking work.",
+        reversibility: { kind: "reversible", detail: "The decision can be superseded." },
+        action: { kind: "record-decision" },
+      },
+    ],
     ...over,
   });
   const items = (at = NOW + 1) =>
@@ -9735,6 +9885,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         ask: "Merge?",
         recommendation: "Yes.",
         basis: "the ticket",
+        ...operatorDecisionFields({ kind: "record-decision" }),
       });
       expect(briefed.isError).toBeUndefined();
       expect(await call("dismiss_item", { key: "note:ready:briefed" })).toHaveProperty(

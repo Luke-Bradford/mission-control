@@ -9,11 +9,13 @@ import {
   DECISION_DEFAULT_WAIT_MS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { routineBriefChoices } from "../src/brief-routine.ts";
 import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { attentionItems } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
+import { liveBriefSeat } from "./brief-fixture.ts";
 
 const SENT = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
 const STALLED = SENT + COMMS_FLIGHT_ESCALATION_MS + COMMS_CAPCOM_ESCALATION_MS;
@@ -62,6 +64,8 @@ const find = (id: string, now: number) =>
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-comms-decision-"));
   store = new Store(join(dir, "db.sqlite"));
+  liveBriefSeat(store, "FLIGHT-1", "flight-run", SENT);
+  liveBriefSeat(store, "GUIDO-1", "run", SENT);
 });
 afterEach(() => {
   store.close();
@@ -200,10 +204,21 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     raiseStalledCommsDecisions({ config: config(), store, now: STALLED });
     const deliver = vi.fn(async () => {});
     const due = STALLED + DECISION_DEFAULT_WAIT_MS;
-    expect(await applyDecisionDefaults({ config: config(), store, now: due - 1, deliver })).toBe(0);
-    expect(await applyDecisionDefaults({ config: config(), store, now: due, deliver })).toBe(1);
-    expect(deliver).toHaveBeenCalledWith("GUIDO-1", expect.stringContaining(keyOf(id)));
+    const choices = routineBriefChoices({
+      config: config(),
+      store,
+      now: () => due,
+      knownSecrets: async () => [],
+      supervisor: { message: deliver },
+    });
+    expect(await applyDecisionDefaults({ config: config(), store, now: due - 1, choices })).toBe(0);
+    expect(await applyDecisionDefaults({ config: config(), store, now: due, choices })).toBe(1);
+    expect(deliver).toHaveBeenCalledWith(
+      "GUIDO-1",
+      expect.stringContaining("existing authority"),
+      expect.objectContaining({ expectedRunId: "run", enforcePause: true, questions: "none" }),
+    );
     expect(find(id, due)?.acked).toBe(true);
-    expect(await applyDecisionDefaults({ config: config(), store, now: due + 1, deliver })).toBe(0);
+    expect(await applyDecisionDefaults({ config: config(), store, now: due + 1, choices })).toBe(0);
   });
 });

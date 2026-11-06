@@ -5,13 +5,13 @@ import type {
   AttentionWaitCondition,
 } from "@mc/core";
 import {
-  BRIEF_KEY_MAX,
   type BriefOption,
   COMMS_OPEN_PREFIX,
+  DECISION_DEFAULT_WAIT_MS,
   flightFloorBlocked,
   GUARD_ACK_PREFIX,
 } from "@mc/core";
-import { z } from "zod";
+import type { z } from "zod";
 import { runAccountId } from "./account-bindings.ts";
 import type { CcConfig } from "./config.ts";
 import { accountAtStop } from "./engine/queue.ts";
@@ -134,37 +134,7 @@ export function partitionAttention(
   return { items: active, held };
 }
 
-const PR_REF = /^[^#\s]+#[1-9]\d*$/;
-
-export const AttentionHoldInput = z
-  .object({
-    reason: z.string().trim().min(1).max(1000),
-    condition: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("manual") }).strict(),
-      z.object({ kind: z.literal("crew") }).strict(),
-      z
-        .object({
-          kind: z.literal("date"),
-          at: z.number().int().min(0).max(8640000000000000),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("ticket"),
-          ticket: z.string().regex(PR_REF),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("ci"),
-          pr: z.string().regex(PR_REF),
-          state: z.enum(["passing", "failing"]),
-        })
-        .strict(),
-      z.object({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }).strict(),
-    ]),
-  })
-  .strict();
+export { AttentionHoldInput } from "./attention-hold-schema.ts";
 
 export function attentionHoldError(e: z.ZodError): string {
   const issue = e.issues[0];
@@ -180,6 +150,7 @@ export function heldRun(
   at: number,
   run: NonNullable<ReturnType<Store["run"]>>,
   repoId?: string,
+  options: { excludeQuestionId?: number } = {},
 ): boolean {
   const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
   return (
@@ -189,7 +160,12 @@ export function heldRun(
     run.loop?.parked?.kind === "budget" ||
     store
       .openQuestions()
-      .some((q) => q.runId === run.id && (q.passedAt !== null || at - q.at >= 20 * 60_000)) ||
+      .some(
+        (q) =>
+          q.runId === run.id &&
+          q.id !== options.excludeQuestionId &&
+          (q.passedAt !== null || at - q.at >= 20 * 60_000),
+      ) ||
     accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at)
   );
 }
@@ -263,6 +239,9 @@ export function decisionDefault(
   if (
     item.owner !== "operator" ||
     !brief ||
+    !brief.binding ||
+    brief.state?.freshness !== "current" ||
+    brief.decision?.whyOperator !== undefined ||
     brief.for === "flight" ||
     brief.defaultAt === undefined ||
     protectedDecisionItem(store, item, config, at)
@@ -272,12 +251,18 @@ export function decisionDefault(
     (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
   );
   if (!option) return null;
-  const briefAt = brief.askAt ?? brief.at;
+  const prepared = brief.binding.actions.find((action) => action.optionId === option.id);
+  if (
+    !prepared?.defaultable ||
+    !["ordinary-run-guidance", "direct-queue-priority-swap"].includes(prepared.action.kind)
+  )
+    return null;
+  const briefAt = brief.binding.epochId;
   const hold = holds(store)[item.key];
   const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
   return {
     option,
     briefAt,
-    dueAt: Math.max(brief.defaultAt, released + (brief.defaultAt - briefAt)),
+    dueAt: Math.max(brief.defaultAt, released + DECISION_DEFAULT_WAIT_MS),
   };
 }
