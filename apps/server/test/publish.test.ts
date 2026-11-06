@@ -139,7 +139,7 @@ const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
 });
 
 const list =
-  (...prs: { number: number; createdAt: string }[]) =>
+  (...prs: { number: number; createdAt: string; closingIssuesReferences?: { number: number }[] }[]) =>
   () => ({
     code: 0,
     stdout: JSON.stringify(prs),
@@ -332,6 +332,65 @@ describe("openPr", () => {
     });
   });
 
+  describe("a PR opened outside any run", () => {
+    const OUTSIDE = {
+      number: 29,
+      createdAt: "2026-10-20T10:00:00Z",
+      closingIssuesReferences: [{ number: 7 }],
+    };
+
+    it("adopts the single open PR that closes the run's ticket when no run recorded it", async () => {
+      ghAnswers = [list(OUTSIDE)];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: true,
+        prNumber: 29,
+      });
+      expect(tools.openDraftPr).not.toHaveBeenCalled();
+    });
+
+    it("refuses a PR on the branch that closes another ticket", async () => {
+      ghAnswers = [list({ ...OUTSIDE, closingIssuesReferences: [{ number: 8 }] })];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses a PR that closes no ticket", async () => {
+      ghAnswers = [list({ ...OUTSIDE, closingIssuesReferences: [] })];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+      });
+    });
+
+    it("refuses a PR that a live run of another seat has recorded", async () => {
+      store.upsertRun(
+        run({
+          id: "r0",
+          agentId: "other-seat",
+          startedAt: START - 1_000,
+          loop: { ...NEW_LOOP, prNumber: 29 },
+        }),
+      );
+      ghAnswers = [list(OUTSIDE)];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses when two PRs are open on the branch", async () => {
+      ghAnswers = [list(OUTSIDE, { ...OUTSIDE, number: 30 })];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+      });
+    });
+  });
+
   it("is transient when gh cannot list, or the tool's own failure text comes back", async () => {
     ghAnswers = [() => ({ code: 1, stdout: "" })];
     expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
@@ -385,7 +444,7 @@ describe("openPr: the branch has moved on, and a PR that cannot be named", () =>
       "--repo=o/mc",
       `--head=${BRANCH}`,
       "--state=open",
-      "--json=number,createdAt",
+      "--json=number,createdAt,closingIssuesReferences",
     ]);
   });
 

@@ -728,11 +728,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return run.branch;
   }
 
-  /** The open PRs on the branch as `[number, createdAt]`, or null when gh could not say. */
+  /** The open PRs on the branch with the tickets each closes, or null when gh could not say. */
   async function openOnBranch(
     repo: string,
     branch: string,
-  ): Promise<{ number: number; createdAt: number }[] | null> {
+  ): Promise<{ number: number; createdAt: number; closes: number[] }[] | null> {
     const listed = await deps.gh(
       [
         "pr",
@@ -740,7 +740,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         `--repo=${repo}`,
         `--head=${branch}`,
         "--state=open",
-        "--json=number,createdAt",
+        "--json=number,createdAt,closingIssuesReferences",
       ],
       { cwd: cwd() },
     );
@@ -752,12 +752,18 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return null;
     }
     if (!Array.isArray(parsed)) return null;
-    const out: { number: number; createdAt: number }[] = [];
+    const out: { number: number; createdAt: number; closes: number[] }[] = [];
     for (const p of parsed) {
       const n = (p as { number?: unknown } | null)?.number;
       const at = Date.parse(String((p as { createdAt?: unknown } | null)?.createdAt));
       if (typeof n === "number" && Number.isSafeInteger(n) && !Number.isNaN(at)) {
-        out.push({ number: n, createdAt: at });
+        const refs = (p as { closingIssuesReferences?: unknown }).closingIssuesReferences;
+        const closes = Array.isArray(refs)
+          ? refs
+              .map((x) => (x as { number?: unknown } | null)?.number)
+              .filter((x): x is number => typeof x === "number")
+          : [];
+        out.push({ number: n, createdAt: at, closes });
       }
     }
     return out;
@@ -797,6 +803,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           ),
       );
       if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
+      // A PR opened outside any run (by the controller, or by a seat with no handoff) has no run
+      // that recorded it. It is this run's when it is the only one open on the branch, it closes
+      // this run's ticket, and no other run on the ticket has recorded it.
+      const lone = open.length === 1 ? open[0] : undefined;
+      const issue = issueOf(run);
+      if (
+        lone !== undefined &&
+        issue !== null &&
+        lone.closes.includes(issue) &&
+        !deps.store
+          .runsOnTicket(run.repoId, run.ticket ?? "")
+          .some((other) => other.id !== run.id && other.loop?.prNumber === lone.number)
+      ) {
+        return { ok: true, prNumber: lone.number };
+      }
       if (open.length > 0) return { ok: false, text: EARLIER_PR_OPEN, transient: false };
 
       const known = await readKnown(deps, "draft_pr");
