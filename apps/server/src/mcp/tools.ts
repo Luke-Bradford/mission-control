@@ -1735,10 +1735,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         ctx.seatId,
         parsed.data,
       );
-      if (sent.repeat) return { text: `Already sent ${sent.id}.` };
       bus.emit("agents");
       bus.emit("attention");
       if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsSend, parsed.data);
+      // a repeat still counts toward FLIGHT's runaway breaker
+      if (sent.repeat) return { text: `Already sent ${sent.id}.` };
       return { text: `Sent ${sent.id}.` };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms message refused.", isError: true };
