@@ -140,7 +140,11 @@ const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
 
 const list =
   (
-    ...prs: { number: number; createdAt: string; closingIssuesReferences?: { number: number }[] }[]
+    ...prs: {
+      number: number;
+      createdAt: string;
+      closingIssuesReferences?: { number: number; url?: string }[];
+    }[]
   ) =>
   () => ({
     code: 0,
@@ -338,7 +342,7 @@ describe("openPr", () => {
     const OUTSIDE = {
       number: 29,
       createdAt: "2026-10-20T10:00:00Z",
-      closingIssuesReferences: [{ number: 7 }],
+      closingIssuesReferences: [{ number: 7, url: "https://github.com/o/mc/issues/7" }],
     };
 
     it("adopts the single open PR that closes the run's ticket when no run recorded it", async () => {
@@ -351,7 +355,26 @@ describe("openPr", () => {
     });
 
     it("refuses a PR on the branch that closes another ticket", async () => {
-      ghAnswers = [list({ ...OUTSIDE, closingIssuesReferences: [{ number: 8 }] })];
+      ghAnswers = [
+        list({
+          ...OUTSIDE,
+          closingIssuesReferences: [{ number: 8, url: "https://github.com/o/mc/issues/8" }],
+        }),
+      ];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses a PR that closes an issue with the same number in another repository", async () => {
+      ghAnswers = [
+        list({
+          ...OUTSIDE,
+          closingIssuesReferences: [{ number: 7, url: "https://github.com/someone/else/issues/7" }],
+        }),
+      ];
       expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
         ok: false,
         text: EARLIER_PR_OPEN,

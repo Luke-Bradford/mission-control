@@ -760,7 +760,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const refs = (p as { closingIssuesReferences?: unknown }).closingIssuesReferences;
         const closes = Array.isArray(refs)
           ? refs
-              .map((x) => (x as { number?: unknown } | null)?.number)
+              .filter((x) => {
+                const url = (x as { url?: unknown } | null)?.url;
+                // only an issue of this repository: another repository's #7 is not this ticket
+                return (
+                  typeof url === "string" &&
+                  url.toLowerCase().startsWith(`https://github.com/${repo.toLowerCase()}/issues/`)
+                );
+              })
+              .map((x) => (x as { number?: unknown }).number)
               .filter((x): x is number => typeof x === "number")
           : [];
         out.push({ number: n, createdAt: at, closes });
