@@ -374,6 +374,7 @@ export async function main(): Promise<void> {
           root: join(dirname(dbPath), "design-previews"),
           port: DESIGN_PREVIEW_PORT,
           hubPort: port,
+          repoId: previewRepoId,
           // the newest PR of the branch decides: a closed one takes its preview with it
           prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
           log: (line) => log(line),

@@ -10411,6 +10411,7 @@ describe("design preview routes", () => {
       root: join(dir, "store"),
       port: 7440,
       hubPort: 7420,
+      repoId: "shop-app",
       prOf: () => null,
     });
     const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });

@@ -21,6 +21,7 @@ const newPreviews = () =>
     root: join(dir, "store"),
     port: PORT,
     hubPort: 7420,
+    repoId: "shop-app",
     prOf: () => pr,
     now: () => clock,
   });
@@ -96,7 +97,11 @@ describe("DesignPreviews", () => {
   it("serves the stored build with the boot script in its head, and the CSP on every answer", async () => {
     const p = newPreviews();
     const view = await p.publish(input(1, worktree("w1", "one")));
-    expect(view).toMatchObject({ ticket: 1, running: true, url: `http://127.0.0.1:${PORT}/` });
+    expect(view).toMatchObject({
+      ticket: 1,
+      repoId: "shop-app",
+      running: true,
+      url: `http://127.0.0.1:${PORT}/` });
     const page = await get(p, "/");
     expect(page.body).toContain('<head><script src="/mc-preview-boot"></script>');
     expect(page.headers["content-security-policy"]).toContain(
@@ -214,6 +219,7 @@ describe("DesignPreviews", () => {
       root: join(dir, "store"),
       port: PORT,
       hubPort: 7420,
+      repoId: "shop-app",
       prOf: () => {
         lookups++;
         return null;
