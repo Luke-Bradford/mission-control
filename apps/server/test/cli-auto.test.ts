@@ -283,11 +283,9 @@ describe("realCliOps", () => {
   });
 
   it("passes the live check only when the version matches and a tool call returned the nonce", async () => {
-    let prompt = "";
-    const ok = record((file, args) => {
+    const ok = record((_file, args) => {
       if (args[0] === "--version") return "2.3.4 (Claude Code)\n";
-      prompt = args.at(-1) ?? "";
-      const dirIn = /check-[a-f0-9]+\.txt/.exec(prompt)?.[0];
+      const dirIn = /check-[a-f0-9]+\.txt/.exec(args.at(-1) ?? "")?.[0];
       return dirIn === undefined ? "?" : `NONCE:${dirIn}`;
     });
     // the fake cannot read the file, so the check must fail: a version print alone is not enough
