@@ -107,13 +107,12 @@ A question is answered on the Needs you page only. Other pages show a count or a
 
 ```mermaid
 flowchart LR
-  S[Seat] -->|asks| F[FLIGHT]
-  F -->|answers itself| S
-  F -->|writes a complete question| N[Needs you]
+  S[Seat asks] --> F[FLIGHT]
+  F -->|can answer| R[FLIGHT answers the seat]
+  F -->|only the operator can| N[Needs you: a complete question]
   N -->|operator picks an option| H[Hub]
-  H -->|delivers the answer and wakes the run| S
-  H -->|records question and answer| T[Ticket page]
-  T --> A[Audit]
+  H --> D[Answer delivered, run woken]
+  H --> T[Recorded on the Ticket page, read by Audit]
 ```
 
 Seats ask FLIGHT, and FLIGHT asks the operator. That rule from #758 (seats ask FLIGHT) stays. The
