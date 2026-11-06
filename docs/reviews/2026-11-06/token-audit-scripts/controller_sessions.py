@@ -1,22 +1,39 @@
+"""Usage of Claude Code sessions in one project folder, counted by event time. Read-only.
+
+Usage: python3 -I controller_sessions.py <project session folder> <days>
+Counts each assistant message once across all files (a resumed session can copy history), and only
+messages whose own timestamp falls in the window. Main sessions and subagent files are reported apart.
+"""
 import json, sys, os, glob, time, collections
-root = sys.argv[1]; cut = time.time() - 7*86400
-tot = collections.Counter(); per = []
+from datetime import datetime
+root, days = sys.argv[1], float(sys.argv[2]); cut = time.time() - days * 86400
+seen = {}; per = collections.defaultdict(lambda: collections.Counter()); peak = collections.Counter()
 for f in glob.glob(os.path.join(root, '*.jsonl')) + glob.glob(os.path.join(root, '*', 'subagents', '*.jsonl')):
     if os.path.getmtime(f) < cut: continue
-    seen = {}
-    for line in open(f, errors='replace'):
-        if '"usage"' not in line: continue
-        try: ev = json.loads(line)
-        except Exception: continue
-        m = ev.get('message') or {}
-        if ev.get('type') == 'assistant' and m.get('id') and isinstance(m.get('usage'), dict):
-            u = m['usage']; p = seen.get(m['id'], (0, 0, 0, 0))
-            seen[m['id']] = (u.get('cache_read_input_tokens', 0), u.get('cache_creation_input_tokens', 0), max(p[2], u.get('output_tokens', 0)), m.get('model', ''))
-    if not seen: continue
-    cr = sum(v[0] for v in seen.values()); cw = sum(v[1] for v in seen.values()); out = sum(v[2] for v in seen.values())
-    sub = 'subagents' in f
-    tot['cr'] += cr; tot['cw'] += cw; tot['out'] += out; tot['calls'] += len(seen); tot['files'] += 1; tot['sub_cr'] += cr if sub else 0
-    per.append((cr, len(seen), max(v[0] + v[1] for v in seen.values()), os.path.basename(f)[:12], 'sub' if sub else 'main', collections.Counter(v[3] for v in seen.values()).most_common(1)[0][0]))
-print('controller session files (7 days):', tot['files'], 'API calls', tot['calls'], f"cache read {tot['cr']/1e6:.0f}M (subagents {tot['sub_cr']/1e6:.0f}M), cache write {tot['cw']/1e6:.1f}M, output seen {tot['out']/1e6:.2f}M (undercounted)")
-for cr, n, peak, name, kind, model in sorted(per, reverse=True)[:8]:
-    print(f"  {name} {kind:4} {model[:22]:22} calls {n:>5} peak ctx {peak/1e3:>5.0f}k cache read {cr/1e6:>7.1f}M")
+    kind = 'subagent' if os.sep + 'subagents' + os.sep in f else 'main'
+    name = os.path.basename(f)[:12]
+    with open(f, errors='replace') as fh:
+        for line in fh:
+            if '"usage"' not in line: continue
+            try: ev = json.loads(line)
+            except Exception: continue
+            m = ev.get('message')
+            if ev.get('type') != 'assistant' or not isinstance(m, dict) or not m.get('id') or not isinstance(m.get('usage'), dict): continue
+            ts = ev.get('timestamp')
+            try: t = datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp()
+            except Exception: continue
+            if t < cut or m['id'] in seen: continue
+            u = m['usage']; seen[m['id']] = 1
+            c = per[(kind, name)]
+            c['calls'] += 1; c['cr'] += u.get('cache_read_input_tokens', 0); c['cw'] += u.get('cache_creation_input_tokens', 0)
+            ctx = u.get('input_tokens', 0) + u.get('cache_read_input_tokens', 0) + u.get('cache_creation_input_tokens', 0)
+            peak[(kind, name)] = max(peak[(kind, name)], ctx)
+tot = collections.Counter()
+for (kind, name), c in per.items():
+    tot[kind + ' files'] += 1
+    for k in ('calls', 'cr', 'cw'): tot[kind + ' ' + k] += c[k]
+print(f"window {days:g} days, by event time; messages counted once across files")
+for kind in ('main', 'subagent'):
+    print(f"  {kind}: files {tot[kind + ' files']}, calls {tot[kind + ' calls']}, cache read {tot[kind + ' cr']/1e6:.0f}M, cache write {tot[kind + ' cw']/1e6:.1f}M")
+for (kind, name), c in sorted(per.items(), key=lambda kv: -kv[1]['cr'])[:5]:
+    print(f"  {name} {kind:8} calls {c['calls']:>5} peak context {peak[(kind, name)]/1e3:>5.0f}k cache read {c['cr']/1e6:>7.1f}M")

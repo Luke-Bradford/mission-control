@@ -26,7 +26,7 @@ for f in files:
                 elif c.get('type') == 'tool_result' and c.get('tool_use_id') in pending:
                     n = pending.pop(c['tool_use_id'])
                     body = c.get('content')
-                    size = len(body) if isinstance(body, str) else sum(len(x.get('text','')) for x in body if isinstance(x, dict))
+                    size = len(body) if isinstance(body, str) else sum(len(x.get('text','')) for x in (body or []) if isinstance(x, dict))
                     chars[n] += size
                     if n == 'comms_read': big.append((size, seat))
     except Exception as e:
