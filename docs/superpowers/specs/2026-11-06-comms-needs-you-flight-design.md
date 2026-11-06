@@ -1,15 +1,14 @@
 # Comms, Needs you and the FLIGHT fly-out: one message system, four clear places
 
-**Status:** design, 6 November 2026. Waiting for the operator's approval. Nothing here is built yet.
-Where a line is marked **(operator)**, the operator said it. Where it is marked **(controller's
-call)**, the controller chose it and the operator can change it.
+**Status:** design, 6 November 2026. It waits for the operator's approval. Nothing here is built.
+A line marked **(operator)** is something the operator said. A line marked **(controller's call)**
+is the controller's choice, and the operator can change it.
 
 ## Intent
 
-The message system is how the crew works. Seats ask FLIGHT (the head agent), hand work over and
-report through it. It is also the only way a question reaches the operator.
+The message system is how the crew works. It is also the only way a question reaches the operator.
 
-The operator tried to use it on 5 November 2026 and it "didn't sit right at all" **(operator)**:
+The operator used it on 5 November 2026 and it "didn't sit right at all" **(operator)**:
 
 - The FLIGHT chat box took no text.
 - Needs you was spread over narrow panes with too little context.
@@ -18,71 +17,91 @@ The operator tried to use it on 5 November 2026 and it "didn't sit right at all"
 
 The operator wants **(operator)**:
 
-- One place for questions. Each question is complete by itself, with background, possible
-  solutions and pictures where they help. The operator picks an option or asks more.
-- Mockups and flow diagrams shown with a question, and the question tracked against a ticket.
-- A quick way to ask FLIGHT about something seen on any page.
-- Comms as the record: who messaged the team, what was said about a ticket, and a way to reply
-  to one message.
-- Audit and logs tagged to a ticket or PR, so problems can be traced.
-- A Needs you list that can be filtered and ordered by priority or date when a backlog builds.
+- One place for questions. Each question is complete by itself: background, possible solutions,
+  and pictures where they help. The operator picks an option or asks more.
+- Mockups and flow diagrams shown with a question. The question is tracked against a ticket.
+- A short way to ask FLIGHT about something seen on any page.
+- Comms as the record: who messaged the team and what was said about a ticket.
+- A way to reply to one message from an agent.
+- Audit and logs tied to a ticket or PR, so a problem can be traced.
+- A Needs you list that can be filtered, and ordered by priority or date.
 
-## What was found on 6 November 2026
+## Words
 
-Measured on the live hub at commit `47c1f5bd`.
+One name for one thing, in this document and in the app.
+
+| Word | Meaning |
+|---|---|
+| Operator | The person running Mission Control. Called CAPCOM in the app |
+| FLIGHT | The head agent. It runs the crew and is the only agent that asks the operator |
+| Seat | One crew agent, such as a developer or a reviewer |
+| Run | One seat's work on one ticket, from start to end |
+| Hub | Mission Control's own server. It is not an agent and not a person |
+| Controller | A Claude Code session outside the crew that helps on this repo. Other repos have none |
+| Question | Something only the operator can decide. In code it is a brief on a Needs-you item |
+| Alert | The hub or FLIGHT cannot work until the operator acts |
+| Message | Anything a person or agent sent |
+| Notice | A message the hub wrote itself |
+| Handoff | What one run leaves for the next run on a ticket |
+| Hold | The operator sets a question aside until a date or event |
+| Fly-out | The FLIGHT chat panel that opens over a page. The code calls it the dock |
+
+## What the controller found on 6 November 2026
+
+The controller read the live hub at commit `47c1f5bd`.
 
 | Finding | Evidence |
 |---|---|
 | Comms carries the crew | 210 messages in 24 hours: 81 between FLIGHT and seats, 44 seat to seat, 34 hub to seat, 51 to or from the operator's name |
-| The operator's name is on machine messages | 23 of 26 messages sent as `CAPCOM` came from the controller session. 22 of 25 sent to `CAPCOM` start "For the controller:" |
-| Needs you is mostly not questions | 10 items, 1 real decision. The rest: 3 stale items from paused loops, 3 "PR · You: review" rows, 2 FLIGHT stall notices, 1 controller reminder |
-| The one real question did not stand alone | Its headline held four raw `127.0.0.1` addresses. Its options assumed the reader knew #1434 and PR 1423 |
-| Picking an option sends chat text | `apps/web/src/shell/ItemDetail.tsx:192`. Nothing ties the click to the question |
-| An answer to a seat is stored, not delivered | `apps/server/src/comms.ts:117`. The seat reads it at its next turn |
-| A question's text is not on its ticket | The seat's question is in `seat_questions`. Comms holds a pointer line only |
-| A brief cannot carry a picture | `AttentionBrief` in `packages/core/src/types.ts` has no picture, link or ticket field |
-| Three ways to type to FLIGHT | The dock posts a seat message. Comms posts a stored message. A Needs-you item posts to its own discussion |
-| The fly-out is missing on three pages | `apps/web/src/App.tsx:154` leaves the dock off Comms, FLIGHT and Needs you |
-| A dead chat box can look live | `apps/web/src/shell/Dock.tsx:151`. Until FLIGHT's state loads, the box is off but shows its normal hint |
-| Hub messages are log noise | The Comms copy of a CI failure is the first 1,200 characters of the raw log |
-| The hub's conversation list is broken | `/api/comms/agents/<seat>/contacts/MC` answers 404. The page shows "No messages yet" |
+| The operator's name is on machine messages | 23 of 26 messages sent as `CAPCOM` came from the controller. 22 of 25 sent to `CAPCOM` start "For the controller:" |
+| Needs you is mostly not questions | 10 items, 1 real decision. The rest: 3 old items from stopped loops, 3 "PR · You: review" rows, 2 notices that FLIGHT was late, 1 reminder for the controller |
+| The one real question did not stand alone | Its headline held four raw `127.0.0.1` addresses. Its options assumed the reader knew two ticket numbers |
+| Picking an option names no option | `apps/web/src/shell/ItemDetail.tsx:192`. To a seat it sends chat text. To FLIGHT it posts in the item's discussion |
+| An answer to a seat is stored, not delivered | `apps/server/src/comms.ts:118`. The seat reads it at its next turn. The route can deliver to the asking run, but the page never names the question |
+| A seat's question is not on its ticket | The text is in `seat_questions`, which has no ticket. Comms holds a pointer line only |
+| A question can show only pictures the hub already holds | `apps/web/src/needs/pictures.ts`. A new mockup image has nowhere to be stored |
+| At least three ways to type to FLIGHT | The fly-out posts a seat message. Comms posts a stored message. A Needs-you item posts to its own discussion |
+| The fly-out is left off three pages | `apps/web/src/App.tsx:155`. Comms, FLIGHT and Needs you have none. This was a decision; see "What this changes" |
+| A dead chat box can look live | `apps/web/src/shell/Dock.tsx:151`. Until FLIGHT's state loads, the box is off but shows its usual hint |
+| Hub messages read as log noise | The Comms copy of a CI failure is the first 1,200 characters of the log excerpt |
+| The hub's conversation does not open | `/api/comms/agents/<seat>/contacts/MC` answers 404 (`apps/server/src/api.ts:2013`) |
 
 ## Goals
 
-1. Each place has one job, and the operator can say which place to use for what.
-2. A question for the operator stands alone, offers choices and can carry pictures.
-3. A choice does what it says, reaches the run that asked, and is recorded on the ticket.
+1. Each place has one job. The operator can say which place to use for what.
+2. A question for the operator stands alone, offers choices and can show pictures.
+3. A choice sends its bound answer to the run that asked, and the ticket's history records it.
 4. Every message says who sent it: the operator, the controller, FLIGHT, a seat or the hub.
-5. Everything said about a ticket or PR can be read in one timeline.
+5. Everything said about a ticket or PR can be read on one page.
 6. No text box looks live when it is not.
 
 ## Non-goals
 
 - A redesign of the Audit page or the Comms graph.
-- The cross-machine rooms and relay from the 24 October agent-comms spec. See "Rooms" below.
+- The cross-machine rooms from the agent-comms spec. See "Rooms".
 - Phone layouts.
-- Merging every store into one table. The rules below matter; the storage is the builder's.
-- Picture upload by the operator. FLIGHT can open the same page the operator is on.
+- One new table for everything. The rules matter; the storage is the developer's choice.
+- Picture upload by the operator. FLIGHT can open the page the operator is on.
+- A change to the activity log. Its rows already link to tickets.
 
 ## Anti-goals: it fails even if it works when
 
 - a question needs project knowledge the reader was not given;
-- a question for the operator appears anywhere other than Needs you;
+- a question for the operator can be answered in a second place;
 - an option click only sends chat text;
 - a machine's message carries the operator's name;
-- the Needs you count includes things that are not questions.
+- the Needs you count includes something that does not wait on the operator.
 
 ## The four places
 
 | Place | The question it answers | What the operator does there |
 |---|---|---|
-| **Needs you** (page) | What needs my decision? | Reads a complete question, picks an option, asks more, holds it |
+| **Needs you** (page) | What needs my decision? | Reads a complete question, picks an option, asks more, sets it aside |
 | **FLIGHT fly-out** (every page) | Can I ask FLIGHT about this now? | Types a short question about what is on screen |
-| **Comms** (page) | Who said what, to whom, about which ticket? | Reads the record, replies to one message |
+| **Comms** (page) | Who said what, and to whom? | Reads the record, replies to one message |
 | **Audit** (page) | What went wrong, or might? | Reads problems, each linked to its ticket or PR |
 
-Nothing else shows questions for the operator. Overview, Board and Agent pages show a count or a
-chip that opens Needs you.
+A question is answered on the Needs you page only. Other pages show a count or a chip that opens it.
 
 ## How a question travels
 
@@ -92,12 +111,13 @@ flowchart LR
   F -->|answers itself| S
   F -->|writes a complete question| N[Needs you]
   N -->|operator picks an option| H[Hub]
-  H -->|delivers the answer and resumes the run| S
-  H -->|records question and answer| T[Ticket timeline in Comms]
+  H -->|delivers the answer and wakes the run| S
+  H -->|records question and answer| T[Ticket page]
   T --> A[Audit]
 ```
 
-The rule from the 28 October roadmap stays: only FLIGHT asks the operator, and seats ask FLIGHT.
+Seats ask FLIGHT, and FLIGHT asks the operator. That rule from #758 (seats ask FLIGHT) stays. The
+hub can also write a question itself, such as a queue change to approve. It meets the same rules.
 
 ## Rules the hub keeps
 
@@ -107,273 +127,321 @@ These live in hub code, not in prompts, so they hold for any model.
 
 Every message records a sender kind: `operator`, `controller`, `flight`, `seat` or `hub`.
 
-- The hub sets it from how the request was made, never from the text.
-- `operator` means a person typed it in the HUD.
-- The controller session gets its own credential and its own name. It stops posting as `CAPCOM`.
+- The hub sets the kind from how the request was made, never from the text.
+- `operator` means a person typed it in the app.
+- The controller gets its own credential and its own name. It stops posting as `CAPCOM`.
+- The controller keeps what it can do today: read, reply, pin, and mark a message done.
+- A controller message wakes FLIGHT as an operator message does today.
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
-- The engine's messages are recorded as the hub's. Today's `MC` sender becomes kind `hub`.
+- The hub's own messages get kind `hub`. Today they are sent as `MC`.
+- Messages stored before this change keep their old sender.
+- Rooms will add a sixth kind, for an agent on another hub.
 
-### 2. Every message carries its ticket
+Today FLIGHT treats any line without the hub's prefix as the operator's
+(`packages/core/src/flight.ts:24`). With this rule, FLIGHT is told which lines are the
+controller's. That file and FLIGHT's role file are hard-rule files, so the change needs clearance.
+
+### 2. A message about a piece of work carries its ticket
 
 - The hub fills the ticket from the sender's run when the sender gives none.
-- One format is stored: `repo#n`. A PR number stays in `ref`.
-- A seat's question to FLIGHT is stored with its full text against the ticket. The pointer line
-  ("Question recorded for FLIGHT") goes.
+- A fly-out line carries the ticket the operator has open, when there is one.
+- New messages store one format: `repo#n`. Older rows stay as they are.
+- A seat's question to FLIGHT is stored with its full text and its ticket. The pointer line goes.
 
-### 3. Needs you holds questions, and nothing else
+### 3. Needs you counts only what waits on the operator
 
-An item is in Needs you only when it carries a complete question for the operator (rule 4).
-Everything that reaches the operator today for another reason moves:
+An item waits on the operator only when it carries a complete question (rule 4). The table under
+"Where today's items go" places every other kind.
 
-| Today in Needs you | Where it goes |
-|---|---|
-| FLIGHT stopped, late or tripped; hub Update needed; account at its stop line | **Alerts**: a header chip, shown on every page when not empty, opening a short list with one action each **(controller's call)** |
-| "For the controller" asks | The FLIGHT and controller conversation in Comms, plus a count on FLIGHT's status line. An ask older than a set limit becomes an alert **(controller's call)** |
-| Stale PR rows with no question | FLIGHT's own queue. FLIGHT moves the PR or writes a real question |
-| Questions from observed loops | FLIGHT's queue until FLIGHT writes a complete question. FLIGHT holds them while a loop is paused |
+The Needs you count is the number of open questions. Alerts have their own chip.
 
-The Needs you count is the number of open questions. Alerts are counted on their own chip.
+When a hub has no FLIGHT seat at all, a seat's question goes to the operator as today. The page
+marks it "asked by a seat, not checked by FLIGHT".
 
 ### 4. A question is complete or the hub refuses it
 
-Tickets #759, #1389 and #1390 already define most of this: the question, why it is the
-operator's, context, who FLIGHT asked, two to four options with consequence and whether each can
-be undone, a recommendation, and what happens with no answer. This design keeps that contract and
-adds:
+#759 (complete operator briefs) and its server ticket #1389 already set the contract. A question
+has: the question itself, why it is the operator's, context, who FLIGHT asked, two to four
+options, a recommendation, what happens with no answer, the cost of delay, and how fresh it is.
+Each option says what follows and whether it can be undone.
 
-- **A title**: one line, at most 90 characters, no web address, no bare ticket number.
-- **A priority**: P0 to P3, taken from the ticket unless FLIGHT gives another with a reason.
-- **A ticket**, or the repo and a stated reason for having none.
-- **Attachments** (rule 5). A question about how something looks must carry a picture or preview.
-- **No raw addresses in the title or the decision sentence.** Links go in the links list.
+This design keeps that contract and adds **(controller's call)**:
 
-The hub also shows every `#n` and `PR n` with its title beside it, so a number never stands alone.
+- **One decision per question.** Two decisions are two questions.
+- **A title:** one line, at most 90 characters, no web address, no bare ticket number.
+- **A priority,** using the board's Priority values. It comes from the main ticket. FLIGHT states
+  one when the ticket has none.
+- **One main ticket,** and any related tickets. With no ticket, FLIGHT names the repo and says why.
+- **A picture or preview** on any question about how something looks (rule 5).
+- **No raw addresses** in the title or the question sentence. Links go in the links list.
+
+The hub shows every `#n` and `PR n` with its title beside it, so a number never stands alone.
 
 The hub cannot judge whether the background is good enough. Two things cover that:
 
-- The `plain-talk` skill tells FLIGHT how to write it for a reader new to the project.
+- The `plain-talk` skill tells FLIGHT how to write for a reader new to the project.
 - Audit counts questions where the operator's first reply was itself a question (rule 9).
 
-### 5. A question can carry pictures and previews
+### 5. A question can show pictures and previews
 
-A brief gains a list of attachments, each with a caption **(controller's call)**:
+Most of this exists since PR 1465 (the Needs you page). A picture is written in the question's
+text, and the page shows it large when the hub holds the image. This design adds two things:
 
-- **Picture**: an image the hub already stores. FLIGHT's page screenshots, PR evidence and QA
-  shots qualify today. A seat or FLIGHT can also store an image file through the hub.
-- **Preview**: a branch build opened at full width (#1454, #1458). A static mockup page or a flow
-  diagram page is a preview too.
-- **Link**: a safe link, by the rules PR 1465 added.
+- **A store for a new image.** A seat or FLIGHT can give the hub an image file, such as a mockup or
+  a flow diagram. The hub returns an address that works in a question.
+- **The check in rule 4.** The hub reads the text for a picture, or finds a preview for the ticket.
 
-A flow diagram is a picture or a preview page in this version. Drawing a diagram from text in the
-HUD is left for later.
+A preview is a branch's build opened at full width, from #1454 and #1458 (branch previews). A
+mockup is a branch preview, so it uses the real app's styles. The question's form does not change.
 
 ### 6. A choice is bound, delivered and recorded
 
-- Picking an option calls the hub with the question id and the option id (#1389).
-- The hub delivers the answer to the run that asked, even if that seat has moved on (#1474).
-- Delivery wakes a waiting run. It does not wait for a turn that might not come.
-- The hub closes the question and records the question, the choice and the time on the ticket.
-- The page shows a receipt: what was chosen, where it went, and whether the seat has read it.
+- Picking an option calls the hub with the ids #1389 defines. Chat text never picks an option.
+- **A seat asked:** the hub delivers the answer to that run and wakes it. #1474 (answers name
+  their question) covers the page's part. FLIGHT is told.
+- **FLIGHT asked for itself:** the answer goes to FLIGHT and wakes it.
+- **The asking run has ended:** the answer goes to FLIGHT, which passes it to the ticket's next
+  run. The hub never hands an answer straight to a different run.
+- The hub closes the question and adds the question, the choice and the time to the ticket's
+  history. Nothing is written to GitHub.
+- The page shows a receipt: what was chosen, where it went and when it was delivered.
 
-"Something else" lets the operator write their own answer. It follows the same path.
+The operator can also write to FLIGHT in the question's conversation, to ask more or to propose
+something else. That text never picks an option and never approves anything. FLIGHT answers, or
+writes the question again with new options.
 
 ### 7. A reply from the operator is delivered
 
-A reply to an agent's message in Comms wakes a waiting seat, or lands at the next turn of a
-working one. The message shows its state: stored, read by the seat, or acted on. The hub already
-records when a seat reads its inbox.
+A reply to an agent's message wakes a waiting seat. A working seat gets it at its next turn. The
+message shows its state: stored, or delivered with the time.
 
 If the run that wrote the message has ended, the page says so before sending. The reply then goes
-to the seat now on that ticket, or to FLIGHT when there is none.
+to the seat now on that ticket, or to FLIGHT when there is none. This applies to replies only,
+never to an answer (rule 6).
 
 ### 8. Hub messages are notices
 
-- Kind `notice`, sender `hub`. One plain line: "CI failed on 341f108: 2 tests in web-core."
-- The text names the failing job and test, then the first error lines, with a link to the run.
-- Notices do not count as unread and can be hidden with one switch.
+- Kind `notice`, sender `hub`.
+- The Comms copy is one plain line with a link: "CI failed on 341f108 in job web-core."
+- The seat still gets the full log excerpt. The same ticket checks that it shows the failing test.
+- Notices do not count as unread. One switch hides them.
 
 ### 9. Audit reads the same records
 
-Each of these is a row in Audit, linked to the ticket's timeline in Comms:
+Each of these becomes a row in Audit's list of things to improve, linked to its ticket:
 
 - a question where the operator had to ask what it meant;
 - a question that waited longer than a set time;
-- a reply or answer that arrived after its run ended;
-- two agents past six rounds on one ticket (exists today);
+- a reply or answer delivered after its run ended;
+- two agents past six rounds on one ticket (the hub counts this today);
 - the same message sent more than once;
-- the same hub notice repeated on one PR;
-- an ask for the controller that waited longer than a set time.
+- the same notice repeated on one PR;
+- a request for the controller that waited longer than a set time.
+
+## Where today's items go
+
+| Today in Needs you | Where it goes |
+|---|---|
+| A question FLIGHT or the hub wrote, complete by rule 4 | Stays |
+| A person waiting on GitHub, with FLIGHT's suggested replies | Stays. The replies are the options |
+| "FLIGHT will do this unless you object", with its 40-minute clock | Stays on the page in its own group. Not counted, because no answer is needed |
+| A held question | Stays on the page in the Held group. Not counted |
+| FLIGHT stopped or late | **Alert.** The alert lists what waits behind FLIGHT, and each raw item opens from it, as today |
+| The hub needs an Update only the operator can run; an account has hit its limit | **Alert** |
+| FLIGHT's safety stop tripped | Stays, as a question with bound choices, as #1389 defines |
+| A request "for the controller" | Comms, addressed to the controller. If none answers in a set time, FLIGHT writes it as a question |
+| A seat that stalled or failed, a stray process, a blocked test lock, a PR nobody is moving | FLIGHT's queue, shown on the FLIGHT page. FLIGHT fixes it or writes a question |
+| A question from a loop Mission Control only watches | FLIGHT's queue until FLIGHT writes a complete question |
+| FLIGHT's own lines that mention the operator | The FLIGHT conversation, marked unread |
+
+**Alerts (controller's call).** A header chip on every page, shown only when there is an alert. It
+opens a short list. Each alert has one link to the place that fixes it, such as Start FLIGHT. An
+alert clears when its cause clears. Alerts send a browser notice, as "FLIGHT is down" does today.
 
 ## Needs you page
 
-Builds on the page PR 1465 added: a list on the left, the open question on the right.
+Builds on the page from PR 1465: a list on the left and the open question on the right.
 
 **The list**
 
-- Shows open questions only. Held and answered questions are one filter away.
-- **Filters (operator):** repo, priority, who asked, state. A search box for the text.
-- **Order (operator):** by priority then oldest by default. Also oldest first, newest first, and
-  soonest deadline.
-- Work that is waiting on an answer sorts first within its priority **(controller's call)**.
+- Keeps its three groups: Waiting on you, FLIGHT will do unless you object, Held.
+- **Filters (operator):** repo, priority, who asked. A search box for the text. Answered questions
+  are one filter away.
+- **Order (operator):** priority then oldest, by default. Also oldest, newest and soonest deadline.
+- A question that seats are waiting on sorts first within its priority **(controller's call)**.
 - Each row: title, ticket, priority, age, and "2 seats waiting" when that is true.
 
 **The open question, in reading order**
 
-1. Title, ticket, priority, who asked, age.
-2. The decision in one sentence.
-3. Background: what this is, what changed, why it needs the operator now.
-4. Pictures and previews, shown at reading width. A click opens one at full size.
-5. Options as cards: what happens, what it costs, whether it can be undone. The recommended one is
-   marked, with the reason.
-6. Actions: pick an option, **Something else**, **Ask a question**, **Hold**.
-7. Detail, one click away: what FLIGHT checked, who it asked, links.
+1. Title, ticket, priority, who asked, age, and a mark when the question is out of date.
+2. The question in one sentence, and why it is the operator's.
+3. Background: what this is, what changed, why it matters now, and the cost of waiting.
+4. Pictures, shown large in the main column. A click opens one at full size. **Open preview** shows
+   a branch build.
+5. Options as cards: what follows, and whether it can be undone. The recommended card is marked
+   with its reason, and its button is the main one.
+6. What happens with no answer.
+7. Actions: pick an option, write to FLIGHT, **Hold**.
+8. What FLIGHT checked and who it asked. These stay open, not folded away.
 
-The conversation stays in its own column beside the question, as today. Its box fills the column
-(#1478).
+The conversation keeps its own column beside the question. Its box fills the column, which #1478
+(the conversation box ticket) fixes.
 
-**Start a topic (controller's call).** The operator can open a topic from this page: a title, some
-text and an optional ticket. FLIGHT replies in the conversation and can add pictures and options.
-It is the same record with the direction reversed, and it shows under "Started by you". A fly-out
-exchange that grows can be moved here.
+A question always opens on this page. The small item panel stays for items that are FLIGHT's.
 
-**An example of a complete question.** The 5 November design approval, rewritten as an
+**An example of a complete question.** One part of the 5 November design approval, as an
 illustration:
 
-> **Approve two page designs before they are built**
-> #1417 Dependencies view · #1434 Agents page · P0 · FLIGHT · 31 hours
+> **Approve the new Agents page design**
+> #1434 Agents page shows what a seat is doing · P0 · asked by FLIGHT · 31 hours ago
 >
-> **Decide:** may the crew build these two designs as shown?
+> **The question:** may the crew build the Agents page as shown?
+> **Why you:** it changes what the product shows.
 >
-> **Background.** Two mockups are ready. Neither changes the live app until built.
-> *Dependencies* adds a chip to Board cards showing what a ticket waits on and what it unblocks.
-> *Agents page* shows what one seat is doing on a single screen. It removes two token counts,
-> "Tokens this run" and "tokens so far", because they leave out cached reads and mislead.
+> **Background.** The Agents page shows one seat's work. Today it needs scrolling to see what the
+> seat is doing. The new design fits it on one screen. It removes two figures, "Tokens this run"
+> and "tokens so far". They leave out cached reads, so they mislead. Context and Cost stay.
+> Waiting costs little: the page works today.
 >
-> *[picture: Board card with the new chip] [picture: Agents page, seat running] [Open preview]*
+> *[picture: Agents page, seat working] [picture: Agents page, seat idle] [Open preview]*
 >
 > **Options**
-> 1. **Approve both (recommended).** Agents is built first. Four Dependencies tickets are filed at
->    P2. Can be undone: yes, nothing ships until each build is reviewed.
-> 2. **Approve Agents only.** Dependencies waits for your changes.
-> 3. **Approve Dependencies only.** Agents waits for your changes.
-> 4. **Change both first.** Nothing is filed or built.
+> 1. **Approve (recommended).** A developer seat builds it next. Can be undone: yes, by a later PR.
+> 2. **Approve, but keep the two token figures.** FLIGHT changes the design first. Can be undone: yes.
+> 3. **Do not build it.** The ticket closes. Can be undone: yes, by reopening it.
 >
-> **Why FLIGHT recommends 1.** The Agents ticket is P0. Removing the two counts is the only loss,
-> and Context and Cost stay.
+> **Why FLIGHT recommends 1.** The two figures are wrong today, and the ticket is P0.
+> **With no answer:** nothing is built. This is an approval, so it has no default.
+
+**Start a topic (controller's call; see the open question at the end).** The operator can open a
+topic from this page with a title and some text. FLIGHT replies in the conversation. When FLIGHT
+comes back with options, the topic is a question like any other. Until then it sits under "Started
+by you" and is not counted.
 
 ## FLIGHT fly-out
 
-**Job:** a quick check-in from any page **(operator)**. FLIGHT has full access, so the operator
-asks it instead of looking things up.
+**Job:** a short check-in from any page **(operator)**. FLIGHT has full access, so the operator asks
+it in place of looking things up.
 
-- Opens on every page with the same key (`f`) and header button, Comms, FLIGHT and Needs you
-  included.
+- Opens on every page with the same key (`f`) and header button.
 - Holds the conversation only, at full height. The waiting list goes. One line says "3 questions
   wait" and opens Needs you.
 - **Knows where the operator is (controller's call).** A chip above the box names the page and the
-  selected ticket or seat. It is sent with the message and can be removed. FLIGHT can open the
-  same page itself.
-- **The box always takes text.** The message is stored at once. Under it, a state line says: sent,
-  read by FLIGHT, or "FLIGHT is stopped. Start FLIGHT", with the button. A stored message is
-  delivered when FLIGHT starts.
-- **One conversation.** The fly-out and Comms show the same thread between the operator and FLIGHT.
-  FLIGHT's replies to the operator are recorded in that thread, not only in its session stream.
-- A multi-line box. One send rule for every box in the app: Enter sends, Shift and Enter adds a
-  line **(controller's call)**.
-- Width and whether it can be pinned beside the page are settled in the mockup.
+  open ticket or seat. It is sent with the message and can be removed.
+- **The box always takes text.** The hub stores the message at once. A line under the box says:
+  sent, delivered, or "FLIGHT is stopped", with a Start FLIGHT button. The hub delivers a stored
+  message when FLIGHT starts.
+- **One conversation.** The fly-out and Comms show the same thread, read the same way and posted
+  the same way. The hub's thread read already joins stored messages with FLIGHT's own turn text.
+- The box takes several lines. One send rule covers every box in the app. The mockup settles it:
+  today the Needs you boxes send on Ctrl or Cmd with Enter, and the others on Enter.
+- The mockup also settles the width, and whether the panel can sit beside the page.
 
 ## Comms
 
-**Job:** the record **(operator)**. Decisions are not made here.
+**Job:** the record **(operator)**. No question is answered here.
 
-- **Left column:** Team, FLIGHT and you, FLIGHT and the controller, Agents, Tickets.
-- The Decisions panel goes. Needs you has its own page.
-- **Tickets** is a list with search. A ticket opens one timeline: messages, questions and their
-  answers, FLIGHT's decisions, hub notices, handovers, reviews and CI. The ticket route already
-  merges most of these; questions, briefs, discussions and holds are added.
-- Clicking a ticket number opens the ticket. Filtering the chat by a ticket is a separate control
-  **(operator, 5 November)**.
-- **Reply** on any message (exists today) now delivers and shows its state (rule 7).
-- Every message shows its sender kind as a tag: YOU, CONTROLLER, FLIGHT, a seat's call sign, HUB.
+- **Left column:** Team, FLIGHT and you, Agents, Tickets. "FLIGHT and the controller" shows on a
+  repo that has controller messages.
+- The Decisions panel goes.
+- Every message shows its sender kind as a tag: YOU, CONTROLLER, FLIGHT, a seat's name, HUB.
+- **Reply** on any message exists today. It now delivers and shows its state (rule 7).
+- **By ticket.** The Tickets list filters the chat to one ticket's messages. That is a separate
+  control from opening the ticket **(operator, 5 November)**.
+- **Clicking a ticket number** opens the Ticket page, which exists today. It already joins runs,
+  reviews, CI, FLIGHT's decisions and messages. It gains questions and their answers, the
+  conversation on each question, holds, handoffs and notices. It opens straight from Comms.
 - Unread counts cover only what is addressed to the operator. Other figures are labelled as
   message counts.
-- The hub's conversation opens (the 404 is fixed).
+- The hub's conversation opens.
 
 ## Rooms (not in this design)
 
-The 24 October spec describes rooms shared across machines through a relay. That code exists in
-`packages/agentcomms` and `apps/relay`, and the hub does not use it yet. When it is wired in, a
-room appears in Comms beside Team. A question that reaches the operator from a room follows
-rules 3 to 6 like any other.
+`docs/superpowers/specs/2026-10-24-agent-comms-design.md` describes rooms shared across machines.
+That code is in `packages/agentcomms` and `apps/relay`, and the hub does not use it yet. When it
+does, a room shows in Comms beside Team. A question from a room follows rules 3 to 6.
 
-## Words
+## What this changes in earlier decisions
 
-One name for one thing in everything the operator reads.
+Each of these is a change, stated so nobody finds it by surprise.
 
-| Word | Meaning |
+| Earlier decision | Change |
 |---|---|
-| Question | Something only the operator can decide. Lives in Needs you |
-| Topic | A discussion the operator started. Lives in Needs you |
-| Alert | Something broken that needs the operator's hand. Lives on the header chip |
-| Message | Anything an agent or person sent. Lives in Comms |
-| Notice | A message the hub wrote itself |
-| Handover | What one run leaves for the next run on a ticket |
-| Hub | Mission Control's own engine. Not an agent and not a person |
-| Controller | A Claude Code session outside the crew, on this repo only |
+| The roadmap (`2026-10-28-operator-console-roadmap.md`, decision 2): when FLIGHT is down or late, one Needs-you item says so | It becomes an alert. It still lists what waits |
+| The roadmap, plan item 12, and #1453 (the Needs you page): no fly-out on FLIGHT, Comms or Needs you | The fly-out opens on every page. It no longer repeats the FLIGHT page, because it holds the conversation only |
+| #1390 (the complete brief shown on the page): Accept on Needs you, Comms and the item panel | Accept on the Needs you page only. #1390 is re-scoped before it starts |
+| #1390: its file list | Out of date since PR 1465. The reading order above replaces it |
+| #759: no new count model | The count change is its own ticket (item 2 below), not part of #759 |
+| #765 (FLIGHT's missing powers made visible): requests "for the controller" | Still gaps to close. Until then they follow the table above and can reach the operator |
+| #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
+
+#1389 is in rework now. This design adds nothing to it. The extra checks in rule 4 are a new
+ticket that follows it.
 
 ## Order of work
 
-Tickets are filed after approval. FLIGHT or the planner can split them.
+The controller files the tickets after approval. FLIGHT or the planning seat can split them.
 
-**Already open, kept as they are**
+**Open today**
 
-| Ticket | Covers |
-|---|---|
-| #1389 | Hub checks a complete brief and binds each choice (in rework) |
-| #1390 | The complete brief shown open, with bound Accept and Discuss |
-| #1474 | An answer names its question, so it reaches the right run |
-| #1478 | Conversation box width and Hold on the Needs you page |
-| #1458 | A branch preview opens from a question (in progress) |
-| #1464 | Remove the dead Asked-of-you file |
+| Ticket | Covers | Change |
+|---|---|---|
+| #1389 | The hub checks a question and binds each choice | None |
+| #1390 | The complete question shown on the page | Re-scoped, as above |
+| #1474 | An answer names its question, so it reaches the right run | None |
+| #1478 | Conversation box width, and Hold, on the Needs you page | None |
+| #1458 | A branch preview opens from a question | None |
+| #1464 | Remove the unused Asked-of-you file | None |
 
 **New, in this order (controller's call)**
 
 1. Senders named for what they are, with a tag on every message (rule 1).
-2. Needs you holds only questions; Alerts chip; filters, order and priority (rule 3, the list).
-3. Questions carry a title, ticket, pictures and previews. Follows #1389 (rules 4 and 5).
-4. Answers and replies are delivered, with a state shown (rules 6 and 7).
+2. Needs you counts only questions; the Alerts chip; filters and order (rule 3, the list).
+3. Title, priority, ticket and picture checks, and the image store. Follows #1389 (rules 4, 5).
+4. Answers and replies are delivered, with their state shown (rules 6, 7).
 5. The fly-out on every page, one FLIGHT conversation, a box that always takes text.
-6. Comms: ticket timeline, sender tags, no Decisions panel, unread rule, hub conversation fix.
-7. Hub notices in plain words (rule 8).
-8. Start a topic.
-9. Audit rows for comms problems (rule 9).
+6. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation; the Ticket page
+   gains the missing kinds.
+7. Notices in plain words (rule 8).
+8. Start a topic, if the operator wants it.
+9. Audit rows for message problems (rule 9).
 
 Items 2, 5 and 6 change what a page looks like. Each gets a mockup in the real app, on a branch,
-checked at 1920x940 and 2560x1145, before its build ticket starts.
+before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920 wide, at
+1600x700, and at the operator's own 1920x940 and 2560x1145.
 
 ## How we know it worked
 
-- The Needs you count equals the number of real questions, checked by hand for a week.
+- The controller checks by hand, for a week, that the count equals the real questions.
 - No message is recorded as the operator's unless the operator typed it.
-- The share of questions answered with no clarifying message rises.
-- The time from an answer to the seat acting on it is measured and shown.
+- The share of questions answered with no clarifying message rises. Audit shows it.
+- Audit shows the time from an answer to its delivery.
 - A browser test covers each text box: it takes text, or it says why not.
 
 ## Security
 
 - No new GitHub writes.
-- The controller's credential grants nothing new. It only labels what the controller already does.
-  An agent with shell access on this Mac could still read the operator's token, as today. Sender
-  kinds make honest traffic clear; they are not a defence against that.
-- A choice acts only through the bound, authorised path #1389 defines. Chat text never runs one.
-- Pictures are shown only from hub storage. Links follow the safe-link rules. A preview runs on its
-  own origin (#1458).
-- A stored message for a stopped FLIGHT is delivered only to FLIGHT, on its next start.
+- The controller's credential grants nothing new. It labels what the controller already does. An
+  agent with shell access on this Mac could still read the operator's token, as today. Sender
+  kinds make honest traffic clear. They are not a defence against that.
+- A choice acts only through the bound path #1389 defines. Chat text never runs one.
+- The image store takes image files only, with a size limit, and scans nothing as code.
+- Pictures show only from hub storage. Links follow the safe-link rules from PR 1465. A preview
+  runs on its own address, as #1458 sets out.
+- A stored message for a stopped FLIGHT goes only to FLIGHT, on its next start.
+- Telling FLIGHT which lines are the controller's (rule 1) touches hard-rule files and needs
+  clearance.
 
-## Left to the builder
+## Left to the developer
 
 - The storage shape, so long as the rules hold.
 - How the hub tells a controller request from an operator request.
-- The limits behind "a set time" in rules 3 and 9, as config with stated defaults.
-- The fly-out's width and pinning, settled by its mockup.
-- How a seat stores an image file through the hub, and its size limit.
+- The limits behind "a set time", as config with stated defaults.
+- The image store's route and size limit.
+- How the Ticket page is reached in the nav.
+
+## Open question for the operator
+
+**Start a topic.** Should the Needs you page let the operator open a topic, as described above?
+With yes, item 8 is built. With no, the fly-out is the only way to start a conversation with
+FLIGHT, and item 8 is dropped. This is a product choice, so it has no default.
