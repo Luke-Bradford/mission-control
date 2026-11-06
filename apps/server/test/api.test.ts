@@ -10442,4 +10442,45 @@ describe("design preview routes", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("list and open name the repo each preview belongs to", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mc-dp-api-"));
+    const dist = join(dir, "wt", "apps", "web", "dist");
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(
+      join(dist, "index.html"),
+      "<!doctype html><html><head></head><body>x</body></html>",
+    );
+    const previews = new DesignPreviews({
+      root: join(dir, "store"),
+      port: 7440,
+      hubPort: 7420,
+      repoId: "shop-app",
+      prOf: () => null,
+    });
+    await previews.publish({
+      ticket: 1453,
+      branch: "feature/1453-x",
+      sha: "a".repeat(40),
+      worktree: join(dir, "wt"),
+    });
+    const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });
+    try {
+      const key = { [OPERATOR_HEADER]: "tok" };
+      const list = (await a.inject({ url: "/api/design-previews", headers: key })).json();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({ repoId: "shop-app", ticket: 1453 });
+      const open = await a.inject({
+        method: "POST",
+        url: "/api/design-previews/1453/open",
+        headers: { ...key, ...json },
+        payload: {},
+      });
+      expect(open.json()).toMatchObject({ repoId: "shop-app", ticket: 1453 });
+    } finally {
+      await previews.close();
+      await a.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
