@@ -298,3 +298,52 @@
   font-size: var(--fs-micro);
   margin-top: var(--sp-1);
 }
+
+/* Board view editor (F13): radios beside a short list of values that scrolls past eight rows. */
+.boardview {
+  align-self: stretch;
+  margin-bottom: var(--sp-2);
+}
+
+.boardview input[type="radio"],
+.boardview input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  flex: none;
+}
+
+.bv-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.bv-match {
+  margin-left: auto;
+  min-width: 160px;
+}
+
+.bv-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0 var(--sp-4);
+  max-height: 192px;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+
+.bv-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.boardview .bv-options .ffield-check {
+  align-items: start;
+}

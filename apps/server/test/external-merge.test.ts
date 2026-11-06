@@ -206,6 +206,24 @@ describe("external PR controller merge", () => {
     expect(h.merges).toHaveLength(1);
   });
 
+  it("refuses when a seat takes the branch between the first check and the merge", async () => {
+    const h = harness();
+    buildRun(2);
+    let reads = 0;
+    const gh: GhRunner = async (args) => {
+      if (
+        args.some((a) => a.startsWith("--json=headRefOid,baseRefOid,changedFiles")) &&
+        ++reads === 2
+      )
+        buildRun(null);
+      return h.deps.gh(args, { cwd: "/fixture" });
+    };
+    const result = await mergeExternalPr({ ...h.deps, gh });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("ownership or hold changed");
+    expect(h.merges).toEqual([]);
+  });
+
   it("serves the PR control routes for an ended run and refuses an unfinished one", async () => {
     const h = harness();
     buildRun(2);

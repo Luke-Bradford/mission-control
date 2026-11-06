@@ -1500,6 +1500,81 @@ export async function installAfterSync(
   }
 }
 
+/** Moves a clean worktree whose commits origin has onto the handed-over branch; else refuses. */
+async function switchToHandoff(
+  w: (args: string[]) => Promise<string>,
+  branch: string,
+  current: string,
+): Promise<void> {
+  const on = current.replace(/^refs\/heads\//, "") || "a detached head";
+  const unpushed = new CheckoutError(
+    "path",
+    `the worktree has unpushed work on ${on}; it was not changed`,
+  );
+  const dirty = await w([
+    "--no-optional-locks",
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  if (dirty.trim() !== "") throw unpushed;
+  const remote = `refs/remotes/origin/${branch}`;
+  if (
+    !(await succeeds(
+      w(["rev-parse", "--verify", "--quiet", "--end-of-options", `${remote}^{commit}`]),
+    ))
+  )
+    throw unpushed;
+  if (!(await succeeds(w(["merge-base", "--is-ancestor", "HEAD", remote])))) throw unpushed;
+  const local = await succeeds(
+    w(["rev-parse", "--verify", "--quiet", "--end-of-options", `refs/heads/${branch}^{commit}`]),
+  );
+  try {
+    await w(
+      local
+        ? ["switch", "--quiet", branch]
+        : ["switch", "--quiet", "--track", "-c", branch, `origin/${branch}`],
+    );
+  } catch (e) {
+    throw new CheckoutError("path", `the worktree could not be moved to ${branch}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+}
+
+/**
+ * A handed-over branch is taken at origin's tip. The PR's head can be ahead of the local branch
+ * (the controller pushes to it), and a seat started on the old tip could not push. Local work that
+ * origin lacks stays; a branch that has diverged is refused, since neither side may be dropped.
+ */
+async function followOrigin(w: (args: string[]) => Promise<string>, branch: string): Promise<void> {
+  const remote = await w([
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "--end-of-options",
+    `refs/remotes/origin/${branch}^{commit}`,
+  ]).then(
+    (s) => s.trim(),
+    () => null,
+  );
+  if (!remote) return;
+  const head = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+  if (head === remote || (await succeeds(w(["merge-base", "--is-ancestor", remote, head])))) return;
+  if (!(await succeeds(w(["merge-base", "--is-ancestor", head, remote])))) {
+    throw new CheckoutError("path", `${branch} has diverged from origin's; it was not changed`);
+  }
+  try {
+    await w(["merge", "--ff-only", "--quiet", remote]);
+  } catch (e) {
+    throw new CheckoutError("path", `${branch} could not be moved to origin's tip`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+}
+
 /**
  * Gives a run its branch and worktree: reuses this ticket's worktree if it exists, else adds one
  * on the existing branch (local, or origin's tracked) or on a new branch from origin's default
@@ -1540,9 +1615,15 @@ export async function prepareCheckout(
   }
   if (await succeeds(lstat(path))) {
     const gitDir = await adminDirOf(common, path);
-    const head = gitDir
+    let head = gitDir
       ? await crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }).catch(() => "")
       : "";
+    if (gitDir !== null && i.handoff && head.trim() !== `refs/heads/${branch}`) {
+      // The seat that wrote the PR gets it back: its worktree sits on the local branch, the PR's
+      // head is another ref. Taken over only when nothing in it is unpushed.
+      await switchToHandoff((args) => crewGit(path, args, common, { gitDir }), branch, head.trim());
+      head = `refs/heads/${branch}`;
+    }
     if (gitDir === null || head.trim() !== `refs/heads/${branch}`) {
       throw new CheckoutError(
         "path",
@@ -1551,6 +1632,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     const status = await crewGit(
       path,
       [
@@ -1630,6 +1714,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff && local !== null) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     await installAll(
       {
         checkout: i.checkout,

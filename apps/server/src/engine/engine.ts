@@ -19,7 +19,10 @@ import {
   AWAY_STATUS_ADDED,
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
+  asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -961,6 +964,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      // a question FLIGHT passed to the operator: the run waits off its seat for the answer
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
@@ -1567,10 +1572,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
+        // (not while the run waits for the operator's answer: that wakes it)
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
+        const waitsOnPerson = asked !== undefined;
         cur.aside = {
           worktree,
-          wake: cur.phase === "working" || a.displaced === true,
+          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
           ...(a.displaced ? { displaced: true as const } : {}),
+          ...(asked ? { ask: asked.id } : {}),
         };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
@@ -1583,11 +1592,13 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working" || a.displaced
-            ? asideForReworkEventText(call)
-            : cur.phase === "ci"
-              ? asideInCiEventText(call)
-              : asideEventText(call),
+          waitsOnPerson
+            ? asideForAnswerEventText(call)
+            : cur.phase === "working" || a.displaced
+              ? asideForReworkEventText(call)
+              : cur.phase === "ci"
+                ? asideInCiEventText(call)
+                : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1639,6 +1650,15 @@ export function createEngine(deps: EngineDeps): Engine {
           );
           out.again = true;
           return;
+        }
+        // a run parked on the operator's question gets one line to carry on with the answer
+        // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
+        // on the seat as any other)
+        if (cur.aside?.ask !== undefined && store.question(cur.aside.ask)?.answeredAt != null) {
+          cur.pendingLine = {
+            key: answerLineKey(run.id, cur.aside.ask),
+            text: answeredLineText,
+          };
         }
         cur.aside = null;
         store.addLoopEvent(
@@ -2870,15 +2890,26 @@ export function createEngine(deps: EngineDeps): Engine {
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
-          const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
+          // A push the push gate refused and a person made later is never recorded on a CI step.
+          // When the PR's head is the run's newest commit, origin holds exactly what the seat has,
+          // so a stuck lift records it.
+          if (opts.action === "lift" && kind === "stuck") {
+            const newest = store.newestRunCommit(run.id)?.sha;
+            if (newest && pr?.state === "open" && pr.headSha === newest)
+              store.setRunPush({ runId: run.id, sha: newest, at: now() });
+          }
+          const pushed = store.runPush(run.id);
           if (!pushed) return refuse("head-moved");
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
             if (kind !== "stuck") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
-            if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
+            if (
+              !head ||
+              (head !== pushed.sha && !(await publisher.isDescendant(run, pushed.sha, head)))
+            )
               return refuse("head-moved");
           } else if (
             kind !== "review" &&

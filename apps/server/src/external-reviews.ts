@@ -2,9 +2,11 @@
 import {
   type EvidenceManifest,
   evidenceSectionText,
+  isReviewBudgetFailure,
   type PullRequestView,
   REVIEW_STATUS_CONTEXT,
   type ReviewRow,
+  type Run,
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
@@ -21,22 +23,32 @@ export const isExternalReview = (row: ReviewRow): boolean =>
   row.authorRunId === externalReviewKey(row.repoId, row.prNumber);
 
 /**
- * A branch the crew or an observed loop still owns: a build run that has not ended, or any run of a
- * configured loop (observed loops are read-only, so their PRs never take the external path).
+ * A branch the crew or an observed loop still owns: a build run that has not ended, any run of a
+ * configured loop (observed loops are read-only, so their PRs never take the external path), a
+ * seat that has claimed the branch's handoff and has no run row yet, or, given the PR's ticket, a
+ * live run on that ticket under another branch.
  */
 export const branchOwned = (
   config: Pick<CcConfig, "loops">,
   store: Store,
   repoId: string,
   branch: string,
-): boolean =>
-  store
-    .runsOnBranch(repoId, branch)
-    .some(
-      (run) =>
-        run.reviewId == null &&
-        (run.endedAt === null || config.loops.some((loop) => loop.id === run.agentId)),
-    );
+  ticket?: string | null,
+): boolean => {
+  const live = (run: Run) =>
+    run.reviewId == null &&
+    (run.endedAt === null || config.loops.some((loop) => loop.id === run.agentId));
+  return (
+    store.runsOnBranch(repoId, branch).some(live) ||
+    (ticket != null &&
+      store
+        .runsOnTicket(repoId, ticket)
+        .some((run) => run.endedAt === null && run.reviewId == null)) ||
+    store
+      .claimedHandoffs(repoId)
+      .some((h) => h.branch === branch || (ticket != null && h.ticket === ticket))
+  );
+};
 
 export interface ExternalReviewSubject {
   sha: string;
@@ -118,7 +130,10 @@ export function createExternalReviews(deps: {
   store: Store;
   gh: GhRunner;
   cwd: string;
-  reviewer(repoId: string): string | null;
+  reviewer(
+    repoId: string,
+    pick?: { author?: string | undefined; role?: string | undefined; avoid?: ReadonlySet<string> },
+  ): string | null;
   evidence?: PrEvidence;
   reportBaseUrl?: string;
   evidenceManifest?(repo: string, pr: number, sha: string): EvidenceManifest | null;
@@ -141,7 +156,7 @@ export function createExternalReviews(deps: {
       pr?.state === "open" &&
       !pr.isDraft &&
       pr.headSha === row.sha &&
-      !branchOwned(deps.config, store, row.repoId, pr.branch)
+      !branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket)
     );
   }
 
@@ -273,7 +288,7 @@ export function createExternalReviews(deps: {
           if (repo.autonomy !== "merge") continue;
           for (const pr of store.pullRequests(repo.id)) {
             if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
-            if (branchOwned(deps.config, store, repo.id, pr.branch)) continue;
+            if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) continue;
             // a review is asked-for work: without an ask in this store the PR is left alone
             if (!externalReviewAsked(store, repo.id, pr.number)) continue;
             try {
@@ -282,7 +297,19 @@ export function createExternalReviews(deps: {
               let row = reviews.findLast(
                 (review) => review.sha === pr.headSha && review.state !== "superseded",
               );
-              if (row === undefined && pr.ci === "passing") {
+              // a review that ran out of tokens is tried again on another review seat, if there is one
+              const failedSeats = new Set(
+                reviews
+                  .filter(
+                    (review) =>
+                      review.sha === pr.headSha &&
+                      review.state === "failed" &&
+                      isReviewBudgetFailure(review.failure),
+                  )
+                  .map((review) => review.seatId),
+              );
+              const retry = row?.state === "failed" && failedSeats.has(row.seatId);
+              if ((row === undefined || retry) && pr.ci === "passing") {
                 if (
                   reviews.length === 0 &&
                   pr.checks?.some((check) => check.name === REVIEW_STATUS_CONTEXT) &&
@@ -292,7 +319,22 @@ export function createExternalReviews(deps: {
                   !store.runsOnBranch(repo.id, pr.branch).some((run) => run.reviewId == null)
                 )
                   continue;
-                const seat = deps.reviewer(repo.id);
+                // the ended author's seat is the one the reviewer must avoid, as on a crew review
+                const author = store
+                  .runsOnBranch(repo.id, pr.branch)
+                  .filter((run) => run.reviewId == null)
+                  .sort((a, b) => (a.endedAt ?? Infinity) - (b.endedAt ?? Infinity))
+                  .at(-1);
+                const seat = deps.reviewer(repo.id, {
+                  author: author?.agentId,
+                  role: author?.profile?.profile.reviewer.role,
+                  avoid: failedSeats,
+                });
+                if (retry && seat && failedSeats.has(seat)) {
+                  // no other review seat: the failed review stands
+                  if (row) await publish(pr, row);
+                  continue;
+                }
                 if (
                   !seat ||
                   !(await readExternalSubject(deps.gh, deps.cwd, repo, pr.number, pr.headSha))
@@ -341,7 +383,11 @@ export function createExternalReviews(deps: {
                   sha: pr.headSha,
                   epoch: 0,
                   attempt: reviews.filter((review) => review.sha === pr.headSha).length + 1,
-                  round: reviews.filter((review) => review.state === "reported").length + 1,
+                  // every review of the PR counts, the crew's own on older heads too
+                  round:
+                    store
+                      .reviewsOfPr(repo.id, pr.number)
+                      .filter((review) => review.state === "reported").length + 1,
                   at: deps.now(),
                 });
                 row = id === null ? undefined : (store.review(id) ?? undefined);
