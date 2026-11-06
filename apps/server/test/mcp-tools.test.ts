@@ -5022,6 +5022,45 @@ describe("report_findings", () => {
     });
   });
 
+  describe("a clean external review", () => {
+    const externalOf = (pr: number) => {
+      const id = store.requestReview({
+        authorRunId: externalReviewKey("mc", pr),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: pr,
+        sha: "b".repeat(40),
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: NOW + 1,
+      }) as number;
+      store.setReviewState(id, ["queued"], "running", { at: NOW + 1, runId: "retro:ext" });
+      return { id, ext: reviewRun("retro:ext", id) };
+    };
+
+    it("marks the PR's earlier crew-review findings fixed", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { id, ext } = externalOf(9);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]).toMatchObject({
+        resolution: "fixed",
+        resolvedReviewId: id,
+      });
+    });
+
+    it("leaves another PR's findings alone", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { ext } = externalOf(77);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]?.resolution).toBeUndefined();
+    });
+  });
+
   it("binds a positional resolution to the latest reported review of the same epoch", async () => {
     const mk = (epoch: number, round: number, at: number) =>
       store.requestReview({
