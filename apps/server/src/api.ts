@@ -5607,7 +5607,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ?? reply.code(404).send({ error: "Item is no longer open." });
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
         attentionItems(
           config,
@@ -5634,7 +5634,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("attention");
         return { ok: true };
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)
           return reply.code(400).send({ error: "Expected an empty object." });
@@ -5831,7 +5831,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
+      // Reader: apps/web/src/pages/Needs.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),

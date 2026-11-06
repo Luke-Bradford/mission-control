@@ -15,11 +15,12 @@ import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 /**
  * The root, every page in the shared nav catalogue, and the web router's `/overview` and plural
  * `/agents` spellings, each alone or followed by a `/` sub-path. Built from `HUD_PAGE_PATHS` so a
- * new page cannot be missed; the segments are plain words, so the pattern stays anchored.
+ * new page cannot be missed; the segments are lowercase words (hyphens allowed), so the pattern
+ * stays anchored.
  */
 const HUD_SEGMENTS = [
   ...new Set([...Object.values(HUD_PAGE_PATHS).map((p) => p.slice(1)), "overview", "agents"]),
-].filter((s) => /^[a-z]+$/.test(s));
+].filter((s) => /^[a-z-]+$/.test(s));
 const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.

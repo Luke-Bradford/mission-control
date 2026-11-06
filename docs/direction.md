@@ -17,7 +17,8 @@ FLIGHT is the head agent. It should run the crew the way the operator would run 
    - read-only repos and other lanes' files stay read-only;
    - git and GitHub writes go only through the PR tools;
    - no network;
-   - one full test run at a time.
+   - one full test run at a time;
+   - a merge past a failed design review needs the operator's own accept (#1529).
 
    Everything else is the agent's judgement, steered by the role prompts and this file. A refusal of ordinary work is a bug in the guard, not a success.
 4. **Spend wisely.** Pick the model and vendor per task: cheap Codex models (gpt-5.6-terra) to build, a stronger one (gpt-5.6-sol) to review, Claude for the hard calls. Watch `/api/limits`, stop new work at an account's `stop_at`, and schedule heavy work around quota resets.

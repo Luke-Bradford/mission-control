@@ -269,7 +269,7 @@ describe("untrusted text in the Comms graph", () => {
     fireEvent.mouseEnter(edge);
     const tip = screen.getByRole("tooltip");
     expect(within(tip).getByText(PAYLOAD + SCRIPT)).toBeTruthy();
-    const graph = document.querySelector(".comms-spider") as Element;
+    const graph = document.querySelector(".comms-rails") as Element;
     expect(graph.querySelector("img, script")).toBeNull();
     expect(graph.textContent).toContain(PAYLOAD);
   });

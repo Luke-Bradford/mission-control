@@ -1058,6 +1058,51 @@ describe("prepareCheckout", () => {
     expect(readFileSync(preserved, "utf8")).toBe("keep\n");
   });
 
+  it("reuses a branch after main changed package.json that the branch left alone", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input(), payloadInstall);
+    commit(first.path, { "src.txt": "branch work\n" });
+    commit(seed, { "package.json": `${PKG}\n` });
+    git(seed, "push", "-q", "origin", "main");
+
+    const reused = await prepareCheckout(input(), payloadInstall);
+    expect(reused).toMatchObject({ path: first.path, created: false });
+  });
+
+  it("still refuses a branch that changes package.json itself after main changed it too", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input(), payloadInstall);
+    commit(first.path, { "package.json": `${PKG}\n\n` });
+    commit(seed, { "package.json": `${PKG}\n` });
+    git(seed, "push", "-q", "origin", "main");
+
+    const e = await fail(prepareCheckout(input(), payloadInstall));
+    expect(e.code).toBe("protected");
+    expect(e.message).toBe(
+      `branch ${BRANCH} changes package.json; Mission Control won't install from it`,
+    );
+  });
+
+  it("reads a reused branch's workspace importers from its merge base", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n\n  apps/relay: {}\n",
+      "pnpm-workspace.yaml": "packages:\n  - apps/*\n",
+      "apps/relay/package.json": PKG,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input(), payloadInstall);
+    mkdirSync(join(first.path, "apps", "relay", "node_modules"), { recursive: true });
+    commit(first.path, { "src.txt": "branch work\n" });
+    commit(seed, { "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+
+    const reused = await prepareCheckout(input(), payloadInstall);
+    expect(reused).toMatchObject({ path: first.path, created: false });
+  });
+
   describe("a reused pnpm workspace", () => {
     const workspace = "packages:\n  - apps/*\n";
     const workspaceLock = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n\n  apps/relay: {}\n";

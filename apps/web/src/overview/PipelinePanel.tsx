@@ -1,5 +1,5 @@
 import type { Crew, OverviewSummary, PipelineCard, PipelineStage } from "@mc/core";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useRef } from "react";
 import { cardAgent, reworkLabel } from "../board/cards.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
@@ -10,6 +10,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, PAGE_PATHS, ticketPath } from "../router.ts";
 import { useSession } from "../shell/session.ts";
+import { useFittingCards } from "./useFittingCards.ts";
 
 /**
  * Lane titles. The building-and-checks lane is "Building · checks", not "In progress": the registry's In
@@ -34,6 +35,9 @@ export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["
 };
 
 const DASH = "—";
+
+/** More checks than this show as a count, not a mark each. */
+const CI_MARKS_MAX = 4;
 
 /** Where a pipeline card leads: the ticket's panel on the Board. One place to change it. */
 /**
@@ -71,6 +75,7 @@ export function PipelinePanel() {
   const now = useNow();
   const r = metrics.readings;
   const ci = data?.kpis?.ciPassRate24h;
+  const lanes = boardLanes(data?.pipeline ?? []);
   return (
     <Panel
       id="pipelineP"
@@ -115,90 +120,18 @@ export function PipelinePanel() {
             : `Registry figures could not load: ${metrics.error.message}`}
         </p>
       )}
-      <div className="board-stages" aria-busy={!data && !error}>
-        {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
-          const lane = key as PipelineLane;
-          const stages = (data?.pipeline ?? []).filter((stage) =>
-            PIPELINE_LANE_STAGES[lane].includes(stage.stage),
-          );
-          const cards = stages.flatMap((stage) => stage.cards ?? []);
-          const count = stages.reduce((total, stage) => total + stage.count, 0);
-          const oldest = Math.min(
-            ...stages.flatMap((stage) => (stage.oldestAt === null ? [] : [stage.oldestAt])),
-          );
-          const stageHref = `${PAGE_PATHS.board}?stage=${key}`;
-          return (
-            <section key={key} className={`board-stage ${key}`} aria-label={label}>
-              <h3>
-                <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
-                  {label}
-                </a>
-                <b className="num">{data ? count : DASH}</b>
-                {key !== "merged" && Number.isFinite(oldest) && (
-                  <span className="board-oldest">oldest {elapsed(now - oldest)}</span>
-                )}
-              </h3>
-              <div className="board-cards scroll">
-                {data && count === 0 && <p className="s muted board-empty">No tickets here.</p>}
-                {cards.map((card) => {
-                  const owner = assignee(card.who, crew);
-                  const href = pipelineCardPath(card);
-                  const rework =
-                    card.rework &&
-                    reworkLabel(card.rework, {
-                      ready: lane === "ready",
-                      onTicket:
-                        cardAgent(
-                          { repoId: card.repoId, issueNumber: card.ticket },
-                          crew?.rows ?? [],
-                        )?.id === card.rework.seat,
-                      pr: card.pr,
-                    });
-                  return (
-                    <a
-                      key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
-                      className="board-card"
-                      href={href}
-                      onClick={(e) => followLink(e, href)}
-                    >
-                      <span className="board-title" title={card.title}>
-                        <span className="board-ticket num">#{card.ticket}</span> {cardTitle(card)}
-                      </span>
-                      {rework && <span className="board-rework">{rework}</span>}
-                      <span className="board-meta">
-                        {owner && (
-                          <span className="pipeline-assignee" title={owner.name}>
-                            <i
-                              style={{ "--c": agentColor(owner.index) } as CSSProperties}
-                              aria-hidden="true"
-                            />
-                            <span>{owner.name}</span>
-                          </span>
-                        )}
-                        {card.priority && <b className="board-tag">{card.priority}</b>}
-                        {card.size && <span className="board-tag">{card.size}</span>}
-                        {card.pr !== null && !(rework && lane === "ready") && (
-                          <span className="num">PR {card.pr}</span>
-                        )}
-                        {card.ci.length > 0 && <CiMarks ci={card.ci} />}
-                        <span className="board-age num">{elapsed(now - card.since)}</span>
-                      </span>
-                    </a>
-                  );
-                })}
-                {count > cards.length && (
-                  <a
-                    className="board-more s"
-                    href={stageHref}
-                    onClick={(e) => followLink(e, stageHref)}
-                  >
-                    {count - cards.length} more on the Board
-                  </a>
-                )}
-              </div>
-            </section>
-          );
-        })}
+      <div
+        className="board-stages"
+        aria-busy={!data && !error}
+        style={
+          {
+            "--board-cols": boardTracks(lanes, BOARD_COLUMNS, Boolean(data)),
+          } as CSSProperties
+        }
+      >
+        {lanes.map((lane) => (
+          <BoardStage key={lane.key} lane={lane} loaded={Boolean(data)} now={now} crew={crew} />
+        ))}
       </div>
     </Panel>
   );
@@ -209,6 +142,18 @@ function CiMarks({ ci }: { ci: PipelineCard["ci"] }) {
   const passed = ci.filter((check) => check === "pass").length;
   const failed = ci.filter((check) => check === "fail").length;
   const label = `CI: ${passed} of ${ci.length} passed${failed ? `, ${failed} failed` : ""}`;
+  // Many checks would wrap the card's meta line, so past a few they read as a count.
+  if (ci.length > CI_MARKS_MAX)
+    return (
+      <span
+        className={`ci-count${failed ? " crit-t" : ""}`}
+        role="img"
+        aria-label={label}
+        title={label}
+      >
+        {failed ? "✗ " : ""}CI {passed}/{ci.length}
+      </span>
+    );
   return (
     <span className="ci-marks" role="img" aria-label={label} title={label}>
       {ci.map((check, i) => (
@@ -216,5 +161,186 @@ function CiMarks({ ci }: { ci: PipelineCard["ci"] }) {
         <i key={i} className={`ci-${check}`} />
       ))}
     </span>
+  );
+}
+
+/** One Board lane: its stages' cards, counts and oldest ticket, after a merged ticket has left review. */
+export interface BoardLane {
+  key: PipelineLane;
+  label: string;
+  cards: PipelineCard[];
+  count: number;
+  oldest: number;
+}
+
+/**
+ * The lanes from the server's stages. A merged pull request takes its own card out of In review and
+ * Merging, whatever the ticket's state: a card leaves when its pull request is in Done, or, with no
+ * pull request on the card, when its ticket is. A new open pull request on a ticket whose earlier
+ * one merged stays in review.
+ */
+export function boardLanes(pipeline: readonly PipelineStage[]): BoardLane[] {
+  const ref = (card: { repoId: string; ticket: number }) => `${card.repoId}#${card.ticket}`;
+  const doneCards = pipeline
+    .filter((stage) => stage.stage === "merged")
+    .flatMap((stage) => stage.cards ?? []);
+  const mergedPrs = new Set(
+    doneCards.flatMap((card) => (card.pr === null ? [] : [`${card.repoId}#${card.pr}`])),
+  );
+  const doneTickets = new Set(doneCards.map(ref));
+  const merged = (card: PipelineCard) =>
+    card.pr !== null ? mergedPrs.has(`${card.repoId}#${card.pr}`) : doneTickets.has(ref(card));
+  return (Object.entries(PIPELINE_STAGES) as [PipelineLane, string][]).map(([key, label]) => {
+    const stages = pipeline.filter((stage) => PIPELINE_LANE_STAGES[key].includes(stage.stage));
+    const all = stages.flatMap((stage) => stage.cards ?? []);
+    const cards = key === "review" || key === "merging" ? all.filter((c) => !merged(c)) : all;
+    const total = stages.reduce((sum, stage) => sum + stage.count, 0);
+    const oldest = Math.min(
+      ...stages.flatMap((stage) => (stage.oldestAt === null ? [] : [stage.oldestAt])),
+    );
+    return { key, label, cards, count: total - (all.length - cards.length), oldest };
+  });
+}
+
+/** The Board's columns: one per lane. */
+const BOARD_COLUMNS: readonly (readonly PipelineLane[])[] = [
+  ["ready"],
+  ["progress"],
+  ["review"],
+  ["merging"],
+  ["merged"],
+];
+
+/**
+ * Grid tracks for a column set: a column with nothing in it is as wide as its head, and the busy
+ * ones share the rest. While nothing has loaded every column is equal.
+ */
+export function boardTracks(
+  lanes: readonly BoardLane[],
+  columns: readonly (readonly PipelineLane[])[],
+  loaded: boolean,
+): string {
+  return columns
+    .map((keys) =>
+      loaded && keys.every((key) => lanes.find((lane) => lane.key === key)?.count === 0)
+        ? "auto"
+        : "minmax(0, 1fr)",
+    )
+    .join(" ");
+}
+
+function BoardStage({
+  lane,
+  loaded,
+  now,
+  crew,
+}: {
+  lane: BoardLane;
+  loaded: boolean;
+  now: number;
+  crew: Crew | undefined;
+}) {
+  const { key, label, cards, count, oldest } = lane;
+  const body = useRef<HTMLDivElement>(null);
+  const stageHref = `${PAGE_PATHS.board}?stage=${key}`;
+  const empty = loaded && count === 0;
+  const cut = count > cards.length;
+  const { limit: fitting, measuring } = useFittingCards(
+    body,
+    cards
+      .map((card) => `${card.repoId}#${card.ticket}:${card.pr}:${card.title}:${card.rework?.round}`)
+      .join("|"),
+    cut,
+  );
+  const shown = fitting === null ? cards : cards.slice(0, fitting);
+  const left = count - shown.length;
+  return (
+    <section className={`board-stage ${key}${empty ? " empty" : ""}`} aria-label={label}>
+      <h3>
+        <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
+          {label}
+        </a>
+        <b className="num">{loaded ? count : DASH}</b>
+        {key !== "merged" && Number.isFinite(oldest) && count > 0 && (
+          <span className="board-oldest">oldest {elapsed(now - oldest)}</span>
+        )}
+      </h3>
+      {!empty && (
+        <div className="board-cards" ref={body}>
+          {shown.map((card) => (
+            <BoardCard
+              key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
+              card={card}
+              lane={key}
+              now={now}
+              crew={crew}
+            />
+          ))}
+          {measuring && shown.length > 0 && (
+            // Stands in for the real link while measuring, so its height is reserved.
+            <span className="board-more s measuring" aria-hidden="true">
+              +{left} more
+            </span>
+          )}
+          {!measuring && left > 0 && (
+            <a
+              className="board-more s"
+              href={stageHref}
+              aria-label={`${left} more on the Board`}
+              onClick={(e) => followLink(e, stageHref)}
+            >
+              +{left} more
+            </a>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BoardCard({
+  card,
+  lane,
+  now,
+  crew,
+}: {
+  card: PipelineCard;
+  lane: PipelineLane;
+  now: number;
+  crew: Crew | undefined;
+}) {
+  const owner = assignee(card.who, crew);
+  const href = pipelineCardPath(card);
+  const rework =
+    card.rework &&
+    reworkLabel(card.rework, {
+      ready: lane === "ready",
+      onTicket:
+        cardAgent({ repoId: card.repoId, issueNumber: card.ticket }, crew?.rows ?? [])?.id ===
+        card.rework.seat,
+      pr: card.pr,
+    });
+  return (
+    <a className="board-card" href={href} onClick={(e) => followLink(e, href)}>
+      <span className="board-title" title={card.title}>
+        <span className="board-ticket num">#{card.ticket}</span> {cardTitle(card)}
+      </span>
+      {rework && <span className="board-rework">{rework}</span>}
+      <span className="board-meta">
+        {owner && !rework?.includes(owner.name) && (
+          <span className="pipeline-assignee" title={owner.name}>
+            <i style={{ "--c": agentColor(owner.index) } as CSSProperties} aria-hidden="true" />
+            <span>{owner.name}</span>
+          </span>
+        )}
+        {card.priority && <b className="board-tag">{card.priority}</b>}
+        {card.size && <span className="board-tag">{card.size}</span>}
+        {card.pr !== null && !(rework && lane === "ready") && (
+          <span className="num">PR {card.pr}</span>
+        )}
+        {card.ci.length > 0 && <CiMarks ci={card.ci} />}
+        <span className="board-age num">{elapsed(now - card.since)}</span>
+      </span>
+    </a>
   );
 }

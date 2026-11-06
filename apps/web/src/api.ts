@@ -123,6 +123,9 @@ export async function apiQaReportImage(id: string): Promise<Blob> {
   return operatorPng(`/api/qa-report-assets/${id}`);
 }
 
+/** A picture on an operator route, as a PNG blob; only paths `pictureRoute` accepted come here. */
+export const apiOperatorPicture = (path: string): Promise<Blob> => operatorPng(path);
+
 async function operatorPng(path: string): Promise<Blob> {
   await loadOperatorToken();
   const read = () =>
