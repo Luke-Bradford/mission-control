@@ -175,6 +175,12 @@ function crewFields(
   };
 }
 
+/** A repo's GitHub slug by its id, for links the hub builds. */
+const githubOf =
+  (config: CcConfig) =>
+  (repoId: string): string | undefined =>
+    config.repos.find((r) => r.id === repoId)?.github;
+
 /** The driver stop the collector stored, else null (also when the stored text is not a stop). */
 function readStop(store: Store, loopId: string): DriverStop | null {
   const raw = store.getSetting(driverStopKey(loopId));
@@ -207,7 +213,7 @@ export function stateInputs(config: CcConfig, store: Store): string {
         status.get(collectorName(loop.kind, loop.id))?.ok,
         status.get(collectorName(loop.kind, loop.id))?.error,
         status.get(noteCollectorName(loop.kind, loop.id))?.error,
-        loopPause(loop, store),
+        loopPause(loop, store, githubOf(config)),
         loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
         // a late line can turn the newest ended run blocked
         store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
@@ -276,7 +282,7 @@ function loopViews(
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
     const sourceError = st && !st.ok ? (st.error ?? "collector failed") : null;
-    const { paused, by: pausedBy } = loopPause(loop, store);
+    const { paused, by: pausedBy, url: pausedByUrl } = loopPause(loop, store, githubOf(config));
     // Only a title marker (`[operator-decision]` / `[loop-blocked]` / `[mvp-ready]`) means the
     // loop waits on the operator; a label-only escalation is listed in Needs you and nothing more.
     const waitingOnOperator = escalations.some(
@@ -296,6 +302,7 @@ function loopViews(
       currentRun: latest ? runSummary(latest) : null,
       paused,
       pausedBy,
+      pausedByUrl,
       sourceError,
       note,
       stop,
@@ -752,7 +759,9 @@ function buildCrew(
               };
             })()),
         paused: view.paused,
-        ...(view.pausedBy ? { pausedBy: view.pausedBy } : {}),
+        ...(view.pausedBy
+          ? { pausedBy: view.pausedBy, pausedByUrl: view.pausedByUrl ?? null }
+          : {}),
         note: view.note,
         stop: view.stop,
         sourceError: view.sourceError,
@@ -1491,7 +1500,8 @@ function withNotTriaging(
   const item: AttentionItem = {
     key: FLIGHT_NOT_TRIAGING_KEY,
     kind: "blocked",
-    owner: OWNER_OPERATOR,
+    // FLIGHT live but late on a wake is its own watch's business; down or stopped is the operator's
+    owner: cause === "late" ? OWNER_FLIGHT : OWNER_OPERATOR,
     agentId: triage.flightId,
     repoId: triage.repoId,
     text: flightNotTriagingText(

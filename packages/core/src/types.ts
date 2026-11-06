@@ -604,6 +604,8 @@ export interface AgentView {
   paused: boolean;
   /** The issue that pauses the loop (`repo#number`, from its config) while it holds; else null. */
   pausedBy?: string | null;
+  /** The pause issue's page on GitHub, when its repo is configured. */
+  pausedByUrl?: string | null;
   sourceError: string | null;
   /** The loop's own latest STOP note (studio loop), e.g. `stopped: quota ...`; display only. */
   note: string | null;
@@ -1051,6 +1053,8 @@ export interface CrewRow {
   paused: boolean;
   /** The issue that pauses the loop (`repo#number`, from its config) while it holds; else null. */
   pausedBy?: string | null;
+  /** The pause issue's page on GitHub, when its repo is configured. */
+  pausedByUrl?: string | null;
   note: string | null;
   stop: DriverStop | null;
   sourceError: string | null;

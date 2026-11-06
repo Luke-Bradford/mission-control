@@ -1795,9 +1795,8 @@ export function wakeReasons(
 }
 
 /**
- * A wake reason in words for the operator: a PR flow fact names the PR, its step and the time it
- * began; any other fact keeps its text with each epoch (13 digits) turned into a time. Never the
- * raw `kind:key:epoch`.
+ * A wake reason in words for the operator, from its fact: a PR, ticket, seat or item named, and the
+ * time where the fact has one. Never the raw `kind:key:epoch` id.
  */
 export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
   const at = (ms: number): string => {
@@ -1808,17 +1807,70 @@ export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
     }).format(ms);
     return `${day} ${clockHm(ms, timeZone)}`;
   };
-  const flow = /^prFlow ["[]*(\d+):(unowned|stage|waiting):?([^"\]]*)/.exec(reason.label);
-  if (flow) {
-    const [, pr, what, rest = ""] = flow;
-    const parts = rest.split(":").filter((x) => x !== "");
-    const since = Number(parts.at(-1));
-    const when = Number.isFinite(since) && since > 1e11 ? ` since ${at(since)}` : "";
-    if (what === "unowned") return `PR #${pr} has had no owner${when}`;
-    if (what === "waiting") return `PR #${pr} has waited on the ${parts[0] ?? "operator"}${when}`;
-    return `PR #${pr} has stood at the ${parts[0] ?? "same"} step${when}`;
+  const times = (text: string): string => text.replace(/\d{13}/g, (ms) => at(Number(ms)));
+  const spaced = (text: string): string => text.replace(/[_-]+/g, " ");
+  const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
+  const category = split?.[1] ?? "";
+  let item: unknown = split?.[2];
+  try {
+    item = JSON.parse(split?.[2] ?? "null");
+  } catch {
+    // a fact id that is not JSON keeps its text
   }
-  return reason.label.replace(/\d{13}/g, (ms) => at(Number(ms)));
+  const text = typeof item === "string" ? item : JSON.stringify(item);
+  const [a = "", b = "", c = "", d = "", e = ""] = typeof item === "string" ? item.split(":") : [];
+  const since = (part: string): string =>
+    /^\d{13}$/.test(part) ? ` since ${at(Number(part))}` : "";
+  switch (category) {
+    case "q":
+      return `question ${text}`;
+    case "prFlow": {
+      const [pr = "", what = "", ...rest] = (typeof item === "string" ? item : "").split(":");
+      const when = since(rest.at(-1) ?? "");
+      if (what === "unowned") return `PR #${pr} has had no owner${when}`;
+      if (what === "waiting") return `PR #${pr} has waited on the ${rest[0] ?? "operator"}${when}`;
+      return `PR #${pr} has stood at the ${rest[0] ?? "same"} step${when}`;
+    }
+    case "triage":
+      return b === "missed"
+        ? `FLIGHT missed ${a}`
+        : `${a} waits for FLIGHT's triage (${spaced(b)})`;
+    case "parked":
+      return `${a} is parked on ${b} (${spaced(c)})`;
+    case "stopped":
+      return `${text} is stopped`;
+    case "idle":
+      return `${a} idle ${b}`;
+    case "free":
+      return `seat ${text} is free`;
+    case "t":
+      return `ticket ${text} is ready to start`;
+    case "reviews":
+      return "review seats are idle with a review queued";
+    case "holdsInForce":
+      return `${spaced(text)} hold is in force`;
+    case "breaker":
+      return `the runaway breaker is tripped (${spaced(text)})`;
+    case "prs":
+      return `PR #${b} (${a}) waits on FLIGHT${e ? ` to ${spaced(e)}` : ""}`;
+    case "planned": {
+      const [, dueAt, , target, label] = Array.isArray(item) ? item : [];
+      return `${label ?? "a planned check"} on ${target ?? "its target"}, due ${typeof dueAt === "number" ? at(dueAt) : "now"}`;
+    }
+    case "items": {
+      if (a === "pr") return times(text.replace(/^pr:/, "").replace(/^([^:]+):/, ""));
+      if (a === "comms-open") return `Comms message ${b} waits for an answer`;
+      if (a === "esc") return `issue ${b} waits for an answer`;
+      if (a === "stall") return `${b} stalled${since(e)}`;
+      return `${spaced(a)} ${times([b, c, d, e].filter((x) => x !== "").join(" "))}`.trim();
+    }
+    case "signals": {
+      const target = times(text.slice(a.length + 1));
+      return target === "" ? spaced(a) : `${spaced(a)} on ${target}`;
+    }
+    default:
+      return times(`${category} ${text}`);
+  }
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
