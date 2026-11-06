@@ -12,7 +12,7 @@ Under these headings, in this order:
 - **### Behaviour**: the rules in order, and every edge case with what happens in it.
 - **### Tests**: the tests to write first, one top-level bullet per `## Done when` item (the tool counts bullets, not nested ones): each test's name, the file it goes in, its inputs and the exact expectation. Use this heading exactly; the tool looks for `### Tests`.
 - **### Checks**: lint, typecheck and only the touched test files; no full suite, no mutation testing.
-- **### Design** (for visible changes, including native mockups and shared styles): the page's question, each stat's label, value, definition, window and unit, and affected states. Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. Use [visual QA](../docs/runbooks/visual-qa.md) to record the accepted reference, preserved strengths, normal data, first-screen fields, panel budgets and viewport matrix. Explain why the allocation supports the task. If a substantial layout change needs a mockup and has none, say so for FLIGHT.
+- **### Design** (for visible changes, including native mockups and shared styles): the page's question and its reader, which items belong on it and which go elsewhere, each stat's label, value, definition, window and unit, affected states, and how the operator arrives (nav, link, URL). Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. Use [visual QA](../docs/runbooks/visual-qa.md) to record the accepted reference, preserved strengths, normal data, first-screen fields, panel budgets and viewport matrix. Explain why the allocation supports the task. If a substantial layout change needs a mockup and has none, say so for FLIGHT.
 
 ## How you work
 

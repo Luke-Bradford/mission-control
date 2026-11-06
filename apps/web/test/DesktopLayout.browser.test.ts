@@ -104,12 +104,13 @@ describeRendered("Approved compact desktop shell", () => {
             expect(initial.rows.every((height) => height >= 40)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
-            await page.boxes(".dock-summary-item");
+            // Beside the Overview's Needs you panel (from 2200 px) the dock leaves its waiting list out.
+            if (width < 2200) await page.boxes(".dock-summary-item");
             const expanded = await shellMetrics(page);
             expect(expanded.dockWidth).toBe(
               width < 1500 ? 380 : width < 1700 ? 540 : width < 2200 ? 620 : 380,
             );
-            expect(expanded.summaryItems).toBe(3);
+            expect(expanded.summaryItems).toBe(width < 2200 ? 3 : 0);
             expect(expanded.smallControls).toEqual([]);
             if (width < 2200) expect(expanded.selected).toBe("dockHeading");
             expect(

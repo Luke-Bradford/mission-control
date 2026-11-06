@@ -3601,7 +3601,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
       SettleArgs,
       "settle",
       async (a) => {

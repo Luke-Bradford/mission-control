@@ -78,7 +78,9 @@ import {
   REVIEW_STATUS_RUNNING,
   REVIEW_STATUS_WAIVED,
   REVIEW_TOKEN_BUDGET,
+  type ReviewCheck,
   type ReviewFinding,
+  type ReviewRow,
   type Run,
   type RunLoop,
   readyHardRuleText,
@@ -113,6 +115,7 @@ import { writeCrewPause } from "../src/crew-pause.ts";
 import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
+  designFailedIn,
   type Engine,
   type EngineDeps,
   reviewerOf,
@@ -3095,12 +3098,13 @@ describe("the engine runs reviews", () => {
     fix: "change it",
   });
   /** The review run reports `findings`, and the event reaches the engine. */
-  function reported(id: number, findings: ReviewFinding[]): void {
+  function reported(id: number, findings: ReviewFinding[], checked?: ReviewCheck[]): void {
     const rv = need(store.review(id));
     const ok = store.recordFindings(id, need(rv.runId), {
       verdict: { spec: "pass", quality: "pass" },
       summary: "done",
       findings,
+      ...(checked ? { checked } : {}),
       at: clock,
     });
     expect(ok).toBe(true);
@@ -6000,6 +6004,25 @@ describe("the engine runs reviews", () => {
         );
       });
 
+      it("a review that failed the design, for FLIGHT only", async () => {
+        await parkedReview();
+        reported(first().id, [finding("Important")], [{ check: "design", result: "fail" }]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
+          "design-failed",
+        );
+        expect(await operate(RUN, "CAPCOM", { action: "accept" })).toBe(true);
+      });
+
+      it("a passed design does not refuse FLIGHT's accept", async () => {
+        await parkedReview();
+        reported(first().id, [finding("Important")], [{ check: "design", result: "pass" }]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
+      });
+
       it("the operator's message could not be stored", async () => {
         await parkedReview();
         expect(await refusal("CAPCOM", { beforeLift: async () => false })).toBe("before-lift");
@@ -7628,5 +7651,59 @@ describe("the engine runs reviews", () => {
       expect(h.asides).toEqual([RUN]);
       expect(h.wakes).toEqual([RUN]);
     });
+  });
+});
+
+describe("designFailedIn: the head's last design verdict", () => {
+  const row = (id: number, sha: string, state: ReviewRow["state"] = "reported"): ReviewRow => ({
+    id,
+    authorRunId: "run",
+    repoId: "mc",
+    seatId: "retro-1",
+    prNumber: 1,
+    sha,
+    epoch: 1,
+    attempt: 1,
+    round: id,
+    state,
+    runId: null,
+    verdict: null,
+    summary: null,
+    blocking: 1,
+    minor: 0,
+    failure: null,
+    createdAt: id,
+    startedAt: null,
+    endedAt: null,
+  });
+  const checks =
+    (verdicts: Record<number, "pass" | "fail" | "n-a" | undefined>) =>
+    (id: number): ReviewCheck[] => {
+      const v = verdicts[id];
+      return v === undefined ? [] : [{ check: "design", result: v }];
+    };
+  it("is a fail when the run's last design verdict failed", () => {
+    expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }))).toBe(true);
+    expect(designFailedIn([row(1, "a")], checks({ 1: "pass" }))).toBe(false);
+    expect(designFailedIn([], checks({}))).toBe(false);
+  });
+
+  it("counts the review carried from before a main merge", () => {
+    // the carried review is on the old head; the merged head has none of its own yet
+    expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }))).toBe(true);
+  });
+
+  it("keeps a fail when a later review, on this head or after a rework, gives no verdict or n-a", () => {
+    expect(designFailedIn([row(1, "a"), row(2, "a")], checks({ 1: "fail", 2: "n-a" }))).toBe(true);
+    expect(designFailedIn([row(1, "a"), row(2, "b")], checks({ 1: "fail" }))).toBe(true);
+  });
+
+  it("clears when a later review passes the design, and ignores rows that never reported", () => {
+    expect(designFailedIn([row(1, "a"), row(2, "b")], checks({ 1: "fail", 2: "pass" }))).toBe(
+      false,
+    );
+    expect(
+      designFailedIn([row(1, "a"), row(2, "b", "failed")], checks({ 1: "pass", 2: "fail" })),
+    ).toBe(false);
   });
 });

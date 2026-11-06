@@ -268,8 +268,8 @@ describe("Demo findings from round 3", () => {
 
 describe("Demo Comms writes", () => {
   it("a refused decision hold says it is a demo", async () => {
-    await at("/comms");
-    await clickText(/^held$/i);
+    await at("/needs-you");
+    await clickText(/^hold$/i);
     const reason = await waitFor(() => {
       const found = document.querySelector<HTMLInputElement>(".hold-form input[required]");
       if (!found) throw new Error("no hold form");

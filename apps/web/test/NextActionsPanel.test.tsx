@@ -16,13 +16,14 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   hub.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-const rows = (container: HTMLElement) => [...container.querySelectorAll(".needs-row")];
+const rows = (container: HTMLElement) => [...container.querySelectorAll(".next-row")];
 
 describe("NextActionsPanel", () => {
   it("says Nothing is waiting for your decision when the list is empty", async () => {
@@ -31,7 +32,7 @@ describe("NextActionsPanel", () => {
     expect(await screen.findByText("Nothing is waiting for your decision.")).toBeTruthy();
     expect(rows(container)).toHaveLength(0);
     expect(container.querySelector(".ph")?.textContent).toContain("0 waiting on you");
-    expect(container.querySelector(".needs-more")).toBeNull();
+    expect(container.querySelector(".next-more")).toBeNull();
   });
 
   it("says Loading your items… until the list arrives", async () => {
@@ -91,13 +92,13 @@ describe("NextActionsPanel", () => {
     await screen.findByText("Choose a cache policy");
     const [row] = rows(container) as [HTMLElement];
     expect(row.tagName).toBe("BUTTON");
-    expect(row.querySelector(".needs-kind")?.textContent).toBe("decision");
-    expect(row.querySelector(".needs-text")?.getAttribute("title")).toBe("Choose a cache policy");
-    expect(row.querySelector(".needs-age")?.textContent).toBe("3h 0m");
+    expect(row.querySelector(".next-kind")?.textContent).toBe("decision");
+    expect(row.querySelector(".next-text")?.getAttribute("title")).toBe("Choose a cache policy");
+    expect(row.querySelector(".next-age")?.textContent).toBe("3h 0m");
     expect(container.querySelector(".ph")?.textContent).toContain("1 waiting on you");
   });
 
-  it("opens the item's panel when its row is chosen", async () => {
+  it("opens the item on the Needs you page when its row is chosen", async () => {
     stubFetch({ "/api/attention": [item({ key: "esc:shop-app#4001" })] });
     const { container } = render(
       <>
@@ -108,7 +109,8 @@ describe("NextActionsPanel", () => {
     await screen.findByText("Choose a cache eviction policy");
     expect(screen.getByTestId("item").textContent).toBe("none");
     fireEvent.click(rows(container)[0] as HTMLElement);
-    expect(screen.getByTestId("item").textContent).toBe("esc:shop-app#4001");
+    expect(window.location.pathname).toBe("/needs-you/esc%3Ashop-app%234001");
+    expect(screen.getByTestId("item").textContent).toBe("none");
   });
 
   it("shows the operator's items, and leaves out FLIGHT's and the lanes'", async () => {
@@ -122,7 +124,7 @@ describe("NextActionsPanel", () => {
     });
     const { container } = render(<NextActionsPanel />);
     await screen.findByText("For you");
-    expect(rows(container).map((row) => row.querySelector(".needs-text")?.textContent)).toEqual(
+    expect(rows(container).map((row) => row.querySelector(".next-text")?.textContent)).toEqual(
       expect.arrayContaining(["For you", "Ownerless"]),
     );
     expect(screen.queryByText("For FLIGHT")).toBeNull();
@@ -138,7 +140,7 @@ describe("NextActionsPanel", () => {
     });
     const { container } = render(<NextActionsPanel />);
     await screen.findByText("A decision");
-    const order = rows(container).map((row) => row.querySelector(".needs-kind")?.textContent);
+    const order = rows(container).map((row) => row.querySelector(".next-kind")?.textContent);
     expect(order).toEqual(["decision", "pr"]);
   });
 
@@ -152,10 +154,10 @@ describe("NextActionsPanel", () => {
     await screen.findByText("Item 0");
     expect(rows(container)).toHaveLength(4);
     expect(container.querySelector(".ph")?.textContent).toContain("7 waiting on you");
-    const more = within(container.querySelector(".needs-more") as HTMLElement).getByRole("link", {
+    const more = within(container.querySelector(".next-more") as HTMLElement).getByRole("link", {
       name: "3 more waiting on you",
     });
-    expect(more.getAttribute("href")).toMatch(/^\/flight/);
+    expect(more.getAttribute("href")).toBe("/needs-you");
     expect(screen.queryByText("Item 4")).toBeNull();
   });
 
@@ -168,7 +170,7 @@ describe("NextActionsPanel", () => {
     const { container } = render(<NextActionsPanel />);
     await screen.findByText("Item 3");
     expect(rows(container)).toHaveLength(4);
-    expect(container.querySelector(".needs-more")).toBeNull();
+    expect(container.querySelector(".next-more")).toBeNull();
   });
 
   it("links the title to Needs you's home", async () => {
@@ -179,6 +181,6 @@ describe("NextActionsPanel", () => {
       within(container.querySelector("#overviewNextP") as HTMLElement)
         .getByRole("link", { name: "Needs you" })
         .getAttribute("href"),
-    ).toMatch(/^\/flight/);
+    ).toBe("/needs-you");
   });
 });

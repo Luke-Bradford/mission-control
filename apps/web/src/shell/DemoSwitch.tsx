@@ -11,13 +11,16 @@ const DEMO_OFF_TEXT = "Switch back to Live: real data from the hub.";
 /**
  * Live or Demo for the whole app. It sits in the footer because the top bar has no spare width
  * at 1280: even an icon button pushed a tab 28 px out of its row (RunTrace.browser.test.ts). A seat or ticket in one world is absent from the other, so the switch also clears what points
- * into the old one and goes to the page's top level.
+ * into the old one and goes to the page's top level. A branch preview (the server marks its page) has
+ * no Live to go to, so it shows no switch.
  */
 export function DemoSwitch() {
   const demo = useDemo();
   const path = usePath();
   const search = useSearch();
   const text = demo ? DEMO_OFF_TEXT : DEMO_ON_TEXT;
+  // A branch preview is Demo for good: there is no hub to switch back to.
+  if (document.documentElement.dataset.mcPreview === "1") return null;
   return (
     <button
       type="button"
