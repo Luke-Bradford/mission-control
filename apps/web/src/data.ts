@@ -200,6 +200,10 @@ export const RESOURCES = {
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
   commsMetrics: { path: "/api/comms/metrics", topic: "agents" },
   commsChatter: { path: "/api/comms/chatter", topic: "agents" },
+  /** Unanswered questions and blockers, with their text; waiting is drawn from these. */
+  commsOpen: { path: "/api/comms/open", topic: "agents" },
+  /** The last 24h's messages one by one (the chart's side pane); an older hub answers 404. */
+  commsFeed: { path: "/api/comms/feed", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: dockStreamPath(agentId),
     topic: "agents",
