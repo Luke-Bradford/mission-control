@@ -178,7 +178,8 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.needs-answer .composer textarea {
+.needs-answer .composer textarea,
+.needs-side .composer textarea {
   flex: 1;
   min-width: 0;
   resize: vertical;
@@ -283,4 +284,19 @@
 .needs-hold {
   flex: none;
   margin-left: auto;
+}
+
+/* Hold open: the form takes its own row in the band and the band grows to hold it, so the
+   whole question stays readable above it. */
+.needs-band:has(.hold-form) {
+  max-height: none;
+}
+
+.needs-hold:has(.hold-form) {
+  flex: 1 0 100%;
+  margin-left: 0;
+}
+
+.needs-hold .hold-form {
+  max-width: 480px;
 }
