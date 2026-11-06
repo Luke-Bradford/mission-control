@@ -8,6 +8,7 @@ import {
   paceIsOn,
 } from "@mc/core";
 import { z } from "zod";
+import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
 
 /** A full PaceSettings. `until` is the end time; the server sets `since` when it is switched on. */
@@ -48,17 +49,23 @@ export function activePace(store: Store, now: number): PaceSettings | null {
   return paceIsOn(settings, now) ? settings : null;
 }
 
-const startsLeft = (store: Store, p: PaceSettings): number =>
-  Math.max(0, p.maxStarts - store.ticketsStartedSince(p.since));
+/** The ids of every crew seat; runs by anything else (an observed loop) do not count as starts. */
+const crewSeatIds = (config: CcConfig): string[] =>
+  (config.crew?.sessions ?? []).flatMap((s) => s.seats.map((x) => x.id));
+
+export const paceStartsLeft = (store: Store, config: CcConfig, p: PaceSettings): number =>
+  Math.max(0, p.maxStarts - store.ticketsStartedSince(p.since, crewSeatIds(config)));
 
 /** The start check's pace input; undefined at normal pace, so nothing is held. */
-export function paceStartCheck(store: Store, now: number): PaceCheck | undefined {
+export function paceStartCheck(store: Store, config: CcConfig, now: number): PaceCheck | undefined {
   const p = activePace(store, now);
-  return p ? { labels: p.labels, startsLeft: startsLeft(store, p), note: p.note } : undefined;
+  return p
+    ? { labels: p.labels, startsLeft: paceStartsLeft(store, config, p), note: p.note }
+    : undefined;
 }
 
 /** What the Overview shows while it is on; null at normal pace. */
-export function paceView(store: Store, now: number): PaceView | null {
+export function paceView(store: Store, config: CcConfig, now: number): PaceView | null {
   const p = activePace(store, now);
   if (!p) return null;
   return {
@@ -66,6 +73,6 @@ export function paceView(store: Store, now: number): PaceView | null {
     until: p.until,
     labels: p.labels,
     maxStarts: p.maxStarts,
-    startsLeft: startsLeft(store, p),
+    startsLeft: paceStartsLeft(store, config, p),
   };
 }

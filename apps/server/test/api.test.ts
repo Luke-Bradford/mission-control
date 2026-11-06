@@ -106,7 +106,7 @@ import { DesignPreviews } from "../src/design-previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
-import { operatorCall } from "../src/flight/operator-call.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
@@ -6540,6 +6540,31 @@ describe("crew routes", () => {
   beforeEach(withCrew);
   const post5 = (action: string, body: unknown = {}) =>
     postBody(`/api/seats/guido-1/${action}`, body);
+
+  it("tells the supervisor to hold the slow pace for a start FLIGHT makes through the operator route", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    store.upsertRun(run({ id: "fl-run", agentId: "flight-1", endedAt: null }));
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/seats/guido-1/start",
+      headers: {
+        ...json,
+        [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "flight-1", runId: "fl-run" }),
+      },
+      payload: { issue: 5 },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true, holdPace: true }]]);
+    supervisorCalls.length = 0;
+    expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
 
   it("identifies an operator start while away", async () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));

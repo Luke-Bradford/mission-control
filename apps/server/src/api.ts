@@ -4213,7 +4213,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const seatAction = <B>(
         path: string,
         schema: z.ZodType<B>,
-        act: (sup: Supervisor, id: string, body: B) => Promise<unknown>,
+        act: (sup: Supervisor, id: string, body: B, req: FastifyRequest) => Promise<unknown>,
         options: { bodyLimit?: number } = {},
       ) =>
         api.post<{ Params: { id: string } }>(path, options, async (req, reply) => {
@@ -4222,7 +4222,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const body = schema.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           try {
-            const out = await act(supervisor, id, body.data);
+            const out = await act(supervisor, id, body.data, req);
             bus.emit("agents");
             return out;
           } catch (e) {
@@ -4231,7 +4231,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b, req) => {
         const pause = pausedSeat(store, id, null);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
@@ -4253,9 +4253,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           started = await sup.startWatch(id);
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          // FLIGHT calling this route is not the operator: the slow pace still holds its starts
+          const holdPace = flightActor(req) === null ? {} : { holdPace: true };
           started = await (deps.engine?.status().on === true && loop === "build"
-            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
+            ? startUnpausedRun(store, sup, id, b.issue, {
+                loop: NEW_LOOP,
+                operator: true,
+                ...holdPace,
+              })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true, ...holdPace }));
         }
         if (capacity.blocked && b.force === true) {
           const repoId = configuredAgents(config).find(
@@ -5533,7 +5539,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             timezone: config.operator.timezone,
             attention: sharedAttention(),
           }),
-          pace: paceView(store, at),
+          pace: paceView(store, config, at),
         };
       });
 

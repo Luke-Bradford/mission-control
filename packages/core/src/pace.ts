@@ -41,10 +41,13 @@ export interface PaceView {
   startsLeft: number;
 }
 
+/** Every refusal from the pace starts with this, so a caller can tell it from a ticket's own failure. */
+export const PACE_HELD_PREFIX = "Slow pace";
+
 export const paceIsOn = (p: PaceSettings, now: number): boolean => p.on && now < p.until;
 
 export function paceRefusal(p: PaceCheck, ref: string, labels: readonly string[]): string | null {
-  const name = p.note === "" ? "Slow pace" : `Slow pace (${p.note})`;
+  const name = p.note === "" ? PACE_HELD_PREFIX : `${PACE_HELD_PREFIX} (${p.note})`;
   if (p.startsLeft <= 0) return `${name} is on and has no starts left: ${ref} waits.`;
   const missing = p.labels.filter((l) => !labels.includes(l));
   if (missing.length > 0)

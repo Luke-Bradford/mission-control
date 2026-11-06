@@ -561,6 +561,8 @@ export interface StartRunOptions {
   override?: ProfileOverride;
   flight?: boolean;
   operator?: boolean;
+  /** The slow pace holds this start even though `operator` is set (FLIGHT calling the operator route). */
+  holdPace?: boolean;
   /** Internal synchronous hook after the actual run exists, immediately before its pause gate. */
   beforeLaunch?: (run: Run) => void;
 }
@@ -3414,7 +3416,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
       const away = activeAway(store, now(), config.operator.timezone);
-      const pace = paceStartCheck(store, now());
+      const pace = paceStartCheck(store, config, now());
       if (
         away &&
         !opts?.operator &&
@@ -3429,7 +3431,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
           : {}),
-        ...(!opts?.operator && pace ? { pace } : {}),
+        ...((!opts?.operator || opts.holdPace === true) && pace ? { pace } : {}),
         repoId: info.repo.id,
         issue,
         card: {

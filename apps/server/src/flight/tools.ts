@@ -1383,7 +1383,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
-    const pace = paceStartCheck(store, now());
+    const pace = paceStartCheck(store, config, now());
     const refusal = eligibleToStart({
       ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
       ...(pace ? { pace } : {}),

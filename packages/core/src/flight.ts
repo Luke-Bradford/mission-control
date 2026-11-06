@@ -1,4 +1,5 @@
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
+import type { PaceView } from "./pace.ts";
 
 export {
   CATCH_UP_KINDS,
@@ -1016,6 +1017,8 @@ export interface FlightTriage {
 
 /** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
+  /** The operator's slow pace while it is on; absent at normal pace. Starts outside it are refused. */
+  pace?: PaceView;
   /** Every open PR, unowned first. FLIGHT starts each wake by reading this flow. */
   prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];

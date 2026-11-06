@@ -1830,13 +1830,19 @@ runs at normal pace and nothing slows it by itself. `POST /api/settings/pace` ta
 (an end time, epoch ms, in the future), `labels` (a ticket starts only if it carries all of them;
 none means any), `maxStarts` (how many tickets may start while it is on) and `note` (the operator's
 word for it, such as "weekend"). The server stamps `since` when it is switched on; only tickets that
-started a build or plan run from then count against `maxStarts` (a review does not, and a ticket
-started twice counts once). The setting is a separate idea from Away: Away limits what kind of
-work may start and what may be written; slow pace limits how much. Both hold at once.
+first started a build or plan run from then count against `maxStarts`: a review does not, a ticket
+started twice counts once, a ticket started before the pace and handed on later does not, and an
+observed loop's runs do not. Seats starting at the same moment are counted from the starts under
+way, so the limit holds. The setting stays apart from Away on purpose: FLIGHT may write Away
+settings but not this one, so only the operator can slow the crew. Away limits what kind of work may
+start and what may be written; slow pace limits how much. Both hold at once, and the Overview
+shows them side by side.
 
 While it is on, the queue, FLIGHT's `start_seat` and a seat start all refuse a ticket that does not
 match or that arrives after the starts are used, naming the pace and the ticket. A start the
-operator makes by hand from the HUD is not held. At the end time it stops applying without anyone
+operator makes by hand from the HUD is not held, but the same route called by FLIGHT through
+`mc operator` is. FLIGHT's state carries `pace`, and FLIGHT's wake facts leave out the tickets the
+pace refuses and the idle-seat fact, so held seats do not wake it all weekend. At the end time it stops applying without anyone
 turning it off. An unreadable row counts as normal pace. `GET /api/overview` carries
 `pace` (`note`, `until`, `labels`, `maxStarts`, `startsLeft`) while it is on and `null` otherwise,
 for the Overview to show.
