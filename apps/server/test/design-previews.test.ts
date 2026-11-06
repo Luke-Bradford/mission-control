@@ -101,7 +101,8 @@ describe("DesignPreviews", () => {
       ticket: 1,
       repoId: "shop-app",
       running: true,
-      url: `http://127.0.0.1:${PORT}/` });
+      url: `http://127.0.0.1:${PORT}/`,
+    });
     const page = await get(p, "/");
     expect(page.body).toContain('<head><script src="/mc-preview-boot"></script>');
     expect(page.headers["content-security-policy"]).toContain(
