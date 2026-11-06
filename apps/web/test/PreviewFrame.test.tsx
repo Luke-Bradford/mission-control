@@ -1,8 +1,10 @@
 import { type AttentionItem, DEFAULT_AWAY } from "@mc/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
-import { PREVIEW_ORIGIN } from "../src/needs/PreviewFrame.tsx";
+import { setDemo } from "../src/demo/mode.ts";
+import { demoMisses } from "../src/demo/source.ts";
+import { PREVIEW_ORIGIN, PreviewOpener } from "../src/needs/PreviewFrame.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
 import { DemoSwitch } from "../src/shell/DemoSwitch.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -11,6 +13,7 @@ import { brief, CONFIG, crewRow, HOUR, item, NOW } from "./fixtures.ts";
 const SHA = "b".repeat(40);
 const view = (ticket: number, over = {}) => ({
   ticket,
+  repoId: "shop-app",
   branch: `feature/${ticket}-x`,
   sha: SHA,
   publishedAt: NOW - HOUR,
@@ -106,7 +109,7 @@ describe("Open preview", () => {
     expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
   });
 
-  it("offers none to an item with no ticket, and none in Demo", async () => {
+  it("offers none to an item with no ticket", async () => {
     routes([ask("q1", "shop-app#4001")], { "/api/design-previews": [view(4001)] });
     render(<Needs item="q1" />);
     expect(await screen.findByRole("button", { name: "Open preview" })).toBeTruthy();
@@ -117,6 +120,42 @@ describe("Open preview", () => {
     render(<Needs item="q1" />);
     await screen.findAllByText(/Question for/);
     expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
+  });
+
+  it("offers none to an item in another repo that has the same ticket number", async () => {
+    const fetch = routes([{ ...ask("q1", "eBull#4001"), repoId: "eBull" }], {
+      "/api/design-previews": [view(4001, { repoId: "shop-app" })],
+    });
+    render(<Needs item="q1" />);
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/design-previews", expect.anything()),
+    );
+    await screen.findAllByText(/Question for/);
+    expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
+  });
+
+  it("offers none when the hub does not say which repo a preview is for", async () => {
+    const { repoId: _repo, ...bare } = view(4001);
+    routes([ask("q1", "shop-app#4001")], { "/api/design-previews": [bare] });
+    render(<Needs item="q1" />);
+    await screen.findAllByText(/Question for/);
+    expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
+  });
+
+  it("offers none in Demo, and never asks the hub for previews", async () => {
+    const fetch = routes([ask("q1", "shop-app#4001")], { "/api/design-previews": [view(4001)] });
+    await act(async () => setDemo(true));
+    try {
+      // the opener alone: in Demo the page lists Demo's items, not this one
+      render(<PreviewOpener item={ask("q1", "shop-app#4001")} />);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
+      // Demo answers from its own source, not fetch: a request for previews would be a recorded miss
+      expect(demoMisses()).not.toContain("/api/design-previews");
+      expect(fetch.mock.calls.some(([path]) => path === "/api/design-previews")).toBe(false);
+    } finally {
+      await act(async () => setDemo(false));
+    }
   });
 
   it("says the preview is gone when the hub no longer has it, and shows no frame", async () => {

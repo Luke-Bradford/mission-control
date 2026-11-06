@@ -1,4 +1,4 @@
-import type { AttentionItem, DesignPreviewView } from "@mc/core";
+import type { AttentionItem, DesignPreviewView, RepoId } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -24,6 +24,13 @@ export function openPreview(view: DesignPreviewView, question: string): void {
 export function closePreview(): void {
   open.set(null);
 }
+
+/**
+ * What the hub says of a stored build. Builds are keyed by ticket number within the hub's own repo,
+ * so `repoId` is what ties one to an item. A hub that does not send it matches nothing (the field
+ * is optional here until the server sends it for every build).
+ */
+type StoredPreview = DesignPreviewView & { repoId?: RepoId };
 
 /** The ticket number in `repo#n`, or null for an item without a ticket. */
 export function ticketNumber(ticket: string | null): number | null {
@@ -84,20 +91,23 @@ export function PreviewFrame({ ticket, label }: { ticket: number; label: string 
 export function PreviewOpener({ item }: { item: AttentionItem }) {
   const ticket = ticketNumber(item.ticket);
   const demo = useDemo();
-  const list = useResource<DesignPreviewView[]>(
+  const list = useResource<StoredPreview[]>(
     ticket === null || demo ? null : RESOURCES.designPreviews,
   );
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new item starts without the note
   useEffect(() => setNote(null), [item.key]);
-  if (ticket === null || !list.data?.some((v) => v.ticket === ticket)) return null;
+  const mine = (v: StoredPreview) =>
+    item.repoId !== null && v.repoId === item.repoId && v.ticket === ticket;
+  if (ticket === null || !list.data?.some(mine)) return null;
   const question = item.brief?.ask ?? item.text;
   const run = async () => {
     setBusy(true);
     setNote(null);
     try {
-      const view = await apiPost<DesignPreviewView>(`/api/design-previews/${ticket}/open`);
+      const view = await apiPost<StoredPreview>(`/api/design-previews/${ticket}/open`);
+      if (!mine(view)) throw new ApiError(404, PREVIEW_GONE_TEXT);
       openPreview(view, question);
     } catch (e) {
       const missing = e instanceof ApiError && e.status === 404;
