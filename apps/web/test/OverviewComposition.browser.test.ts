@@ -232,7 +232,7 @@ describeRendered("Overview composition", () => {
       "#agentsList .rowlink",
       "#agentsList button",
       ".board-card",
-      ".needs-row",
+      ".next-row",
     ])
       expect((await page.reachable(selector, ".overview-grid")).every(Boolean), selector).toBe(
         true,
@@ -249,10 +249,7 @@ describeRendered("Overview composition", () => {
   it("opens a Needs-you item from the keyboard", async () => {
     const page = await open("mixed", 1920, 940);
     await settled(page);
-    await page.evaluate(
-      () => document.querySelector<HTMLElement>(".needs-row")?.focus(),
-      undefined,
-    );
+    await page.evaluate(() => document.querySelector<HTMLElement>(".next-row")?.focus(), undefined);
     await page.press("Enter");
     await page.evaluate(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
