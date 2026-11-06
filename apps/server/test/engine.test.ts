@@ -154,6 +154,7 @@ import {
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { activity } from "../src/views.ts";
+import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");
 const HUB = START + 30 * 60_000;
@@ -851,17 +852,19 @@ describe("controller PR scratch reviews", () => {
       mergeable: null,
     };
     store.upsertPullRequests(REPO, [pr], clock);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: REPO,
-      seatId: RETRO,
-      prNumber: 77,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: clock,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: REPO,
+        seatId: RETRO,
+        prNumber: 77,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: clock,
+      }),
+    );
     h.engine = h.make({
       externalReviews: {
         sync: async () => {},

@@ -17,6 +17,7 @@ import type { GhRunner } from "../src/mcp/gh.ts";
 import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -150,7 +151,7 @@ function harness() {
   };
   const deps = {
     config,
-    repo: config.repos[0]!,
+    repo: defined(config.repos[0]),
     store,
     bus,
     gh,
@@ -200,7 +201,7 @@ describe("external PR controller merge", () => {
     const h = harness();
     buildRun(null);
     expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
-    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    store.upsertRun({ ...defined(store.run("builder:old")), endedAt: 2 });
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
   });
@@ -243,7 +244,7 @@ describe("external PR controller merge", () => {
     try {
       expect((await hold()).statusCode).toBe(200);
       expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
-      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      store.upsertRun({ ...defined(store.run("builder:old")), endedAt: null });
       expect((await hold()).statusCode).toBe(404);
     } finally {
       await app.close();
@@ -344,9 +345,9 @@ describe("external PR controller merge", () => {
     "refuses missing or changed merge evidence: %s",
     async (failure) => {
       const h = harness();
-      if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+      if (failure === "ci") defined(h.facts.statusCheckRollup[0]).conclusion = "FAILURE";
       if (failure === "review") {
-        const id = store.reviewsOfPr("sample", 7)[0]!.id;
+        const id = defined(store.reviewsOfPr("sample", 7)[0]).id;
         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
       }
       if (failure === "head") h.state.moveDuringFiles = true;

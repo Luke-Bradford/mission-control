@@ -4002,10 +4002,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       const subject = external ? await readSubject() : null;
       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
-      const issue = external ? subject!.ticket.number : issueOf(author!);
-      const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+      const issue = subject ? subject.ticket.number : author === null ? null : issueOf(author);
+      const head = subject
+        ? subject.sha
+        : author === null
+          ? null
+          : (store.runPush(author.id)?.sha ?? null);
       if (
-        (!external && author!.repoId !== info.repo.id) ||
+        (!external && author?.repoId !== info.repo.id) ||
         issue === null ||
         (head !== review.sha &&
           (head === null ||
@@ -4023,7 +4027,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       let ticket: TicketView | null;
       try {
-        ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
+        ticket = subject ? subject.ticket : await deps.fetchTicket(info.repo, issue);
       } catch (e) {
         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
           cause: e,

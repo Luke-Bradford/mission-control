@@ -41,7 +41,7 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
           .flatMap((s) => s.seats)
           .find((s) => seatDef(s).loop === "watch");
         if (notice.by === "flight" && !flight) continue;
-        const from = notice.by === "flight" ? flight!.id : COMMS_CAPCOM;
+        const from = notice.by === "flight" && flight ? flight.id : COMMS_CAPCOM;
         try {
           const message = await sendComms(
             {

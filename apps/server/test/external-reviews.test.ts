@@ -14,6 +14,7 @@ import type { GhRunner } from "../src/mcp/gh.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -70,7 +71,7 @@ function harness() {
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   const gh: GhRunner = vi.fn(async (args, options) => {
     if (args.includes("POST")) {
-      const path = args[args.indexOf("POST") + 1]!;
+      const path = defined(args[args.indexOf("POST") + 1]);
       const body = JSON.parse(options.input ?? "{}");
       writes.push({ path, body });
       if (path.endsWith("/comments")) comments.push(body);
@@ -174,7 +175,9 @@ describe("external PR review subjects", () => {
     await service.sync();
     expect(store.reviewsIn(["queued"])).toHaveLength(1);
     expect(h.writes).toHaveLength(1);
-    expect(service.wanted(store.reviewsOfRun(externalReviewKey("sample", 7))[0]!)).toBe(true);
+    expect(service.wanted(defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]))).toBe(
+      true,
+    );
   });
 
   it("does not review a branch whose build run is still unfinished", async () => {
@@ -189,7 +192,7 @@ describe("external PR review subjects", () => {
     buildRun({ endedAt: 2 });
     const service = createExternalReviews(harness().deps);
     await service.sync();
-    const queued = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const queued = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     expect(service.wanted(queued)).toBe(true);
     buildRun({ id: "builder:new", endedAt: null, status: "running" });
     expect(service.wanted(queued)).toBe(false);
@@ -197,17 +200,19 @@ describe("external PR review subjects", () => {
 
   it("queues a later round, avoiding the ended author's seat, after a crew review of an older head", async () => {
     buildRun({ endedAt: 2 });
-    const crew = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: NEXT,
-      epoch: 1,
-      attempt: 1,
-      round: 1,
-      at: 1,
-    })!;
+    const crew = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: NEXT,
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: 1,
+      }),
+    );
     store.setReviewState(crew, ["queued"], "running", { runId: "retro:x", at: 2 });
     store.recordFindings(crew, "retro:x", {
       verdict: { spec: "pass", quality: "pass" },
@@ -252,7 +257,7 @@ describe("external PR review subjects", () => {
     const service = createExternalReviews(deps);
     await service.sync();
     const key = externalReviewKey("sample", 7);
-    const first = store.reviewsOfRun(key)[0]!;
+    const first = defined(store.reviewsOfRun(key)[0]);
     expect(first.seatId).toBe("retro");
     store.setReviewState(first.id, ["queued"], "running", { runId: "retro:x", at: 3 });
     store.setReviewState(first.id, ["running"], "failed", {
@@ -265,8 +270,8 @@ describe("external PR review subjects", () => {
     expect(rows.map((r) => r.seatId)).toEqual(["retro", "retro-2"]);
     // with no other seat to try, the failed review stands and nothing more is queued
     await service.sync();
-    store.setReviewState(rows[1]!.id, ["queued"], "running", { runId: "retro-2:x", at: 5 });
-    store.setReviewState(rows[1]!.id, ["running"], "failed", {
+    store.setReviewState(defined(rows[1]).id, ["queued"], "running", { runId: "retro-2:x", at: 5 });
+    store.setReviewState(defined(rows[1]).id, ["running"], "failed", {
       at: 6,
       failure: reviewBudgetFailure(1000),
     });
@@ -383,7 +388,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const old = store.reviewsIn(["queued"])[0]!;
+    const old = defined(store.reviewsIn(["queued"])[0]);
     store.upsertPullRequests("sample", [pr({ headSha: NEXT })], 2);
     h.current({
       head: { sha: NEXT, ref: "feature/sample", repo: { full_name: "example/sample" } },
@@ -432,7 +437,7 @@ describe("external PR review subjects", () => {
       };
       const service = createExternalReviews(deps);
       await service.sync();
-      const row = store.reviewsIn(["queued"])[0]!;
+      const row = defined(store.reviewsIn(["queued"])[0]);
       store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
       expect(
         store.recordFindings(row.id, "retro:review", {
@@ -475,7 +480,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(row.id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -510,7 +515,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const old = store.reviewsIn(["queued"])[0]!;
+    const old = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(old.id, ["queued"], "superseded", { at: 101 });
     await service.sync();
     const current = store.reviewsIn(["queued"]);
@@ -521,7 +526,7 @@ describe("external PR review subjects", () => {
   it("withholds a report containing disallowed text and never posts a clean status", async () => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(row.id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -540,7 +545,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "failed", {
       at: 101,
       failure: "Reviewer ended without a report.",
@@ -590,7 +595,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     await createExternalReviews({
       ...h.deps,
-      config: { ...config, repos: [{ ...config.repos[0]!, autonomy: "draft" }] },
+      config: { ...config, repos: [{ ...defined(config.repos[0]), autonomy: "draft" }] },
     }).sync();
     store.upsertPullRequests(
       "sample",
@@ -617,17 +622,19 @@ describe("external PR review subjects", () => {
 
 describe("current-head review read model", () => {
   function review(sha = SHA, authorRunId = externalReviewKey("sample", 7)) {
-    const id = store.requestReview({
-      authorRunId,
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 1,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId,
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 1,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 2, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -644,17 +651,19 @@ describe("current-head review read model", () => {
   });
   it("does not revive an old report when the newer queued row is superseded", () => {
     review();
-    const id = store.requestReview({
-      authorRunId: externalReviewKey("sample", 7),
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: NEXT,
-      epoch: 0,
-      attempt: 1,
-      round: 2,
-      at: 4,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: externalReviewKey("sample", 7),
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: NEXT,
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      }),
+    );
     store.setReviewState(id, ["queued"], "superseded", { at: 5 });
     expect(reviewCheckFor(store, "sample", 6)(pr({ headSha: NEXT }))).toBeNull();
   });

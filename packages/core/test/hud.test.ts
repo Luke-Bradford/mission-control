@@ -57,7 +57,6 @@ import {
   USAGE_COLLECTOR_PREFIX,
   usageCollector,
 } from "../src/hud.ts";
-import { CHECK_BASH_TIMEOUT_MS } from "../src/mcp.ts";
 import type { SeatState } from "../src/runtime.ts";
 import type { AgentState, PullRequestView, SeatSessionRow } from "../src/types.ts";
 

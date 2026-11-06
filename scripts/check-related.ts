@@ -26,7 +26,10 @@ export function checkRelated(cwd: string): number {
     );
     return 1;
   }
-  const result = spawnSync("pnpm", ["-s", "test", `--changed=${base}`], {
+  // A pass prints dots and the summary; a failure still prints its test name and error in full.
+  // Console output from passing tests is dropped so it cannot bury either.
+  const args = ["-s", "test", `--changed=${base}`, "--reporter=dot", "--silent=passed-only"];
+  const result = spawnSync("pnpm", args, {
     cwd,
     stdio: "inherit",
   });
