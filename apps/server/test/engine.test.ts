@@ -78,6 +78,7 @@ import {
   REVIEW_STATUS_RUNNING,
   REVIEW_STATUS_WAIVED,
   REVIEW_TOKEN_BUDGET,
+  type ReviewCheck,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -3095,12 +3096,13 @@ describe("the engine runs reviews", () => {
     fix: "change it",
   });
   /** The review run reports `findings`, and the event reaches the engine. */
-  function reported(id: number, findings: ReviewFinding[]): void {
+  function reported(id: number, findings: ReviewFinding[], checked?: ReviewCheck[]): void {
     const rv = need(store.review(id));
     const ok = store.recordFindings(id, need(rv.runId), {
       verdict: { spec: "pass", quality: "pass" },
       summary: "done",
       findings,
+      ...(checked ? { checked } : {}),
       at: clock,
     });
     expect(ok).toBe(true);
@@ -5998,6 +6000,25 @@ describe("the engine runs reviews", () => {
         expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
           "floor-enforced",
         );
+      });
+
+      it("a review that failed the design, for FLIGHT only", async () => {
+        await parkedReview();
+        reported(first().id, [finding("Important")], [{ check: "design", result: "fail" }]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
+          "design-failed",
+        );
+        expect(await operate(RUN, "CAPCOM", { action: "accept" })).toBe(true);
+      });
+
+      it("a passed design does not refuse FLIGHT's accept", async () => {
+        await parkedReview();
+        reported(first().id, [finding("Important")], [{ check: "design", result: "pass" }]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
       });
 
       it("the operator's message could not be stored", async () => {

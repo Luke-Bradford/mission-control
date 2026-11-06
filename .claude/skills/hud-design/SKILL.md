@@ -5,16 +5,17 @@ description: Plan, build and review visible interfaces, including dashboard layo
 
 # HUD design checklist
 
-Use `docs/design/system.md` (sections cited below). A failed **[I]** item is Important; other failures are Minor.
-Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-qa.md) for planning, evidence and sign-off.
+Use `docs/design/system.md` (sections cited). A failed **[I]** item is Important; other failures are Minor.
+Mockups count. [Visual QA](../../../docs/runbooks/visual-qa.md) covers planning, evidence and sign-off.
 
 ## Plan
 
 - [ ] One question per page; one purpose per panel (§1).
-- [ ] Dashboards: rank panels and allocate space per [composition](references/dashboard-layout.md); declare real CSS viewport/zoom/rail, first-screen fields, normal rows and panel budgets.
+- [ ] Content: the reader, and which items belong (§1).
+- [ ] Dashboards: rank and size panels per [composition](references/dashboard-layout.md): real viewport, first-screen fields, normal rows, budgets.
 - [ ] Stats: label, value, definition, window, unit (§5–7).
 - [ ] Page-shaped APIs; tabs fetch on opening (§8–9).
-- [ ] Mockups precede new pages/big visual changes (direction principle 6).
+- [ ] Mockups precede new pages and big changes.
 
 ## Build
 
@@ -25,21 +26,22 @@ Visual work includes mockups. Follow [visual QA](../../../docs/runbooks/visual-q
 - [ ] **[I]** Controls: keyboard reachable, named, focus-visible, minimum 24×24 px (§8–9).
 - [ ] Maximum four text lines per box (§5–7).
 - [ ] Tables: 40 px rows (32 compact), right-aligned tabular numbers, visible sort, unknown `—` (§5–7).
-- [ ] Content-aware columns; aligned headers/body; useful padding/density.
-- [ ] **[I]** Readable labels/units/actions; only free text truncates, with keyboard access to full content.
+- [ ] Content-aware columns, aligned headers, useful density.
+- [ ] **[I]** Readable labels/units/actions; only free text truncates, keyboard reaches full text.
 - [ ] Clock ticks do not rebuild pages (§8–9).
 
 ## Check
 
 - [ ] Empty, one, 50 rows, long content.
-- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9), [dashboards](references/dashboard-layout.md#viewports-use-the-real-ones).
-- [ ] [Table QA](../../../docs/runbooks/table-qa.md): inspect settled application context and focused details.
+- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9), [dashboards](references/dashboard-layout.md#viewports-use-the-real-ones); also arrive from Overview by the nav.
+- [ ] [Table QA](../../../docs/runbooks/table-qa.md): settled context, then details.
 
 ## Review
 
-- [ ] Build items hold in diff and rendered page.
-- [ ] **[I]** First screen answers the declared question (§1): useful hierarchy, content-sized panels and coherent allocation at real viewports with busy data. Dashboard fit or eventual scroll reachability alone cannot pass.
+- [ ] Build items hold in diff and render.
+- [ ] **[I]** First screen answers the declared question (§1) at real viewports with busy data: clear hierarchy, content-sized panels. Fit or scroll reachability alone cannot pass.
 - [ ] No empty panels/lone-number tiles (§5–7).
-- [ ] Record observations, images, findings and limits; geometry alone is insufficient.
+- [ ] **[I]** Every item is for the page's reader; no raw ids or internal notes.
+- [ ] Record observations, images, findings, limits; geometry alone is insufficient.
 
-Record `design`: pass (every [I] passes on rendered page), n-a (no visible change or unable to render; explain in note and summary), fail (quote failures). It does not hold merges; Important findings do. Judge rendered items on your render. Only live-data checks are a "Controller check".
+Record `design`: pass (every [I] passes on your render), n-a (no visible change), fail (quote failures; also a visible change nobody rendered). A fail holds the merge; the round cap never waives it. Only live-data checks are a "Controller check".

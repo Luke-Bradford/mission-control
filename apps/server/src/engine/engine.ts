@@ -263,6 +263,7 @@ export type OperatorRefusal =
   | "second-review-done"
   | "no-second-reviewer"
   | "floor-enforced"
+  | "design-failed"
   | "before-lift"
   | "rework-undelivered"
   | "use-controller-check"
@@ -289,6 +290,8 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
+  "design-failed":
+    "the last review failed this head's design check, so FLIGHT cannot accept it: send it back for rework, or brief the operator with the rendered page and the failed points so they decide",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -2956,6 +2959,14 @@ export function createEngine(deps: EngineDeps): Engine {
               );
               if (paths.length > 0) return refuse("floor-enforced");
             }
+            // A failed design is what the operator sees. The round cap never waives it for FLIGHT
+            // (PR 1465, #1529): rework it, or the operator looks at the page and accepts it.
+            if (
+              by === "FLIGHT" &&
+              review !== undefined &&
+              store.reviewChecks(review.id).some((c) => c.check === "design" && c.result === "fail")
+            )
+              return refuse("design-failed");
           }
           if (flightHeld(store.run(run.id) ?? run)) return refuse("held");
         }

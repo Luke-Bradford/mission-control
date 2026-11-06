@@ -98,6 +98,8 @@ are different evidence from seeing and using the result.
 | Charts and meaning | Is this chart appropriate? Are units, time, scale, denominator, missing data and freshness clear? Is its aspect ratio useful? Is information repeated? |
 | Responsive behavior | Does the layout recompose across the declared viewports without squeezing important content, enlarging empty plots or losing accepted strengths? |
 | Interaction and states | Do keyboard focus, error/retry, forms, filters, readers and overlays work in the real shell? |
+| Arrival | Does the page look the same when reached from the Overview by the nav as when opened by URL? Page stylesheets load lazily and stay loaded, so another page's rules can reach this one. |
+| Content | Is every item for this page's reader? Name any item meant for someone else, any with nothing to decide, and any raw id, timestamp or internal note shown as text. |
 
 Write a concrete observation and an image or interaction receipt for each applicable dimension.
 “No overflow”, “all tests pass” and an image count are insufficient design observations.
@@ -114,6 +116,7 @@ Give a reproduction, affected source and image, impact and concrete correction o
 Independent rendering is preferred for final application QA. If the reviewer only inspects supplied
 images, say so. That can assess visible composition, but cannot establish unperformed interactions.
 If the required render cannot run, record the missing coverage and reason; do not claim a rendered pass.
+A visible change that nobody rendered records `design` as fail, not n-a. A failed design holds the merge; the review-round cap does not waive it.
 
 ## Retain context and detail
 
