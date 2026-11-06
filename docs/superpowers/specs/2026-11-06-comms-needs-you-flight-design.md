@@ -26,6 +26,119 @@ The operator wants **(operator)**:
 - Audit and logs tied to a ticket or PR, so a problem can be traced.
 - A Needs you list that can be filtered, and ordered by priority or date.
 
+## Amendment, 6 November afternoon: only what needs an answer
+
+The operator read the live pages after this design was approved **(operator)**:
+
+- Needs you holds items that need the operator's answer. It is not a place for things to wait.
+- A purposely held item does not sit in Needs you. It goes back to the Backlog with the right
+  labels and a note, or it is removed.
+- FLIGHT checks that every item makes sense before it reaches the operator. If it does not make
+  sense to FLIGHT, FLIGHT sends it back.
+- Notifications in Comms do not help. Whoever responds to one clears it.
+- Fewer notifications. Needs you is the only place the operator needs to see open questions.
+
+This section changes the rest of the design where they differ. The tables below are already
+updated to match.
+
+### What the operator saw at 16:05
+
+13 items counted in Needs you. One was a question only the operator could answer (PR 1423, two
+page designs, and even that one held raw `127.0.0.1` addresses and two decisions).
+
+| Items | What they were | Why they showed |
+|---|---|---|
+| 3 | "For the controller:" requests to check PRs | FLIGHT labelled them `blocker`; the hub makes every open blocker the operator's (`apps/server/src/hud.ts:1166`) |
+| 2 | "FLIGHT is not triaging", "FLIGHT left 1 wake reason … `wait_over:PR 1463:1793914200000`" | Hub alarms, owner fixed to the operator, raw ids in the text |
+| 3 | studio-builder issues 115, 115 and 14 days old | The loop is paused by its own issue, which the hub does not read as paused (`hud.ts:1184`) |
+| 3 | "PR #n · You: review" | Ended-run PRs under the operator's login; FLIGHT's brief said they were FLIGHT's, but the count kept them |
+| 1 | #1503, a one-line `package.json` change | A tooling call within FLIGHT's and the controller's power |
+| 1 | PR 1423, two page designs | A real question |
+
+The Comms bell showed 27 "mentions": every direct message to CAPCOM, nearly all "For the
+controller". Only "Mark all read" clears it.
+
+### How Teams does it
+
+Microsoft Teams keeps three things apart, and Mission Control copies the split:
+
+| Teams | What it holds | Mission Control |
+|---|---|---|
+| Approvals | Requests that need your yes or no, each complete, gone once you act | **Needs you** |
+| Activity feed | Only what is addressed to you: an @mention, a reply to your message. Opening it clears it | One unread mark on a Comms thread where someone replied to the operator. No bell |
+| Channels | The record. Bold when there is something new, never a notification by default | **Comms** |
+
+A Teams request is cleared by acting on it, not by reading a list of it. The same holds here:
+a request clears when the thing it asked for happens.
+
+### From a seat's side
+
+1. Before asking, the seat reads its ticket, the ticket's decisions (in its start brief), the
+   spec and `docs/direction.md`. If the answer is there, it uses it.
+2. It asks FLIGHT with `ask_flight`, never the operator. The question says what is blocked, what
+   it tried, the options it sees and which it would pick. The hub stamps the ticket, run and commit.
+3. It keeps working on the parts the question does not block. A run parks only when nothing is left.
+4. If FLIGHT sends the question back, the seat rewrites it or decides as FLIGHT says.
+
+### From FLIGHT's side: FLIGHT is the gate
+
+For every seat question and every item the hub raises, FLIGHT works down this list and stops at
+the first step that fits:
+
+1. **Answered already?** The spec, the ticket, a past decision or `docs/direction.md` answers it.
+   FLIGHT answers the seat.
+2. **FLIGHT's call?** Within FLIGHT's authority (flow, order, merges, tooling, rework). FLIGHT
+   decides, logs it, and tells the seat. There is no "unless you object" clock: FLIGHT decides or
+   asks, never both.
+3. **Does it make sense?** If FLIGHT cannot state the question, the options and why they matter,
+   it sends the question back to the seat with what is missing (`return_question`). An item the
+   hub raised that FLIGHT cannot explain is a hub fault: FLIGHT files it and the item does not
+   reach the operator.
+4. **A wait, not a question?** Waiting on CI, a PR, a date or another ticket goes on FLIGHT's
+   watch list on the FLIGHT page.
+5. **Only the operator can decide?** Money, product direction or taste, security, something that
+   cannot be undone, or a floor approval. FLIGHT writes one complete question (rule 4). The test:
+   someone new to the project could answer from that page alone.
+
+FLIGHT checks each open question again when its ticket or PR moves, and at least once a day.
+If it is no longer needed or no longer true, FLIGHT withdraws it with one line saying why.
+
+### From the controller's side
+
+- Requests for the controller go to the controller's own inbox (rule 1), not to the operator.
+- A request clears when what it asked for happens: the check is recorded, the PR merges or
+  closes. A reply is not needed to clear it.
+- A request unanswered past a set time is an Audit row. It reaches the operator only if the
+  operator alone can act. #1450 (FLIGHT clears every check itself) removes most of these requests.
+
+### From the operator's side
+
+- **Needs you** counts open questions and shows nothing else. Each question offers three actions:
+  pick an option, ask FLIGHT more, or **Not now**.
+- **Not now** closes the question. Its ticket moves to the Backlog with the label
+  `waiting:operator` and the question stays on the Ticket page. When FLIGHT promotes the ticket
+  again, it asks again if the question still stands. There is no Held group.
+- **Alerts** show only when the operator alone can fix something: FLIGHT will not start, an
+  Update only a person can run, an account at its limit. "FLIGHT is late" goes to FLIGHT's watch
+  and Audit, because the hub restarts and wakes FLIGHT itself.
+- **Comms** is the record. It sends no notifications. The bell goes. A thread where someone
+  replied to the operator shows one unread mark, cleared by opening it.
+- **Browser notices:** a new question and a new alert. Nothing else.
+- **What FLIGHT decided** is on the FLIGHT page, so the operator can read it and reverse a
+  decision from the fly-out.
+
+### Loops Mission Control only watches
+
+A watched loop's issue reaches Needs you only as FLIGHT's complete question. A loop paused by its
+own pause issue (such as autonomy-engine#1818) counts as paused, so its issues stay on its card.
+
+### How we know it worked
+
+- Every item in Needs you is a complete question. Measured: items counted ÷ open questions = 1.
+- No question older than a day without FLIGHT's check. Audit shows the count.
+- The operator's first reply is rarely a question about what an item means (rule 9).
+- The operator sees no Comms notification for a message addressed to someone else.
+
 ## Words
 
 One name for one thing, in this document and in the app.
@@ -259,14 +372,17 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 |---|---|
 | A question FLIGHT or the hub wrote, complete by rule 4 | Stays |
 | A person waiting on GitHub, with FLIGHT's suggested replies | Stays. The replies are the options |
-| "FLIGHT will do this unless you object", with its 40-minute clock | Stays on the page in its own group. Not counted, because no answer is needed |
-| A held question | Stays on the page in the Held group. Not counted |
-| FLIGHT stopped or late | **Alert.** The alert lists what waits behind FLIGHT, and each raw item opens from it, as today |
+| "FLIGHT will do this unless you object", with its 40-minute clock | Goes. FLIGHT decides and logs it on the FLIGHT page, or asks a complete question **(operator, 6 Nov pm)** |
+| A held question | Goes. **Not now** moves its ticket to the Backlog, labelled `waiting:operator`, with the question on the Ticket page **(operator, 6 Nov pm)** |
+| FLIGHT stopped and the hub cannot start it | **Alert.** It lists what waits behind FLIGHT |
+| FLIGHT late, or a wake left without a decision | FLIGHT's watch and Audit. Not the operator's: the hub restarts and wakes FLIGHT |
 | The hub needs an Update only the operator can run; an account has hit its limit | **Alert** |
 | FLIGHT's safety stop tripped | Stays, as a question with bound choices, as #1389 defines |
 | A request "for the controller" | Comms, addressed to the controller. If none answers in a set time, FLIGHT writes it as a question |
 | A seat that stalled or failed, a stray process, a blocked test lock, a PR nobody is moving | FLIGHT's queue, shown on the FLIGHT page. FLIGHT fixes it or writes a question |
-| A question from a loop Mission Control only watches | FLIGHT's queue until FLIGHT writes a complete question |
+| A question from a loop Mission Control only watches | FLIGHT's queue until FLIGHT writes a complete question. Hidden while the loop is paused, including by its own pause issue |
+| "PR #n · You: review" on a PR no run owns | FLIGHT's queue |
+| The Comms Mentions bell | Goes. One unread mark on a thread where someone replied to the operator |
 | Something that needs the operator's yes: merging a change to the files that steer the crew, reordering the work queue, a safety approval, accepting tested work, more budget | Stays, written as a complete question. The hub writes it where it raises the item today |
 | Something that reports state: work in review, work ready, work waiting on other work, a tool error, a seat's message nobody answered | FLIGHT's queue |
 | FLIGHT's own lines that mention the operator | The FLIGHT conversation, marked unread |
@@ -437,7 +553,8 @@ The layout is settled through the `hud-design` skill (see "How the pages get des
 
 **The list**
 
-- Keeps its three groups: Waiting on you, FLIGHT will do unless you object, Held.
+- One group: open questions. The "FLIGHT will do unless you object" and Held groups go
+  (see the amendment).
 - **Filters (operator):** repo, priority, who asked. A search box for the text. Answered questions
   are one filter away.
 - **Order (operator):** priority then oldest, by default. Also oldest, newest and soonest deadline.
@@ -454,7 +571,7 @@ The layout is settled through the `hud-design` skill (see "How the pages get des
 5. Options as cards: what follows, and whether it can be undone. The recommended card is marked
    with its reason, and its button is the main one.
 6. What happens with no answer.
-7. Actions: pick an option, write to FLIGHT, **Hold**.
+7. Actions: pick an option, write to FLIGHT, **Not now** (the ticket goes to the Backlog).
 8. What FLIGHT checked and who it asked. These stay open, not folded away.
 
 The conversation stays beside the question, wide enough to read. Its box fills its space, which
@@ -549,7 +666,9 @@ Each of these is a change, stated so nobody finds it by surprise.
 | #759: no new count model | The count change is its own ticket (item 3 below), not part of #759 |
 | #765 (FLIGHT's missing powers made visible): requests "for the controller" | Still gaps to close. Until then they follow the table above and can reach the operator |
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
-| The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions. Held items, timed defaults and alerts are shown but not counted |
+| The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions, and the page shows only those. Held items and timed defaults leave the page; alerts have their chip |
+| Timed defaults (#1196, `apps/server/src/decision-defaults.ts`) | Retired for questions to the operator. FLIGHT decides or asks |
+| Hold on a Needs-you item (`HoldItem`, `apps/server/src/attention-holds.ts`) | Becomes **Not now**: the ticket goes to the Backlog. FLIGHT's own waits move to its watch list |
 | The roadmap, plan item 7: notices only for briefed asks and "FLIGHT is down" | Two more alerts send a notice: an Update the operator must run, and an account at its limit |
 | The role files: use `comms_read` for missed crew context | Read by ticket |
 
@@ -570,6 +689,21 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 | #1478 | Conversation box width, and Hold, on the Needs you page | None |
 | #1458 | A branch preview opens from a question | None |
 | #1464 | Remove the unused Asked-of-you file | None |
+
+**First, from the amendment (controller's call).** These cut the noise with small changes and go
+ahead of the list below:
+
+- **Who an item is for** (#1509 gains it): a Comms request FLIGHT sends for the controller is not
+  the operator's; FLIGHT-late and wake-left alarms are FLIGHT's watch; a "You: review" PR no run
+  owns is FLIGHT's; a loop paused by its own pause issue counts as paused. Needs you shows one
+  group, open questions; the Held and timed-default groups go.
+- **FLIGHT is the gate** (new ticket): the five steps above in `roles/FLIGHT.md`; `return_question`
+  sends a question back to its seat with what is missing; FLIGHT withdraws a question that no
+  longer stands; a daily check of each open question; **Not now** moves the ticket to the Backlog
+  labelled `waiting:operator`; timed defaults stop for the operator's questions. The seats' roles
+  say how to ask FLIGHT (the seat's side above).
+- **Requests clear by action** (#1513 gains it): the Mentions bell goes; a request clears when what
+  it asked for happens; an unread mark only where someone replied to the operator.
 
 **New, in this order (controller's call)**
 
