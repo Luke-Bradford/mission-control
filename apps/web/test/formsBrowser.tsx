@@ -16,7 +16,8 @@ import { Setup } from "../src/pages/Setup.tsx";
 import { NOW, seatRow } from "./fixtures.ts";
 
 // One harness for the repo, seat and account-switch forms: `?form=F06` is the Agent page header
-// that holds Switch account; anything else is Setup's Repos & seats tab. `?state=` is how the
+// that holds Switch account; `loops` and `sources` are Setup's Loops and Sources tabs (the template
+// editor and the Teams feeds); anything else is Setup's Repos & seats tab. `?state=` is how the
 // data arrives: loading (never), error (refused), status-loading (accounts load, their login state does not) or
 // disconnected (the live stream is down). F06 is drawn as the Agent page draws it: the More menu.
 const root = document.getElementById("root");
@@ -48,7 +49,11 @@ createRoot(root).render(
   <div className="app">
     <div className="shell shell-full">
       <main>
-        {params.get("form") === "F06" ? (
+        {params.get("form") === "loops" ? (
+          <Setup tab="loops" />
+        ) : params.get("form") === "sources" ? (
+          <Setup tab="sources" />
+        ) : params.get("form") === "F06" ? (
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <AgentHeaderActions
               row={seatRow({ accountId: params.get("account") ?? "codex-main" })}
