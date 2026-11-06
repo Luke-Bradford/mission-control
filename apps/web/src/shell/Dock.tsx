@@ -403,6 +403,25 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
+/** From this width the Overview's side column, with Needs you in it, sits beside the open dock. */
+const OVERVIEW_BESIDE_QUERY = "(min-width: 2200px)";
+
+/** Whether the Overview shows its Needs you panel beside the dock, so the dock need not repeat it. */
+export function useNeedsBeside(overview: boolean) {
+  const [wide, setWide] = useState(
+    () => typeof matchMedia !== "undefined" && matchMedia(OVERVIEW_BESIDE_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const media = matchMedia(OVERVIEW_BESIDE_QUERY),
+      update = () => setWide(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return overview && wide;
+}
+
 export function Dock({
   coversPage = false,
   needsBeside = false,
