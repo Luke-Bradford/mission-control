@@ -184,6 +184,13 @@
   resize: vertical;
 }
 
+/* The conversation box takes the whole row; its Ask FLIGHT button sits on the row below. */
+.needs-side .composer textarea {
+  flex: 1 0 100%;
+  min-width: 0;
+  resize: vertical;
+}
+
 /* The side column is the conversation alone, filling its height. */
 .needs-side .item-conversation.page {
   flex: 1 1 auto;
@@ -283,4 +290,19 @@
 .needs-hold {
   flex: none;
   margin-left: auto;
+}
+
+/* Hold open: the form takes its own row in the band and the band grows to hold it, so the
+   whole question stays readable above it. */
+.needs-band:has(.hold-form) {
+  max-height: none;
+}
+
+.needs-hold:has(.hold-form) {
+  flex: 1 0 100%;
+  margin-left: 0;
+}
+
+.needs-hold .hold-form {
+  max-width: 480px;
 }
