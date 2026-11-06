@@ -365,7 +365,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: "7" },
+        { text: "Use port 5174.", question: 7 },
       ]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
@@ -403,7 +403,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: "7" },
+        { text: "Use port 5174.", question: 7 },
       ]),
     );
     const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
@@ -438,7 +438,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
     expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-      { text: "Use port 5174.", question: "7" },
+      { text: "Use port 5174.", question: 7 },
     ]);
   });
 
@@ -498,7 +498,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.change(input, { target: { value: " port? " } });
     fireEvent.click(screen.getByRole("button", { name: "Reply" }));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "port?", question: "7" }]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "port?", question: 7 }]),
     );
     await waitFor(() => expect(input.value).toBe(""));
     fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {

@@ -35,9 +35,10 @@ export function flightText(key: string, about: string, body: string): string {
 }
 
 /** The question id behind an `ask:<id>` item, or null for any other kind. */
-export function askedQuestion(key: string): string | null {
-  const id = key.startsWith(ASK_PREFIX) ? key.slice(ASK_PREFIX.length) : "";
-  return id === "" ? null : id;
+export function askedQuestion(key: string): number | null {
+  const match = /^ask:(\d+)$/.exec(key);
+  const id = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 const failure = (e: unknown): string => (e instanceof ApiError ? e.message : "server unreachable");
