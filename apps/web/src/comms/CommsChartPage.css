@@ -106,7 +106,7 @@
 .comms-chart-pane li {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
   font-size: var(--fs-s);
 }
 .comms-chart-pane q {
