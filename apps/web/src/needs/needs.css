@@ -178,9 +178,15 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.needs-answer .composer textarea,
-.needs-side .composer textarea {
+.needs-answer .composer textarea {
   flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+/* The conversation box takes the whole row; its Ask FLIGHT button sits on the row below. */
+.needs-side .composer textarea {
+  flex: 1 0 100%;
   min-width: 0;
   resize: vertical;
 }
