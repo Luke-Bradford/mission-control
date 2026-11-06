@@ -162,9 +162,9 @@ describe("Needs you counts only what the operator must answer", () => {
       at: SENT,
     });
 
-  it("one late wake is FLIGHT's watch; several left are the operator's alert", () => {
+  it("the wake-left alert stays the operator's, however many reasons it names", () => {
     leftNote("FLIGHT left 1 wake reason without a decision after two wakes: PR #9 waited");
-    expect(noteItems(config(false)).map((i) => i.owner)).not.toContain("operator");
+    expect(noteItems(config(false)).map((i) => i.owner)).toEqual(["operator"]);
     store.clearNote("flight:left", SENT + 1);
     leftNote("FLIGHT left 5 wake reasons without a decision after two wakes: PR #9 waited");
     expect(noteItems(config(false)).map((i) => i.owner)).toEqual(["operator"]);

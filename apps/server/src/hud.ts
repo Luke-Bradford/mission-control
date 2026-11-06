@@ -1407,12 +1407,7 @@ function buildAttentionItems(
       return { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" };
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
-    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) {
-      // one late wake is FLIGHT's own watch; several left undecided are the operator's alert
-      return /^FLIGHT left 1 wake reason\b/.test(i.text)
-        ? { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" }
-        : item;
-    }
+    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     // FLIGHT's review queue, even when FLIGHT is not triaging: the count item carries it
     if (unownedReviews.has(i.key) && (!live || !triaging))
