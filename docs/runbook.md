@@ -553,7 +553,7 @@ What each seat's process starts with:
   `GET /api/comms/open` lists these items with their text (first 280 characters) and also lists
   each seat's open `ask_flight` question as a question to FLIGHT (id `ask:<n>`). A seat question
   follows FLIGHT's triage window (20 minutes from the later of the ask and FLIGHT going live),
-  not the 15 and 45 minute Comms steps; with no FLIGHT seat its `nextStep` is `operator`. A `seen` reaction
+  not the 15 and 45 minute Comms steps; with no FLIGHT seat, or once FLIGHT has passed it to the operator, its `nextStep` is `operator`. A `seen` reaction
   from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
   `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref, and the first 280 characters of text) newest
   first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.

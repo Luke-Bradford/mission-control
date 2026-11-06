@@ -1159,6 +1159,26 @@ describe("Comms API", () => {
     }
   });
 
+  it("shows a seat question FLIGHT passed on as the operator's", async () => {
+    const id = store.addQuestion({
+      agentId: "alpha",
+      runId: "r-alpha",
+      text: "Schema?",
+      at: clock - 25 * 60_000,
+    });
+    store.passQuestion(id, clock - 24 * 60_000);
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        to: "CAPCOM",
+        nextStep: "operator",
+        nextAt: clock - 24 * 60_000,
+      });
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");

@@ -1683,7 +1683,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const flightId = flightSeat(config)?.seat.id ?? COMMS_CAPCOM;
         // A seat question is FLIGHT's from the start: its deadline is FLIGHT's triage window,
         // and with no FLIGHT seat it is the operator's now.
-        const seatQuestionStep = (askedAt: number) => {
+        // A question FLIGHT passed to the operator is the operator's, whatever the window says.
+        const seatQuestionStep = (askedAt: number, passedAt: number | null) => {
+          if (passedAt !== null)
+            return {
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: passedAt,
+            };
           const triage = seatQuestionTriage(config, store, at, askedAt);
           if (triage === null)
             return {
@@ -1702,11 +1709,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           id: `ask:${q.id}`,
           label: "question" as const,
           from: q.agentId,
-          to: flightId,
+          to: q.passedAt === null ? flightId : COMMS_CAPCOM,
           ticket: store.run(q.runId)?.ticket ?? null,
           text: q.text.slice(0, COMMS_OPEN_TEXT_MAX),
           at: q.at,
-          ...seatQuestionStep(q.at),
+          ...seatQuestionStep(q.at, q.passedAt),
         }));
         return {
           items: [...asked, ...seatQuestions]
