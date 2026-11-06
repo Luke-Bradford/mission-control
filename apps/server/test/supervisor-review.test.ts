@@ -943,7 +943,7 @@ describe("startReview", () => {
         ]),
       );
       const brief = await briefOf(s.id, s.sha);
-      expect(brief.split("the previous one")).toHaveLength(2);
+      expect(brief.split("— the previous one")).toHaveLength(2);
       expect(brief).not.toContain("Open blocking findings from earlier heads");
     });
 
