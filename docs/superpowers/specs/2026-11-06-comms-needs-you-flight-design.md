@@ -210,9 +210,9 @@ The operator can also write to FLIGHT in the question's conversation, to ask mor
 something else. That text never picks an option and never approves anything. FLIGHT answers, or
 writes the question again with new options.
 
-### 7. A reply from the operator is delivered
+### 7. A message from the operator to a seat is delivered
 
-A reply to an agent's message wakes a waiting seat. A working seat gets it at its next turn. The
+A message or reply from the operator wakes a waiting seat. A working seat gets it at its next turn. The
 message shows its state: stored, or delivered with the time.
 
 If the run that wrote the message has ended, the page says so before sending. The reply then goes
@@ -313,10 +313,11 @@ illustration:
 > **Why FLIGHT recommends 1.** The two figures are wrong today, and the ticket is P0.
 > **With no answer:** nothing is built. This is an approval, so it has no default.
 
-**Start a topic (controller's call; see the open question at the end).** The operator can open a
-topic from this page with a title and some text. FLIGHT replies in the conversation. When FLIGHT
-comes back with options, the topic is a question like any other. Until then it sits under "Started
-by you" and is not counted.
+**What Needs you is for (operator, 6 November).** It holds items raised from the seats' work:
+blockers, questions, and choices that need a person. The operator does not start anything here.
+The operator's own question goes to FLIGHT in the fly-out, or to a seat in Comms. If it turns
+into new work, FLIGHT files a ticket for the planning seat. The planning seat's own questions
+then reach Needs you the usual way.
 
 ## FLIGHT fly-out
 
@@ -345,7 +346,8 @@ it in place of looking things up.
   repo that has controller messages.
 - The Decisions panel goes.
 - Every message shows its sender kind as a tag: YOU, CONTROLLER, FLIGHT, a seat's name, HUB.
-- **Reply** on any message exists today. It now delivers and shows its state (rule 7).
+- The operator can message a seat directly, or **Reply** on one message. Both exist today. Both
+  now deliver and show their state (rule 7).
 - **By ticket.** The Tickets list filters the chat to one ticket's messages. That is a separate
   control from opening the ticket **(operator, 5 November)**.
 - **Clicking a ticket number** opens the Ticket page, which exists today. It already joins runs,
@@ -403,8 +405,7 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 6. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation; the Ticket page
    gains the missing kinds.
 7. Notices in plain words (rule 8).
-8. Start a topic, if the operator wants it.
-9. Audit rows for message problems (rule 9).
+8. Audit rows for message problems (rule 9).
 
 Items 2, 5 and 6 change what a page looks like. Each gets a mockup in the real app, on a branch,
 before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920 wide, at
@@ -439,9 +440,3 @@ before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920
 - The limits behind "a set time", as config with stated defaults.
 - The image store's route and size limit.
 - How the Ticket page is reached in the nav.
-
-## Open question for the operator
-
-**Start a topic.** Should the Needs you page let the operator open a topic, as described above?
-With yes, item 8 is built. With no, the fly-out is the only way to start a conversation with
-FLIGHT, and item 8 is dropped. This is a product choice, so it has no default.
