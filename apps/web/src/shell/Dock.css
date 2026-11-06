@@ -208,3 +208,86 @@
   align-self: center;
   flex: none;
 }
+
+/* The one line to Needs you: the count of open questions, and where they are. */
+.dock-summary {
+  max-height: none;
+  padding: var(--sp-2) var(--sp-4);
+  gap: var(--sp-2);
+}
+.dock-needs {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 32px;
+  text-align: left;
+}
+.dock-needs.warn > span:first-child {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* The fly-out's box: the page chip, several lines of text, then the state line beside Send. */
+.dock .composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+.dock .composer textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  max-height: 40vh;
+  resize: vertical;
+  font: inherit;
+}
+.dchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  justify-self: start;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 var(--sp-1) 0 var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+}
+.dchip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dchip-x {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.dchip-back {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dsend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.dstate {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+}

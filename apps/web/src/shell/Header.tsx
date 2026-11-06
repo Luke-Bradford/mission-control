@@ -16,7 +16,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { DEMO_MARKER_TEXT, useDemo } from "../demo/mode.ts";
 import { hhmm, hms, MONTHS, percent, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
+import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
 import { openAway, useDock } from "./overlays.ts";
@@ -64,7 +64,7 @@ export function Header({ page }: { page: Page }) {
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page} waiting={waiting} />
+        <DockButton waiting={waiting} />
       </div>
       <span className="sr-only">
         <LiveIndicator />
@@ -397,27 +397,17 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
  * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge is the
  * Needs-you count, which the chat's "Waiting on you" lists.
  */
-function DockButton({ page, waiting }: { page: Page; waiting: number }) {
+function DockButton({ waiting }: { waiting: number }) {
   const dock = useDock();
-  const inComms = page === "comms";
-  const fullWidth = FULL_WIDTH_PAGES.has(page);
-  const title = inComms
-    ? "FLIGHT chat is open in Comms"
-    : fullWidth
-      ? "Open FLIGHT chat in Comms (f)"
-      : "Show or hide FLIGHT's chat (f)";
+  const open = dock.visible && !dock.collapsed;
   return (
     <button
       type="button"
-      className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
-      title={title}
+      className={`iconbtn${open ? " on" : ""}`}
+      title="Show or hide FLIGHT's chat (f)"
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
-      onClick={() => {
-        if (fullWidth) navigate(PAGE_PATHS.comms);
-        // Comms already is FLIGHT's full conversation; the dock is not mounted here.
-        else if (!inComms) dock.toggle();
-      }}
+      aria-pressed={open}
+      onClick={dock.toggle}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
