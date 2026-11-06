@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_HEADING,
@@ -6,9 +8,11 @@ import {
   evidenceMissing,
   evidenceRefusalText,
   evidenceSectionText,
+  evidenceUncataloguedText,
   HUD_PAGE_PATHS,
   isEvidenceImageName,
   prEvidenceAffectedPages,
+  prEvidenceUncatalogued,
   sectionOf,
   withSection,
 } from "../src/index.ts";
@@ -23,6 +27,7 @@ const ALL = [
   "setup_roles",
   "setup_sources",
   "setup_access",
+  "commschart",
 ];
 
 describe("prEvidenceAffectedPages", () => {
@@ -156,5 +161,46 @@ describe("evidenceSectionText", () => {
       `http://127.0.0.1:7421/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png`,
     );
     expect(text).toContain("1 region");
+  });
+});
+
+describe("prEvidenceUncatalogued: a page no screenshot can show", () => {
+  it("names a new page file with no evidence address", () => {
+    expect(
+      prEvidenceUncatalogued([
+        "apps/web/src/pages/Inbox.tsx",
+        "apps/web/src/pages/Needs.tsx",
+        "apps/web/src/pages/QaHotspots.tsx",
+        "apps/web/src/pages/CommsChartPage.tsx",
+        "apps/web/src/pages/TicketPage.tsx",
+        "apps/web/src/pages/Inbox.test.tsx",
+        "apps/web/src/needs/NeedsList.tsx",
+      ]),
+    ).toEqual(["pages/Inbox.tsx"]);
+    expect(evidenceUncataloguedText(["pages/Inbox.tsx"])).toContain(
+      "pages/Inbox.tsx has no screenshot address",
+    );
+  });
+
+  it("maps the pages that have an address, and aliases to their host page", () => {
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Needs.tsx"])).toEqual(["needs"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual([
+      "commschart",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual([
+      "audit",
+      "readiness",
+      "hotspots",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["hotspots"]);
+  });
+
+  it("every page in apps/web has an address, an alias or a stated reason", () => {
+    const dir = join(import.meta.dirname, "../../../apps/web/src/pages");
+    const pages = readdirSync(dir)
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => `apps/web/src/pages/${f}`);
+    expect(pages.length).toBeGreaterThan(5);
+    expect(prEvidenceUncatalogued(pages)).toEqual([]);
   });
 });
