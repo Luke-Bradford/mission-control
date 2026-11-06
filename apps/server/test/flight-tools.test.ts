@@ -6947,6 +6947,29 @@ describe("superuser housekeeping", () => {
     for (const path of paths) expect(merges[0]?.decision).toContain(path);
     expect(decisions().filter((d) => d.kind === "approval")).toEqual([]);
   });
+  it("merge_pr adopts nothing on a standard repo, and logs its refusal", async () => {
+    engineOn = true;
+    runPr();
+    store.setRunPush({ runId: "r-pr", sha: SHA_B, at: NOW });
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), awaitingFlight: null });
+    ghImpl = async (a) => ({
+      code: 0,
+      stdout:
+        a[0] === "pr" && a[1] === "view"
+          ? JSON.stringify({
+              state: "OPEN",
+              isCrossRepository: false,
+              headRefOid: "e".repeat(40),
+              headRefName: "mc/7",
+            })
+          : "",
+      stderr: "",
+    });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([]);
+    // the refused call is on the ledger, as any other tool's refusal
+    expect(decisions().filter((d) => d.about === "merge_pr")).toHaveLength(1);
+  });
   it("merge_pr adopts a head that came from outside the run, once, and refuses otherwise", async () => {
     elevated();
     runPr();
@@ -6971,6 +6994,7 @@ describe("superuser housekeeping", () => {
       text: `PR #12's head ${OUTSIDE.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`,
     });
     expect(adoptCalls).toEqual([["r-pr", OUTSIDE]]);
+    expect(decisions().find((d) => d.targetRunId === "r-pr")).toMatchObject({ kind: "sync" });
     expect(clearanceCalls).toEqual([]);
     // a head that is the run's own push is not adopted
     adoptCalls.length = 0;

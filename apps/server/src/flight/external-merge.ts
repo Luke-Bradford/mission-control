@@ -10,7 +10,6 @@ import {
   type ReviewRow,
   type TicketView,
   ticketControllerCheck,
-  touchesReason,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import { parseChecks } from "../collectors/github.ts";
@@ -38,7 +37,7 @@ export async function mergeExternalPr(i: {
   rules: () => Promise<RepoRules | Error>;
   now: () => number;
   fetchTicket(repo: CcConfig["repos"][number], number: number): Promise<TicketView | null>;
-}): Promise<{ text: string; isError?: boolean; reasons?: string[]; ticket?: number }> {
+}): Promise<{ text: string; isError?: boolean; paths?: string[]; ticket?: number }> {
   const fail = (text: string) => ({ text, isError: true as const });
   const { repo, store, number } = i;
   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
@@ -237,6 +236,9 @@ export async function mergeExternalPr(i: {
     ];
     if (floor && claude && !protectedPaths.includes("CLAUDE.md")) protectedPaths.push("CLAUDE.md");
     const superuser = flightPowersOf(i.config, repo.id) === "superuser";
+    // protected paths need a hub review row on this head, not only an external mc/review status
+    if (superuser && protectedPaths.length > 0 && review === null)
+      return fail("An independent clean QA report is required on this exact head.");
     // a superuser repo's FLIGHT clears the floor and hard-rule paths itself; always_ask stays
     const approvalRequired = superuser
       ? matches(rules.alwaysAsk, labels)
@@ -352,7 +354,7 @@ export async function mergeExternalPr(i: {
       text: `Merged external PR #${number} at ${sha}.${approval ? " Used the recorded approval." : ""}`,
       ...(superuser && protectedPaths.length > 0
         ? {
-            reasons: [touchesReason(protectedPaths)],
+            paths: protectedPaths,
             ...(tickets[0] ? { ticket: tickets[0].number } : {}),
           }
         : {}),

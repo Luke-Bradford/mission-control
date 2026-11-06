@@ -320,10 +320,8 @@ describe("external PR controller merge", () => {
     const withTicket = await mergeExternalPr(linked.deps);
     expect(withTicket.isError).toBeUndefined();
     expect(withTicket.ticket).toBe(9);
-    expect(withTicket.reasons).toEqual(["touches .github/workflows/ci.yml"]);
-    expect(result.reasons).toEqual([
-      "touches .github/workflows/ci.yml, apps/server/src/guard/rules.ts",
-    ]);
+    expect(withTicket.paths).toEqual([".github/workflows/ci.yml"]);
+    expect(result.paths).toEqual([".github/workflows/ci.yml", "apps/server/src/guard/rules.ts"]);
     // an always_ask label still needs the operator
     const again = harness();
     again.deps.config = superuser;
@@ -332,6 +330,27 @@ describe("external PR controller merge", () => {
     again.wire.labels = [{ name: "secret" }];
     expect((await mergeExternalPr(again.deps)).text).toContain("requires the operator's approval");
     expect(again.merges).toHaveLength(0);
+  });
+
+  it("a superuser repo needs a hub review row when protected paths change, not only an mc/review status", async () => {
+    store.close();
+    store = new Store(":memory:");
+    store.upsertPullRequests("sample", [pr], 1);
+    const superuser = {
+      ...config,
+      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+    };
+    const guarded = harness();
+    guarded.deps.config = superuser;
+    guarded.deps.repo = superuser.repos[0]!;
+    guarded.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
+    expect((await mergeExternalPr(guarded.deps)).text).toContain("independent clean QA report");
+    expect(guarded.merges).toHaveLength(0);
+    // a PR with no protected path still rides on the real mc/review status
+    const plain = harness();
+    plain.deps.config = superuser;
+    plain.deps.repo = superuser.repos[0]!;
+    expect((await mergeExternalPr(plain.deps)).isError).toBeUndefined();
   });
 
   it("needs an external review row on a crew branch's head, even with a passing mc/review status", async () => {

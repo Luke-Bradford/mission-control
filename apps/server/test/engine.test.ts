@@ -36,7 +36,6 @@ import {
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
   fixSentText,
-  flightMergedLine,
   globMatches,
   hardRulesBySettingKey,
   hardRulesFlagKey,
@@ -4373,34 +4372,53 @@ describe("the engine runs reviews", () => {
 
     describe("FLIGHT adopts a head from outside the run", () => {
       it("adoptPrHead moves the run to ci on the new head, and refuses a working run", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
         await toReview();
         await h.engine.reconcileRun(RUN);
         expect(loopOf().phase).toBe("review");
-        setLoop({ gate: { ...need(h.gate), sha: SHA }, flightClearedSha: SHA });
+        setLoop({
+          gate: { ...need(h.gate), sha: SHA },
+          touches: { sha: SHA, paths: ["docs/x.md"] },
+          flightClearedSha: SHA,
+          reviewWaivedSha: SHA,
+          carry: { from: SHA, to: SHA },
+        });
         // nothing to adopt while the head is the run's own push
         expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
-        // the PR's head moved to a commit the run did not make
-        setPr({ ci: "passing", headSha: SHA_B });
+        // the PR's head moved to a commit the run did not make; CI has not run on it
+        setPr({ ci: "pending", headSha: SHA_B });
         expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
         clock += 1000;
         expect(await h.engine.adoptPrHead(RUN, SHA_B)).toBe(true);
         expect(store.runPush(RUN)?.sha).toBe(SHA_B);
         expect(store.newestRunCommit(RUN)?.sha).toBe(SHA_B);
-        // CI is green on the new head, so the pass that follows has already moved it on to review
         expect(loopOf()).toMatchObject({
+          phase: "ci",
           pushFor: SHA_B,
+          gate: null,
           flightClearedSha: null,
           awaitingFlight: null,
+          adopted: true,
         });
-        expect(["ci", "review"]).toContain(loopOf().phase);
-        expect(loopOf().adopted).toMatchObject({ sha: SHA_B });
-        expect(loopOf().gate?.sha ?? SHA_B).toBe(SHA_B);
+        // the old head's reads are gone; the pass has read the new head afresh
+        expect(loopOf().touches).toMatchObject({ sha: SHA_B, paths: [] });
+        // a waiver of the old head's review does not carry over to the adopted one
+        expect(loopOf().reviewWaivedSha ?? null).toBeNull();
+        expect(loopOf().carry ?? null).toBeNull();
         expect(loopTexts().some((t) => t.includes("adopted head"))).toBe(true);
         // a run that is working is refused
         setLoop({ phase: "working" });
         setPr({ ci: "passing", headSha: SHA });
         expect(await h.engine.adoptPrHead(RUN, SHA)).toBe(false);
         expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+      });
+
+      it("adoptPrHead is for superuser repos only", async () => {
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "pending", headSha: SHA_B });
+        expect(await h.engine.adoptPrHead(RUN, SHA_B)).toBe(false);
+        expect(store.runPush(RUN)?.sha).toBe(SHA);
       });
     });
 
@@ -5545,107 +5563,68 @@ describe("the engine runs reviews", () => {
       expect(h.steps).toContain("merge");
     });
 
-    it("one line to the operator after a merge FLIGHT cleared", async () => {
+    it("a merge FLIGHT cleared sends the operator no Comms line; its reasons stay in the FLIGHT log", async () => {
       flightSeatConfig();
       h.touches = ["apps/server/src/guard/x.ts", ".github/workflows/ci.yml"];
       h.gate = { ...need(h.gate), hubOnly: false, strays: ["docs/outside.md"] };
       await gateOpen();
       await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
-      const decisionId = store.addFlightDecision({
-        at: clock,
-        kind: "merge",
-        seatId: null,
-        targetRunId: RUN,
-        ref: "mc#7",
-        questionId: null,
-        about: "PR #12",
-        decision: "Cleared",
-        basis: "Read the diff",
-      });
       expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
-      expect(mergeLines()).toHaveLength(1);
-      const reasons = [
-        "touches apps/server/src/guard/x.ts, .github/workflows/ci.yml",
-        "files outside the seat's area: docs/outside.md",
-        "a commit from outside the run",
-      ];
-      expect(mergeLines()[0]).toMatchObject({
-        from: "flight-1",
-        to: "CAPCOM",
-        ref: "PR 12",
-        label: null,
-        text: flightMergedLine(12, reasons, `/tickets/mc/7#decision-${decisionId}`),
+      expect(h.steps).toContain("merge");
+      expect(mergeLines()).toEqual([]);
+    });
+
+    it.each([
+      "apps/web/src/x.ts",
+      "apps/server/src/guard/x.ts",
+      "apps/server/src/api.ts",
+      ".github/workflows/ci.yml",
+      "CLAUDE.md",
+    ])("accept keeps RETRO independent on %s", async (path) => {
+      need(config.repos[0]).flightPowers = "superuser";
+      h.touches = [path];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Critical")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "Blocked review", ended: false },
       });
-      await h.engine.reconcileRun(RUN);
-      await h.engine.reconcileRun(RUN);
-      expect(mergeLines()).toHaveLength(1);
-    });
-
-    it("no line to the operator when nothing needed FLIGHT's call", async () => {
-      flightSeatConfig();
-      h.touches = [];
-      await gateOpen();
-      await h.engine.reconcileRun(RUN);
-      expect(h.steps).toContain("merge");
-      expect(mergeLines()).toEqual([]);
-    });
-
-    it("no line to the operator on a standard repo", async () => {
-      h.touches = [];
-      await gateOpen();
-      await h.engine.reconcileRun(RUN);
-      expect(h.steps).toContain("merge");
-      expect(mergeLines()).toEqual([]);
-    });
-
-    it.each(["apps/web/src/x.ts", "apps/server/src/guard/x.ts", "apps/server/src/api.ts"])(
-      "accept keeps RETRO independent on %s",
-      async (path) => {
-        need(config.repos[0]).flightPowers = "superuser";
-        h.touches = [path];
-        await toReview();
-        await h.engine.reconcileRun(RUN);
-        reported(first().id, [finding("Critical")]);
-        await h.engine.reconcileRun(RUN);
-        setLoop({
-          phase: "parked",
-          parked: { kind: "review", reason: "Blocked review", ended: false },
+      const accepted = await operate(RUN, "FLIGHT", {
+        kinds: ["review"],
+        action: "accept",
+      });
+      expect(accepted).toBe(path.startsWith("apps/web"));
+      if (!accepted)
+        expect(
+          h.hardRuleLists.some((rules) =>
+            rules.some((pattern) => globMatches(pattern, path, true)),
+          ),
+        ).toBe(true);
+      if (accepted) {
+        expect(loopOf().reviewWaivedSha).toBe(SHA);
+        expect(h.statusCalls.at(-1)).toMatchObject({
+          state: "success",
+          description: REVIEW_STATUS_WAIVED,
         });
-        const accepted = await operate(RUN, "FLIGHT", {
-          kinds: ["review"],
-          action: "accept",
+        setPr({
+          ci: "passing",
+          checks: [
+            {
+              name: "mc/review",
+              kind: "status",
+              conclusion: "SUCCESS",
+              state: "passing",
+              attempt: null,
+              url: null,
+            },
+          ],
         });
-        expect(accepted).toBe(path.startsWith("apps/web"));
-        if (!accepted)
-          expect(
-            h.hardRuleLists.some((rules) =>
-              rules.some((pattern) => globMatches(pattern, path, true)),
-            ),
-          ).toBe(true);
-        if (accepted) {
-          expect(loopOf().reviewWaivedSha).toBe(SHA);
-          expect(h.statusCalls.at(-1)).toMatchObject({
-            state: "success",
-            description: REVIEW_STATUS_WAIVED,
-          });
-          setPr({
-            ci: "passing",
-            checks: [
-              {
-                name: "mc/review",
-                kind: "status",
-                conclusion: "SUCCESS",
-                state: "passing",
-                attempt: null,
-                url: null,
-              },
-            ],
-          });
-          await h.engine.reconcileRun(RUN);
-          expect(h.steps).toContain("merge");
-        } else expect(loopOf().phase).toBe("parked");
-      },
-    );
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toContain("merge");
+      } else expect(loopOf().phase).toBe("parked");
+    });
 
     it.each(["review", "review-ruling", "ruling", "review-failed"])(
       "accept requires a reported floor review (%s)",

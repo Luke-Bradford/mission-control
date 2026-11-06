@@ -24,7 +24,7 @@ export const GUARD_RULES = {
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
   "repo-rules":
-    "FLIGHT must keep this repository's protected paths and Mission Control rules; change them through a seat's PR and mc merge_pr",
+    "FLIGHT must keep this repository's protected paths and Mission Control rules; on a standard repo ask a controller to approve an override; on a superuser repo change them through a seat's PR and mc merge_pr",
   unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;

@@ -1,5 +1,5 @@
 import type { TicketEvent, TicketHistory } from "@mc/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
@@ -9,7 +9,7 @@ import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketQaReports } from "../qa/TicketQaReports.tsx";
-import { boardPath, followLink, useHash } from "../router.ts";
+import { boardPath, followLink } from "../router.ts";
 import {
   eventLine,
   findingsOf,
@@ -34,23 +34,13 @@ function Field({ label, value }: { label: string; value: string | null }) {
 
 function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null }) {
   const findings = e.kind === "review" ? findingsOf(t, e.reviewId) : [];
-  const anchor = e.kind === "decision" ? `decision-${e.id}` : undefined;
-  const hash = useHash();
-  const more = useRef<HTMLDetailsElement>(null);
-  const item = useRef<HTMLLIElement>(null);
-  // a link to this decision (`#decision-<id>`) opens its full text and scrolls to it
-  useEffect(() => {
-    if (anchor === undefined || hash !== `#${anchor}`) return;
-    if (more.current) more.current.open = true;
-    item.current?.scrollIntoView?.({ block: "center" });
-  }, [anchor, hash]);
   return (
-    <li className="tk-event" data-kind={e.kind} id={anchor} ref={item}>
+    <li className="tk-event" data-kind={e.kind}>
       <span className="tk-when">{tz ? `${dayMonth(e.at, tz)} ${hhmm(e.at, tz)}` : dash}</span>
       <Pill tone="plain">{KIND_WORD[e.kind]}</Pill>
       <span className="tk-line">{eventLine(e)}</span>
       {(e.kind === "comms" || e.kind === "decision") && (
-        <details className="tk-more" ref={more}>
+        <details className="tk-more">
           <summary>Full text</summary>
           <p className="tk-text">
             <MentionText text={e.kind === "comms" ? e.text : `${e.decision}\n${e.basis}`} />

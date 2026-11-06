@@ -2977,7 +2977,7 @@ describe("merge workspace", () => {
   it("a head FLIGHT adopted waits for its clearance even with nothing else to call, then merges", () => {
     const base = merge(
       { flightPowers: "superuser" },
-      { touches: { sha: SHA, paths: [] }, adopted: { sha: SHA, epoch: 0 } },
+      { touches: { sha: SHA, paths: [] }, adopted: true },
     );
     const held = reconcile(base);
     expect(held.loop.awaitingFlight).toBe(SHA);
@@ -2993,11 +2993,29 @@ describe("merge workspace", () => {
   ])("an adopted head keeps every later head waiting for FLIGHT: %s", (_name, extra) => {
     const base = merge(
       { flightPowers: "superuser" },
-      { touches: { sha: SHA, paths: [] }, adopted: { sha: SHA2, epoch: 0 }, ...extra },
+      { touches: { sha: SHA, paths: [] }, adopted: true, ...extra },
     );
     expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
     expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
     expect(flightClearanceReasons(base.loop, SHA)).toContain("a head adopted from outside the run");
+  });
+
+  it("flightClearanceReasons names every floor and guard path first, never inside 'and N more'", () => {
+    const paths = [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "CLAUDE.md",
+      ".github/workflows/ci.yml",
+      "apps/server/src/guard/x.ts",
+    ];
+    const [reason] = flightClearanceReasons({ touches: { sha: SHA, paths }, gate: gateOf() }, SHA);
+    expect(reason).toBe(
+      "touches CLAUDE.md, .github/workflows/ci.yml, apps/server/src/guard/x.ts, a, b and 4 more",
+    );
   });
 
   it("flightClearanceReasons names what needed FLIGHT's call, for this head only", () => {

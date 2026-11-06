@@ -85,9 +85,6 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
   };
 }
 
-/** A link to a FLIGHT decision on a ticket's page. */
-const DECISION_LINK = /^(?:\/tickets\/[\w.-]+\/\d+#decision-\d+|\/flight)$/;
-
 /**
  * A ticket or PR number in a message: the number opens the item, and a small separate button beside
  * it filters the chat to that item. A number that cannot be resolved to a repo is plain text with
@@ -180,9 +177,7 @@ function MessageRefs({
   from: string;
   to: string;
 }) {
-  const parts = text.split(
-    /(\bPR \d+\b|(?<!\w)#\d+\b|\/tickets\/[\w.-]+\/\d+#decision-\d+|(?<=Reason: )\/flight\b)/g,
-  );
+  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
   const occurrences = new Map<string, number>();
   return (
     <>
@@ -190,11 +185,7 @@ function MessageRefs({
         const n = occurrences.get(part) ?? 0;
         occurrences.set(part, n + 1);
         const key = `${part}:${n}`;
-        return DECISION_LINK.test(part) ? (
-          <a className="comms-ref" key={key} href={part} onClick={(e) => followLink(e, part)}>
-            the logged decision
-          </a>
-        ) : /^(?:PR \d+|#\d+)$/.test(part) ? (
+        return /^(?:PR \d+|#\d+)$/.test(part) ? (
           <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
         ) : (
           <MentionText key={key} text={part} />

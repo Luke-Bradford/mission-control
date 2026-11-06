@@ -26,69 +26,6 @@ afterEach(() => {
 });
 
 describe("Comms routes", () => {
-  it("a ticketless line's /flight is a link", async () => {
-    stubFetch({
-      "/api/comms/crew": {
-        messages: [
-          {
-            id: "comms:nt",
-            at: NOW - MIN,
-            from: "flight-1",
-            to: "CAPCOM",
-            text: "FLIGHT merged PR 12: touches CLAUDE.md. Reason: /flight Read the diff",
-            ticket: null,
-            label: null,
-            ref: "PR 12",
-            replyTo: null,
-            mentions: [],
-            reactions: [],
-            pinned: false,
-            operator: false,
-          },
-        ],
-      },
-      "/api/comms/mentions": { mentions: [] },
-      "/api/comms/pins": { messages: [] },
-      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
-      "POST /api/comms/read": { ok: true },
-    });
-    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
-    const link = await screen.findByRole("link", { name: "the logged decision" });
-    expect(link.getAttribute("href")).toBe("/flight");
-  });
-
-  it("the line's reason is a link", async () => {
-    const message = {
-      id: "comms:merged",
-      at: NOW - MIN,
-      from: "flight-1",
-      to: "CAPCOM",
-      text: "FLIGHT merged PR 12: touches CLAUDE.md. Reason: /tickets/shop-app/707#decision-31",
-      ticket: "shop-app#707",
-      label: null,
-      ref: "PR 12",
-      replyTo: null,
-      mentions: [],
-      reactions: [],
-      pinned: false,
-      operator: false,
-    };
-    stubFetch({
-      "/api/comms/crew": { messages: [message] },
-      "/api/comms/mentions": { mentions: [] },
-      "/api/comms/pins": { messages: [] },
-      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
-      "POST /api/comms/read": { ok: true },
-    });
-    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
-    const link = await screen.findByRole("link", { name: "the logged decision" });
-    expect(link.getAttribute("href")).toBe("/tickets/shop-app/707#decision-31");
-    fireEvent.click(link);
-    expect(window.location.pathname).toBe("/tickets/shop-app/707");
-    expect(window.location.hash).toBe("#decision-31");
-    window.history.replaceState(null, "", "/");
-  });
-
   it("keeps the reader's place when the conversation rerenders", async () => {
     const message = {
       id: "comms:older",

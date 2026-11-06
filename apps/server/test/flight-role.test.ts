@@ -18,7 +18,9 @@ describe("roles/FLIGHT.md", () => {
       .split("\n")
       .filter((line) => /controller/i.test(line))
       .flatMap((line) => line.split(/(?<=\.)\s+/))
-      .filter((sentence) => /controller/i.test(sentence));
+      .filter((sentence) => /controller/i.test(sentence))
+      // the controller steps that remain are for a standard repo
+      .filter((sentence) => !/^On a standard repo/.test(sentence));
     // the ticket's own check is the one mention that names the word, and it is FLIGHT's to do
     expect(sentences.some((s) => /## Controller check.*is yours/.test(s))).toBe(true);
     expect(sentences.filter((s) => WAITS_ON_CONTROLLER.test(s))).toEqual([]);
@@ -30,5 +32,7 @@ describe("roles/FLIGHT.md", () => {
     expect(role).toContain("Keep a hold the operator set in force");
     expect(role).toContain("- change branch protection or rulesets on GitHub;");
     expect(role).not.toMatch(/loosen a gate/i);
+    expect(role).toContain("On a standard repo, a PR that changes what confines seats");
+    expect(role).toContain("`git push origin <name>:<branch>`");
   });
 });

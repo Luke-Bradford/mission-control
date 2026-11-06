@@ -1347,7 +1347,9 @@ product direction, a security exception, an irreversible external action, and a 
 repo reserves (`always_ask`). These are FLIGHT shortcuts; each change is a logged decision. On a superuser
 repo `mc merge_pr` clears any PR once review is clean and CI is green, guard rules, hard-rule paths, CI
 workflows and the CLAUDE.md block included, with no controller check and no approval row. The hub logs
-the clearance with its basis and sends the operator one line per such merge, linking the logged reason.
+the clearance as a `merge` decision, with its basis, the run and ticket, and what needed FLIGHT's call (paths
+under the guard, `CLAUDE.md` and `.github/**` named first). That decision on the FLIGHT page is the operator's
+line for each such merge; the hub sends no Comms message for it.
 A standard repo keeps the floor: a controller's approval (see [FLIGHT approvals](#flight-approvals))
 is what lifts it.
 
@@ -1455,8 +1457,9 @@ No build run is invented and no board card is marked Done by this path.
 
 When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an
 unended run, but FLIGHT's shell may merge, resolve and commit on a detached HEAD (`git fetch`, `git
-checkout --detach origin/<branch>`, `git merge origin/main`), then push the result to the PR's own
-branch. The guard refuses those git writes on `main` and in a checkout it cannot read, and a push to
+checkout --detach origin/<branch>`, `git merge origin/main`), resolve and commit, then `git switch -c
+<name>` and `git push origin <name>:<branch>` to the PR's own branch (the guard refuses a push of
+`HEAD:<branch>`, as it needs a named branch on both sides). The guard refuses those git writes on `main` and in a checkout it cannot read, and a push to
 `main` stays refused. Or FLIGHT starts a seat on the ticket and sends the conflict to it.
 
 On a standard repo, protected repository rules require the existing head-bound `merge-floor`
@@ -1465,11 +1468,13 @@ section is unchanged. Changes to FLIGHT's runtime or approval guidance also requ
 controller check there, which FLIGHT cannot give itself through `mc operator`.
 
 On a superuser repo only `always_ask` labels and a linked ticket's `## Controller check` hold an
-external PR. FLIGHT's own logged decision covers protected paths, and after the merge the operator gets
-one line naming them, linked to the decision. For a crew PR awaiting FLIGHT clearance, `mc merge_pr`
+external PR. FLIGHT's own logged decision covers protected paths and names them; a PR that changes them still needs a
+hub review row on its head, not only a passing `mc/review` status. For a crew PR awaiting FLIGHT clearance, `mc merge_pr`
 clears the head. When the PR's head came from outside the run (a commit from a person or another
-worktree) the run cannot await clearance; `mc merge_pr` then adopts that head as the run's push, so CI
-and RETRO check it, and FLIGHT calls it again when it awaits. A `gate` park (strays or foreign commits
+worktree) the run cannot await clearance; on a superuser repo `mc merge_pr` then adopts that head as the
+run's push (logged as a `sync` decision; any waiver of the old head's review is dropped), so CI and
+RETRO check it, and the run waits for FLIGHT's clearance on every later head too. FLIGHT calls it again
+when it awaits. A `gate` park (strays or foreign commits
 on a superuser repo) is lifted with `settle_park` `lift`.
 
 External PR acceptance and controller checks have head-bound records. A required acceptance

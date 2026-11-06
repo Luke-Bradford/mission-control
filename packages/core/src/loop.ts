@@ -28,7 +28,7 @@ import {
   reviewFor,
   reviewParkText,
 } from "./review.ts";
-import { FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
+import { FLIGHT_FLOOR_ENFORCING_PATHS, FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
 import type { SeatState } from "./runtime-model.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
@@ -879,7 +879,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     (touches.paths.length > 0 ||
       gate?.missionControlChanged === true ||
       outside ||
-      loop.adopted != null);
+      loop.adopted === true);
   const clear = elevated
     ? touches !== null && (!flightCall || cleared)
     : touches !== null &&
@@ -897,11 +897,22 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
   return { on, P, touches, gate, clear, passes, awaiting };
 }
 
-/** Up to five paths, then "and N more". */
-const clearancePaths = (paths: readonly string[]): string =>
-  paths.length > 5
-    ? `${paths.slice(0, 5).join(", ")} and ${paths.length - 5} more`
-    : paths.join(", ");
+/**
+ * The floor and guard paths first, every one named; then the rest up to five paths in all, with the
+ * count of those left out. A protected path is never folded into "and N more".
+ */
+const clearancePaths = (paths: readonly string[]): string => {
+  const isFloor = (path: string) =>
+    [...FLIGHT_FLOOR_PATHS, ...FLIGHT_FLOOR_ENFORCING_PATHS].some((g) =>
+      globMatches(g, path, true),
+    );
+  const floor = paths.filter(isFloor);
+  const rest = paths.filter((path) => !isFloor(path));
+  const room = Math.max(0, 5 - floor.length);
+  const named = [...floor, ...rest.slice(0, room)];
+  const more = rest.length - Math.min(rest.length, room);
+  return more > 0 ? `${named.join(", ")} and ${more} more` : named.join(", ");
+};
 
 /** The reason line for protected paths a merge changed. */
 export const touchesReason = (paths: readonly string[]): string =>
@@ -919,7 +930,7 @@ export function flightClearanceReasons(
   const strays = (gate?.strays ?? []).filter((p) => !(touches?.paths ?? []).includes(p));
   if (strays.length > 0) reasons.push(`files outside the seat's area: ${clearancePaths(strays)}`);
   if (gate !== null && !gate.hubOnly) reasons.push("a commit from outside the run");
-  if (loop.adopted != null) reasons.push("a head adopted from outside the run");
+  if (loop.adopted === true) reasons.push("a head adopted from outside the run");
   return reasons;
 }
 

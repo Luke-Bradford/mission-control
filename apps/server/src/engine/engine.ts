@@ -65,12 +65,12 @@ import {
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_CONTROLLER_CHECK_PATHS,
+  FLIGHT_FLOOR_PATHS,
   fillLoopText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
-  flightClearanceReasons,
   gateView,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
@@ -158,7 +158,6 @@ import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
-import { sendFlightMergedLine } from "../flight/merged-line.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
@@ -1726,7 +1725,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "merge": {
-        // a hold from FLIGHT or the controller keeps the merge until it is released
+        // a hold from FLIGHT or the operator keeps the merge until it is released
         if (cur.mergeHold) {
           const hold = cur.mergeHold;
           const reason = mergeHoldParkText(hold.by, hold.reason);
@@ -1743,7 +1742,7 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
-        // a ticket's `## Controller check` holds the merge until the operator's pass on this head
+        // a ticket's `## Controller check` holds the merge until a recorded pass on this head
         const check = await controllerCheckHold(run, cur, a.sha);
         if (check !== null) {
           out.parked = true;
@@ -1811,36 +1810,7 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           return refused(r, "merge");
         }
-        const merged = cur.merging?.done.includes("merge") === true;
         stepDone("merge", a.sha, mergedText(cur.prNumber));
-        // FLIGHT's own call covered this merge: the operator hears of it once, with its reason
-        const reasons =
-          !merged && flightPowersOf(config, run.repoId) === "superuser"
-            ? flightClearanceReasons(cur, a.sha)
-            : [];
-        if (reasons.length > 0 && cur.prNumber !== null) {
-          const issue = issueOf(run);
-          const decision =
-            store
-              .flightDecisionsOnTicket(run.ticket ?? "", [run.id], 20)
-              .find((d) => d.kind === "merge" || d.kind === "settle") ?? null;
-          if (
-            sendFlightMergedLine(
-              { store, config, log },
-              {
-                at,
-                pr: cur.prNumber,
-                reasons,
-                ticket:
-                  run.ticket !== null && issue !== null
-                    ? { ref: run.ticket, repoId: run.repoId, issue }
-                    : null,
-                decision: decision === null ? null : { id: decision.id, basis: decision.basis },
-              },
-            )
-          )
-            bus.emit("agents");
-        }
         deps.pollGithub?.();
         out.again = true;
         return;
@@ -2963,11 +2933,10 @@ export function createEngine(deps: EngineDeps): Engine {
               .at(-1);
             // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
             if (!first || first.blocking === 0) return refuse("wrong-action");
-            const paths = await publisher.hardRuleTouches(
-              run,
-              pushed.sha,
-              FLIGHT_CONTROLLER_CHECK_PATHS,
-            );
+            const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+              ...FLIGHT_CONTROLLER_CHECK_PATHS,
+              ...FLIGHT_FLOOR_PATHS,
+            ]);
             if (paths.length === 0) return refuse("wrong-action");
             const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
             if (
@@ -2986,11 +2955,10 @@ export function createEngine(deps: EngineDeps): Engine {
               .filter((r) => r.sha === pushed.sha && r.state === "reported")
               .at(-1);
             if (!review || review.blocking > 0) {
-              const paths = await publisher.hardRuleTouches(
-                run,
-                pushed.sha,
-                FLIGHT_CONTROLLER_CHECK_PATHS,
-              );
+              const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+                ...FLIGHT_CONTROLLER_CHECK_PATHS,
+                ...FLIGHT_FLOOR_PATHS,
+              ]);
               if (paths.length > 0) return refuse("floor-enforced");
             }
             // A failed design needs the operator's own accept (PR 1465, #1529).
@@ -3396,7 +3364,8 @@ export function createEngine(deps: EngineDeps): Engine {
           run.endedAt !== null ||
           flightHeld(run) ||
           (loop.phase !== "review" && loop.phase !== "ci") ||
-          run.branch === null
+          run.branch === null ||
+          flightPowersOf(config, run.repoId) !== "superuser"
         )
           return false;
         const pr = findPr(run, loop);
@@ -3413,8 +3382,10 @@ export function createEngine(deps: EngineDeps): Engine {
           gate: null,
           touches: null,
           flightClearedSha: null,
+          reviewWaivedSha: null,
+          carry: null,
           awaitingFlight: null,
-          adopted: { sha: head, epoch: loop.epoch },
+          adopted: true,
           transient: 0,
         });
         store.addLoopEvent(

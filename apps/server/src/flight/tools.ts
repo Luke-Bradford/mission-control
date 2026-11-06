@@ -312,7 +312,7 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
@@ -2870,7 +2870,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   ): Promise<Result> {
     const no = () => fail("No awaiting-flight run PR in your lane.");
     const phase = run.loop?.phase;
-    if (!deps.engine?.adoptPrHead || (phase !== "review" && phase !== "ci")) return no();
+    if (
+      !deps.engine?.adoptPrHead ||
+      (phase !== "review" && phase !== "ci") ||
+      flightPowersOf(config, repo.id) !== "superuser"
+    )
+      return no();
     const { value } = await ghObject("merge_pr", [
       "pr",
       "view",
@@ -2904,7 +2909,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail("The merge gates changed; refresh the PR.");
     const text = `PR #${a.pr}'s head ${head.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`;
     record(now(), {
-      kind: "merge",
+      kind: "sync",
       about: `PR #${a.pr}`,
       ref: run.ticket,
       targetRunId: run.id,
@@ -3334,7 +3339,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean; records?: boolean } = {},
+    options: { engine?: boolean; records?: boolean; refusals?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -3358,7 +3363,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           // close_ticket records its own decision (ref, title, URL) once a write has landed.
           if (
             kind !== "close" &&
-            options.records !== false &&
+            (options.records !== false || (options.refusals === true && result.isError)) &&
             (kind !== "rerun" || !result.isError)
           )
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
@@ -3565,20 +3570,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
           if (!result.isError)
             recordExternalMerge(
+              { record: (d) => record(now(), d) },
               {
-                store,
-                config,
-                log: (line) => deps.log?.(line),
-                record: (d) => record(now(), d),
-              },
-              {
-                at: now(),
                 pr: a.pr,
                 repoId: repo.id,
                 text: result.text,
                 basis: a.basis,
                 seatId: ctx.seatId,
-                ...(result.reasons === undefined ? {} : { reasons: result.reasons }),
+                ...(result.paths === undefined ? {} : { paths: result.paths }),
                 ...(result.ticket === undefined ? {} : { ticket: result.ticket }),
               },
             );
@@ -3653,7 +3652,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         };
       },
       z.toJSONSchema(PrBasisArgs),
-      { records: false },
+      // a landed merge logs its own decision with the run and ticket; a refusal is logged as any other
+      { records: false, refusals: true },
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,

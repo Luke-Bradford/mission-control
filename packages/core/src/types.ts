@@ -145,7 +145,7 @@ export interface RunLoop {
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
   /** FLIGHT adopted a head from outside the run: every later head of the run waits for FLIGHT's clearance too. */
-  adopted?: { sha: string; epoch: number } | null;
+  adopted?: boolean;
   /**
    * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
    * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
