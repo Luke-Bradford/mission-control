@@ -111,8 +111,9 @@ flowchart LR
   F -->|can answer| R[FLIGHT answers the seat]
   F -->|only the operator can| N[Needs you: a complete question]
   N -->|operator picks an option| H[Hub]
+  H --> T[Recorded on the Ticket page]
+  T --> A[Audit reads it]
   H --> D[Answer delivered, run woken]
-  H --> T[Recorded on the Ticket page, read by Audit]
 ```
 
 Seats ask FLIGHT, and FLIGHT asks the operator. That rule from #758 (seats ask FLIGHT) stays. The
