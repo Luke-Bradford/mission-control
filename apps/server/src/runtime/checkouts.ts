@@ -509,6 +509,27 @@ async function removePending(
 }
 
 /**
+ * Where a branch began on origin's default branch: the merge base of `baseSha` and `rev`. What the
+ * branch changed is judged from here, so a file main changed after the branch began is not counted
+ * as the branch's.
+ */
+async function branchBase(
+  inClone: (args: string[]) => Promise<string>,
+  baseSha: string,
+  rev: string,
+  subject: string,
+): Promise<string> {
+  const mergeBase = (await inClone(["merge-base", baseSha, rev]).catch(() => "")).trim();
+  if (!COMMIT_SHA.test(mergeBase)) {
+    throw new CheckoutError(
+      "protected",
+      `could not compare ${subject} with origin; Mission Control won't install from it`,
+    );
+  }
+  return mergeBase;
+}
+
+/**
  * Refuses a reused branch whose ref changes an install input, compared with origin's default
  * branch. The early message only: the ref can move, so `refuseChangedInputs` decides.
  */
@@ -1010,7 +1031,8 @@ async function verifyInstall(
   allowNestedInstallDir?: (rel: string, read: ReadObject) => Promise<boolean>,
 ): Promise<string[]> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
-  if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
+  const base = s.compare ? await branchBase(s.inClone, s.base, s.rev, s.subject) : s.base;
+  if (s.compare) await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
   const read = verifiedObjects((args, maxBuffer) =>
@@ -1029,7 +1051,7 @@ async function verifyInstall(
     read,
   );
   if (unsafe !== null) throw refuse(s.subject, unsafe);
-  await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
+  await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
   for (const file of tool.required) {
     if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
   }
@@ -1104,7 +1126,7 @@ async function installReusedPnpm(
   }
   let importers: Promise<Set<string>> | undefined;
   const nestedModules = await verifyInstall(s, PNPM_TOOL, true, async (rel, read) => {
-    if (importers === undefined) importers = pnpmWorkspaceImporters(read, s.base);
+    if (importers === undefined) importers = pnpmWorkspaceImporters(read, base);
     if (!(await importers).has(dirname(rel))) return false;
     const packageJson = join(s.path, dirname(rel), "package.json");
     const manifest = await lstat(packageJson).catch(() => null);
@@ -1481,7 +1503,8 @@ export async function installAfterSync(
     const g = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
     const subject = `branch ${worktree.branch}`;
     await refuseUnsafeTree(w, "HEAD", subject, PNPM_TOOL.installDir);
-    await refuseInstallInputs(w, worktree.baseSha, "HEAD", subject, PNPM_TOOL.inputs);
+    const base = await branchBase(w, worktree.baseSha, "HEAD", subject);
+    await refuseInstallInputs(w, base, "HEAD", subject, PNPM_TOOL.inputs);
     const inputs: string[] = [];
     const unsafe = await inspectDisk(worktree.path, PNPM_TOOL, inputs);
     if (unsafe !== null) throw refuse(subject, unsafe);
@@ -1490,7 +1513,7 @@ export async function installAfterSync(
     const read = verifiedObjects((args, maxBuffer) =>
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
-    await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, worktree.baseSha, subject);
+    await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, base, subject);
     const pnpmStore = await prepareSharedPnpmStore(worktreesRoot, worktree.branch);
     await addMcTmpExclude(common);
     await install(PNPM_TOOL, worktree.path, worktree.branch, undefined, pnpmStore);
