@@ -12,6 +12,7 @@ import {
   itemPath,
   legacyRedirect,
   mapPath,
+  needsYouPath,
   PAGE_PATHS,
   route,
   SETUP_TABS,
@@ -175,6 +176,7 @@ describe("path helpers", () => {
     expect(route(mapPath("a/b c"))).toEqual({ page: "map", repoId: "a/b c" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",
+      needs: "/needs-you",
       flight: "/flight",
       board: "/board",
       agent: "/agent",
@@ -196,10 +198,8 @@ describe("legacyRedirect()", () => {
     ["/agents", "", "/"],
     ["/agents/", "", "/"],
     ["/loops", "", "/"],
-    ["/needs", "", "/flight#askP"],
-    ["/needs/", "", "/flight#askP"],
-    ["/needs-you", "", "/flight#askP"],
-    ["/needs-you/", "", "/flight#askP"],
+    ["/needs", "", "/needs-you"],
+    ["/needs/", "", "/needs-you"],
     ["/cto", "", "/flight"],
     ["/metrics", "", "/telemetry"],
     ["/metrics/", "", "/telemetry"],
@@ -215,15 +215,21 @@ describe("legacyRedirect()", () => {
     expect(legacyRedirect(from, hash)).toBe(to);
   });
 
-  it("sends an old needs link to the same item as its comms path", () => {
+  it("sends an old needs link to the same item on the Needs you page", () => {
     const to = legacyRedirect("/needs/shop-app%233227", "");
-    expect(to).toBe("/comms/esc%3Ashop-app%233227");
-    expect(route(to ?? "")).toEqual({
-      page: "comms",
+    expect(to).toBe("/needs-you/esc%3Ashop-app%233227");
+    expect(route(to ?? "")).toEqual({ page: "needs", item: "esc:shop-app#3227" });
+  });
+
+  it("routes /needs-you with and without an item, and leaves it to no redirect", () => {
+    expect(route("/needs-you")).toEqual({ page: "needs", item: null });
+    expect(route("/needs-you/")).toEqual({ page: "needs", item: null });
+    expect(route(needsYouPath("esc:shop-app#3227"))).toEqual({
+      page: "needs",
       item: "esc:shop-app#3227",
-      view: { kind: "flight" },
     });
-    expect(route(to ?? "")).toEqual(route("/comms/esc:shop-app%233227"));
+    expect(needsYouPath("a b/c")).toBe("/needs-you/a%20b%2Fc");
+    expect(legacyRedirect("/needs-you", "")).toBeNull();
   });
 
   it("is null for anything else", () => {

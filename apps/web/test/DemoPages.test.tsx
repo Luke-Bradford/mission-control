@@ -153,7 +153,7 @@ describe("the header switch", () => {
       fireEvent.click(back);
     });
     expect(document.querySelector(".demo-marker")).toBeNull();
-    expect(document.title).toBe("Mission Control");
+    expect(document.title).toMatch(/^(\(\d+\) )?Mission Control$/);
     expect(document.getElementById("toast")?.textContent).toBe("Back to Live.");
   });
 

@@ -1,7 +1,7 @@
 import type { AttentionBrief, AttentionItem, BriefOption } from "@mc/core";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Expandable } from "../components/Expandable.tsx";
-import { Markdown } from "../components/Markdown.tsx";
+import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
 import {
@@ -22,18 +22,25 @@ function BriefSection({
   title,
   children,
   after,
+  plain = false,
 }: {
   title: string;
   children: ReactNode;
   after?: ReactNode;
+  /** Unclamped: the Needs you page shows the whole text. */
+  plain?: boolean;
 }) {
   return (
     <section className="brief-section">
       <h3 className="bsec">{title}</h3>
       <div className="s qtext">
-        <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={title}>
-          {children}
-        </Expandable>
+        {plain ? (
+          children
+        ) : (
+          <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={title}>
+            {children}
+          </Expandable>
+        )}
       </div>
       {after}
     </section>
@@ -49,7 +56,9 @@ export function ItemBrief({
   catchUp,
   viewLinks,
   approval = false,
+  plain = false,
 }: {
+  plain?: boolean;
   brief?: AttentionBrief;
   original?: ReactNode;
   links?: ReactNode;
@@ -59,7 +68,7 @@ export function ItemBrief({
   approval?: boolean;
 }) {
   const ask = brief?.ask?.trim();
-  return (
+  const body = (
     <div className="brief">
       {brief?.catchUp ? (
         <div className="ctx">
@@ -75,6 +84,7 @@ export function ItemBrief({
         catchUp
       )}
       <BriefSection
+        plain={plain}
         title="The question"
         after={
           <>
@@ -88,6 +98,7 @@ export function ItemBrief({
       {brief && (
         <>
           <BriefSection
+            plain={plain}
             title={approval ? "If you approve" : "FLIGHT's view"}
             after={
               <>
@@ -120,7 +131,7 @@ export function ItemBrief({
             )}
           </BriefSection>
           {Boolean(brief.did?.length) && (
-            <BriefSection title="What FLIGHT did">
+            <BriefSection plain={plain} title="What FLIGHT did">
               <ul className="checked">
                 {brief.did?.map((step, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: actions remain in source order
@@ -140,7 +151,7 @@ export function ItemBrief({
             </BriefSection>
           )}
           {ask?.trim() && (
-            <BriefSection title="What FLIGHT needs from you">
+            <BriefSection plain={plain} title="What FLIGHT needs from you">
               <Markdown text={ask} />
             </BriefSection>
           )}
@@ -148,6 +159,7 @@ export function ItemBrief({
       )}
     </div>
   );
+  return plain ? <OpenLinks>{body}</OpenLinks> : body;
 }
 
 function TextList({ title, lines }: { title: string; lines?: string[] }) {
