@@ -32,9 +32,13 @@ type DraftStep = Omit<ProfileStep, "checks" | "phase"> & {
   phase: ProfileStepPhase;
   checks: DraftCheck[];
 };
-const check = (): DraftCheck => ({ id: crypto.randomUUID(), kind: "cmd", text: "" });
+// Row keys only need to be unique within the draft; crypto.randomUUID is missing on a hub served
+// over plain http from a non-local address.
+let rowCount = 0;
+const rowId = () => `row-${++rowCount}`;
+const check = (): DraftCheck => ({ id: rowId(), kind: "cmd", text: "" });
 const step = (): DraftStep => ({
-  id: crypto.randomUUID(),
+  id: rowId(),
   name: "implement",
   phase: "working",
   checks: [check()],
