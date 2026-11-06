@@ -282,8 +282,7 @@ describeRendered("Comms chart, rendered", () => {
         console.info(
           `comms chart 50 seats ${at}: ${frames.length} frames, median ${sorted[Math.floor(sorted.length / 2)]?.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms`,
         );
-        // A software-rendered CI runner sits near 50 ms here; a real stall is well past 100.
-        expect(p95).toBeLessThan(100);
+        expect(p95).toBeLessThan(50);
         await page.close();
       }
     },

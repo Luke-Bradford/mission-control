@@ -364,6 +364,177 @@ export function CommsRails({
       waitingSeats.has(s.id) ? ", waiting on an answer" : ""
     }. Narrow the chart to ${s.name}`;
 
+  const sideOf = (id: string) => layout.seats.get(id)?.side;
+  // The links and seats do not depend on the hover card, so hovering re-renders only the card.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: helpers below derive from these inputs
+  const edgeMarks = useMemo(
+    () => (
+      <g className="comms-edges">
+        {drawn.map(({ edge, path }) => {
+          const kept = filterKeeps(filter, edge.a, edge.b);
+          const chosen = filter !== null && filter.kind === "pair" && kept;
+          const cls = [
+            "comms-edge",
+            edge.waiting ? "waiting" : "",
+            lit.has(keyOf(edge.a, edge.b)) ? "live" : "",
+            filter !== null && !kept ? "dim" : "",
+            chosen ? "focus" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const w = 1 + edge.weight * 2.5;
+          return (
+            // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
+            <g
+              key={edge.key}
+              className={cls}
+              data-key={edge.key}
+              role="button"
+              tabIndex={edge.key === edgeStop ? 0 : -1}
+              aria-label={edgeLabel(edge)}
+              aria-pressed={chosen}
+              onClick={() => pickEdge(edge)}
+              onKeyDown={(e) => {
+                press(e, () => pickEdge(edge));
+                walk(e, edgeOrder, edge.key, setActiveEdge, "data-key");
+              }}
+              onFocus={() => {
+                setActiveEdge(edge.key);
+                setTip({ kind: "edge", id: edge.key });
+              }}
+              onBlur={() => setTip(null)}
+              onMouseEnter={() => setTip({ kind: "edge", id: edge.key })}
+              onMouseLeave={() => setTip(null)}
+            >
+              <path className="comms-edge-hit" d={path.d} />
+              <path
+                className="comms-edge-line"
+                d={path.d}
+                strokeWidth={w}
+                strokeDasharray={edge.waiting ? "6 4" : undefined}
+              />
+              {edge.waiting && (
+                <g
+                  className="comms-wait-mark"
+                  transform={`translate(${path.mid.x.toFixed(1)} ${path.mid.y.toFixed(1)})`}
+                >
+                  <rect x={-22} y={-9} width={44} height={18} rx={9} />
+                  <text textAnchor="middle" dy="0.34em">
+                    ⧖ {waitWord(edge.waiting.ms)}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    ),
+    [drawn, filter, lit, edgeStop, onPickLink, byId],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: helpers below derive from these inputs
+  const nodeMarks = useMemo(
+    () => (
+      <g className="comms-nodes">
+        {seats.map((seat) => {
+          const p = point(seat.id);
+          if (!p) return null;
+          const hub = seat.hub;
+          const side = sideOf(seat.id);
+          const out = hub ? 0 : side === "left" ? -1 : 1;
+          const dim = inside !== null && !inside.has(seat.id);
+          const selected =
+            filter !== null &&
+            (filter.kind === "seat"
+              ? filter.id === seat.id
+              : filter.a === seat.id || filter.b === seat.id);
+          const cls = [
+            "comms-node",
+            hub ? "hub" : "",
+            `presence-${seat.presence}`,
+            seat.alert ? "alert" : "",
+            waitingSeats.has(seat.id) ? "waiting" : "",
+            dim ? "dim" : "",
+            selected ? "selected" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const r = hub ? 0 : seat.presence === "running" ? 6 : 5;
+          return (
+            // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
+            <g
+              key={seat.id}
+              className={cls}
+              data-id={seat.id}
+              style={{ "--node-color": seat.color } as CSSProperties}
+              transform={`translate(${p.x} ${p.y})`}
+              role="button"
+              tabIndex={seat.id === seatStop ? 0 : -1}
+              aria-label={seatLabel(seat)}
+              aria-pressed={selected}
+              onClick={() => onPickSeat(seat.id)}
+              onKeyDown={(e) => {
+                press(e, () => onPickSeat(seat.id));
+                walk(e, seatOrder, seat.id, setActiveSeat, "data-id");
+              }}
+              onFocus={() => {
+                setActiveSeat(seat.id);
+                setTip({ kind: "seat", id: seat.id });
+              }}
+              onBlur={() => setTip(null)}
+              onMouseEnter={() => setTip({ kind: "seat", id: seat.id })}
+              onMouseLeave={() => setTip(null)}
+            >
+              {hub ? (
+                <>
+                  <rect
+                    className="comms-node-hit"
+                    x={-HUB_W / 2}
+                    y={-13}
+                    width={HUB_W}
+                    height={26}
+                    rx={13}
+                  />
+                  <rect
+                    className="comms-node-core"
+                    x={-HUB_W / 2}
+                    y={-11}
+                    width={HUB_W}
+                    height={22}
+                    rx={11}
+                  />
+                  <text className="comms-node-name hub-name" textAnchor="middle" dy="0.34em">
+                    {seat.name}
+                  </text>
+                </>
+              ) : (
+                <>
+                  <rect
+                    className="comms-node-hit"
+                    x={out < 0 ? -layout.nameRoom : -12}
+                    y={-layout.rowH / 2}
+                    width={layout.nameRoom + 12}
+                    height={layout.rowH}
+                  />
+                  <circle className="comms-node-ring" r={r + 4} />
+                  <circle className="comms-node-core" r={r} />
+                  <text
+                    className="comms-node-name"
+                    x={out * (r + 8)}
+                    dy="0.34em"
+                    textAnchor={out < 0 ? "end" : "start"}
+                  >
+                    {full ? seat.name : fitName(seat.name, layout.nameRoom)}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    ),
+    [seats, layout, hubIds, filter, inside, waitingSeats, seatStop, full, onPickSeat],
+  );
+
   const tipFor = () => {
     if (tip === null) return null;
     if (tip.kind === "seat") {
@@ -391,7 +562,6 @@ export function CommsRails({
     return p.y > layout.h * 0.6 ? { left, bottom: layout.h - p.y + 14 } : { left, top: p.y + 14 };
   };
 
-  const sideOf = (id: string) => layout.seats.get(id)?.side;
   const empty = drawn.length === 0;
 
   return (
@@ -437,65 +607,7 @@ export function CommsRails({
                 {fitName(h.key, layout.nameRoom)}
               </text>
             ))}
-            <g className="comms-edges">
-              {drawn.map(({ edge, path }) => {
-                const kept = filterKeeps(filter, edge.a, edge.b);
-                const chosen = filter !== null && filter.kind === "pair" && kept;
-                const cls = [
-                  "comms-edge",
-                  edge.waiting ? "waiting" : "",
-                  lit.has(keyOf(edge.a, edge.b)) ? "live" : "",
-                  filter !== null && !kept ? "dim" : "",
-                  chosen ? "focus" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                const w = 1 + edge.weight * 2.5;
-                return (
-                  // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
-                  <g
-                    key={edge.key}
-                    className={cls}
-                    data-key={edge.key}
-                    role="button"
-                    tabIndex={edge.key === edgeStop ? 0 : -1}
-                    aria-label={edgeLabel(edge)}
-                    aria-pressed={chosen}
-                    onClick={() => pickEdge(edge)}
-                    onKeyDown={(e) => {
-                      press(e, () => pickEdge(edge));
-                      walk(e, edgeOrder, edge.key, setActiveEdge, "data-key");
-                    }}
-                    onFocus={() => {
-                      setActiveEdge(edge.key);
-                      setTip({ kind: "edge", id: edge.key });
-                    }}
-                    onBlur={() => setTip(null)}
-                    onMouseEnter={() => setTip({ kind: "edge", id: edge.key })}
-                    onMouseLeave={() => setTip(null)}
-                  >
-                    <path className="comms-edge-hit" d={path.d} />
-                    <path
-                      className="comms-edge-line"
-                      d={path.d}
-                      strokeWidth={w}
-                      strokeDasharray={edge.waiting ? "6 4" : undefined}
-                    />
-                    {edge.waiting && (
-                      <g
-                        className="comms-wait-mark"
-                        transform={`translate(${path.mid.x.toFixed(1)} ${path.mid.y.toFixed(1)})`}
-                      >
-                        <rect x={-22} y={-9} width={44} height={18} rx={9} />
-                        <text textAnchor="middle" dy="0.34em">
-                          ⧖ {waitWord(edge.waiting.ms)}
-                        </text>
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-            </g>
+            {edgeMarks}
             <g className="comms-particles">
               {particles.map((p) => (
                 <circle
@@ -512,106 +624,7 @@ export function CommsRails({
                 />
               ))}
             </g>
-            <g className="comms-nodes">
-              {seats.map((seat) => {
-                const p = point(seat.id);
-                if (!p) return null;
-                const hub = seat.hub;
-                const side = sideOf(seat.id);
-                const out = hub ? 0 : side === "left" ? -1 : 1;
-                const dim = inside !== null && !inside.has(seat.id);
-                const selected =
-                  filter !== null &&
-                  (filter.kind === "seat"
-                    ? filter.id === seat.id
-                    : filter.a === seat.id || filter.b === seat.id);
-                const cls = [
-                  "comms-node",
-                  hub ? "hub" : "",
-                  `presence-${seat.presence}`,
-                  seat.alert ? "alert" : "",
-                  waitingSeats.has(seat.id) ? "waiting" : "",
-                  dim ? "dim" : "",
-                  selected ? "selected" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                const r = hub ? 0 : seat.presence === "running" ? 6 : 5;
-                return (
-                  // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
-                  <g
-                    key={seat.id}
-                    className={cls}
-                    data-id={seat.id}
-                    style={{ "--node-color": seat.color } as CSSProperties}
-                    transform={`translate(${p.x} ${p.y})`}
-                    role="button"
-                    tabIndex={seat.id === seatStop ? 0 : -1}
-                    aria-label={seatLabel(seat)}
-                    aria-pressed={selected}
-                    aria-describedby={
-                      tip?.kind === "seat" && tip.id === seat.id ? `${uid}-tip` : undefined
-                    }
-                    onClick={() => onPickSeat(seat.id)}
-                    onKeyDown={(e) => {
-                      press(e, () => onPickSeat(seat.id));
-                      walk(e, seatOrder, seat.id, setActiveSeat, "data-id");
-                    }}
-                    onFocus={() => {
-                      setActiveSeat(seat.id);
-                      setTip({ kind: "seat", id: seat.id });
-                    }}
-                    onBlur={() => setTip(null)}
-                    onMouseEnter={() => setTip({ kind: "seat", id: seat.id })}
-                    onMouseLeave={() => setTip(null)}
-                  >
-                    {hub ? (
-                      <>
-                        <rect
-                          className="comms-node-hit"
-                          x={-HUB_W / 2}
-                          y={-13}
-                          width={HUB_W}
-                          height={26}
-                          rx={13}
-                        />
-                        <rect
-                          className="comms-node-core"
-                          x={-HUB_W / 2}
-                          y={-11}
-                          width={HUB_W}
-                          height={22}
-                          rx={11}
-                        />
-                        <text className="comms-node-name hub-name" textAnchor="middle" dy="0.34em">
-                          {seat.name}
-                        </text>
-                      </>
-                    ) : (
-                      <>
-                        <rect
-                          className="comms-node-hit"
-                          x={out < 0 ? -layout.nameRoom : -12}
-                          y={-layout.rowH / 2}
-                          width={layout.nameRoom + 12}
-                          height={layout.rowH}
-                        />
-                        <circle className="comms-node-ring" r={r + 4} />
-                        <circle className="comms-node-core" r={r} />
-                        <text
-                          className="comms-node-name"
-                          x={out * (r + 8)}
-                          dy="0.34em"
-                          textAnchor={out < 0 ? "end" : "start"}
-                        >
-                          {full ? seat.name : fitName(seat.name, layout.nameRoom)}
-                        </text>
-                      </>
-                    )}
-                  </g>
-                );
-              })}
-            </g>
+            {nodeMarks}
           </svg>
           {tipped && (
             <div
