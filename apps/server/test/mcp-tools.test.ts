@@ -1641,26 +1641,72 @@ describe("Comms seat tools", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
-  it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
-    store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
-    store.addComms({ at: NOW - 3, from: "guido-2", to: "guido-1", ticket: null, text: "direct" });
+  it("reads its own ticket's crew, direct and mentioned context, one line each, without leaking other DMs", async () => {
+    store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: "mc#42", text: "crew" });
+    store.addComms({
+      at: NOW - 3,
+      from: "guido-2",
+      to: "guido-1",
+      ticket: "mc#42",
+      text: "direct",
+    });
     store.addComms({
       at: NOW - 2,
       from: "retro",
       to: "CAPCOM",
-      ticket: null,
+      ticket: "mc#42",
       text: "mentioned @guido-1",
       mentions: ["guido-1"],
     });
-    store.addComms({ at: NOW - 1, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    store.addComms({ at: NOW - 1, from: "guido-2", to: "retro", ticket: "mc#42", text: "private" });
+    store.addComms({ at: NOW, from: "retro", to: "crew", ticket: "mc#7", text: "other ticket" });
     const result = await read({ limit: 2 });
-    const parsed = JSON.parse(result.text) as { messages: { text: string; id: string }[] };
-    expect(parsed.messages.map((message) => message.text)).toEqual([
-      "direct",
-      "mentioned @guido-1",
-    ]);
-    expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
+    const lines = result.text.split("\n");
+    expect(lines[0]).toMatch(/^comms:\d+ guido-2>guido-1: direct$/);
+    expect(lines[1]).toMatch(/^comms:\d+ retro>CAPCOM: mentioned @guido-1$/);
+    expect(result.text).not.toContain("private");
+    expect(result.text).not.toContain("other ticket");
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
+
+  it("with no arguments returns only the seat's own ticket, one line a message, and a read by id returns the full text", async () => {
+    const long = `start ${"word ".repeat(120)}end`;
+    const mine = store.addComms({
+      at: NOW - 3,
+      from: "retro",
+      to: "crew",
+      ticket: "mc#42",
+      text: long,
+    });
+    // an old row keyed with the short form is the same ticket
+    store.addComms({ at: NOW - 2, from: "retro", to: "crew", ticket: "#42", text: "short form" });
+    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: "mc#7", text: "elsewhere" });
+    if (mine === null) throw new Error("expected stored row");
+    const result = await read();
+    const lines = result.text.split("\n").filter((l) => l.startsWith("comms:"));
+    expect(lines).toHaveLength(2);
+    expect(lines.every((l) => l.length <= 200)).toBe(true);
+    expect(lines[0]).toContain("start word");
+    expect(lines[0]).not.toContain("end");
+    expect(result.text).toContain("short form");
+    expect(result.text).not.toContain("elsewhere");
+    const full = JSON.parse((await read({ id: mine.id })).text) as { text: string };
+    expect(full.text).toBe(long);
+    expect((await read({ id: "comms:9999" })).isError).toBe(true);
+    // another ticket and the team channel can still be named
+    expect((await read({ ticket: "#7" })).text).toContain("elsewhere");
+    expect((await read({ ticket: "mc#7" })).text).not.toContain("short form");
+    expect((await read({ channel: "crew" })).text).toContain("elsewhere");
+  });
+
+  it("gives FLIGHT the short form across tickets by default", async () => {
+    liveSeat("flight-1", "flight-1:live");
+    store.addComms({ at: NOW - 2, from: "retro", to: "crew", ticket: "mc#7", text: "seven" });
+    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: "mc#8", text: "eight" });
+    const flight = make({ config: withFlight() });
+    const text = (await read({}, flight, { seatId: "flight-1", runId: "flight-1:live" })).text;
+    expect(text).toContain("(mc#7): seven");
+    expect(text).toContain("(mc#8): eight");
   });
 
   it("reads only its direct, mentioned, replied and pinned inbox rows, newest last", async () => {
@@ -1668,16 +1714,16 @@ describe("Comms seat tools", () => {
       at: NOW - 8,
       from: "guido-1",
       to: "retro",
-      ticket: null,
+      ticket: "mc#42",
       text: "my message",
     });
-    store.addComms({ at: NOW - 7, from: "retro", to: "crew", ticket: null, text: "crew" });
-    store.addComms({ at: NOW - 6, from: "retro", to: "guido-1", ticket: null, text: "direct" });
+    store.addComms({ at: NOW - 7, from: "retro", to: "crew", ticket: "mc#42", text: "crew" });
+    store.addComms({ at: NOW - 6, from: "retro", to: "guido-1", ticket: "mc#42", text: "direct" });
     store.addComms({
       at: NOW - 5,
       from: "retro",
       to: "crew",
-      ticket: null,
+      ticket: "mc#42",
       text: "mentioned",
       mentions: ["guido-1"],
     });
@@ -1685,7 +1731,7 @@ describe("Comms seat tools", () => {
       at: NOW - 4,
       from: "retro",
       to: "guido-2",
-      ticket: null,
+      ticket: "mc#42",
       text: "reply",
       replyTo: own?.id,
     });
@@ -1693,10 +1739,10 @@ describe("Comms seat tools", () => {
       at: NOW - 3,
       from: "guido-2",
       to: "retro",
-      ticket: null,
+      ticket: "mc#42",
       text: "pin",
     });
-    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "other" });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: "mc#42", text: "other" });
     if (pinned === null) throw new Error("expected stored pin");
     store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
 
@@ -1724,18 +1770,12 @@ describe("Comms seat tools", () => {
     });
     const newer = "guido-1:newer";
     liveSeat("guido-1", newer);
-    const current = JSON.parse((await read({}, tools, { ...CTX, runId: newer })).text) as {
-      messages: { text: string }[];
-    };
-    expect(current.messages.map((message) => message.text)).not.toContain(
+    expect((await read({}, tools, { ...CTX, runId: newer })).text).not.toContain(
       "Rework the review findings.",
     );
 
     liveSeat("guido-1", RUN);
-    const resumed = JSON.parse((await read()).text) as { messages: { text: string }[] };
-    expect(resumed.messages.map((message) => message.text)).toContain(
-      "Rework the review findings.",
-    );
+    expect((await read()).text).toContain("Rework the review findings.");
   });
 
   it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
@@ -1743,39 +1783,35 @@ describe("Comms seat tools", () => {
       at: NOW - 6,
       from: "guido-1",
       to: "retro",
-      ticket: null,
+      ticket: "mc#42",
       text: "mine",
     });
-    store.addComms({ at: NOW - 5, from: "retro", to: "crew", ticket: null, text: "crew" });
+    store.addComms({ at: NOW - 5, from: "retro", to: "crew", ticket: "mc#42", text: "crew" });
     const pinned = store.addComms({
       at: NOW - 4,
       from: "guido-2",
       to: "retro",
-      ticket: null,
+      ticket: "mc#42",
       text: "pinned private",
     });
     store.addComms({
       at: NOW - 3,
       from: "retro",
       to: "guido-2",
-      ticket: null,
+      ticket: "mc#42",
       text: "reply to mine",
       replyTo: own?.id,
     });
-    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: "mc#42", text: "private" });
     if (own === null || pinned === null) throw new Error("expected stored rows");
     store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
     const pins = vi.spyOn(store, "commsPins");
     try {
-      const parsed = JSON.parse((await read({})).text) as {
-        messages: { text: string; pinned: boolean }[];
-      };
-      expect(parsed.messages.map((m) => [m.text, m.pinned])).toEqual([
-        ["mine", false],
-        ["crew", false],
-        ["pinned private", true],
-        ["reply to mine", false],
-      ]);
+      const texts = (await read({})).text
+        .split("\n")
+        .filter((l) => l.startsWith("comms:"))
+        .map((l) => l.replace(/^comms:\d+ \S+: /, ""));
+      expect(texts).toEqual(["mine", "crew", "pinned private", "reply to mine"]);
       // the pins are read once per call, not once per row
       expect(pins).toHaveBeenCalledTimes(1);
     } finally {
@@ -1783,41 +1819,56 @@ describe("Comms seat tools", () => {
     }
   });
 
-  it("cuts each message's text at MC_TEXT_MAX with the stored-text marker", async () => {
+  it("cuts a message read by id at MC_TEXT_MAX with the stored-text marker", async () => {
     const long = "é".repeat(MC_TEXT_MAX + 5);
-    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: null, text: long });
-    const parsed = JSON.parse((await read({})).text) as { messages: { text: string }[] };
-    expect(parsed.messages[0]?.text).toBe(
+    const row = store.addComms({
+      at: NOW - 1,
+      from: "retro",
+      to: "crew",
+      ticket: "mc#42",
+      text: long,
+    });
+    const parsed = JSON.parse((await read({ id: row?.id })).text) as { text: string };
+    expect(parsed.text).toBe(
       `${"é".repeat(MC_TEXT_MAX)}${commsCutMarker(MC_TEXT_MAX, MC_TEXT_MAX + 5)}`,
     );
   });
 
-  it("keeps the result under MC_COMMS_READ_MAX by leaving out the oldest messages, and says so", async () => {
-    for (let n = 0; n < 30; n++)
+  it("keeps the result under MC_COMMS_READ_MAX with 200-character lines", async () => {
+    for (let n = 0; n < 100; n++)
       store.addComms({
-        at: NOW - 100 + n,
+        at: NOW - 200 + n,
         from: "retro",
         to: "crew",
-        ticket: null,
+        ticket: "mc#42",
         text: `${n} ${"x".repeat(MC_TEXT_MAX)}`,
       });
     const result = await read({ limit: 100 });
     expect(result.text.length).toBeLessThanOrEqual(MC_COMMS_READ_MAX);
-    const parsed = JSON.parse(result.text) as {
-      omitted: number;
-      note: string;
-      messages: { text: string }[];
-    };
-    expect(parsed.omitted).toBeGreaterThan(0);
-    expect(parsed.omitted + parsed.messages.length).toBe(30);
-    expect(parsed.note).toBe(
-      `${parsed.omitted} older messages were left out to keep this under ${MC_COMMS_READ_MAX} characters.`,
-    );
-    // the newest survive
-    expect(parsed.messages.at(-1)?.text.startsWith("29 ")).toBe(true);
-    expect(parsed.messages[0]?.text.startsWith(`${parsed.omitted} `)).toBe(true);
-    // a small read has no note
-    expect(JSON.parse((await read({ limit: 2 })).text)).not.toHaveProperty("omitted");
+    const lines = result.text.split("\n").filter((l) => l.startsWith("comms:"));
+    expect(lines.every((l) => l.length <= 200)).toBe(true);
+    expect(lines.at(-1)).toContain(": 99 ");
+  });
+
+  it("stores a seat message with no ticket given under the run's ticket as repo#n", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    await send({ to: "guido-2", text: "no ticket named" });
+    await send({ to: "guido-2", text: "names seven", ref: "#7" });
+    expect(store.commsForPair("guido-1", "guido-2").map((m) => [m.text, m.ticket])).toEqual([
+      ["no ticket named", "mc#42"],
+      ["names seven", "mc#7"],
+    ]);
+  });
+
+  it("stores an identical message sent twice within a minute once and answers already sent", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    const first = await send({ to: "guido-2", text: "same", label: "handoff" });
+    const again = await send({ to: "guido-2", text: "same", label: "handoff" });
+    expect(first.text).toMatch(/^Sent comms:\d+\.$/);
+    expect(again).toEqual({ text: first.text.replace("Sent", "Already sent") });
+    expect(again.isError).toBeUndefined();
+    expect(store.commsForPair("guido-1", "guido-2")).toHaveLength(1);
+    expect(store.commsRepeatCount(0)).toBe(1);
   });
 
   it("persists every supported destination, label, ref, reply and mention", async () => {

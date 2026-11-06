@@ -812,6 +812,51 @@ describe("startRun", () => {
     expect(run?.transcriptPath).toBe(join(dir, "db", "crew", `${out.runId}.jsonl`));
   });
 
+  it("starts a run on a ticket with the ticket's answered questions in its brief", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "old-run",
+      agentId: "retro",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    const asked = store.addQuestion({
+      agentId: "retro",
+      runId: "old-run",
+      text: "Which store shape?",
+      at: 1,
+    });
+    store.answerQuestion(asked, 3);
+    store.addFlightDecision({
+      at: 3,
+      kind: "answer",
+      seatId: "retro",
+      targetRunId: null,
+      ref: null,
+      questionId: asked,
+      about: "Which store shape?",
+      decision: "Use one table, repo#n keys.",
+      basis: "operator call",
+    });
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("Already decided on this ticket");
+    expect(userLines()[0]).toContain("- Which store shape? -> Use one table, repo#n keys.");
+  });
+
   it("passes no --effort for a seat without one", async () => {
     const { sup } = make();
     sup.start();

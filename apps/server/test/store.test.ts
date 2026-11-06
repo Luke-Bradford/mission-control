@@ -3345,6 +3345,40 @@ describe("comms", () => {
   });
 });
 
+describe("question and answer retention", () => {
+  it("keeps an answered seat question and FLIGHT's answer for 365 days, other decisions and messages for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addQuestion({ agentId: "a", runId: "r", text: "Which?", at: 0 });
+    store.answerQuestion(q, 1);
+    const decision = (kind: "answer" | "note", questionId: number | null) =>
+      store.addFlightDecision({
+        at: 0,
+        kind,
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId,
+        about: "x",
+        decision: kind,
+        basis: "b",
+      });
+    decision("answer", q);
+    decision("note", null);
+    store.addComms({ at: 0, from: "a", to: "b", ticket: null, text: "old" });
+    const count = (table: string) =>
+      (
+        (store as unknown as { db: DatabaseSync }).db
+          .prepare(`SELECT COUNT(*) AS n FROM ${table}`)
+          .get() as { n: number }
+      ).n;
+    for (let i = 0; i < 20; i++) await store.pruneHistory(100 * day);
+    expect([count("seat_questions"), count("flight_decisions"), count("comms")]).toEqual([1, 1, 0]);
+    expect(store.flightDecisionsAbout("answer", "x")).toEqual([]);
+    for (let i = 0; i < 20; i++) await store.pruneHistory(367 * day);
+    expect([count("seat_questions"), count("flight_decisions")]).toEqual([0, 0]);
+  });
+});
+
 describe("test lock history", () => {
   it("keeps one row per hold, closes the last call with the supplied clock, and frees runs", () => {
     store.upsertRun(run({ ticket: "MC-1" }));

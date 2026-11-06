@@ -215,6 +215,8 @@ export const LIVE_COMMS_LIMIT = 5_000;
 export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
 export const OPERATIONAL_RETENTION_DAYS = 90;
 export const AUDIT_RETENTION_DAYS = 365;
+/** FLIGHT's answers to seats' questions, and the questions it passed on, outlive the 90-day log. */
+const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
@@ -410,6 +412,11 @@ CREATE TABLE IF NOT EXISTS comms (
   to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
+-- Each exact repeat of a stored message that was turned away, for the count in Audit.
+CREATE TABLE IF NOT EXISTS comms_repeats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL, message_id INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
 CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
 CREATE TABLE IF NOT EXISTS comms_reads (
@@ -2994,7 +3001,10 @@ export class Store {
       ["guard_hits", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["flight_wakes", "at < ?", OPERATIONAL_RETENTION_DAYS],
-      ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
+      // A seat's question to FLIGHT and FLIGHT's answer to it are kept as long as a run.
+      ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
+      ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
+      ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
@@ -3103,10 +3113,12 @@ export class Store {
       this.historyNextTable = (index + 1) % tables.length;
       const findings = table === "review_findings";
       const condition =
-        table === "comms" || table === "flight_decisions"
+        table === "comms"
           ? "at < ?"
-          : findings
-            ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
+          : table === "flight_decisions"
+            ? `at < ? AND kind NOT IN (${DECISION_KINDS_KEPT_SQL})`
+            : findings
+              ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
             AND v.ended_at < ? AND v.state IN ('reported', 'failed', 'superseded')
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
@@ -3117,7 +3129,7 @@ export class Store {
               ON p.repo_id = v.repo_id AND p.number = v.pr_number
             WHERE v.id = review_findings.review_id AND p.state = 'open'
           ))`
-            : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
+              : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
         `SELECT rowid AS id FROM ${table} WHERE rowid > ? AND ${condition}
@@ -5674,14 +5686,46 @@ export class Store {
   }
 
   /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
-  addComms(row: NewCommsRow, rate?: { since: number; limit: number }): CommsRow | null {
+  addComms(
+    row: NewCommsRow,
+    rate?: { since: number; limit: number },
+    /** An identical message stored at or after this time is returned, flagged, not stored again. */
+    repeatSince?: number,
+  ): (CommsRow & { repeat?: true }) | null {
     const text = cutCommsText(row.text);
     const replyTo =
       row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
     if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
       throw new Error("Invalid Comms message ID.");
     let id: number | null = null;
+    let repeat = false;
     this.transaction(() => {
+      if (repeatSince !== undefined) {
+        const same = this.db
+          .prepare(
+            `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND text = ? AND at >= ?
+               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ?
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get(
+            row.from,
+            row.to,
+            text,
+            repeatSince,
+            row.ticket,
+            row.label ?? null,
+            replyTo,
+            row.targetRunId ?? null,
+          ) as { id: number } | undefined;
+        if (same !== undefined) {
+          id = same.id;
+          repeat = true;
+          this.db
+            .prepare("INSERT INTO comms_repeats (at, from_id, to_id, message_id) VALUES (?,?,?,?)")
+            .run(row.at, row.from, row.to, same.id);
+          return;
+        }
+      }
       if (rate !== undefined) {
         const count = this.db
           .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND at >= ?")
@@ -5691,7 +5735,17 @@ export class Store {
       id = this.insertComms(row, text, replyTo);
       this.raiseChatterNote(row);
     }, true);
-    return id === null ? null : this.commsMessage(`comms:${id}`);
+    const stored = id === null ? null : this.commsMessage(`comms:${id}`);
+    return stored !== null && repeat ? { ...stored, repeat: true } : stored;
+  }
+
+  /** How many exact repeats of a stored message were turned away at or after `since`. */
+  commsRepeatCount(since: number): number {
+    return (
+      this.db.prepare("SELECT COUNT(*) AS n FROM comms_repeats WHERE at >= ?").get(since) as {
+        n: number;
+      }
+    ).n;
   }
 
   /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
@@ -7423,6 +7477,32 @@ export class Store {
       .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
       .all(agentId) as { at: number }[];
     return new Set(rows.map((r) => r.at));
+  }
+
+  /**
+   * The questions seats asked on a ticket that FLIGHT answered, with the answer it recorded,
+   * newest first. Every run on the ticket starts with these, so a decision is not asked twice.
+   */
+  answeredQuestionsOn(
+    ticket: string,
+    limit: number,
+  ): { id: number; question: string; answer: string; at: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT q.id, q.text AS question, d.decision AS answer, d.at AS at
+         FROM seat_questions q
+         JOIN runs r ON r.id = q.run_id
+         JOIN flight_decisions d ON d.question_id = q.id AND d.kind = 'answer'
+         WHERE r.ticket = ? AND q.answered_at IS NOT NULL
+         ORDER BY d.at DESC, d.id DESC LIMIT ?`,
+      )
+      .all(ticket, limit) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      question: r.question as string,
+      answer: r.answer as string,
+      at: r.at as number,
+    }));
   }
 
   /** Questions not yet answered, oldest first. */

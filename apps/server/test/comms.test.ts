@@ -328,11 +328,93 @@ it("keeps the newest oversized inbox row and marks delivered rows read", () => {
   expect(delivered.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
   expect(delivered).toContain(newest.id);
   expect(delivered).toContain("stored text cut");
-  expect(delivered).toContain('"unread":true');
   store.markCommsInboxRead("seat", inbox.messageIds);
 
+  // delivered once: the next line does not carry it again
   const later = commsInboxPrompt(store, "seat", "r");
-  expect(later).toContain('"unread":false');
+  expect(later).not.toContain(newest.id);
+  expect(later).not.toContain('"unread":false');
+});
+
+it("does not attach a message already sent to a seat to its next delivered line", () => {
+  const first = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "first",
+    targetRunId: "r",
+  });
+  if (first === null) throw new Error("expected stored Comms row");
+  const start = commsInboxContext(store, "seat", "r");
+  expect(start.text).toContain("first");
+  store.markCommsInboxRead("seat", start.messageIds);
+  const second = store.addComms({
+    at: 2,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "second",
+    targetRunId: "r",
+  });
+  if (second === null) throw new Error("expected stored Comms row");
+  const next = commsInboxContext(store, "seat", "r");
+  expect(next.messageIds).toEqual([second.id]);
+  expect(next.text).toContain("second");
+  expect(next.text).not.toContain("first");
+  store.markCommsInboxRead("seat", next.messageIds);
+  expect(commsInboxContext(store, "seat", "r").messageIds).toEqual([]);
+});
+
+it("stores a seat message with the sender's run ticket in repo#n form", async () => {
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    now: () => 10,
+    seatSender: true,
+    senderTicket: "mc#42",
+  };
+  const plain = await sendComms(deps, "seat", { to: "other", text: "no ticket given" });
+  expect(plain.ticket).toBe("mc#42");
+  // a short-form ref is stored in the one long form, not as #7
+  const named = await sendComms(deps, "seat", { to: "other", text: "about seven", ref: "#7" });
+  expect(named.ticket).toBe("mc#7");
+  // a reply inherits the ticket of the message it answers, in the one form
+  const old = store.addComms({ at: 1, from: "other", to: "seat", ticket: "#9", text: "old" });
+  if (old === null) throw new Error("expected stored Comms row");
+  const reply = await sendComms(deps, "seat", { to: "other", text: "reply", replyTo: old.id });
+  expect(reply.ticket).toBe("mc#9");
+});
+
+it("stores an identical message sent again within a minute once, and counts the repeat", async () => {
+  let at = 1_000;
+  const notify = vi.fn();
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    now: () => at,
+    seatSender: true,
+    notify,
+  };
+  const input = { to: "other", text: "same words", label: "handoff" as const };
+  const first = await sendComms(deps, "seat", input);
+  expect(first.repeat).toBeUndefined();
+  at += 3_000;
+  const again = await sendComms(deps, "seat", input);
+  expect(again.id).toBe(first.id);
+  expect(again.repeat).toBe(true);
+  expect(store.comms(0)).toHaveLength(1);
+  expect(store.commsRepeatCount(0)).toBe(1);
+  // the recipient is woken by the first copy only
+  expect(notify).toHaveBeenCalledTimes(1);
+  // a different recipient or text is not a repeat; the same text after the window is stored
+  await sendComms(deps, "seat", { ...input, to: "crew" });
+  at += 61_000;
+  const later = await sendComms(deps, "seat", input);
+  expect(later.id).not.toBe(first.id);
+  expect(store.comms(0)).toHaveLength(3);
 });
 
 it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", async () => {

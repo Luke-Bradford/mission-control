@@ -81,6 +81,23 @@ export interface BriefInput {
   leftoverChanges?: readonly string[];
   /** Redacted, bounded observations for explicitly declared ticket files. */
   fileContext?: string | null;
+  /** The ticket's answered questions, newest first; the brief lists ten at most. */
+  decisions?: readonly { question: string; answer: string }[];
+}
+
+/** How many of a ticket's answered questions a run's start brief lists. */
+export const BRIEF_DECISIONS_MAX = 10;
+/** The longest a decision line is, in characters. */
+export const BRIEF_DECISION_LINE_MAX = 300;
+
+/** One line for an answered question: what was asked and the choice made, cut to one short line. */
+export function decisionLine(d: { question: string; answer: string }): string {
+  const flat = (t: string) => t.replace(/\s+/g, " ").trim();
+  const line = `- ${flat(d.question)} -> ${flat(d.answer)}`;
+  const chars = Array.from(line);
+  return chars.length > BRIEF_DECISION_LINE_MAX
+    ? `${chars.slice(0, BRIEF_DECISION_LINE_MAX - 1).join("")}…`
+    : line;
 }
 
 const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``).join(", ");
@@ -176,6 +193,14 @@ export function ticketBrief(i: BriefInput): string {
     i.body,
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
+    ...((i.decisions?.length ?? 0) > 0
+      ? [
+          "## Already decided on this ticket",
+          "These questions were answered. Do not ask them again.",
+          ...(i.decisions ?? []).slice(0, BRIEF_DECISIONS_MAX).map(decisionLine),
+          "",
+        ]
+      : []),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     last,
