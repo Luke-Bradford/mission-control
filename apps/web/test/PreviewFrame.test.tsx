@@ -158,6 +158,17 @@ describe("Open preview", () => {
     }
   });
 
+  it("shows no frame when the open answer is another repo's build", async () => {
+    routes([ask("q1", "shop-app#4001")], {
+      "/api/design-previews": [view(4001)],
+      "POST /api/design-previews/4001/open": view(4001, { repoId: "eBull" }),
+    });
+    render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open preview" }));
+    expect(await screen.findByText("That preview is gone.")).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
   it("says the preview is gone when the hub no longer has it, and shows no frame", async () => {
     routes([ask("q1", "shop-app#4001")], { "/api/design-previews": [view(4001)] });
     render(<Needs item="q1" />);
