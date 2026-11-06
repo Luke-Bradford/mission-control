@@ -129,6 +129,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
+  FLIGHT_POINTER_FED_KINDS,
   FLIGHT_POINTER_KINDS,
   FLIGHT_POINTER_TARGET_MAX,
   FLIGHT_POINTERS_MAX,
@@ -181,6 +182,7 @@ import {
   ledgerNoKeyText,
   ledgerOwnerText,
   ledgerPointerText,
+  ledgerPointerUnfedText,
   ledgerTitleText,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -3090,8 +3092,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       person: (t) => LOGIN.test(t),
       metric: (t) => (METRIC_IDS as readonly string[]).includes(t),
     };
-    for (const p of a.pointers ?? [])
+    for (const p of a.pointers ?? []) {
+      if (!FLIGHT_POINTER_FED_KINDS.includes(p.kind)) return fail(ledgerPointerUnfedText(p.kind));
       if (!pointable[p.kind](p.target)) return fail(ledgerPointerText(p.kind, p.target));
+    }
     const at = now();
     const entries = store.flightLedger(session.id);
     const old = entries.find((e) => e.key === a.key);

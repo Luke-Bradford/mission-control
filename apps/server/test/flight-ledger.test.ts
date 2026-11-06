@@ -11,6 +11,7 @@ import {
   FLIGHT_LEDGER_KEEP_MS,
   FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_MOVED_LISTED,
   FLIGHT_POINTER_KINDS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_VIEW_LIMIT,
@@ -927,6 +928,32 @@ describe("ledger pointers", () => {
 });
 
 describe("the wake digest's moved pointers", () => {
+  it("caps the list, and leaves out a PR the digest's prs already lists, reading both", () => {
+    const targets = Array.from({ length: FLIGHT_MOVED_LISTED + 5 }, (_, n) => `mc#${100 + n}`);
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [...targets, "mc#7"].map((target) => ({
+          kind: "pr" as const,
+          target,
+          changedAt: null,
+          change: null,
+          readAt: null,
+        })),
+      }),
+      0,
+    );
+    store.upsertPullRequests("mc", [pr(7, { state: "open", mergedAt: null })], NOW);
+    for (const t of [...targets, "mc#7"])
+      store.markFlightPointers("pr", t, "CI failing", NOW + MIN);
+    const state = flightState({ config, store, busy: [], now: NOW + 2 * MIN });
+    expect(state.moved).toHaveLength(FLIGHT_MOVED_LISTED);
+    expect(state.moved?.some((m) => m.target === "mc#7")).toBe(false);
+    markPointersShown(store, config, state, NOW + 3 * MIN);
+    // the PR's pointer was covered and is read; the five past the cap wait for the next wake
+    expect(store.movedFlightPointers("s1")).toHaveLength(5);
+  });
+
   it("lists a moved pointer once, and not again after FLIGHT has read it", () => {
     store.putFlightLedgerEntry(
       "s1",

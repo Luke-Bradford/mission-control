@@ -7684,23 +7684,25 @@ describe("track", () => {
       ["pr", "nope#7"],
       ["pr", "7"],
       ["ticket", "mc#0"],
-      ["seat", "nobody-9"],
-      ["repo", "nope"],
-      ["person", "bad_login"],
-      ["metric", "madeUp"],
     ] as const) {
       const r = await call("track", { ...entry, pointers: [{ kind, target }] });
       expect(r.isError, `${kind} ${target}`).toBe(true);
       expect(r.text).toContain(`a ${kind} pointer is`);
     }
     expect(store.flightLedger("s1")).toEqual([]);
+    for (const [kind, target] of [
+      ["seat", "guido-1"],
+      ["repo", "mc"],
+      ["person", "octocat"],
+      ["metric", "merged"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, kind).toBe(true);
+      expect(r.text).toContain(`no hub event moves a ${kind} pointer`);
+    }
     const good = [
       { kind: "pr", target: "mc#7" },
       { kind: "ticket", target: "mc#8" },
-      { kind: "seat", target: "guido-1" },
-      { kind: "repo", target: "mc" },
-      { kind: "person", target: "octocat" },
-      { kind: "metric", target: "merged" },
     ];
     expect((await call("track", { ...entry, pointers: good })).isError).toBeUndefined();
   });

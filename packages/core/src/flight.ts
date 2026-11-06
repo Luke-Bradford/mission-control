@@ -290,6 +290,10 @@ export const FOR_THE_CONTROLLER = "For the controller:";
 export const FLIGHT_POINTER_KINDS = ["pr", "ticket", "seat", "repo", "person", "metric"] as const;
 export type FlightPointerKind = (typeof FLIGHT_POINTER_KINDS)[number];
 export const FLIGHT_POINTERS_MAX = 10;
+/** The kinds a hub event marks today; `track` refuses the rest rather than hold a pointer that never moves. */
+export const FLIGHT_POINTER_FED_KINDS: readonly FlightPointerKind[] = ["pr", "ticket"];
+/** The most moved pointers one digest lists; the rest stay unread for the next wake. */
+export const FLIGHT_MOVED_LISTED = 20;
 export const FLIGHT_POINTER_TARGET_MAX = 100;
 export const FLIGHT_POINTER_CHANGE_MAX = 120;
 /** A pointer as FLIGHT names it on `track`: what it watches. */
@@ -298,6 +302,8 @@ export interface FlightPointerRef {
   /** A PR or ticket as `repo#n`, a seat id, a repo id, a person's login or a metric id. */
   target: string;
 }
+export const ledgerPointerUnfedText = (kind: FlightPointerKind): string =>
+  `Not tracked: no hub event moves a ${kind} pointer yet, so it would never change. Point at a ${FLIGHT_POINTER_FED_KINDS.join(" or ")}.`;
 export const ledgerPointerText = (kind: FlightPointerKind, target: string): string => {
   const form: Record<FlightPointerKind, string> = {
     pr: "<repo id>#<number>, e.g. mc#7",
@@ -437,7 +443,7 @@ export const headlineText = (n: number): string =>
 export const headlineSavedText = (n: number): string =>
   `Saved your headline (${n} of ${FLIGHT_HEADLINE_MAX} characters).`;
 export const TRACK_DESCRIPTION =
-  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it. pointers names what the entry watches (a pr or ticket as repo#n, a seat, repo, person or metric): the hub marks a pointer when that thing changes, and your next wake lists the pointers that moved. A new pointers list replaces the old one.";
+  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it. pointers names what the entry watches (a pr or ticket as repo#n): the hub marks a pointer when that thing changes, and your next wake lists the pointers that moved. Only pr and ticket pointers are accepted today: the hub has no event for the other kinds. A new pointers list replaces the old one.";
 export const UNTRACK_DESCRIPTION =
   "Close a ledger entry by key with its outcome and status done (default) or dropped.";
 export const LEDGER_DESCRIPTION =
@@ -1187,7 +1193,7 @@ export interface FlightState {
   breaker: { tripped: boolean; reason: string | null };
   /** Pending scheduled work; only due entries prompt a wake. */
   planned?: FlightScheduleEntry[];
-  /** Pointers whose target changed since FLIGHT last read them; absent when none did. */
+  /** Pointers whose target changed since FLIGHT last read them (at most FLIGHT_MOVED_LISTED, and not a PR already in `prs`); absent when none did. */
   moved?: FlightMovedPointer[];
   /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
@@ -1203,6 +1209,8 @@ export interface FlightWakeInputs {
   fresh: string[];
   /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
   operator?: string[];
+  /** Moved PR pointers the digest leaves out because `prs` lists that PR: stamped read with `moved`. */
+  movedCovered?: FlightMovedPointer[];
 }
 
 export interface FlightWakeList<T> {
