@@ -1395,10 +1395,10 @@ describe("Needs banner", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen in FLIGHT →",
+      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen Needs you →",
     );
     fireEvent.click(btn);
-    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
+    expect(window.location.pathname + window.location.hash).toBe("/needs-you");
   });
 });
 
@@ -1415,7 +1415,7 @@ describe("Needs banner, acknowledged items", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "3things need you2 decisions1 stall· 1 not acknowledgedOpen in FLIGHT →",
+      "3things need you2 decisions1 stall· 1 not acknowledgedOpen Needs you →",
     );
   });
 
@@ -1430,7 +1430,7 @@ describe("Needs banner, acknowledged items", () => {
     });
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
-    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen in FLIGHT →");
+    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen Needs you →");
   });
 
   it("is all clear when every item is someone else's", async () => {

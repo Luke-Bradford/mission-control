@@ -4,7 +4,7 @@
  * wiring, and a guard against a second submit while one is out.
  * It carries no request, cache or authorisation logic: callers keep using apiPost/apiPut.
  */
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useId, useLayoutEffect, useRef } from "react";
 import "./forms.css";
 
 /** One known local problem: the id of the field it belongs to, and what to tell the operator. */
@@ -66,7 +66,9 @@ export function ErrorSummary({
   const ref = useRef<HTMLElement>(null);
   const titleId = useId();
   const shown = issues.length > 0 || message !== null;
-  useEffect(() => {
+  // A layout effect, so focus is on the summary in the same commit that shows it. A passive effect
+  // can run a task later when the save finishes outside an event, leaving focus on the old control.
+  useLayoutEffect(() => {
     if (focusKey === 0 || !shown) return;
     ref.current?.focus();
     ref.current?.scrollIntoView?.({ block: "nearest" });

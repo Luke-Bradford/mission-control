@@ -1171,3 +1171,36 @@ describe("the Work line of an idle seat with an open run", () => {
     expect(await work({ loop: null })).not.toContain("Run open");
   });
 });
+
+it("folds several free seats into one row that opens into full rows, and keeps busy seats full size", async () => {
+  stub(
+    [
+      seatRow({ id: "free-a", hudState: "idle", run: null }),
+      seatRow({ id: "free-b", hudState: "idle", run: null }),
+      seatRow({ id: "free-c", hudState: "idle", run: null }),
+    ],
+    true,
+    [],
+  );
+  const { container } = render(<AgentsPanel />);
+  const toggle = await screen.findByRole("button", { name: /3 free/ });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(container.querySelector(".free-seats")?.textContent).toContain("FREE-A");
+  expect(container.querySelectorAll(".trow:not(.head):not(.flight):not(.free-seats)")).toHaveLength(
+    0,
+  );
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(container.querySelectorAll(".trow:not(.head):not(.flight):not(.free-seats)")).toHaveLength(
+    3,
+  );
+});
+
+it("does not fold a single free seat", async () => {
+  stub([seatRow({ id: "free-a", hudState: "idle", run: null })], true, []);
+  const { container } = render(<AgentsPanel />);
+  await waitFor(() =>
+    expect(container.querySelectorAll(".trow:not(.head)").length).toBeGreaterThan(1),
+  );
+  expect(container.querySelector(".free-seats")).toBeNull();
+});

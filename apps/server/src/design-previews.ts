@@ -11,10 +11,10 @@ import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "no
 import { extname, join, sep } from "node:path";
 import type { DesignPreviewView } from "@mc/core";
 import Fastify, { type FastifyInstance } from "fastify";
+import { DESIGN_PREVIEW_PORT } from "./design-preview-port.ts";
 import { webHandler } from "./web.ts";
 
-/** Outside `PREVIEW_PORTS` (7431..7439), which the branch-preview hubs use. */
-export const DESIGN_PREVIEW_PORT = 7440;
+export { DESIGN_PREVIEW_PORT };
 export const DESIGN_PREVIEW_IDLE_MS = 60 * 60_000;
 export const DESIGN_PREVIEW_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 export const DESIGN_PREVIEW_MAX_STORED = 5;

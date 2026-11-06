@@ -5,7 +5,7 @@ import { KnowsTab } from "../flight/KnowsTab.tsx";
 import { NeedsYouTab } from "../flight/NeedsYouTab.tsx";
 import { StatusStrip } from "../flight/Situation.tsx";
 import { FLIGHT_TABS, type FlightTab, TAB_LABEL, tabForHash } from "../flight/tabs.ts";
-import { navigate, useHash } from "../router.ts";
+import { LEGACY_NEEDS_HASHES, NEEDS_YOU_PATH, navigate, useHash } from "../router.ts";
 import "../flight/flight.css";
 
 export { tabForHash };
@@ -68,6 +68,11 @@ export function Flight() {
   // A link to a section opens its tab, on load and when the fragment changes on this page.
   useEffect(() => {
     if (hash === "") return;
+    // The asks moved to their own page; an old link to them follows.
+    if (LEGACY_NEEDS_HASHES.includes(hash)) {
+      navigate(NEEDS_YOU_PATH, { replace: true });
+      return;
+    }
     setTab(tabForHash(hash));
     // The target was hidden while its tab was, so the browser could not scroll to it.
     requestAnimationFrame(() => {

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
@@ -30,7 +31,7 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
-import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
+import { Dock, useNeedsBeside, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
 import { HelpModal } from "./shell/HelpModal.tsx";
@@ -55,7 +56,11 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
+const CommsChartPage = lazy(() =>
+  import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
+);
 const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
+const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
 const TicketPage = lazy(() =>
@@ -147,9 +152,10 @@ function Shell({
   const dock = useDock();
   const overview = shown.page === "overview";
   const overviewOverlay = useOverviewDockOverlay(overview, dock);
+  const needsBeside = useNeedsBeside(overview);
   // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
   // keeps its own workspace instead of duplicating it beside the page.
-  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
+  const showDock = tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -163,14 +169,16 @@ function Shell({
     .filter(Boolean)
     .join(" ");
   const agentId = shown.page === "agent" ? shown.id : null;
+  // The tab title carries the count, so a waiting ask shows from another tab or a background window.
+  const waiting = useNeedsCount().n;
   useEffect(() => {
     const base = demo ? DEMO_TITLE : TITLE;
-    if (!popout && !demo) return;
-    document.title = popout && agentId !== null ? `${agentId} · ${base}` : base;
+    const lead = waiting && !demo ? `(${waiting}) ` : "";
+    document.title = popout && agentId !== null ? `${agentId} · ${base}` : `${lead}${base}`;
     return () => {
       document.title = TITLE;
     };
-  }, [popout, agentId, demo]);
+  }, [popout, agentId, demo, waiting]);
   // Popped out (the Agent header's Pop out): the Agent page alone, with its toasts.
   if (popout) {
     return (
@@ -226,7 +234,7 @@ function Shell({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock coversPage={overviewOverlay} />}
+        {showDock && <Dock coversPage={overviewOverlay} needsBeside={needsBeside} />}
       </div>
       <Footer />
       <Toast />
@@ -293,6 +301,9 @@ function PageView({ route: r }: { route: Route }) {
     case "overview":
       page = <Overview />;
       break;
+    case "needs":
+      page = <Needs item={r.item} />;
+      break;
     case "flight":
       page = <Flight />;
       break;
@@ -310,6 +321,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
+      break;
+    case "commsChart":
+      page = <CommsChartPage />;
       break;
     case "telemetry":
       page = <Telemetry />;
@@ -368,7 +382,7 @@ function useShellKeys(current: Route, popout: boolean) {
         const { current: on, popout: isPopout } = latest.current;
         // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
         // their workspace; every other page has the same site-wide rail.
-        if (isPopout || on.page === "comms") return;
+        if (isPopout || tabOf(on) === "comms") return;
         if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
         else toggleDock();
       },

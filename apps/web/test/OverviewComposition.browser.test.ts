@@ -261,11 +261,18 @@ describeRendered("Overview composition", () => {
       () => ({
         search: location.search,
         hash: location.hash,
+        path: location.pathname,
         flyout: !!document.querySelector(".flyout"),
       }),
       undefined,
     );
-    expect(opened.flyout || opened.search.includes("item") || opened.hash !== "").toBe(true);
+    // an ask opens on the Needs you page; any other item still opens the flyout
+    expect(
+      opened.flyout ||
+        opened.search.includes("item") ||
+        opened.hash !== "" ||
+        opened.path.startsWith("/needs-you"),
+    ).toBe(true);
     expect(page.errors()).toEqual([]);
   }, 60_000);
 

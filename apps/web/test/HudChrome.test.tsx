@@ -292,7 +292,7 @@ describe("HUD chrome", () => {
   it("never lights the Board tab: Needs you is the one lamp", async () => {
     stub({ "/api/attention": [item({ kind: "pr", escalationId: null })] });
     render(<Header page="board" />);
-    await screen.findByRole("button", { name: /^Needs you 1:/ });
+    await screen.findByRole("link", { name: "Needs you: 1 waiting" });
     const board = within(screen.getByRole("navigation", { name: "Pages" })).getByRole("link", {
       name: /^Board/,
     });
