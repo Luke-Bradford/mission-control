@@ -148,10 +148,11 @@ export function TeamsSources({ config }: { config: ConfigView | undefined }) {
               </span>
               <button
                 type="button"
+                aria-label={`Remove ${feed.name}`}
                 disabled={busy}
                 onClick={() => setSelection(selected.filter((_, i) => i !== index))}
               >
-                Remove {feed.name}
+                Remove
               </button>
             </li>
           ))}

@@ -736,6 +736,17 @@
   overflow-wrap: anywhere;
 }
 
+/* A long feed name wraps inside its row instead of widening the form. */
+.teams-sources .fgroup,
+.teams-sources .tlist {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.teams-sources .tlist li,
+.teams-sources .tlist li > span {
+  min-width: 0;
+}
+
 .ptrack .gate,
 .pcard.gate {
   border: 1px solid var(--warn-mark);
