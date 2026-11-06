@@ -1023,9 +1023,33 @@ describe("Comms API", () => {
       const all = await comms.inject({ method: "GET", url: "/api/comms/feed" });
       expect(all.statusCode).toBe(200);
       expect(all.json().messages).toEqual([
-        { id: third.id, at: third.at, from: "alpha", to: "crew", label: null, ref: null },
-        { id: second.id, at: second.at, from: "beta", to: "alpha", label: null, ref: null },
-        { id: first.id, at: first.at, from: "alpha", to: "beta", label: "question", ref: "PR 1" },
+        {
+          id: third.id,
+          at: third.at,
+          from: "alpha",
+          to: "crew",
+          label: null,
+          ref: null,
+          text: "three",
+        },
+        {
+          id: second.id,
+          at: second.at,
+          from: "beta",
+          to: "alpha",
+          label: null,
+          ref: null,
+          text: "two",
+        },
+        {
+          id: first.id,
+          at: first.at,
+          from: "alpha",
+          to: "beta",
+          label: "question",
+          ref: "PR 1",
+          text: "one",
+        },
       ]);
       const after = await comms.inject({
         method: "GET",
@@ -1034,6 +1058,9 @@ describe("Comms API", () => {
       expect(after.json().messages.map((m: { id: string }) => m.id)).toEqual([third.id, second.id]);
       const capped = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=1" });
       expect(capped.json().messages.map((m: { id: string }) => m.id)).toEqual([third.id]);
+      commsRow("alpha", "beta", "y".repeat(500));
+      const long = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=1" });
+      expect(long.json().messages[0].text).toHaveLength(280);
       const tooMany = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=100000" });
       expect(tooMany.statusCode).toBe(400);
       const bad = await comms.inject({ method: "GET", url: "/api/comms/feed?since=nope" });

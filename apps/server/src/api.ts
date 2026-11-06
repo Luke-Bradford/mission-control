@@ -1707,7 +1707,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
         const sinceId = query.data.since === undefined ? 0 : commsMessageNumber(query.data.since);
         if (sinceId === null) return reply.code(400).send({ error: "invalid Comms message id" });
-        return { messages: store.commsFeed(sinceId, query.data.limit ?? COMMS_FEED_DEFAULT) };
+        return {
+          messages: store.commsFeed(
+            sinceId,
+            query.data.limit ?? COMMS_FEED_DEFAULT,
+            COMMS_OPEN_TEXT_MAX,
+          ),
+        };
       });
       // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
       api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
