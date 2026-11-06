@@ -221,6 +221,10 @@ If the run that wrote the message has ended, the page says so before sending. Th
 to the seat now on that ticket, or to FLIGHT when there is none. This applies to replies only,
 never to an answer (rule 6).
 
+The hub stores an exact repeat once. A second copy to the same recipient on the same ticket
+within a minute gets the answer "already sent", with the first copy's state. On 6 November one
+answer was stored three times in three seconds.
+
 ### 8. Hub messages are notices
 
 - Kind `notice`, sender `hub`.
@@ -343,6 +347,33 @@ Four smaller points:
 - A refused question names the missing part, so FLIGHT fixes it in one try.
 
 The Comms graph already totals tokens per link. Audit uses that figure per ticket (rule 9).
+
+### No model reads messages to sort them
+
+The operator asked whether a small model such as Haiku should check each seat's messages. For
+seats the answer is no **(controller's call)**:
+
+- After item 1, hub code picks a seat's messages by address, ticket and kind. That costs no tokens.
+- A model in that path adds a call, and a summary can lose an exact id or error text.
+- What is left is small. A seat's inbox averaged 3,750 characters a read.
+
+A small model might pay off in front of FLIGHT, and that needs proof first. FLIGHT woke 249 times
+in the 24 hours to 6 November and cost 137 of the crew's 354 dollars the day before. The hub
+records why FLIGHT woke, not whether it then did anything. Item 10 adds that record. If many wakes
+for one reason end with no action, a hub rule or a small model can take that reason. The operator
+decides after seeing the figures.
+
+### Also measured, and passed to Audit
+
+These are agent reports, not messages, so this design does not change them. The controller files
+them as Audit rows with the figures. Each is for the same 24 hours.
+
+| Tool | Calls | Text | What stands out |
+|---|---|---|---|
+| `report_findings` (a reviewer's report) | 79 | 811,000 characters written, 10,000 a call | The largest text the crew writes. What it checked is 154,000; what works well is 43,000 |
+| `report_evidence` (a developer's report) | 140 in 29 runs | 388,000 characters written | 39% of the Done-when text repeats the report before it |
+| `read_ticket` | 71 | 433,000 characters returned, 6,100 a call | Not looked into |
+| `preview_browser` | 98 | 949,000 characters returned | Not looked into |
 
 ## Kept outside any session
 
@@ -536,7 +567,8 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 7. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation, ticket search;
    the Ticket page gains the missing kinds.
 8. Notices in plain words (rule 8).
-9. Audit rows for message problems (rule 9).
+9. Audit rows for message problems (rule 9), and for the four tools under "Also measured".
+10. The hub records whether each FLIGHT wake led to an action, by reason. Hub code, no model.
 
 Items 3, 6 and 7 change what a page looks like. Each follows "How the pages get designed"
 before its build ticket starts.
