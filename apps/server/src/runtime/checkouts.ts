@@ -1126,7 +1126,10 @@ async function installReusedPnpm(
   }
   let importers: Promise<Set<string>> | undefined;
   const nestedModules = await verifyInstall(s, PNPM_TOOL, true, async (rel, read) => {
-    if (importers === undefined) importers = pnpmWorkspaceImporters(read, base);
+    if (importers === undefined)
+      importers = branchBase(s.inClone, s.base, s.rev, s.subject).then((from) =>
+        pnpmWorkspaceImporters(read, from),
+      );
     if (!(await importers).has(dirname(rel))) return false;
     const packageJson = join(s.path, dirname(rel), "package.json");
     const manifest = await lstat(packageJson).catch(() => null);
