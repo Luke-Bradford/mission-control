@@ -2558,6 +2558,121 @@ describe("set aside", () => {
     });
   });
 
+  describe("a question the operator must answer", () => {
+    const waiting = (over: Partial<LoopSnapshot> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, operatorAsk: true, ...over },
+        { phase: "working", cardFor: "working:0" },
+      );
+      return {
+        ...s,
+        seat: { ...s.seat, state: "idle" as const, inTurn: false, openQuestion: true },
+      };
+    };
+
+    it("parks the ticket: the run leaves its seat so the seat can take the next one", () => {
+      const r = reconcile(waiting());
+      expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+    });
+
+    it("keeps a question that is not the operator's, a running turn or a missing seat", () => {
+      const w = waiting();
+      const cases: [string, LoopSnapshot][] = [
+        ["FLIGHT's question", waiting({ operatorAsk: false })],
+        ["in turn", { ...w, seat: { ...w.seat, inTurn: true } }],
+        ["not idle", { ...w, seat: { ...w.seat, state: "running" } }],
+        ["seat does not hold the run", { ...w, seat: { ...w.seat, holdsRun: false } }],
+        ["ended", waiting({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("parks a run in ci or review too, and brings it back once answered", () => {
+      const inReview = (over: Partial<LoopSnapshot> = {}) => {
+        const s = base({ operatorAsk: true, ...over });
+        return { ...s, seat: { ...s.seat, openQuestion: true } };
+      };
+      const inCi = () => {
+        const s = base(
+          { operatorAsk: true, pr: pr({ ci: "pending" }), review: facts([]) },
+          { phase: "ci", pushFor: SHA, pushStartedAt: NOW - 60_000, cardFor: "ci:0" },
+        );
+        return { ...s, seat: { ...s.seat, openQuestion: true } };
+      };
+      for (const [name, s] of [
+        ["review", inReview()],
+        ["ci", inCi()],
+      ] as const) {
+        expect(kindsOf(reconcile(s).actions), name).toContain("set-aside");
+        const off = (operatorAsk: boolean) => {
+          const x = {
+            ...s,
+            operatorAsk,
+            seat: {
+              ...s.seat,
+              state: "stopped" as const,
+              inTurn: true,
+              holdsRun: false,
+              openQuestion: operatorAsk,
+            },
+          };
+          return reconcile({
+            ...x,
+            loop: { ...x.loop, aside: { worktree: "/w/r1", wake: false, ask: 3 } },
+          });
+        };
+        expect(off(true).loop.aside?.wake, name).toBe(false);
+        expect(kindsOf(off(true).actions), name).not.toContain("wake");
+        expect(off(false).loop.aside?.wake, name).toBe(true);
+        expect(kindsOf(off(false).actions), name).toContain("wake");
+      }
+    });
+
+    it("sends the answer line before the woken run is set aside again", () => {
+      const pending = { key: "answer:r1:3", text: "x" };
+      const review = () => {
+        const s = base({ operatorAsk: false }, { pendingLine: pending });
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      const ci = () => {
+        const s = base(
+          { operatorAsk: false, pr: pr({ ci: "pending" }), review: facts([]) },
+          {
+            phase: "ci",
+            pushFor: SHA,
+            pushStartedAt: NOW - 60_000,
+            cardFor: "ci:0",
+            pendingLine: pending,
+          },
+        );
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      for (const [name, s] of [
+        ["review", review()],
+        ["ci", ci()],
+      ] as const) {
+        const kinds = kindsOf(reconcile(s).actions);
+        expect(kinds, name).toContain("send");
+        expect(kinds, name).not.toContain("set-aside");
+      }
+    });
+
+    it("stays off the seat while the operator has not answered, and comes back after", () => {
+      const parked = (operatorAsk: boolean) => {
+        const s = off({ operatorAsk, review: null }, { phase: "working", ...asideOf() });
+        return { ...s, seat: { ...s.seat, openQuestion: operatorAsk } };
+      };
+      const held = reconcile(parked(true));
+      expect(held.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+      expect(kindsOf(held.actions)).not.toContain("wake");
+      const answered = reconcile(parked(false));
+      expect(answered.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+      expect(kindsOf(answered.actions)).toContain("wake");
+    });
+  });
+
   it("not set aside", () => {
     const b = base();
     const cases: [string, LoopSnapshot][] = [

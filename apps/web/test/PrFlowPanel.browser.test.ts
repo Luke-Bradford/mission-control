@@ -53,7 +53,7 @@ describeRendered("FLIGHT PR flow panel", () => {
       expect(
         await page.evaluate(() => {
           const flow = document.getElementById("prFlowP");
-          const needs = document.getElementById("askP");
+          const needs = document.querySelector(".flight-needs-link");
           return (
             flow?.previousElementSibling === needs &&
             !!document.querySelector(".pr-flow-warn") &&

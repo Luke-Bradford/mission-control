@@ -7,6 +7,8 @@ import {
   AWAY_BUG_VERIFIED,
   AWAY_SETTING,
   type AwayDiff,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
   asideForReworkEventText,
   asideInCiEventText,
@@ -108,6 +110,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { writeCrewPause } from "../src/crew-pause.ts";
+import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
   type Engine,
@@ -7378,6 +7381,82 @@ describe("the engine runs reviews", () => {
       expect(store.seatSession(SEAT)?.runId).toBe(b);
     });
 
+    it("a ticket waiting on the operator's answer leaves its seat for the next ticket, and returns once answered", async () => {
+      h.asideOn = true;
+      const b = "guido-1:b";
+      building(b, 7);
+      const id = store.addQuestion({ agentId: SEAT, runId: b, text: "Which provider?", at: clock });
+      // asked, but FLIGHT has not passed it to the operator: the seat keeps the ticket
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([]);
+      // with the operator: the ticket is parked off the seat, which is offered the next ticket
+      store.passQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([b]);
+      // the freed seat is offered its next ticket
+      await vi.waitFor(() => expect(h.taken).toEqual([SEAT]));
+      await vi.waitFor(() =>
+        expect(store.run(b)?.loop?.aside).toEqual({
+          worktree: expect.any(String),
+          wake: false,
+          ask: id,
+        }),
+      );
+      await h.engine.reconcileRun(b);
+      expect(h.wakes).toEqual([]);
+      // answered: the ticket comes back
+      store.answerQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+      // one line carries the answer to the woken run, and it is not sent twice
+      await vi.waitFor(() => expect(h.sent.map((m) => m.text)).toEqual([answeredLineText]));
+      await h.engine.reconcileRun(b);
+      await h.engine.reconcileRun(b);
+      expect(h.sent.map((m) => m.text)).toEqual([answeredLineText]);
+      expect(sentKeys()).toEqual([answerLineKey(b, id)]);
+    });
+
+    it("a question FLIGHT takes back wakes the run with no false answer line", async () => {
+      h.asideOn = true;
+      const b = "guido-1:b";
+      building(b, 7);
+      const id = store.addQuestion({ agentId: SEAT, runId: b, text: "Which provider?", at: clock });
+      store.passQuestion(id, clock);
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([b]);
+      store.unpassQuestion(id);
+      await h.engine.reconcileRun(b);
+      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
+      await h.engine.reconcileRun(b);
+      expect(h.sent).toEqual([]);
+    });
+
+    it("a review parked on the operator's question does not displace the ticket being built", async () => {
+      await setAside();
+      const id = store.addQuestion({
+        agentId: SEAT,
+        runId: RUN,
+        text: "Which provider?",
+        at: clock,
+      });
+      store.passQuestion(id, clock);
+      setLoop({ aside: { worktree: WT, wake: false, ask: id } });
+      const b = "guido-1:b";
+      building(b, 7);
+      reported(first().id, [finding("Important")]);
+      for (const r of [RUN, b, RUN, b]) await h.engine.reconcileRun(r);
+      // the findings wait for the answer: the seat keeps building b, and nothing is woken
+      expect(h.asides).toEqual([RUN]);
+      expect(h.wakes).toEqual([]);
+      expect(store.run(b)?.loop?.aside ?? null).toBeNull();
+      // answered: the parked run is due back, and the findings follow it
+      // (the seat is busy with b, so the wake is refused and the mark stays)
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      store.answerQuestion(id, clock);
+      await h.engine.reconcileRun(RUN);
+      expect(asideRun()?.wake).toBe(true);
+    });
+
     it("two set-aside reworks come back oldest first", async () => {
       await setAside();
       const younger = "guido-1:younger";
@@ -7420,6 +7499,22 @@ describe("the engine runs reviews", () => {
       setPr({ ci: "pending" });
       await h.engine.reconcileRun(RUN);
     }
+
+    it("a CI failure on a run parked on the operator's question is not due back until it is answered", async () => {
+      await inCi();
+      const id = store.addQuestion({
+        agentId: SEAT,
+        runId: RUN,
+        text: "Which provider?",
+        at: clock,
+      });
+      store.passQuestion(id, clock);
+      setLoop({ aside: { worktree: join(dir, "wt"), wake: false, ask: id }, ciFailedSha: SHA });
+      setPr({ ci: "failing" });
+      expect(asideWakeDue(store, need(store.run(RUN)))).toBe(false);
+      setLoop({ aside: { worktree: join(dir, "wt"), wake: false } });
+      expect(asideWakeDue(store, need(store.run(RUN)))).toBe(true);
+    });
 
     it("freed in CI: the seat takes its next ticket", async () => {
       await inCi();

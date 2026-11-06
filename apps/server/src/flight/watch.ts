@@ -17,6 +17,7 @@ import {
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
@@ -59,6 +60,7 @@ import {
   flightState,
   flightWake,
   flightWakes,
+  idleSeatLine,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -71,6 +73,7 @@ import {
   recordNextFlightWake,
   recordWakeReasons,
   routineOnly,
+  trackIdleSeat,
   unhandledReasons,
   type WakeReason,
   wakeFacts,
@@ -358,7 +361,42 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     return all.length === 0 ? null : { wokeAt, reasons: all };
   };
 
+  /**
+   * Seats idle with tickets open are timed and logged whether or not FLIGHT can be woken now: it
+   * may be in a turn, rate limited or rotating, and those hours still count. Runs after the
+   * pass, however it ended, so the pass reads the state in its usual order.
+   */
+  async function noteIdleSeats(): Promise<void> {
+    if (stopped || !enabled) return;
+    const found = flightSeat(config);
+    if (found === null) return;
+    const t = now();
+    try {
+      const state = flightState({
+        config,
+        store,
+        busy: supervisor.busy(),
+        now: t,
+        hubLogin: deps.login ?? null,
+        lock: deps.lockState?.(),
+        areas: await deps.areas?.(found.session.repoId),
+      });
+      trackIdleSeat(store, state, t);
+      logIdleSeats(state);
+    } catch (e) {
+      log(`flight watch: idle seats: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
   async function pass(): Promise<void> {
+    try {
+      await passOnce();
+    } finally {
+      await noteIdleSeats();
+    }
+  }
+
+  async function passOnce(): Promise<void> {
     if (stopped) return;
     const found = flightSeat(config);
     // with no FLIGHT seat or the watch off, there is no outage of its own to report
@@ -370,7 +408,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const t = now();
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
-
     let added = false;
     let nextDue = Infinity;
     for (const item of operatorItems(
@@ -696,6 +733,24 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   let gapTimer: NodeJS.Timeout | null = null;
+  /** Each idle seat's last logged 30-minute period: one line per seat period. */
+  const loggedIdle = new Map<string, number>();
+  /** Every period over 30 minutes with a free seat and open tickets: how long, and why. */
+  function logIdleSeats(state: FlightState): void {
+    const idle = state.wake?.idle;
+    for (const id of [...loggedIdle.keys()]) {
+      if (!idle?.seats.some((x) => x.id === id)) loggedIdle.delete(id);
+    }
+    if (idle === undefined) return;
+    const due = idle.seats.filter((x) => {
+      const period = Math.floor(x.ms / FLIGHT_IDLE_SEAT_WAKE_MS);
+      return period >= 1 && (loggedIdle.get(x.id) ?? 0) < period;
+    });
+    if (due.length === 0) return;
+    for (const x of due) loggedIdle.set(x.id, Math.floor(x.ms / FLIGHT_IDLE_SEAT_WAKE_MS));
+    log(idleSeatLine(idle, due));
+  }
+
   /** Checks again once the wake gap has passed; one pending re-check at a time. */
   /** When the pending timer fires, in the watch's clock. */
   let gapDueAt = 0;

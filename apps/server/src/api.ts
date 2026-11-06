@@ -536,7 +536,9 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
+    Partial<
+      Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold" | "reconcileRun">
+    >;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -609,6 +611,11 @@ const MessageBody = z.strictObject({
     .max(COMMS_MESSAGE_MAX)
     .refine((t) => t.trim() !== "", "must not be blank"),
   interrupt: z.boolean().optional(),
+  /**
+   * The seat question this text answers (a Needs-you reply to an ask item names it). Only then does
+   * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
+   */
+  question: z.number().int().positive().optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4270,6 +4277,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         MessageBody,
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
+          // A reply that names a passed question whose run was set aside is that run's answer, not
+          // the run now on the seat's: the text waits in the run's inbox, only that question
+          // closes, and the engine wakes the run. Nothing is written to the run on the seat.
+          const named = b.question === undefined ? null : store.question(b.question);
+          if (b.question !== undefined && (named === null || named.answeredAt !== null)) {
+            throw new SupervisorError(409, "That question is already closed.");
+          }
+          if (named !== null && named.agentId !== id) {
+            throw new SupervisorError(409, "That question belongs to another seat.");
+          }
+          const parked =
+            named !== null &&
+            named.agentId === id &&
+            named.passedAt !== null &&
+            named.runId !== runId &&
+            store.run(named.runId)?.endedAt === null &&
+            store.run(named.runId)?.loop?.aside != null
+              ? named
+              : undefined;
+          if (parked !== undefined) {
+            const asideRun = store.run(parked.runId);
+            try {
+              await sendComms(
+                {
+                  store,
+                  crew: commsCrew,
+                  knownSecrets: deps.knownSecrets ?? (async () => []),
+                  now,
+                },
+                COMMS_CAPCOM,
+                {
+                  to: id,
+                  text: b.text,
+                  ref: asideRun?.ticket ?? undefined,
+                  targetRunId: parked.runId,
+                },
+              );
+            } catch (e) {
+              throw new SupervisorError(
+                400,
+                e instanceof Error ? e.message : "Comms message refused.",
+              );
+            }
+            store.answerQuestion(parked.id, now());
+            bus.emit("attention");
+            await deps.engine?.reconcileRun?.(parked.runId);
+            return { ok: true };
+          }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
             let delivered = false;
@@ -5549,7 +5604,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ?? reply.code(404).send({ error: "Item is no longer open." });
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
         attentionItems(
           config,
@@ -5576,7 +5631,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("attention");
         return { ok: true };
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)
           return reply.code(400).send({ error: "Expected an empty object." });
@@ -5773,7 +5828,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
+      // Reader: apps/web/src/pages/Needs.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),

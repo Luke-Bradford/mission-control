@@ -5,6 +5,7 @@ import { NextActionsPanel } from "../src/overview/NextActionsPanel.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
+import { Needs } from "../src/pages/Needs.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
 import { Header } from "../src/shell/Header.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
@@ -160,13 +161,14 @@ describe("one Needs-you count", () => {
         <Comms item={null} view={{ kind: "flight" }} />
         <BoardPage repoId={null} ticket={null} />
         <Flight />
+        <Needs item={null} />
       </>,
     );
-    await screen.findByRole("button", { name: /^Needs you \d/ });
+    await screen.findByRole("link", { name: /^Needs you: \d+ waiting$/ });
     await screen.findByText("Ticket 5");
 
     const counts = () => {
-      const header = screen.getByRole("button", { name: /^Needs you \d+:/ });
+      const header = screen.getByRole("link", { name: /^Needs you: \d+ waiting$/ });
       const chat = screen.getByRole("button", { name: /^FLIGHT chat/ });
       const dock = container.querySelector("#dockWaiting .dwh")?.textContent;
       const comms = within(
@@ -184,12 +186,12 @@ describe("one Needs-you count", () => {
       const panel = container.querySelector("#overviewNextP");
       const waiting = panel?.querySelector(".ph")?.textContent;
       const listed =
-        (panel?.querySelectorAll(".needs-row").length ?? 0) +
-        Number(panel?.querySelector(".needs-more")?.textContent?.replace(/\D/g, "") || 0);
+        (panel?.querySelectorAll(".next-row").length ?? 0) +
+        Number(panel?.querySelector(".next-more")?.textContent?.replace(/\D/g, "") || 0);
       const pulse = screen
         .getByRole("button", { name: /^Needs you: \d+$/ })
         .querySelector("b")?.textContent;
-      const asks = container.querySelectorAll('#askP [data-testid="ask-row"]');
+      const asks = container.querySelectorAll("#page-needs .needs-list .needs-row");
       return {
         header: header.querySelector("b")?.textContent,
         chat: chat.getAttribute("aria-label"),

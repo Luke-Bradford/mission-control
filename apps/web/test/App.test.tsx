@@ -5,7 +5,7 @@ import { navigate } from "../src/router.ts";
 import { toggleDock } from "../src/shell/overlays.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, REPOS } from "./fixtures.ts";
+import { CONFIG, crewRow, item, REPOS } from "./fixtures.ts";
 
 class StubEventSource {
   addEventListener() {}
@@ -52,6 +52,7 @@ describe("App", () => {
 
   it.each([
     ["/", "Overview"],
+    ["/needs-you", "Needs you"],
     ["/flight", "Flight"],
     ["/board", "Board"],
     ["/agent", "Agents"],
@@ -68,6 +69,21 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
   });
 
+  it("carries the waiting count in the tab title, and has no dock on the Needs you page", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/settings/crew-pause": null,
+      "/api/attention": [
+        item({ key: "a", kind: "question", escalationId: null, text: "One" }),
+        item({ key: "b", kind: "question", escalationId: null, text: "Two" }),
+      ],
+    });
+    const { container } = at("/needs-you");
+    await waitFor(() => expect(document.title).toBe("(2) Mission Control"));
+    expect(container.querySelector("#dock")).toBeNull();
+  });
+
   it("skips from the Board link to the board content", async () => {
     at("/board");
     const board = await screen.findByRole("heading", { level: 2, name: "Work board" });
@@ -77,6 +93,7 @@ describe("App", () => {
 
   it.each([
     ["/", "page-overview", "Overview"],
+    ["/needs-you", "page-needs", "Needs you —"],
     ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],
     ["/agent", "page-agent", "Agents"],
@@ -103,7 +120,7 @@ describe("App", () => {
 
   it.each([
     ["/agents/shop-app-ta", "/agent/shop-app-ta", ""],
-    ["/needs/shop-app%233227", "/comms/esc%3Ashop-app%233227", ""],
+    ["/needs/shop-app%233227", "/needs-you/esc%3Ashop-app%233227", ""],
     ["/config", "/setup/sources", "#glossary"],
     ["/settings#glossary", "/setup/sources", "#glossary"],
     ["/settings", "/setup", ""],

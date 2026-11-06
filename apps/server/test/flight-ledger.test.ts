@@ -644,6 +644,7 @@ describe("retrospective measures", () => {
       productPass: {
         pages: [
           "/",
+          "/needs-you",
           "/flight",
           "/board",
           "/map",
