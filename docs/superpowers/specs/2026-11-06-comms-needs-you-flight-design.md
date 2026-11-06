@@ -616,7 +616,7 @@ follow the `hud-design` checklist.
   runs on its own address, as #1458 sets out.
 - A stored message for a stopped FLIGHT goes only to FLIGHT, on its next start.
 - Items 1, 2, 4, 5 and 8 change hard-rule files. These are the seat tools, the engine, FLIGHT's
-  tools and start brief, and the role files. Each needs clearance.
+  tools and start brief, the question checks, and the role files. Each needs clearance.
 
 ## Left to the developer
 
