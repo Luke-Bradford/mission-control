@@ -123,10 +123,11 @@ describe("foldTranscript", () => {
     expect(f.costUsd).toBe(2.4711);
     expect(f.resultCount).toBe(1);
     expect(f.isError).toBe(false);
-    // msg_fixture_1 seen twice (last wins: out 120) + msg_fixture_2 once
+    // Input and cache are the streamed messages (msg_fixture_1 seen twice, last wins); output is
+    // the one result line's own count (the streamed 162 is not the final figure).
     expect(f.tokens).toEqual({
       input: 4,
-      output: 162,
+      output: 1,
       cacheRead: 12628 + 70733,
       cacheCreate: 58105 + 3447,
     });
@@ -159,7 +160,7 @@ describe("foldTranscript", () => {
       1,
     );
     expect(f.model).toBe("claude-opus-5-5");
-    expect(f.tokens.output).toBe(162);
+    expect(f.tokens.output).toBe(1); // the result line's count, not the streamed 162
   });
 
   it("uses the last result cost and last branch; flags errors", () => {
@@ -617,7 +618,7 @@ describe("foldTranscript digest", () => {
   it("keeps folding rate_limit_event and tokens alongside the digest", () => {
     const f = foldTranscript(null, agentLines, 7);
     expect(f.rateLimits.map((r) => r.window)).toEqual(["5h", "7d"]);
-    expect(f.tokens).toEqual({ input: 120, output: 155, cacheRead: 25_700, cacheCreate: 1350 });
+    expect(f.tokens).toEqual({ input: 120, output: 1, cacheRead: 25_700, cacheCreate: 1350 });
   });
 
   it("returns an empty digest for no lines", () => {

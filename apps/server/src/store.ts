@@ -13,6 +13,10 @@ import type {
   QaHistoryEntry,
   QaReport,
   RunHandoff,
+  RunTokenAudit,
+  TokenCall,
+  TokenCounts,
+  TokenSourceAdd,
 } from "@mc/core";
 import {
   type AccountId,
@@ -294,6 +298,22 @@ CREATE TABLE IF NOT EXISTS prompt_sections (
   PRIMARY KEY (run_id, wake, section)
 );
 CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
+CREATE TABLE IF NOT EXISTS run_token_audit (
+  run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
+  median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+  output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
+  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_token_calls (
+  run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
+  PRIMARY KEY (run_id, idx)
+);
+CREATE TABLE IF NOT EXISTS controller_usage (
+  session_id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, calls INTEGER NOT NULL,
+  input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+  output INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
@@ -2177,6 +2197,166 @@ export class Store {
       "INSERT OR IGNORE INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
+  }
+
+  /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
+  saveRunTokenAudit(
+    runId: string,
+    at: number,
+    audit: RunTokenAudit,
+    calls: readonly TokenCall[],
+  ): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM run_token_calls WHERE run_id = ?").run(runId);
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
+             cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
+             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          at,
+          audit.calls,
+          audit.peakContext,
+          audit.medianContext,
+          audit.cacheRead,
+          audit.cacheWrite,
+          audit.output,
+          audit.rewrites,
+          audit.rewriteTokens,
+          audit.readAfterReport,
+          JSON.stringify(audit.bySource),
+          JSON.stringify(audit.byCommand),
+        );
+      const insert = this.db.prepare(
+        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      calls.forEach((c, i) =>
+        insert.run(
+          runId,
+          i,
+          c.context,
+          c.cacheRead,
+          c.cacheWrite,
+          c.output,
+          JSON.stringify(c.added),
+        ),
+      );
+    });
+  }
+
+  /** A run's stored calls, in order. */
+  runTokenCalls(runId: string): TokenCall[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
+        .all(runId) as Row[]
+    ).map((r) => ({
+      context: r.context as number,
+      cacheRead: r.cache_read as number,
+      cacheWrite: r.cache_write as number,
+      output: r.output as number,
+      added: JSON.parse(r.added as string) as TokenSourceAdd[],
+    }));
+  }
+
+  /** Ended runs started since `since` with no token audit yet, newest first. */
+  runsToAuditTokens(since: number, limit: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE ended_at IS NOT NULL AND started_at >= ?
+             AND id NOT IN (SELECT run_id FROM run_token_audit)
+           ORDER BY started_at DESC, seq DESC LIMIT ?`,
+        )
+        .all(since, limit) as Row[]
+    ).map(toRun);
+  }
+
+  /** The stored token audits of runs that started since `since`, with the run each belongs to. */
+  runTokenAudits(since: number): { run: Run; audit: RunTokenAudit }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
+           a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
+           a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+         FROM run_token_audit a JOIN runs r ON r.id = a.run_id
+         WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      run: toRun(r),
+      audit: {
+        calls: r.a_calls as number,
+        peakContext: r.a_peak as number,
+        medianContext: r.a_median as number,
+        cacheRead: r.a_cache_read as number,
+        cacheWrite: r.a_cache_write as number,
+        output: r.a_output as number,
+        rewrites: r.a_rewrites as number,
+        rewriteTokens: r.a_rewrite_tokens as number,
+        readAfterReport: r.a_after as number | null,
+        bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
+        byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+      },
+    }));
+  }
+
+  /** Prompt-section tokens by section for prompts recorded since `since`. */
+  promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
+    return this.db
+      .prepare(
+        "SELECT section, SUM(tokens) AS tokens FROM prompt_sections WHERE at >= ? GROUP BY section",
+      )
+      .all(since) as { section: PromptSection; tokens: number }[];
+  }
+
+  /** Stores one controller session's usage numbers (never text); a session read again is replaced. */
+  saveControllerUsage(u: {
+    sessionId: string;
+    startedAt: number;
+    calls: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO controller_usage
+           (session_id, started_at, calls, input, cache_read, cache_write, output)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(u.sessionId, u.startedAt, u.calls, u.input, u.cacheRead, u.cacheWrite, u.output);
+  }
+
+  controllerUsageSince(since: number): {
+    sessions: number;
+    calls: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+  } {
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS sessions, COALESCE(SUM(calls), 0) AS calls, COALESCE(SUM(input), 0) AS input,
+           COALESCE(SUM(cache_read), 0) AS cacheRead, COALESCE(SUM(cache_write), 0) AS cacheWrite,
+           COALESCE(SUM(output), 0) AS output FROM controller_usage WHERE started_at >= ?`,
+      )
+      .get(since) as Row;
+    return r as never;
+  }
+
+  /** Whether a controller session's usage is stored. */
+  hasControllerUsage(sessionId: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM controller_usage WHERE session_id = ?").get(sessionId) !==
+      undefined
+    );
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */

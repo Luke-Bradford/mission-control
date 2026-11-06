@@ -141,6 +141,8 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
+  TOKEN_AUDIT_DAYS_DEFAULT,
+  TOKEN_AUDIT_DAYS_MAX,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -383,6 +385,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { tokenAuditView } from "./token-audit-view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -3762,6 +3765,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ]),
         );
         return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
+      });
+      // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
+      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
+        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+          return reply
+            .code(400)
+            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+        }
+        return tokenAuditView(store, config, now(), days);
       });
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
