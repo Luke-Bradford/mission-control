@@ -9,7 +9,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { reviewerOf } from "../src/engine/engine.ts";
-import { askExternalReview } from "../src/external-pr-control.ts";
+import {
+  askExternalReview,
+  externalReviewAsked,
+  seedExternalReviewAsks,
+  withdrawExternalReview,
+} from "../src/external-pr-control.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prUat } from "../src/pr-uat.ts";
@@ -63,7 +68,7 @@ beforeEach(() => {
   store = new Store(":memory:");
   store.upsertPullRequests("sample", [pr()], 1);
   // a review is asked-for work: the operator or FLIGHT asked this hub to review PR 7
-  askExternalReview(store, "sample", 7, "CAPCOM", 1);
+  askExternalReview(store, "sample", 7, "CAPCOM", 1, SHA);
 });
 afterEach(() => store.close());
 
@@ -110,6 +115,55 @@ describe("external PR review subjects", () => {
     await service.sync();
     expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toEqual([]);
     expect(h.writes).toEqual([]);
+  });
+
+  it("reviews an ended run's PR with no ask, because a run here made the branch", async () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    store.upsertRun({
+      id: "r1",
+      agentId: "guido-1",
+      repoId: "sample",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: "feature/sample",
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      reviewId: null,
+    });
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
+  it("an ask withdrawn stops the review", async () => {
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    expect(service.wanted(row)).toBe(true);
+    expect(withdrawExternalReview(store, "sample", 7)).toBe(true);
+    expect(withdrawExternalReview(store, "sample", 7)).toBe(false);
+    expect(service.wanted(row)).toBe(false);
+  });
+
+  it("Update seeds an ask for each review already in flight, once", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+    expect(externalReviewAsked(store, "sample", 7, NEXT)).toBe(false);
+    withdrawExternalReview(store, "sample", 7);
+    seedExternalReviewAsks(store, 6);
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
   });
 
   it("an older queued row with no ask is no longer wanted", async () => {
@@ -410,6 +464,10 @@ describe("external PR review subjects", () => {
     h.current({
       head: { sha: NEXT, ref: "feature/sample", repo: { full_name: "example/sample" } },
     });
+    // the ask bound the old head: the push is not reviewed until someone asks for it
+    await service.sync();
+    expect(store.reviewsIn(["queued"]).map((row) => row.sha)).toEqual([SHA]);
+    askExternalReview(store, "sample", 7, "CAPCOM", 3, NEXT);
     await service.sync();
     expect(service.wanted(old)).toBe(false);
     expect(store.reviewsIn(["queued"]).map((row) => row.sha)).toEqual([SHA, NEXT]);

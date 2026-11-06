@@ -576,7 +576,7 @@ describe("two hubs on one repo", () => {
     } finally {
       await app.close();
     }
-    expect(externalReviewAsked(store, "mc", 110)).toBe(true);
+    expect(externalReviewAsked(store, "mc", 110, SHA(110))).toBe(true);
     const reviews = createExternalReviews({
       config: cfg,
       store,

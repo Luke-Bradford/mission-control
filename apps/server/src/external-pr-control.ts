@@ -78,19 +78,60 @@ export function externalControlReason(
 
 const askKey = (repo: string, pr: number) => `external-review-ask:${repo}#${pr}`;
 
-/** Whether the operator or FLIGHT asked this hub for a QA review of the PR. The ask is in this store only. */
-export function externalReviewAsked(store: Store, repo: string, pr: number): boolean {
-  return store.getSetting(askKey(repo, pr)) !== null;
+interface Ask {
+  at: number;
+  by: string;
+  sha: string;
 }
 
-/** Records the ask; asking again keeps the first. It stands for later heads of the PR. */
+function readAsk(store: Store, repo: string, pr: number): Ask | null {
+  const value = store.getSetting(askKey(repo, pr));
+  if (value === null) return null;
+  try {
+    const ask = JSON.parse(value) as Ask;
+    return typeof ask.sha === "string" ? ask : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the operator, FLIGHT or an Update asked this hub for a QA review of this head of the
+ * PR. The ask is in this store only and binds one head: a push needs a new ask.
+ */
+export function externalReviewAsked(store: Store, repo: string, pr: number, sha: string): boolean {
+  return readAsk(store, repo, pr)?.sha === sha;
+}
+
+/** Records the ask for `sha`; asking again for the same head changes nothing, a new head replaces it. */
 export function askExternalReview(
   store: Store,
   repo: string,
   pr: number,
-  by: "FLIGHT" | "CAPCOM",
+  by: "FLIGHT" | "CAPCOM" | "Update",
   at: number,
+  sha: string,
 ): void {
-  if (externalReviewAsked(store, repo, pr)) return;
-  store.setSetting(askKey(repo, pr), JSON.stringify({ at, by }));
+  if (externalReviewAsked(store, repo, pr, sha)) return;
+  store.setSetting(askKey(repo, pr), JSON.stringify({ at, by, sha }));
+}
+
+/** Takes the ask back; true when there was one. */
+export function withdrawExternalReview(store: Store, repo: string, pr: number): boolean {
+  if (store.getSetting(askKey(repo, pr)) === null) return false;
+  store.deleteSetting(askKey(repo, pr));
+  return true;
+}
+
+/**
+ * Update seeds the asks of reviews already in flight, so a hub that updates keeps finishing them
+ * (a pending mc/review status is never left behind). Runs once; later asks are the operator's.
+ */
+export function seedExternalReviewAsks(store: Store, at: number): void {
+  const seeded = "external-review-asks-seeded";
+  if (store.getSetting(seeded) !== null) return;
+  for (const row of store.externalReviewRows()) {
+    askExternalReview(store, row.repoId, row.prNumber, "Update", at, row.sha);
+  }
+  store.setSetting(seeded, String(at));
 }

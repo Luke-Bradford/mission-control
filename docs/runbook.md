@@ -1484,9 +1484,15 @@ status) are limited to work it owns, so a hub with no runs writes nothing:
   no run here is not released by this hub when its wait resolves.
 - A PR opened by hand has no run. Ask this hub to review it with
   `POST /api/prs/:repo/:number/review-request { sha }` (FLIGHT: `mc operator`). The ask is kept in
-  this hub's store only, stands for later heads of the PR, and is what starts its QA review, its
-  `mc/review` status, its card follow and its screenshot evidence. Asking again changes nothing.
-  Without an ask the PR is read and shown, never written to.
+  this hub's store only and binds the head `sha` it was made for: a push needs a new ask, so an
+  ask on another hub's PR does not follow that PR's later heads. It starts the QA review, the
+  `mc/review` status, the card follow and the screenshot evidence for that head. Asking again for
+  the same head changes nothing and writes no Activity line. Take it back with
+  `{ sha, action: "withdraw" }` (it needs no GitHub read, so it works on a closed PR).
+  Without an ask the PR is read and shown, never written to. A PR whose branch a run in this
+  hub's store made, ended or not, needs no ask for its QA review.
+- On Update, the hub records an ask once for each external review already in flight, so a review
+  that was running is finished and its pending `mc/review` status is not left behind.
 - A preview never moves a card: it polls GitHub and shows it.
 - Hubs still read and show every PR, including another hub's.
 

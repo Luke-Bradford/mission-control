@@ -10,8 +10,8 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
-import { externalReviewAsked } from "./external-pr-control.ts";
 import type { GhRunner } from "./mcp/gh.ts";
+import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
 import { qaReportGitSummary } from "./qa-reports.ts";
@@ -145,6 +145,9 @@ export function createExternalReviews(deps: {
 }): ExternalReviews {
   const { store } = deps;
   let syncing = false;
+  /** A review is this hub's work: its branch has a run here, or someone asked it to review this head. */
+  const mine = (repoId: string, pr: Pick<PullRequestView, "number" | "branch" | "headSha">) =>
+    ownsPr(store, repoId, pr);
   function wanted(row: ReviewRow): boolean {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     const pr = store.pullRequests(row.repoId).find((p) => p.number === row.prNumber);
@@ -152,11 +155,11 @@ export function createExternalReviews(deps: {
       isExternalReview(row) &&
       (deps.enabled?.() ?? true) &&
       repo?.autonomy === "merge" &&
-      externalReviewAsked(store, row.repoId, row.prNumber) &&
       pr?.state === "open" &&
       !pr.isDraft &&
       pr.headSha === row.sha &&
-      !branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket)
+      !branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket) &&
+      mine(row.repoId, pr)
     );
   }
 
@@ -289,8 +292,8 @@ export function createExternalReviews(deps: {
           for (const pr of store.pullRequests(repo.id)) {
             if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
             if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) continue;
-            // a review is asked-for work: without an ask in this store the PR is left alone
-            if (!externalReviewAsked(store, repo.id, pr.number)) continue;
+            // a review is this hub's work: a run here made the branch, or someone asked for this head
+            if (!mine(repo.id, pr)) continue;
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);

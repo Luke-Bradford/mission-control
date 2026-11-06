@@ -5178,6 +5178,16 @@ export class Store {
     );
   }
 
+  /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
+  externalReviewRows(): ReviewRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
+      )
+      .all() as Row[];
+    return rows.map(toReview);
+  }
+
   reviewsOfRun(authorRunId: string): ReviewRow[] {
     const rows = this.db
       .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")

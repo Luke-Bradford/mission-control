@@ -269,13 +269,27 @@ describe("external PR controller merge", () => {
       operatorToken: TOKEN,
     });
     try {
-      expect(externalReviewAsked(store, "sample", 7)).toBe(false);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
       expect((await post(app)).statusCode).toBe(200);
       expect((await post(app)).statusCode).toBe(200);
-      expect(externalReviewAsked(store, "sample", 7)).toBe(true);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      // asking again for the same head writes no second Activity line
       expect(
         store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
-      ).not.toHaveLength(0);
+      ).toHaveLength(1);
+      // a withdrawn ask is gone, and asking is repeatable after it
+      const withdraw = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/prs/sample/7/review-request",
+          headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+          payload: JSON.stringify({ sha: SHA, action: "withdraw" }),
+        });
+      expect((await withdraw()).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+      expect((await withdraw()).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
       store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
       expect((await post(app)).statusCode).toBe(404);
     } finally {
@@ -301,7 +315,7 @@ describe("external PR controller merge", () => {
         payload: JSON.stringify({ sha: SHA }),
       });
       expect(r.statusCode).toBe(409);
-      expect(externalReviewAsked(store, "sample", 7)).toBe(false);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
     } finally {
       await app.close();
     }

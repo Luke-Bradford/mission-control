@@ -14,13 +14,16 @@ export function ownsBranch(store: Store, repoId: RepoId, branch: string): boolea
   return store.runsOnBranch(repoId, branch).some((r) => r.reviewId == null);
 }
 
-/** The PR's branch is owned, or someone asked this hub to review the PR. */
+/** The PR's branch is owned, or someone asked this hub to review this head of the PR. */
 export function ownsPr(
   store: Store,
   repoId: RepoId,
-  pr: Pick<PullRequestView, "number" | "branch">,
+  pr: Pick<PullRequestView, "number" | "branch" | "headSha">,
 ): boolean {
-  return ownsBranch(store, repoId, pr.branch) || externalReviewAsked(store, repoId, pr.number);
+  return (
+    ownsBranch(store, repoId, pr.branch) ||
+    (pr.headSha != null && externalReviewAsked(store, repoId, pr.number, pr.headSha))
+  );
 }
 
 /** A build run has the ticket, or a real run in this store moved the card. */

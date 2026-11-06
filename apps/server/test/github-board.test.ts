@@ -18,6 +18,7 @@ import {
 import { Store } from "../src/store.ts";
 
 const NOW = 1_000_000_000;
+const SHA40 = "a".repeat(40);
 
 const STATUS_OPTIONS = [
   { id: "O_todo", name: "Todo" },
@@ -414,7 +415,7 @@ describe("followPrs", () => {
     createdAt: 1,
     updatedAt: 1,
     mergedAt: null,
-    headSha: null,
+    headSha: SHA40,
     mergeable: null,
     ...over,
   });
@@ -451,7 +452,8 @@ describe("followPrs", () => {
     store.replaceBoard("mc", [{ ...card(status), closed }]);
     store.upsertPullRequests("mc", prs, NOW);
     // a hub follows only the PRs it owns; asking for a review is how a hand-opened PR becomes one
-    if (owned) for (const p of prs) askExternalReview(store, "mc", p.number, "CAPCOM", NOW);
+    if (owned)
+      for (const p of prs) askExternalReview(store, "mc", p.number, "CAPCOM", NOW, p.headSha ?? "");
     await followPrs({ gql: b.gql, store, config: cfg, now: () => now }, "mc");
     return b;
   }
@@ -706,7 +708,9 @@ describe("followPrs", () => {
     expect(store.pullRequests("mc")[0]).toMatchObject({ closingIssues: [], ticket: "mc#7" });
     const b = fakeBoard({ itemStatus: "O_review" });
     store.replaceBoard("mc", [{ ...card("In Review"), closed: true }]);
-    askExternalReview(store, "mc", 91, "CAPCOM", NOW);
+    // an old row has no head yet; the next poll gives it one, and the ask binds to that head
+    store.upsertPullRequests("mc", [{ ...store.pullRequests("mc")[0]!, headSha: SHA40 }], NOW);
+    askExternalReview(store, "mc", 91, "CAPCOM", NOW, SHA40);
     expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
     expect(b.state.card).toBe("O_done");
   });
@@ -759,7 +763,7 @@ describe("followPrs", () => {
     b.state.mutationFailures = [new GqlTransportError("github: HTTP 403", 403)];
     store.replaceBoard("mc", [card("Todo")]);
     store.upsertPullRequests("mc", [pr()], NOW);
-    askExternalReview(store, "mc", 91, "CAPCOM", NOW);
+    askExternalReview(store, "mc", 91, "CAPCOM", NOW, SHA40);
     const deps = { gql: b.gql, store, config, now: () => now };
     expect(await followPrs(deps, "mc")).toBe(false);
     expect(store.boardMovesOfRun("pr:mc#91")).toMatchObject([{ state: "failed", at: NOW }]);
