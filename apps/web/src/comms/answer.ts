@@ -4,6 +4,8 @@ import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { type FlightSeat, flightOffText } from "../flight/flightTypes.ts";
 import { toggleDock } from "../shell/overlays.ts";
 
+const ASK_PREFIX = "ask:";
+
 /** Where an answer to a Needs-you item goes. */
 export type AnswerTarget =
   | { to: "github"; url: string | null }
@@ -32,6 +34,12 @@ export function flightText(key: string, about: string, body: string): string {
   return `${itemLead(key, about)}\n\n${body}`;
 }
 
+/** The question id behind an `ask:<id>` item, or null for any other kind. */
+export function askedQuestion(key: string): string | null {
+  const id = key.startsWith(ASK_PREFIX) ? key.slice(ASK_PREFIX.length) : "";
+  return id === "" ? null : id;
+}
+
 const failure = (e: unknown): string => (e instanceof ApiError ? e.message : "server unreachable");
 
 /** Sends `body` to the target. Resolves to an error message to show, or null when it went through. */
@@ -45,7 +53,12 @@ export async function sendAnswer(
   if (target.to === "github") return null;
   try {
     if (target.to === "seat") {
-      await apiPost(ACTIONS.seatMessage(target.seatId), { text: body });
+      // Name the question, so the answer reaches the run that asked it even if another run is on the seat now.
+      const question = askedQuestion(item.key);
+      await apiPost(
+        ACTIONS.seatMessage(target.seatId),
+        question === null ? { text: body } : { text: body, question },
+      );
     } else {
       if (!flight?.live) return flightOffText(flight);
       await apiPost(ACTIONS.seatMessage(flight.id), { text: flightText(item.key, about, body) });

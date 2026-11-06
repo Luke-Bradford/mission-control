@@ -364,7 +364,7 @@ describe("ItemPanel, acting on an item", () => {
     const fn = acting([SEAT_Q]);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174." }]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174.", question: "7" }]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
@@ -400,7 +400,7 @@ describe("ItemPanel, acting on an item", () => {
     const fn = acting([SEAT_Q], STOPPED);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174." }]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174.", question: "7" }]),
     );
     const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
     expect(ask.disabled).toBe(true);
@@ -424,6 +424,18 @@ describe("ItemPanel, acting on an item", () => {
     await waitFor(() => expect(document.querySelector("#discuss")).toBeNull());
     expect(posts(fn, "/api/attention/note%3Ablocked%3Ar1%3A0/dismiss")).toEqual([{}]);
     expect(fn.mock.calls.filter(([p]) => p === "/api/attention").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("a refused seat answer (409) shows the server's message on the card", async () => {
+    const refusal = "That question is no longer open on this seat.";
+    const fn = acting([SEAT_Q], {
+      "POST /api/seats/mc-dev-1/message": () => ({ status: 409, body: { error: refusal } }),
+    });
+    fireEvent.click(await enabled("5174"));
+    expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
+    expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
+      { text: "Use port 5174.", question: "7" },
+    ]);
   });
 
   it("Dismiss shows the refusal text and keeps the panel", async () => {
@@ -482,7 +494,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.change(input, { target: { value: " port? " } });
     fireEvent.click(screen.getByRole("button", { name: "Reply" }));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "port?" }]),
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "port?", question: "7" }]),
     );
     await waitFor(() => expect(input.value).toBe(""));
     fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
