@@ -223,7 +223,7 @@ never to an answer (rule 6).
 
 The hub stores an exact repeat once. A second copy to the same recipient on the same ticket
 within a minute gets the answer "already sent", with the first copy's state. On 6 November one
-answer was stored three times in three seconds.
+message to a seat was stored three times in three seconds.
 
 ### 8. Hub messages are notices
 
@@ -358,7 +358,8 @@ seats the answer is no **(controller's call)**:
 - What is left is small. A seat's inbox averaged 3,750 characters a read.
 
 A small model might pay off in front of FLIGHT, and that needs proof first. FLIGHT woke 249 times
-in the 24 hours to 6 November and cost 137 of the crew's 354 dollars the day before. The hub
+in the 24 hours to 6 November. On the latest day the hub reports, FLIGHT cost 137 of the crew's
+354 dollars. The hub
 records why FLIGHT woke, not whether it then did anything. Item 10 adds that record. If many wakes
 for one reason end with no action, a hub rule or a small model can take that reason. The operator
 decides after seeing the figures.
