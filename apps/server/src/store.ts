@@ -1960,6 +1960,8 @@ export class Store {
     // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
     this.addColumn("comms", "from_run_id", "TEXT");
     this.addColumn("comms", "pr", "INTEGER");
+    // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
+    this.addColumn("comms", "wake_failed_at", "INTEGER");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -5844,6 +5846,23 @@ export class Store {
       replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
       mentions,
     };
+  }
+
+  markCommsWakeFailed(id: string, at: number): void {
+    const n = commsMessageNumber(id);
+    if (n !== null) this.db.prepare("UPDATE comms SET wake_failed_at = ? WHERE id = ?").run(at, n);
+  }
+  clearCommsWakeFailed(id: string): void {
+    const n = commsMessageNumber(id);
+    if (n !== null) this.db.prepare("UPDATE comms SET wake_failed_at = NULL WHERE id = ?").run(n);
+  }
+  commsWakeFailed(id: string): boolean {
+    const n = commsMessageNumber(id);
+    return (
+      n !== null &&
+      this.db.prepare("SELECT wake_failed_at FROM comms WHERE id = ?").get(n)?.wake_failed_at !=
+        null
+    );
   }
 
   /** The run and PR the hub stamped on a message; nulls for a message it did not stamp. */

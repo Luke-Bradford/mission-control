@@ -144,10 +144,22 @@ export async function sendComms(
   if (!deps.seatSender) stored = storeMessage();
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   const sent: SentComms = message(stored);
-  // An exact repeat was stored once already: it wakes no one a second time.
-  if (stored.repeat) return { ...sent, repeat: true };
+  // An exact repeat was stored once already. It wakes no one a second time, unless the first wake
+  // failed: then the retry wakes them now.
+  if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
   // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat.
-  if (sent.label !== null) for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+  if (sent.label !== null) {
+    try {
+      for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+    } catch (e) {
+      deps.store.markCommsWakeFailed(sent.id, now);
+      throw e;
+    }
+  }
+  if (stored.repeat) {
+    deps.store.clearCommsWakeFailed(sent.id);
+    return { ...sent, repeat: true };
+  }
   return sent;
 }
 

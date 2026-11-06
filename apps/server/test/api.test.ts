@@ -6649,6 +6649,18 @@ describe("crew routes", () => {
     expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(1);
   });
 
+  it("wakes the seat on a retry when the first wake failed, storing the message once", async () => {
+    supervisorFail = new SupervisorError(409, "GUIDO-1 is busy");
+    expect((await post5("message", { text: "stop now", interrupt: true })).statusCode).toBe(409);
+    supervisorFail = null;
+    expect((await post5("message", { text: "stop now", interrupt: true })).statusCode).toBe(200);
+    expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(2);
+    expect(store.comms(0).filter((c) => c.text === "stop now")).toHaveLength(1);
+    // the wake now succeeded: a third identical send wakes no one
+    expect((await post5("message", { text: "stop now", interrupt: true })).statusCode).toBe(200);
+    expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(2);
+  });
+
   it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
