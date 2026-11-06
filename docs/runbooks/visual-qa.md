@@ -98,6 +98,8 @@ are different evidence from seeing and using the result.
 | Charts and meaning | Is this chart appropriate? Are units, time, scale, denominator, missing data and freshness clear? Is its aspect ratio useful? Is information repeated? |
 | Responsive behavior | Does the layout recompose across the declared viewports without squeezing important content, enlarging empty plots or losing accepted strengths? |
 | Interaction and states | Do keyboard focus, error/retry, forms, filters, readers and overlays work in the real shell? |
+| Arrival | Does the page look the same when reached the way the operator reaches it (from the Overview, by nav or link) as when opened by URL? Page stylesheets load lazily and stay loaded, so another page's rules can reach this one. |
+| Content | Is every item for this page's reader? Name any item meant for someone else, and any unformatted internal id or epoch time where the reader expects a name or a time. On a page for decisions, such as Needs you, also name any item with nothing to decide. |
 
 Write a concrete observation and an image or interaction receipt for each applicable dimension.
 “No overflow”, “all tests pass” and an image count are insufficient design observations.
@@ -114,6 +116,7 @@ Give a reproduction, affected source and image, impact and concrete correction o
 Independent rendering is preferred for final application QA. If the reviewer only inspects supplied
 images, say so. That can assess visible composition, but cannot establish unperformed interactions.
 If the required render cannot run, record the missing coverage and reason; do not claim a rendered pass.
+A rendered page is your own render, or images of the current head (PR evidence or the author's). Images show composition, not interactions: say which [I] items they cannot establish. With neither render nor images, record the `design` verdict as fail with one Important finding that asks for images of this head; the author can produce them. A failed design holds FLIGHT's accept: only the operator accepts past it. Record `design` on every visible change, every round: a later review with no verdict keeps an earlier fail, and a later pass clears it.
 
 ## Retain context and detail
 
