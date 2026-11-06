@@ -2233,7 +2233,7 @@ export class Store {
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
-      calls.forEach((c, i) =>
+      for (const [i, c] of calls.entries()) {
         insert.run(
           runId,
           i,
@@ -2242,8 +2242,8 @@ export class Store {
           c.cacheWrite,
           c.output,
           JSON.stringify(c.added),
-        ),
-      );
+        );
+      }
     });
   }
 
