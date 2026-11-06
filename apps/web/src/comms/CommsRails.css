@@ -23,6 +23,16 @@
   display: block;
   overflow: visible;
 }
+/* Own compositor layer: the dots animate every frame and must not repaint the links and seats. */
+.comms-rails-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  will-change: transform;
+  transform: translateZ(0);
+}
 .comms-centre-line {
   stroke: var(--line);
   stroke-width: 1;

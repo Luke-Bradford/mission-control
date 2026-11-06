@@ -68,8 +68,8 @@ export type ChartMode = "all" | "open";
 
 const PARTICLE_MS = 1_150;
 const PARTICLE_GAP_MS = 200;
-const MAX_PARTICLES_PER_FLOW = 4;
-const MAX_PARTICLES = 40;
+const MAX_PARTICLES_PER_FLOW = 2;
+const MAX_PARTICLES = 16;
 /** How long a link stays lit after a new message on it. */
 const LIVE_MS = 1_800;
 /** The chart's size before it is measured (and in tests, where nothing is laid out). */
@@ -644,6 +644,16 @@ export function CommsRails({
               </text>
             ))}
             {edgeMarks}
+            {nodeMarks}
+          </svg>
+          {/* The travelling dots live on their own layer, so animating them repaints only them. */}
+          <svg
+            className="comms-rails-overlay"
+            width={layout.w}
+            height={layout.h}
+            viewBox={`0 0 ${layout.w} ${layout.h}`}
+            aria-hidden="true"
+          >
             <g className="comms-particles">
               {particles.map((p) => (
                 <circle
@@ -660,7 +670,6 @@ export function CommsRails({
                 />
               ))}
             </g>
-            {nodeMarks}
           </svg>
           {tipped && (
             <div
