@@ -35,7 +35,7 @@ const SMOKE_ANSWER = "OK";
 const SMOKE_PASS = /^\W*ok\W*$/i;
 const MAX_LINE = 200;
 /** `.../Caskroom/claude-code/<version>/claude`: where Homebrew keeps the cask's files. */
-const CASK_PATH = /[\\/]Caskroom[\\/]claude-code[\\/]/;
+export const CASK_PATH = /[\\/]Caskroom[\\/]claude-code[\\/]/;
 
 export interface ExecResult {
   /** Null when the command could not start or was killed (its timeout). */
@@ -48,7 +48,7 @@ export interface ExecResult {
 export type ExecFn = (
   file: string,
   args: readonly string[],
-  opts: { timeoutMs: number; env?: NodeJS.ProcessEnv },
+  opts: { timeoutMs: number; env?: NodeJS.ProcessEnv; cwd?: string },
 ) => Promise<ExecResult>;
 
 export const realExec: ExecFn = (file, args, opts) =>
@@ -62,6 +62,7 @@ export const realExec: ExecFn = (file, args, opts) =>
         killSignal: "SIGKILL",
         maxBuffer: 4 * 1024 * 1024,
         ...(opts.env === undefined ? {} : { env: opts.env }),
+        ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
       },
       (err, stdout, stderr) => {
         if (!err) return resolve({ code: 0, stdout, stderr });
