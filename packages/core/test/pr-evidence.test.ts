@@ -27,7 +27,6 @@ const ALL = [
   "setup_roles",
   "setup_sources",
   "setup_access",
-  "commschart",
 ];
 
 describe("prEvidenceAffectedPages", () => {
@@ -184,15 +183,29 @@ describe("prEvidenceUncatalogued: a page no screenshot can show", () => {
 
   it("maps the pages that have an address, and aliases to their host page", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/pages/Needs.tsx"])).toEqual(["needs"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual([
-      "commschart",
-    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual([
       "audit",
       "readiness",
       "hotspots",
     ]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["hotspots"]);
+  });
+
+  it("lifts the hold when the PR also changes the catalogue, which the hub reads from main", () => {
+    expect(
+      prEvidenceUncatalogued(["apps/web/src/pages/Inbox.tsx", "packages/core/src/pr-evidence.ts"]),
+    ).toEqual([]);
+    expect(
+      prEvidenceUncatalogued(["apps/web/src/pages/Inbox.tsx", "packages/core/src/flight.ts"]),
+    ).toEqual([]);
+  });
+
+  it("does not take inherited object keys for pages", () => {
+    expect(prEvidenceUncatalogued(["apps/web/src/pages/Constructor.tsx"])).toEqual([
+      "pages/Constructor.tsx",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Constructor.tsx"])).toEqual(ALL);
   });
 
   it("every page in apps/web has an address, an alias or a stated reason", () => {

@@ -20,7 +20,6 @@ export const EVIDENCE_PAGE_PATHS = {
   setup_roles: "/setup/roles",
   setup_sources: "/setup/sources",
   setup_access: "/setup/access",
-  commschart: "/comms/chart",
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
@@ -85,10 +84,15 @@ const PAGE_ALIASES: Record<string, EvidencePage> = {
 /** `pages/` files with no fixed address, so no screenshot can show them. */
 export const UNPHOTOGRAPHED_PAGES: Readonly<Record<string, string>> = {
   ticket: "a ticket's page has no fixed address",
+  commschart: "a live, animated chart; not photographed until the capture probe shows it settles",
 };
 
-const pageKey = (path: string): string =>
-  (path.split("/").at(-1) ?? "")
+/** Files whose change adds or removes a page's evidence address. */
+const CATALOGUE_FILES = ["packages/core/src/pr-evidence.ts", "packages/core/src/flight.ts"];
+
+/** A `pages/` file's page key: its name, lower case, without the extension or a `Page` suffix. */
+const pageKey = (file: string): string =>
+  file
     .replace(/\.[^.]+$/, "")
     .toLowerCase()
     .replace(/page$/, "");
@@ -99,10 +103,9 @@ function pageOf(path: string): EvidencePage | null {
   const dir = rest.split("/")[0] ?? "";
   if (rest.includes("/") && dir !== "pages") return PAGE_DIRS[dir] ?? null;
   if (dir === "pages") {
-    const key = pageKey(rest);
-    const alias = PAGE_ALIASES[key];
-    if (alias !== undefined) return alias;
-    return key in EVIDENCE_PAGE_PATHS ? (key as EvidencePage) : null;
+    const key = pageKey(rest.split("/")[1] ?? "");
+    if (Object.hasOwn(PAGE_ALIASES, key)) return PAGE_ALIASES[key] ?? null;
+    return Object.hasOwn(EVIDENCE_PAGE_PATHS, key) ? (key as EvidencePage) : null;
   }
   return null;
 }
@@ -129,16 +132,25 @@ export function prEvidenceAffectedPages(paths: readonly string[]): EvidencePage[
 }
 
 /**
- * Page files in `apps/web/src/pages` that no screenshot can show: a page added without an evidence
- * address. Such a change would otherwise count as "every known page" and never photograph itself
- * (PR 1465, the Needs you page, #1529).
+ * Page files in `apps/web/src/pages` that no screenshot can show: a page with no evidence address,
+ * alias or stated reason. Such a change would otherwise count as "every known page" and never
+ * photograph itself (PR 1465, the Needs you page, #1529). Empty when the PR also changes the
+ * catalogue: the hub photographs from main's catalogue, so a page and its address in one PR could
+ * never leave draft. That PR's page is then the reviewer's to render (a design verdict needs a
+ * render or images of the head).
  */
 export function prEvidenceUncatalogued(paths: readonly string[]): string[] {
+  if (paths.some((path) => CATALOGUE_FILES.includes(path))) return [];
   const out = new Set<string>();
   for (const path of paths) {
     if (!/^apps\/web\/src\/pages\/[^/]+\.tsx$/.test(path) || TEST_FILE.test(path)) continue;
-    const key = pageKey(path);
-    if (key in EVIDENCE_PAGE_PATHS || key in PAGE_ALIASES || key in UNPHOTOGRAPHED_PAGES) continue;
+    const key = pageKey(path.split("/").at(-1) ?? "");
+    if (
+      Object.hasOwn(EVIDENCE_PAGE_PATHS, key) ||
+      Object.hasOwn(PAGE_ALIASES, key) ||
+      Object.hasOwn(UNPHOTOGRAPHED_PAGES, key)
+    )
+      continue;
     out.add(path.slice("apps/web/src/".length));
   }
   return [...out].sort();
@@ -146,7 +158,7 @@ export function prEvidenceUncatalogued(paths: readonly string[]): string[] {
 
 /** Why a web PR stays in draft: a page no screenshot can show. */
 export function evidenceUncataloguedText(files: readonly string[]): string {
-  return `kept in draft: ${files.join(", ")} has no screenshot address, so its evidence cannot show it; add the page to EVIDENCE_PAGE_PATHS (or HUD_PAGE_PATHS when it is in the nav)`;
+  return `kept in draft: ${files.join(", ")} has no screenshot address, so its evidence cannot show it. Add the page to EVIDENCE_PAGE_PATHS in packages/core/src/pr-evidence.ts (or HUD_PAGE_PATHS in packages/core/src/flight.ts when it is in the nav), in this PR or one before it; a page removed by this PR leaves draft the same way`;
 }
 
 export interface EvidenceGap {
