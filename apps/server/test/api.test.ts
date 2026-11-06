@@ -3848,7 +3848,13 @@ describe("crew and attention", () => {
 });
 
 describe("pace settings", () => {
-  const input = { on: true, until: NOW + 3_600_000, labels: ["bug"], maxStarts: 2, note: "weekend" };
+  const input = {
+    on: true,
+    until: NOW + 3_600_000,
+    labels: ["bug"],
+    maxStarts: 2,
+    note: "weekend",
+  };
 
   it("is normal until saved, then shows on the Overview until the end time", async () => {
     expect((await get("/api/overview")).json().pace).toBeNull();
