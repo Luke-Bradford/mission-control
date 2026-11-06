@@ -302,6 +302,7 @@ import {
   forgetViews,
   NO_LOCK,
   NOTE_KEY,
+  seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
@@ -1680,6 +1681,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...step(item.at),
         }));
         const flightId = flightSeat(config)?.seat.id ?? COMMS_CAPCOM;
+        // A seat question is FLIGHT's from the start: its deadline is FLIGHT's triage window,
+        // and with no FLIGHT seat it is the operator's now.
+        const seatQuestionStep = (askedAt: number) => {
+          const triage = seatQuestionTriage(config, store, at, askedAt);
+          if (triage === null)
+            return {
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: at,
+            };
+          const late = !triage.triaging || at >= triage.dueAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: late ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: triage.triaging ? triage.dueAt : at,
+          };
+        };
         const seatQuestions = store.openQuestions().map((q) => ({
           id: `ask:${q.id}`,
           label: "question" as const,
@@ -1688,7 +1706,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ticket: store.run(q.runId)?.ticket ?? null,
           text: q.text.slice(0, COMMS_OPEN_TEXT_MAX),
           at: q.at,
-          ...step(q.at),
+          ...seatQuestionStep(q.at),
         }));
         return {
           items: [...asked, ...seatQuestions]

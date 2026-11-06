@@ -1,4 +1,4 @@
-import { joinMapGraph, unpackMap } from "@mc/core";
+import { FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -1099,6 +1099,62 @@ describe("Comms API", () => {
       const after = (await comms.inject({ method: "GET", url: "/api/comms/open" })).json().items;
       expect(after.some((i: { id: string }) => i.id === `ask:${id}`)).toBe(false);
     });
+  });
+
+  it("gives an open seat question FLIGHT's triage window, and the operator's when no FLIGHT seat exists", async () => {
+    const askedAt = clock - 16 * 60_000;
+    const id = store.addQuestion({
+      agentId: "alpha",
+      runId: "r-alpha",
+      text: "Schema?",
+      at: askedAt,
+    });
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        waitedMs: 16 * 60_000,
+        nextStep: "flight",
+        nextAt: askedAt + FLIGHT_TRIAGE_WAIT_MS,
+      });
+    });
+    clock = askedAt + FLIGHT_TRIAGE_WAIT_MS + 1;
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        nextStep: "flight-not-triaging",
+        nextAt: askedAt + FLIGHT_TRIAGE_WAIT_MS,
+      });
+    });
+    const noFlight = buildApp({
+      config: {
+        ...commsConfig(),
+        crew: {
+          ...commsConfig().crew!,
+          sessions: commsConfig().crew!.sessions.map((s) => ({
+            ...s,
+            seats: s.seats.filter((seat) => seat.role !== "FLIGHT"),
+          })),
+        },
+      },
+      store,
+      bus,
+      now: () => clock,
+      knownSecrets: async () => [],
+      deliverComms: vi.fn(),
+    });
+    await noFlight.ready();
+    try {
+      const item = (await noFlight.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({ to: "CAPCOM", nextStep: "operator", nextAt: clock });
+    } finally {
+      await noFlight.close();
+    }
   });
 
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
