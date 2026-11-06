@@ -36,8 +36,11 @@ import {
   AUTO_CLI_TOOLS,
   type AutoCliTool,
   autoUpdateCli,
-  brewKeepsCurrent,
   type CliToolOps,
+  cliAutoHoldOwner,
+  cliAutoHoldText,
+  npmPrefix,
+  pendingCliUpdate,
   realCliOps,
 } from "./cli-auto.ts";
 import {
@@ -352,7 +355,10 @@ export function realCollectors(config: CcConfig): Collectors {
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
     cli: (beforeUpgrade) => checkCli({ exec: realExec, beforeUpgrade }),
-    cliOps: (tool) => (brewKeepsCurrent(tool) ? null : realCliOps(tool, realExec)),
+    cliOps: (tool) => {
+      const prefix = npmPrefix(tool);
+      return prefix === null ? null : realCliOps(tool, realExec, prefix);
+    },
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
       sampleClaude(
@@ -454,6 +460,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   if (heldNote !== undefined) {
     if (config.updates?.cli === "between_runs") cliHold.hold(heldNote.text);
     else store.clearNote(CLI_NOTE_KEY, now());
+  }
+
+  // An update begun before a restart (or a rollback that failed) keeps runs held until it is settled.
+  if (config.updates?.cli === "between_runs") {
+    for (const tool of AUTO_CLI_TOOLS) {
+      const pending = pendingCliUpdate(store, tool);
+      if (pending !== null) cliHold.hold(cliAutoHoldText(tool, pending.to), cliAutoHoldOwner(tool));
+    }
   }
 
   /** Each agent's HUD state at its last recorded change or last look; seeded so a restart is no change. */
@@ -1069,7 +1083,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (config.updates?.cli !== "between_runs") return;
       for (const tool of AUTO_CLI_TOOLS) {
         const ops = c.cliOps(tool);
-        if (ops === null) continue;
+        if (ops === null) {
+          recordStatus(
+            `cli-auto:${tool}`,
+            false,
+            `${tool} is not an npm global install; update it by hand`,
+          );
+          continue;
+        }
         try {
           await autoUpdateCli(tool, ops, {
             store,

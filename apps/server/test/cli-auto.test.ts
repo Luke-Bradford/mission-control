@@ -1,14 +1,24 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditView } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
   autoUpdateCli,
   type CliToolOps,
   cliUpdateKind,
   heldCliVersion,
+  npmPrefix,
+  pendingCliUpdate,
   realCliOps,
 } from "../src/cli-auto.ts";
 import { CliHold, type ExecFn } from "../src/cli-update.ts";
@@ -211,12 +221,84 @@ describe("autoUpdateCli", () => {
     expect(state.installs).toEqual([]);
   });
 
-  it("leaves a hold set by someone else alone and installs nothing", async () => {
+  it("updates while another path holds runs, and leaves that hold alone", async () => {
     const { state, ops } = fakeOps("2.1.0", "2.2.0");
-    hold.hold("claude CLI is upgrading");
-    expect(await run("claude", ops)).toBe("busy");
-    expect(state.installs).toEqual([]);
-    expect(hold.reason).toBe("claude CLI is upgrading");
+    hold.hold("claude CLI failed its smoke test", "cli:claude");
+    expect(await run("codex", ops)).toBe("applied");
+    expect(state.installed).toBe("2.2.0");
+    expect(hold.reason).toBe("claude CLI failed its smoke test");
+    // and the other way: a later release by that path leaves this update's hold in place
+    const slow = fakeOps("1.0.0", "1.0.1");
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const waiting: CliToolOps = {
+      ...slow.ops,
+      check: async (v) => {
+        await gate;
+        return slow.ops.check(v);
+      },
+    };
+    const pass = run("codex", waiting);
+    await vi.waitFor(() => expect(hold.heldBy("cli-auto:codex")).toBe(true));
+    hold.release("cli:claude");
+    expect(hold.reason).toMatch(/codex/);
+    release();
+    expect(await pass).toBe("applied");
+    expect(hold.reason).toBeNull();
+  });
+
+  it("does not hold runs when a failed install changed nothing (the working version never left)", async () => {
+    const { state, ops } = fakeOps("2.1.0", "2.1.1");
+    const down: CliToolOps = {
+      ...ops,
+      install: async (v) => {
+        state.installs.push(v);
+        return { ok: false, error: "network down" };
+      },
+    };
+    expect(await run("claude", down)).toBe("rolled-back");
+    expect(state.installs).toEqual(["2.1.1"]);
+    expect(state.installed).toBe("2.1.0");
+    expect(hold.reason).toBeNull();
+    expect(heldCliVersion(store, "claude")).toBe("2.1.1");
+    expect(store.notes().filter((n) => n.clearedAt === null)).toHaveLength(1);
+  });
+
+  it("checks a version a restart left unproven before anything runs on it", async () => {
+    const { state, ops } = fakeOps("2.2.0", "2.2.0", []);
+    store.setSetting("cli-auto-pending:claude", JSON.stringify({ from: "2.1.0", to: "2.2.0" }));
+    expect(pendingCliUpdate(store, "claude")).toEqual({ from: "2.1.0", to: "2.2.0" });
+    expect(await run("claude", ops)).toBe("applied");
+    expect(state.checks).toEqual(["2.2.0"]);
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    expect(hold.reason).toBeNull();
+
+    // and one that fails is rolled back to the version before it
+    const bad = fakeOps("2.3.0", "2.3.0", ["2.3.0"]);
+    store.setSetting("cli-auto-pending:codex", JSON.stringify({ from: "2.2.0", to: "2.3.0" }));
+    expect(await run("codex", bad.ops)).toBe("rolled-back");
+    expect(bad.state.installed).toBe("2.2.0");
+    expect(heldCliVersion(store, "codex")).toBe("2.3.0");
+  });
+
+  it("keeps the update pending after a failed rollback, and tries the rollback again next pass", async () => {
+    const { state, ops } = fakeOps("2.1.0", "2.1.1", ["2.1.1"]);
+    let broken = true;
+    const flaky: CliToolOps = {
+      ...ops,
+      install: async (v) =>
+        v === "2.1.0" && broken ? { ok: false, error: "EACCES" } : ops.install(v),
+    };
+    expect(await run("claude", flaky)).toBe("rollback-failed");
+    expect(pendingCliUpdate(store, "claude")).toEqual({ from: "2.1.0", to: "2.1.1" });
+    expect(hold.heldBy("cli-auto:claude")).toBe(true);
+    broken = false;
+    expect(await run("claude", flaky)).toBe("rolled-back");
+    expect(state.installed).toBe("2.1.0");
+    expect(hold.reason).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
   });
 
   it("serves the tier of each item through the audit view", async () => {
@@ -252,6 +334,7 @@ describe("autoUpdateCli", () => {
 });
 
 describe("realCliOps", () => {
+  const PREFIX = "/opt/npm";
   const record = (answers: (file: string, args: readonly string[]) => string | null = () => "") => {
     const calls: { file: string; args: string[]; cwd?: string }[] = [];
     const exec: ExecFn = async (file, args, opts) => {
@@ -265,43 +348,64 @@ describe("realCliOps", () => {
   };
 
   it("reads the latest version from the registry and the installed one from --version", async () => {
-    const { exec, calls } = record((file) => (file === "npm" ? "2.3.4\n" : "codex-cli 0.5.6\n"));
-    expect(await realCliOps("claude", exec).latest()).toBe("2.3.4");
+    const { exec, calls } = record((file) => (file === "npm" ? "2.3.4\n" : "codex-cli 0.155.0\n"));
+    expect(await realCliOps("claude", exec, PREFIX).latest()).toBe("2.3.4");
     expect(calls[0]).toMatchObject({
       file: "npm",
       args: ["view", "@anthropic-ai/claude-code", "version"],
     });
-    expect(await realCliOps("codex", exec).installed()).toBe("0.5.6");
+    expect(await realCliOps("codex", exec, PREFIX).installed()).toBe("0.155.0");
   });
 
   it("installs one exact version with no shell, and refuses a version that is not x.y.z", async () => {
     const { exec, calls } = record();
-    expect(await realCliOps("codex", exec).install("0.5.7")).toEqual({ ok: true });
-    expect(calls[0]).toMatchObject({ file: "npm", args: ["install", "-g", "@openai/codex@0.5.7"] });
-    expect((await realCliOps("codex", exec).install("0.5.7 --foo")).ok).toBe(false);
+    expect(await realCliOps("codex", exec, PREFIX).install("0.5.7")).toEqual({ ok: true });
+    expect(calls[0]).toMatchObject({
+      file: "npm",
+      args: ["--prefix", PREFIX, "install", "-g", "@openai/codex@0.5.7"],
+    });
+    expect((await realCliOps("codex", exec, PREFIX).install("0.5.7 --foo")).ok).toBe(false);
     expect(calls).toHaveLength(1);
   });
 
   it("passes the live check only when the version matches and a tool call returned the nonce", async () => {
-    const ok = record((_file, args) => {
-      if (args[0] === "--version") return "2.3.4 (Claude Code)\n";
-      const dirIn = /check-[a-f0-9]+\.txt/.exec(args.at(-1) ?? "")?.[0];
-      return dirIn === undefined ? "?" : `NONCE:${dirIn}`;
-    });
-    // the fake cannot read the file, so the check must fail: a version print alone is not enough
-    const r = await realCliOps("claude", ok.exec).check("2.3.4");
-    expect(r.ok).toBe(false);
-    expect(ok.calls.map((c) => c.file)).toEqual(["claude", "claude"]);
-    expect(ok.calls[1].args).toEqual(expect.arrayContaining(["-p", "--allowedTools", "Read"]));
-    expect(ok.calls[1].cwd).toBeDefined();
+    const calls: { args: string[]; cwd?: string }[] = [];
+    const exec: ExecFn = async (_file, args, opts) => {
+      calls.push({ args: [...args], cwd: opts.cwd });
+      if (args[0] === "--version") return { code: 0, stdout: "2.3.4 (Claude Code)\n", stderr: "" };
+      const name = /check-[a-f0-9]+\.txt/.exec(args.at(-1) ?? "")?.[0] ?? "";
+      return { code: 0, stdout: readFileSync(join(opts.cwd ?? "", name), "utf8"), stderr: "" };
+    };
+    expect((await realCliOps("claude", exec, PREFIX).check("2.3.4")).ok).toBe(true);
+    // the variadic --allowedTools must not sit before the prompt, or it swallows it
+    expect(calls[1].args).toEqual([
+      "-p",
+      "--model",
+      "haiku",
+      "--allowedTools=Read",
+      expect.stringMatching(/^Read the file check-[a-f0-9]+\.txt /),
+    ]);
+    expect(calls[1].cwd).toBeDefined();
+
+    // a model that only answers, without the tool call, fails
+    const guess = record((_f, args) => (args[0] === "--version" ? "2.3.4 (Claude Code)\n" : "OK"));
+    expect((await realCliOps("claude", guess.exec, PREFIX).check("2.3.4")).ok).toBe(false);
     const wrongVersion = record(() => "9.9.9 (Claude Code)\n");
-    expect((await realCliOps("claude", wrongVersion.exec).check("2.3.4")).ok).toBe(false);
+    expect((await realCliOps("claude", wrongVersion.exec, PREFIX).check("2.3.4")).ok).toBe(false);
     expect(wrongVersion.calls).toHaveLength(1);
+  });
+
+  it("fails a codex under the seat floor before it runs anything", async () => {
+    const low = record(() => "codex-cli 0.5.6\n");
+    const r = await realCliOps("codex", low.exec, PREFIX).check("0.5.6");
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/floor/);
+    expect(low.calls).toHaveLength(1);
   });
 
   it("passes when the answer holds the nonce the harness wrote", async () => {
     const { exec, calls } = record((_f, args) => {
-      if (args[0] === "--version") return "codex-cli 0.5.6\n";
+      if (args[0] === "--version") return "codex-cli 0.155.0\n";
       return "token ".concat(
         // echo back whatever nonce file the harness wrote, as a tool call would
         readFileSync(
@@ -310,7 +414,7 @@ describe("realCliOps", () => {
         ),
       );
     });
-    const r = await realCliOps("codex", exec).check("0.5.6");
+    const r = await realCliOps("codex", exec, PREFIX).check("0.155.0");
     expect(r.ok).toBe(true);
   });
 });
@@ -360,3 +464,115 @@ describe("the cliAuto job", () => {
     await scheduler.stop();
   });
 });
+
+describe("npmPrefix", () => {
+  it("finds the prefix that owns a tool installed by npm, and nothing for any other install", () => {
+    const prefix = join(dir, "npm");
+    const bin = join(dir, "bin");
+    mkdirSync(join(prefix, "lib", "node_modules", "@openai", "codex", "bin"), { recursive: true });
+    mkdirSync(bin);
+    const target = join(prefix, "lib", "node_modules", "@openai", "codex", "bin", "codex.js");
+    writeFileSync(target, "#!/bin/sh\n");
+    symlinkSync(target, join(bin, "codex"));
+    expect(npmPrefix("codex", bin)).toBe(realpathOf(prefix));
+
+    const other = join(dir, "brew", "bin");
+    mkdirSync(other, { recursive: true });
+    writeFileSync(join(other, "claude"), "#!/bin/sh\n");
+    expect(npmPrefix("claude", other)).toBeNull();
+    expect(npmPrefix("claude", join(dir, "nowhere"))).toBeNull();
+  });
+});
+
+describe("the hold during an update", () => {
+  const config = (): CcConfig => ({
+    operator: { id: "operator", timezone: "Europe/London" },
+    accounts: [],
+    repos: [],
+    loops: [],
+    poll: { usageMinutes: 30, githubSeconds: 60 },
+    updates: { hub: "off", cli: "between_runs" },
+  });
+
+  it("survives the brew job passing its smoke test while the check is still running", async () => {
+    const { ops, state } = fakeOps("0.1.0", "0.1.1");
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const waiting: CliToolOps = {
+      ...ops,
+      check: async (v) => {
+        await gate;
+        return ops.check(v);
+      },
+    };
+    const scheduler = createScheduler({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      cliHold: hold,
+      collectors: {
+        cliOps: (tool) => (tool === "codex" ? waiting : null),
+        cli: async () => ({
+          cask: true,
+          version: "2.0.0",
+          upgraded: false,
+          brewProblem: null,
+          smokeFailure: null,
+        }),
+      },
+    });
+    const auto = scheduler.tick("cliAuto");
+    await vi.waitFor(() => expect(state.installs).toEqual(["0.1.1"]));
+    await scheduler.tick("cli");
+    expect(hold.reason).toMatch(/codex/);
+    release();
+    await auto;
+    expect(hold.reason).toBeNull();
+    await scheduler.stop();
+  });
+
+  it("keeps a smoke-failure hold from the brew job when the update pass ends after it", async () => {
+    const { ops } = fakeOps("0.1.0", "0.1.1");
+    const scheduler = createScheduler({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      cliHold: hold,
+      collectors: {
+        cliOps: (tool) => (tool === "codex" ? ops : null),
+        cli: async () => ({
+          cask: true,
+          version: "2.0.0",
+          upgraded: false,
+          brewProblem: null,
+          smokeFailure: "boom",
+        }),
+      },
+    });
+    await scheduler.tick("cli");
+    await scheduler.tick("cliAuto");
+    expect(hold.reason).toMatch(/smoke test/);
+    await scheduler.stop();
+  });
+
+  it("holds runs at start when an update was begun and not settled", async () => {
+    store.setSetting("cli-auto-pending:codex", JSON.stringify({ from: "0.1.0", to: "0.1.1" }));
+    const { ops, state } = fakeOps("0.1.1", "0.1.1");
+    const scheduler = createScheduler({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      cliHold: hold,
+      collectors: { cliOps: (tool) => (tool === "codex" ? ops : null) },
+    });
+    expect(hold.reason).toMatch(/codex/);
+    await scheduler.tick("cliAuto");
+    expect(state.checks).toEqual(["0.1.1"]);
+    expect(hold.reason).toBeNull();
+    await scheduler.stop();
+  });
+});
+
+const realpathOf = (p: string) => realpathSync(p);
