@@ -132,7 +132,8 @@
 .comms-particle {
   offset-rotate: 0deg;
   animation: comms-travel 1150ms linear both;
-  filter: drop-shadow(0 0 3px var(--accent));
+  stroke: var(--surface);
+  stroke-width: 1.5;
   pointer-events: none;
 }
 @keyframes comms-travel {

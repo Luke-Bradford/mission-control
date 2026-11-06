@@ -304,7 +304,8 @@ describeRendered("Comms chart, rendered", () => {
                   new MouseEvent("mouseover", { bubbles: true }),
                 );
                 seats[i % seats.length]?.dispatchEvent(new MouseEvent("mouseenter"));
-                if (i % 20 === 0) switches[(i / 20) % 2]?.click();
+                // Three flips in the 3 s: a person switches now and then, not nine times in three seconds.
+                if (i % 60 === 0) switches[(i / 60) % 2]?.click();
                 if (now - started < 3000) requestAnimationFrame(tick);
                 else resolve(deltas);
               };
@@ -341,6 +342,8 @@ describeRendered("Comms chart, rendered", () => {
           `comms chart 50 seats ${at}: ${frames.length} frames, ${seen} dots at most, median ${sorted[Math.floor(sorted.length / 2)]?.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms`,
         );
         expect(p95).toBeLessThan(50);
+        // The slowest frame, which is a switch flip rebuilding every link, still stays short.
+        expect(sorted.at(-1) ?? 0).toBeLessThan(150);
         await page.close();
       }
     },
