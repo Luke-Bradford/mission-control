@@ -1129,12 +1129,14 @@ describe("Comms API", () => {
         nextAt: askedAt + FLIGHT_TRIAGE_WAIT_MS,
       });
     });
+    const full = commsConfig();
+    if (!full.crew) throw new Error("missing crew");
     const noFlight = buildApp({
       config: {
-        ...commsConfig(),
+        ...full,
         crew: {
-          ...commsConfig().crew!,
-          sessions: commsConfig().crew!.sessions.map((s) => ({
+          ...full.crew,
+          sessions: full.crew.sessions.map((s) => ({
             ...s,
             seats: s.seats.filter((seat) => seat.role !== "FLIGHT"),
           })),
