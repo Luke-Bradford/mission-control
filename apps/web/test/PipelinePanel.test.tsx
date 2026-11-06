@@ -321,7 +321,6 @@ describe("cardTitle", () => {
     await screen.findByText(/Ticket 4/);
     const board = container.querySelector(".board-stages") as HTMLElement;
     expect(board.style.getPropertyValue("--board-cols")).toBe("auto auto minmax(0, 1fr) auto auto");
-    expect(board.style.getPropertyValue("--board-cols-wide")).toBe("auto auto minmax(0, 1fr) auto");
   });
 });
 

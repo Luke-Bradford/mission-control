@@ -126,8 +126,6 @@ export function PipelinePanel() {
         style={
           {
             "--board-cols": boardTracks(lanes, BOARD_COLUMNS, Boolean(data)),
-            "--board-cols-wide": boardTracks(lanes, BOARD_COLUMNS_WIDE, Boolean(data)),
-            "--board-rows-wide": boardRowsWide(lanes, Boolean(data)),
           } as CSSProperties
         }
       >
@@ -204,18 +202,12 @@ export function boardLanes(pipeline: readonly PipelineStage[]): BoardLane[] {
   });
 }
 
-/** The columns at each width: the five lanes, or four with Merging under In review. */
+/** The Board's columns: one per lane. */
 const BOARD_COLUMNS: readonly (readonly PipelineLane[])[] = [
   ["ready"],
   ["progress"],
   ["review"],
   ["merging"],
-  ["merged"],
-];
-const BOARD_COLUMNS_WIDE: readonly (readonly PipelineLane[])[] = [
-  ["ready"],
-  ["progress"],
-  ["review", "merging"],
   ["merged"],
 ];
 
@@ -235,15 +227,6 @@ export function boardTracks(
         : "minmax(0, 1fr)",
     )
     .join(" ");
-}
-
-/**
- * The wide layout's two rows (In review over Merging): an empty Merging is only its head; a busy one
- * takes a third, so both bodies have a height of their own for the fit to work in.
- */
-export function boardRowsWide(lanes: readonly BoardLane[], loaded: boolean): string {
-  const merging = lanes.find((lane) => lane.key === "merging");
-  return loaded && merging?.count === 0 ? "minmax(0, 1fr) auto" : "minmax(0, 2fr) minmax(0, 1fr)";
 }
 
 function BoardStage({

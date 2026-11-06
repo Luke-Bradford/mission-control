@@ -197,7 +197,7 @@ describeRendered("Overview Board at the real sizes", () => {
     [2560, 1145],
     [2560, 1250],
   ])(
-    "keeps In review and Merging both useful at %ix%i with 8 and 3 tickets",
+    "gives In review and Merging each their own whole cards at %ix%i with 8 and 3 tickets",
     async (width, height) => {
       const page = await open(width, height, { wideBusy: true });
       const shown = await page.evaluate(
@@ -207,7 +207,7 @@ describeRendered("Overview Board at the real sizes", () => {
         }),
         undefined,
       );
-      expect(shown.review).toBeGreaterThanOrEqual(3);
+      expect(shown.review).toBeGreaterThanOrEqual(2);
       expect(shown.merging).toBeGreaterThanOrEqual(1);
       expect(await cut(page, ".board-cards", ".board-card")).toEqual([]);
     },
