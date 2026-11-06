@@ -261,34 +261,87 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 opens a short list. Each alert has one link to the place that fixes it, such as Start FLIGHT. An
 alert clears when its cause clears. Alerts send a browser notice, as "FLIGHT is down" does today.
 
-## What it costs the agents
+## Tracking that costs the agents nothing
 
-The record must not become a place where agents spend tokens **(operator, 6 November)**.
+The record is there to cut token use and to show who did what **(operator, 6 November)**. It must
+not become a place where agents spend tokens writing or scanning.
 
-**1. Agents write nothing extra.** The hub records the sender, ticket, delivery, question and
-answer itself, from the tools agents already call. There is no new tool and no duty to log.
+**What the controller measured.** From the Claude seats' transcripts for the 24 hours to
+6 November:
 
-**2. The hub pushes; agents do not scan.** An agent gets only what is addressed to it, once, at
-its next turn. That exists today, capped at 40 messages and 8,000 characters.
+| Tool | Calls | Text returned | Note |
+|---|---|---|---|
+| `comms_read` | 25 | 318,000 characters, 12,700 a call | 9 calls hit the 20,000 cap. The crew sent 83,000 characters that day, so it was read about four times over |
+| `comms_inbox` | 22 | 83,000 characters, 3,750 a call | Only what is addressed to the seat |
+| `comms_send` | 54 | 29,000 characters written | 530 a message |
+| `ask_flight` | 13 | 7,800 characters written | |
 
-**3. A run gets its ticket's decisions at the start.** The handoff already gives a new run the
-goal, what is done, what is left and the last six messages on the ticket. It gains the ticket's
-answered questions: one line each with the choice, ten at most **(controller's call)**. A decision
-is then not asked twice.
+`comms_read` is the waste. It returns the newest 50 messages across the whole crew with no
+filter, so most of what a seat reads is about other tickets. RETRO-1 (a reviewer seat) called it
+12 times, once a review.
 
-**4. A seat that needs more reads by ticket.** Today `comms_read` returns the newest 50 messages
-across the whole crew, up to 20,000 characters, with no filter. It gains a ticket filter and
-defaults to the seat's own ticket. The role files tell seats to read by ticket. Role files are
-hard-rule files, so that change needs clearance.
+**Pins are mostly there, in two forms.** In the same 24 hours no seat message lacked a ticket.
+But 38 of 219 messages stored the short form (`#1458`) and the rest the long form
+(`mission-control#1458`), so one ticket's messages sit under two keys. 23 of the 26 messages sent
+as the operator had no ticket at all.
 
-Four smaller points follow from the rules above:
+### The hub stamps every message; the agent types two things
+
+A seat's token is tied to one run, so the hub already knows everything below when a tool is
+called. The agent gives the recipient and the text.
+
+| Field | Set by | From |
+|---|---|---|
+| Sender and sender kind | Hub | The seat's token, or the app session (rule 1) |
+| Run | Hub | The token |
+| Ticket and PR | Hub | The run's ticket and its open PR (rule 2) |
+| Kind | Hub | The tool that was called: `ask_flight` is a question, `report_findings` is findings, the engine is a notice |
+| Commit | Hub | The run's newest commit, when the hub knows it **(controller's call)** |
+| Delivered, answered | Hub | When it put the message in a prompt; when a reply or answer closed it |
+| Reply-to | Agent | One id, only when replying. The id is on the row being answered |
+| To, text | Agent | |
+
+A seat's actions are tracked the same way and already are: taking a ticket, a commit, a push, a
+PR, a CI result, a review round, a merge. The hub writes those as events. With the messages they
+make one timeline for the ticket.
+
+### What an agent uses, and what is left out
+
+A field earns its place when the hub can stamp it and it lets an agent ask for less.
+
+| Field | What it saves |
+|---|---|
+| Ticket and PR | The agent reads one ticket's thread, not the crew's |
+| Kind | It can ask for decisions and open questions and skip chatter |
+| Answered or open | It sees what still waits on it, as a list, not a log to re-read |
+| Commit | It can tell a finding about an old commit from a current one |
+| Sender kind | It knows an operator's decision from a seat's suggestion or a hub notice |
+| Delivered | It does not send the same message again |
+
+Left out on purpose: anything an agent would write about its own message, such as urgency,
+confidence or tags. That costs tokens and cannot be trusted. Token counts are for Audit and
+people, and are not sent to agents.
+
+### Reading is by ticket, short first
+
+- **The hub pushes.** An agent gets what is addressed to it, once, at its next turn. That exists
+  today, capped at 40 messages and 8,000 characters.
+- **A run starts with its ticket's decisions.** The handoff already gives the goal, what is done,
+  what is left and the last six messages. It gains the ticket's answered questions: one line each
+  with the choice, ten at most **(controller's call)**. A decision is then not asked twice.
+- **`comms_read` reads one ticket.** It defaults to the seat's own ticket and can filter by kind.
+  Each message comes back as one line of at most 200 characters **(controller's call)**. The agent
+  asks for a full text by id when it needs one.
+- The role files tell seats to read by ticket. Role files are hard-rule files, so that change
+  needs clearance.
+
+Four smaller points:
 
 - The Comms copy of a notice is one line, so a later read does not pay for log text again.
 - Hub code works out the Audit rows. No agent reads messages to find them.
 - Delivering an answer to a seat does not wake FLIGHT. FLIGHT sees one line at its next wake.
 - A refused question names the missing part, so FLIGHT fixes it in one try.
 
-For scale, the crew sent 219 messages in the 24 hours to 6 November, about 83,000 characters.
 The Comms graph already totals tokens per link. Audit uses that figure per ticket (rule 9).
 
 ## Kept outside any session
@@ -448,7 +501,7 @@ Each of these is a change, stated so nobody finds it by surprise.
 | The roadmap, plan item 12, and #1453 (the Needs you page): no fly-out on FLIGHT, Comms or Needs you | The fly-out opens on every page. It no longer repeats the FLIGHT page, because it holds the conversation only |
 | #1390 (the complete brief shown on the page): Accept on Needs you, Comms and the item panel | Accept on the Needs you page only. #1390 is re-scoped before it starts |
 | #1390: its file list | Out of date since PR 1465. The reading order above replaces it |
-| #759: no new count model | The count change is its own ticket (item 2 below), not part of #759 |
+| #759: no new count model | The count change is its own ticket (item 3 below), not part of #759 |
 | #765 (FLIGHT's missing powers made visible): requests "for the controller" | Still gaps to close. Until then they follow the table above and can reach the operator |
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
 
@@ -472,19 +525,20 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 
 **New, in this order (controller's call)**
 
-1. Senders named for what they are, with a tag on every message (rule 1).
-2. Needs you counts only questions; the Alerts chip; filters and order (rule 3, the list).
-3. Title, priority, ticket and picture checks, and the image store. Follows #1389 (rules 4, 5).
-4. Answers and messages are delivered, with their state shown (rules 6, 7).
-5. A run gets its ticket's decisions at the start; seats read Comms by ticket; decisions are kept
-   for 365 days ("What it costs the agents", "Kept outside any session").
+1. Tracking that costs nothing: the hub stamps run, ticket, PR and kind; one ticket format;
+   `comms_read` by ticket, short first; a run gets its ticket's decisions at the start; decisions
+   kept for 365 days. First because it saves tokens now and the rest reads from it.
+2. Senders named for what they are, with a tag on every message (rule 1).
+3. Needs you counts only questions; the Alerts chip; filters and order (rule 3, the list).
+4. Title, priority, ticket and picture checks, and the image store. Follows #1389 (rules 4, 5).
+5. Answers and messages are delivered, with their state shown (rules 6, 7).
 6. The fly-out on every page, one FLIGHT conversation, a box that always takes text.
 7. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation, ticket search;
    the Ticket page gains the missing kinds.
 8. Notices in plain words (rule 8).
 9. Audit rows for message problems (rule 9).
 
-Items 2, 6 and 7 change what a page looks like. Each follows "How the pages get designed"
+Items 3, 6 and 7 change what a page looks like. Each follows "How the pages get designed"
 before its build ticket starts.
 
 ## How we know it worked
@@ -494,6 +548,8 @@ before its build ticket starts.
 - The share of questions answered with no clarifying message rises. Audit shows it.
 - Audit shows the time from an answer to its delivery.
 - A browser test covers each text box: it takes text, or it says why not.
+- Text returned by `comms_read` falls from 318,000 characters a day. The controller measures it
+  again a week after item 1 ships.
 - Comms tokens per merged ticket do not rise. Audit shows the figure.
 
 ## Security
@@ -517,4 +573,4 @@ before its build ticket starts.
 - The limits behind "a set time", as config with stated defaults.
 - The image store's route and size limit.
 - How the Ticket page is reached in the nav.
-- The exact form of the ticket filter on `comms_read`.
+- The exact form of `comms_read`: its filters, the one-line form, and the read by id.
