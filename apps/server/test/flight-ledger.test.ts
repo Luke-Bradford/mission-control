@@ -905,6 +905,15 @@ describe("ledger pointers", () => {
     expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["closed"]);
   });
 
+  it("keeps a change made after the digest was built unread when the shown one is stamped", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW);
+    const shown = store.movedFlightPointers("s1");
+    store.markFlightPointers("pr", "mc#7", "merged", NOW + MIN);
+    store.markFlightPointersRead("s1", shown, NOW + 2 * MIN);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["merged"]);
+  });
+
   it("keeps a pointer's marks when the entry is saved again with the same pointer", () => {
     store.putFlightLedgerEntry("s1", pointed("a", { kind: "seat", target: "guido-1" }), 0);
     store.markFlightPointers("seat", "guido-1", "parked", NOW);
