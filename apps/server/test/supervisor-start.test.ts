@@ -825,7 +825,8 @@ describe("startRun", () => {
       status: "ok",
       sessionId: null,
       model: "haiku",
-      branch: BRANCH,
+      // no branch: a run that left one would start the next as a handoff
+      branch: null,
       ticket: "mc#42",
       costUsd: null,
       tokens: null,
