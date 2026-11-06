@@ -176,8 +176,11 @@ it("refreshes a stale base explicitly, retains checks and retries with the refre
   await screen.findByRole("alert");
   fireEvent.click(within(form).getByRole("button", { name: "Refresh templates" }));
   await waitFor(() =>
-    expect(within(form).getByRole("alert").textContent).toContain("Templates refreshed"),
+    expect(within(form).getByRole("status").textContent).toContain("Templates refreshed"),
   );
+  // a successful refresh is news, not a failure: no error summary, no alert
+  expect(form.querySelector(".fsum")).toBeNull();
+  expect(within(form).queryByRole("alert")).toBeNull();
   fireEvent.submit(form);
   await screen.findByRole("region", { name: "sample-work" });
   expect(attempts).toBe(2);

@@ -65,6 +65,7 @@ export function TemplateEditor({
   const [budget, setBudget] = useState("");
   const [attempted, setAttempted] = useState(false);
   const [failure, setFailure] = useState<{ title: string; text: string } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -161,6 +162,7 @@ export function TemplateEditor({
     if (busy) return;
     setAttempted(true);
     setFailure(null);
+    setNotice(null);
     if (validate().length > 0) {
       setFocusKey((key) => key + 1);
       return;
@@ -196,24 +198,24 @@ export function TemplateEditor({
     }
   };
   const refresh = async () => {
+    setNotice(null);
     setRefreshing(true);
     setBusy(true);
     try {
       const fresh = await onRefresh();
       setBase(fresh.version);
-      setFailure({
-        title: "Templates refreshed",
-        text: "Templates refreshed. Review your draft and save again.",
-      });
+      setFailure(null);
+      setNotice("Templates refreshed. Review your draft and save again.");
     } catch (e) {
+      setNotice(null);
       setFailure({
         title: "Not refreshed",
         text: e instanceof Error ? e.message : "Could not refresh templates",
       });
+      setFocusKey((key) => key + 1);
     } finally {
       setBusy(false);
       setRefreshing(false);
-      setFocusKey((key) => key + 1);
     }
   };
   return (
@@ -490,6 +492,11 @@ export function TemplateEditor({
       {busy && (
         <p role="status" className="fstatus s">
           {refreshing ? "Refreshing templates…" : "Saving template…"}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="fstatus s">
+          {notice}
         </p>
       )}
       <ErrorSummary
