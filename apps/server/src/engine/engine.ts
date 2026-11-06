@@ -19,7 +19,10 @@ import {
   AWAY_STATUS_ADDED,
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
+  asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -959,6 +962,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      // a question FLIGHT passed to the operator: the run waits off its seat for the answer
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
@@ -1565,10 +1570,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
+        // (not while the run waits for the operator's answer: that wakes it)
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
+        const waitsOnPerson = asked !== undefined;
         cur.aside = {
           worktree,
-          wake: cur.phase === "working" || a.displaced === true,
+          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
           ...(a.displaced ? { displaced: true as const } : {}),
+          ...(asked ? { ask: asked.id } : {}),
         };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
@@ -1581,11 +1590,13 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working" || a.displaced
-            ? asideForReworkEventText(call)
-            : cur.phase === "ci"
-              ? asideInCiEventText(call)
-              : asideEventText(call),
+          waitsOnPerson
+            ? asideForAnswerEventText(call)
+            : cur.phase === "working" || a.displaced
+              ? asideForReworkEventText(call)
+              : cur.phase === "ci"
+                ? asideInCiEventText(call)
+                : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1637,6 +1648,15 @@ export function createEngine(deps: EngineDeps): Engine {
           );
           out.again = true;
           return;
+        }
+        // a run parked on the operator's question gets one line to carry on with the answer
+        // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
+        // on the seat as any other)
+        if (cur.aside?.ask !== undefined && store.question(cur.aside.ask)?.answeredAt != null) {
+          cur.pendingLine = {
+            key: answerLineKey(run.id, cur.aside.ask),
+            text: answeredLineText,
+          };
         }
         cur.aside = null;
         store.addLoopEvent(
