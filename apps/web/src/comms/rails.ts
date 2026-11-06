@@ -192,8 +192,19 @@ export function placeWaitMarks(
     const start = mark.at(mark.askerFirst ? 0 : 1);
     const inward = Math.sign(mark.at(0.5).x - start.x) || 1;
     const beside = { x: start.x + inward * (12 + mark.width / 2), y: start.y };
-    for (const dy of [0, -(WAIT_H + 4), WAIT_H + 4, -2 * (WAIT_H + 4), 2 * (WAIT_H + 4), -3 * (WAIT_H + 4), 3 * (WAIT_H + 4)]) {
-      const spots = dy === 0 ? [...SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d)), beside] : SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d));
+    for (const dy of [
+      0,
+      -(WAIT_H + 4),
+      WAIT_H + 4,
+      -2 * (WAIT_H + 4),
+      2 * (WAIT_H + 4),
+      -3 * (WAIT_H + 4),
+      3 * (WAIT_H + 4),
+    ]) {
+      const spots =
+        dy === 0
+          ? [...SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d)), beside]
+          : SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d));
       for (const q of spots) {
         const p = { x: q.x, y: q.y + dy };
         const box = {

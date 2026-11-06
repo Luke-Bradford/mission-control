@@ -173,7 +173,12 @@ it("keeps a wait mark off the asking seat's dot on a short seat-to-hub link", ()
   );
   const p = placed.get("s1") as Point;
   expect(p).toBeDefined();
-  const box = { x0: p.x - width / 2, x1: p.x + width / 2, y0: p.y - WAIT_H / 2, y1: p.y + WAIT_H / 2 };
+  const box = {
+    x0: p.x - width / 2,
+    x1: p.x + width / 2,
+    y0: p.y - WAIT_H / 2,
+    y1: p.y + WAIT_H / 2,
+  };
   const dot = { x0: seat.x - 10, x1: seat.x + 10, y0: seat.y - 10, y1: seat.y + 10 };
   expect(box.x0 < dot.x1 && dot.x0 < box.x1 && box.y0 < dot.y1 && dot.y0 < box.y1).toBe(false);
 });
