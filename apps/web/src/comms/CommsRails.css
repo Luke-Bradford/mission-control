@@ -292,3 +292,19 @@
   text-align: center;
   pointer-events: none;
 }
+
+/* Waits with no room on their links are counted here, not stacked on top of each other. */
+.comms-wait-more {
+  position: absolute;
+  top: var(--sp-1);
+  left: var(--sp-1);
+  margin: 0;
+  padding: 0 var(--sp-2);
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: 3px;
+  pointer-events: none;
+}

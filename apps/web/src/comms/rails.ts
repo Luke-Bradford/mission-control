@@ -143,3 +143,62 @@ export function linkPath(
     at,
   };
 }
+
+/** A wait mark's height (px); its width follows its label (`waitMarkWidth`). */
+export const WAIT_H = 18;
+/** A wait mark's width for its label, so the text sits inside the pill. */
+export const waitMarkWidth = (label: string): number => label.length * CHAR_PX + 12;
+
+export type WaitMarkInput = {
+  key: string;
+  /** The point `t` of the way along the link, from `a` (0) to `b` (1). */
+  at: (t: number) => Point;
+  /** Whether the asker is at the link's start; marks sit near the asker's end. */
+  askerFirst: boolean;
+  width: number;
+};
+
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+const hit = (a: Rect, b: Rect) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+/** How far along a link, from the asker, a mark may sit; tried in this order. */
+const SLIDE = [0.25, 0.35, 0.15, 0.45, 0.55, 0.65, 0.1, 0.75, 0.85];
+
+/**
+ * Puts each wait mark near the asker's end of its link and slides it along the link until it clears
+ * the marks placed before it and every hub pill. `marks` come in priority order (longest wait first).
+ * A mark that fits nowhere is dropped (`dropped`), for the caller to fold into one count.
+ */
+export function placeWaitMarks(
+  marks: readonly WaitMarkInput[],
+  hubs: readonly Point[],
+): { placed: Map<string, Point>; dropped: string[] } {
+  const taken: Rect[] = hubs.map((h) => ({
+    x0: h.x - HUB_W / 2 - 4,
+    x1: h.x + HUB_W / 2 + 4,
+    y0: h.y - 15,
+    y1: h.y + 15,
+  }));
+  const placed = new Map<string, Point>();
+  const dropped: string[] = [];
+  for (const mark of marks) {
+    let spot: { p: Point; box: Rect } | null = null;
+    for (const d of SLIDE) {
+      const p = mark.at(mark.askerFirst ? d : 1 - d);
+      const box = {
+        x0: p.x - mark.width / 2 - 2,
+        x1: p.x + mark.width / 2 + 2,
+        y0: p.y - WAIT_H / 2 - 2,
+        y1: p.y + WAIT_H / 2 + 2,
+      };
+      if (!taken.some((t) => hit(t, box))) {
+        spot = { p, box };
+        break;
+      }
+    }
+    if (spot) {
+      taken.push(spot.box);
+      placed.set(mark.key, spot.p);
+    } else dropped.push(mark.key);
+  }
+  return { placed, dropped };
+}

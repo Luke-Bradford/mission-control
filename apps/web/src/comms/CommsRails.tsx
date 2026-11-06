@@ -25,7 +25,10 @@ import {
   type Point,
   type RailGroup,
   type RailLayout,
+  placeWaitMarks,
   railLayout,
+  WAIT_H,
+  waitMarkWidth,
 } from "./rails.ts";
 import "./CommsRails.css";
 
@@ -88,6 +91,9 @@ function meetAt(layout: RailLayout, id: string, other: string): Point | undefine
 type Particle = { id: number; d: string; color: string; delay: number };
 type Tip = { kind: "seat" | "edge"; id: string } | null;
 
+/** The wait mark's words. */
+const waitLabel = (w: Waiting) => `⧖ ${waitWord(w.ms)}`;
+
 const keyOf = (a: string, b: string) => (a < b ? `${a}\0${b}` : `${b}\0${a}`);
 
 /** The All / Open switch, in the panel's title row and the full-screen view's. */
@@ -116,7 +122,7 @@ export function ChartModeSwitch({
         className={mode === "open" ? "on" : ""}
         aria-pressed={mode === "open"}
         onClick={() => onChange("open")}
-        title="Links with a question or blocker waiting for an answer"
+        title="Links with a question or blocker waiting for an answer. One answered by a reaction still shows until the hub closes it."
       >
         Open{openCount > 0 ? ` ${openCount}` : ""}
       </button>
@@ -212,6 +218,29 @@ export function CommsRails({
       }),
     [shown, layout],
   );
+
+  // Wait marks sit near the asker's end of their link, longest wait first, clear of each other and
+  // the hub pills. A mark with no room is left off its link and counted in the note instead.
+  const waitSpots = useMemo(() => {
+    const waiting = drawn
+      .filter(({ edge }) => edge.waiting !== null)
+      .sort((x, y) => (y.edge.waiting?.ms ?? 0) - (x.edge.waiting?.ms ?? 0));
+    const out = placeWaitMarks(
+      waiting.map(({ edge, path }) => ({
+        key: edge.key,
+        at: path.at,
+        askerFirst: edge.waiting?.asker === edge.a,
+        width: waitMarkWidth(waitLabel(edge.waiting as Waiting)),
+      })),
+      [...layout.hubs.values()],
+    );
+    const left = waiting.filter(({ edge }) => out.dropped.includes(edge.key));
+    return {
+      placed: out.placed,
+      more: left.length,
+      longest: Math.max(0, ...left.map(({ edge }) => edge.waiting?.ms ?? 0)),
+    };
+  }, [drawn, layout]);
 
   // Who is inside the filter: its own ends, and the ends of every drawn link it keeps.
   const inside = useMemo(() => {
@@ -413,14 +442,20 @@ export function CommsRails({
                 strokeWidth={w}
                 strokeDasharray={edge.waiting ? "6 4" : undefined}
               />
-              {edge.waiting && (
+              {edge.waiting && waitSpots.placed.get(edge.key) && (
                 <g
                   className="comms-wait-mark"
-                  transform={`translate(${path.mid.x.toFixed(1)} ${path.mid.y.toFixed(1)})`}
+                  transform={`translate(${(waitSpots.placed.get(edge.key) as Point).x.toFixed(1)} ${(waitSpots.placed.get(edge.key) as Point).y.toFixed(1)})`}
                 >
-                  <rect x={-22} y={-9} width={44} height={18} rx={9} />
+                  <rect
+                    x={-waitMarkWidth(waitLabel(edge.waiting)) / 2}
+                    y={-WAIT_H / 2}
+                    width={waitMarkWidth(waitLabel(edge.waiting))}
+                    height={WAIT_H}
+                    rx={WAIT_H / 2}
+                  />
                   <text textAnchor="middle" dy="0.34em">
-                    ⧖ {waitWord(edge.waiting.ms)}
+                    {waitLabel(edge.waiting)}
                   </text>
                 </g>
               )}
@@ -429,7 +464,7 @@ export function CommsRails({
         })}
       </g>
     ),
-    [drawn, filter, lit, edgeStop, onPickLink, byId],
+    [drawn, filter, lit, edgeStop, onPickLink, byId, waitSpots],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: helpers below derive from these inputs
   const nodeMarks = useMemo(
@@ -635,6 +670,11 @@ export function CommsRails({
             >
               {tipped.node}
             </div>
+          )}
+          {waitSpots.more > 0 && (
+            <p className="comms-wait-more" role="status">
+              +{waitSpots.more} more waiting, longest {waitWord(waitSpots.longest)}
+            </p>
           )}
           {empty && (
             <p className="comms-empty">

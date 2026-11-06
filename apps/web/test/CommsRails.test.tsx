@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CommsRails, type RailEdgeView, type RailSeatView } from "../src/comms/CommsRails.tsx";
 import type { Flows } from "../src/comms/chartTypes.ts";
 import { pairFilter } from "../src/comms/commsFilter.ts";
-import type { RailGroup } from "../src/comms/rails.ts";
+import { CHAR_PX, type RailGroup } from "../src/comms/rails.ts";
 
 afterEach(() => vi.useRealTimers());
 
@@ -227,4 +227,57 @@ it("drops a travelling dot when its time is up", () => {
 it("says so when there are no links, rather than drawing nothing", () => {
   view(1);
   expect(screen.getByText(/no direct messages/i)).toBeTruthy();
+});
+
+it("sizes the wait pill to its words, so an hours wait stays inside it", () => {
+  view(3, {
+    edges: [
+      edge("dev-1", "dev-2", {
+        waiting: { n: 1, ms: 190 * 60_000, asker: "dev-1", question: null },
+      }),
+    ],
+  });
+  const mark = document.querySelector(".comms-wait-mark");
+  expect(mark?.textContent).toBe("⧖ 3h 10m");
+  expect(Number(mark?.querySelector("rect")?.getAttribute("width"))).toBeGreaterThanOrEqual(
+    "⧖ 3h 10m".length * CHAR_PX,
+  );
+});
+
+it("keeps many waits from stacking: no two marks overlap, and the rest are counted", () => {
+  const { seats, groups } = crew(9);
+  const asking = seats.filter((s) => !s.hub).map((s) => s.id);
+  const edges = asking.map((id, i) =>
+    edge(id, "flight-1", {
+      waiting: { n: 1, ms: (i + 1) * 3_600_000, asker: id, question: null },
+    }),
+  );
+  render(
+    <CommsRails
+      seats={seats}
+      groups={groups}
+      hubIds={HUBS}
+      edges={edges}
+      mode="open"
+      filter={null}
+      flows={noFlows}
+      reduced={false}
+      label="Comms chart"
+      full={false}
+      onPickSeat={vi.fn()}
+      onPickLink={vi.fn()}
+      onClear={vi.fn()}
+    />,
+  );
+  const boxes = [...document.querySelectorAll(".comms-wait-mark")].map((g) => {
+    const [x, y] = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(g.getAttribute("transform") ?? "")?.slice(1).map(Number) ?? [0, 0];
+    const w = Number(g.querySelector("rect")?.getAttribute("width"));
+    return { x0: (x ?? 0) - w / 2, x1: (x ?? 0) + w / 2, y0: (y ?? 0) - 9, y1: (y ?? 0) + 9 };
+  });
+  boxes.forEach((a, i) => {
+    for (const b of boxes.slice(i + 1))
+      expect(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1).toBe(false);
+  });
+  const more = document.querySelector(".comms-wait-more");
+  expect(boxes.length + Number(/\+(\d+)/.exec(more?.textContent ?? "")?.[1] ?? 0)).toBe(9);
 });

@@ -10,6 +10,12 @@ import {
 } from "./browserRunner.ts";
 import { CONFIG, NOW, seatRow } from "./fixtures.ts";
 
+declare global {
+  interface Window {
+    __refetchAgents(): void;
+  }
+}
+
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR ?? join(process.env.TMPDIR ?? "/tmp", "comms-rails-shots");
 const ROLES = ["GUIDO", "RETRO", "INCO", "FAO", "OPS"] as const;
@@ -55,25 +61,16 @@ function crewApi(n: number) {
     "/api/comms/traffic": { hours: [] },
     "/api/comms/metrics": { p95BySeat: [], bySeat: [] },
     "/api/comms/open": {
-      items: [
-        {
-          id: "o1",
-          label: "question",
-          from: ids[1] ?? "flight-1",
-          to: "flight-1",
-          ticket: "#1",
-          waitedMs: 14 * 60_000,
-          question: "Which branch?",
-        },
-        {
-          id: "o2",
-          label: "blocker",
-          from: ids[2] ?? "flight-1",
-          to: "CAPCOM",
-          ticket: null,
-          waitedMs: 190 * 60_000,
-        },
-      ],
+      // Several questions per hub and seat, on both rails, from minutes to days old.
+      items: ids.slice(1, 10).map((from, i) => ({
+        id: `o${i}`,
+        label: i % 2 ? "blocker" : "question",
+        from,
+        to: i % 3 === 0 ? "flight-1" : i % 3 === 1 ? "CAPCOM" : (ids[i + 2] ?? "flight-1"),
+        ticket: null,
+        waitedMs: ([14, 190, 7 * 1440, 5, 60 * 5, 61, 3 * 1440, 45, 125][i] ?? 1) * 60_000,
+        question: "Which branch?",
+      })),
     },
     "/api/comms/feed": {
       messages: ids.slice(0, 6).map((from, i) => ({
@@ -122,6 +119,29 @@ const measure = (page: RenderedPage) =>
     };
   }, null);
 
+/** What is wrong with the wait marks: overlapping each other, sitting on a hub pill, text outside. */
+const waitMarkProblems = (page: RenderedPage) =>
+  page.evaluate(() => {
+    const rects = [...document.querySelectorAll(".comms-wait-mark")].map((g) => ({
+      box: (g.querySelector("rect") as SVGRectElement).getBoundingClientRect(),
+      text: (g.querySelector("text") as SVGTextElement).getBoundingClientRect(),
+    }));
+    const hubs = [...document.querySelectorAll(".comms-node.hub .comms-node-core")].map((e) =>
+      e.getBoundingClientRect(),
+    );
+    const meet = (a: DOMRect, b: DOMRect) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    let overlap = 0;
+    let onHub = 0;
+    let outside = 0;
+    rects.forEach((r, i) => {
+      for (const o of rects.slice(i + 1)) if (meet(r.box, o.box)) overlap++;
+      for (const h of hubs) if (meet(r.box, h)) onHub++;
+      if (r.text.left < r.box.left - 0.5 || r.text.right > r.box.right + 0.5) outside++;
+    });
+    return { marks: rects.length, overlap, onHub, outside };
+  }, null);
+
 const overlaps = (names: { x: number; y: number; right: number; bottom: number }[]) =>
   names.some((a, i) =>
     names
@@ -150,6 +170,11 @@ describeRendered("Comms chart, rendered", () => {
         // Every seat has a row at least 24px tall, and no two names overlap.
         expect(m.hits.every((h) => h >= 24 - 0.5)).toBe(true);
         if (n > 1) expect(overlaps(m.names)).toBe(false);
+        if (n >= 9) {
+          const w = await waitMarkProblems(page);
+          expect(w.marks).toBeGreaterThan(0);
+          expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
+        }
         // Past what the panel can hold the rails scroll inside it, never off the page.
         expect(
           (await page.reachable(".comms-rails-scroll", ".comms-graph-panel")).every(Boolean),
@@ -184,6 +209,8 @@ describeRendered("Comms chart, rendered", () => {
         // Full names at 20 seats: none cut with an ellipsis.
         expect(m.names.some((name) => name.text.endsWith("…"))).toBe(false);
         expect(overlaps(m.names)).toBe(false);
+        const w = await waitMarkProblems(page);
+        expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
         expect(m.pane).toBe(focus !== "");
         if (focus) {
           expect(m.chip).toContain("SEAT-2");
@@ -235,22 +262,25 @@ describeRendered("Comms chart, rendered", () => {
   );
 
   it(
-    "holds a steady frame rate at 50 participants in the panel and full screen",
+    "holds a steady frame rate at 50 participants with messages arriving, in the panel and full screen",
     async () => {
       for (const [at, width, height] of [
         ["/comms/crew", 1600, 1000],
         ["/comms/chart", 1920, 940],
       ] as const) {
+        const api = crewApi(50);
+        const links = api["/api/comms/links"].links;
         const page = await renderAt({
           page: "test/commsBrowser.html",
           width,
           height,
           search: `?at=${encodeURIComponent(at)}`,
-          api: crewApi(50),
+          api,
         });
         await page.box(".comms-node");
-        // Busy: sweep the pointer over every seat and flip All / Open every few frames for 3 seconds.
-        const frames = await page.evaluate(
+        // Busy: sweep the pointer over every seat and flip All / Open for 3 seconds, while new
+        // messages land on a third of the links every 300 ms and the page reads them again.
+        const measuring = page.evaluate(
           () =>
             new Promise<number[]>((resolve) => {
               const seats = [...document.querySelectorAll<SVGElement>(".comms-node")];
@@ -277,14 +307,62 @@ describeRendered("Comms chart, rendered", () => {
             }),
           null,
         );
+        let done = false;
+        void measuring.finally(() => {
+          done = true;
+        });
+        let round = 0;
+        let seen = 0;
+        while (!done) {
+          await new Promise((r) => setTimeout(r, 300));
+          round++;
+          for (const [k, link] of links.entries())
+            if (k % 3 === 0) {
+              link.count += 1;
+              (link as { lastId?: string }).lastId = `t:${round}:${k}`;
+            }
+          await page.evaluate(() => window.__refetchAgents(), null);
+          seen = Math.max(
+            seen,
+            await page.evaluate(() => document.querySelectorAll(".comms-particle").length, null),
+          );
+        }
+        const frames = await measuring;
+        // Messages really travelled during the measurement.
+        expect(seen).toBeGreaterThan(0);
         const sorted = [...frames].sort((a, b) => a - b);
         const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
         console.info(
-          `comms chart 50 seats ${at}: ${frames.length} frames, median ${sorted[Math.floor(sorted.length / 2)]?.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms`,
+          `comms chart 50 seats ${at}: ${frames.length} frames, ${seen} dots at most, median ${sorted[Math.floor(sorted.length / 2)]?.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms`,
         );
         expect(p95).toBeLessThan(50);
         await page.close();
       }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it.each([
+    { at: "/comms", width: 1600, height: 1000 },
+    { at: "/comms/chart", width: 1920, height: 940 },
+  ])(
+    "renders Demo's chart at $at with readable wait marks",
+    async ({ at, width, height }) => {
+      const page = await renderAt({
+        page: "test/demoBrowser.html",
+        width,
+        height,
+        search: `?demo=1&at=${encodeURIComponent(at)}`,
+      });
+      await page.box(".comms-node");
+      await page.box(".comms-wait-mark");
+      const m = await measure(page);
+      expect(m.nodes).toBeGreaterThan(10);
+      expect(overlaps(m.names)).toBe(false);
+      const w = await waitMarkProblems(page);
+      expect(w.marks).toBeGreaterThan(0);
+      expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
+      await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

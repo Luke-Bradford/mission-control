@@ -1,11 +1,17 @@
 import { expect, it } from "vitest";
 import {
+  CHAR_PX,
   fitName,
+  HUB_W,
   linkPath,
   MIN_ROW,
+  type Point,
+  placeWaitMarks,
   type RailGroup,
   railLayout,
   sideOfGroups,
+  WAIT_H,
+  waitMarkWidth,
 } from "../src/comms/rails.ts";
 
 /** `n` seats in groups of up to three, ids `s1`..`sn`. */
@@ -114,4 +120,40 @@ it("bows a link between two seats on one rail towards the centre", () => {
   expect(across.mid.x).toBeCloseTo(200, 0);
   expect(across.at(0)).toEqual({ x: 80, y: 40 });
   expect(across.at(1)).toEqual({ x: 320, y: 200 });
+});
+
+it("places wait marks clear of each other and of the hub pills, and drops what cannot fit", () => {
+  // Twelve links from stacked seats into the three hubs: their midpoints crowd the centre line.
+  const layout = railLayout(crew(12), { w: 360, h: 420 }, HUBS, 8);
+  const hubPts = [...layout.hubs.values()];
+  const ids = [...layout.seats.keys()];
+  const marks = ids.map((id, i) => {
+    const seat = layout.seats.get(id) as Point;
+    const hubPoint = hubPts[i % 3] as Point;
+    const path = linkPath(seat, { x: hubPoint.x - HUB_W / 2, y: hubPoint.y }, layout.cx);
+    return { key: id, at: path.at, askerFirst: true, width: waitMarkWidth("⧖ 3h 10m") };
+  });
+  const { placed, dropped } = placeWaitMarks(marks, hubPts);
+  expect(placed.size + dropped.length).toBe(marks.length);
+  expect(placed.size).toBeGreaterThan(3);
+  const boxes = [...placed.values()].map((p) => ({
+    x0: p.x - waitMarkWidth("⧖ 3h 10m") / 2,
+    x1: p.x + waitMarkWidth("⧖ 3h 10m") / 2,
+    y0: p.y - WAIT_H / 2,
+    y1: p.y + WAIT_H / 2,
+  }));
+  const meet = (a: (typeof boxes)[number], b: (typeof boxes)[number]) =>
+    a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  boxes.forEach((a, i) => {
+    for (const b of boxes.slice(i + 1)) expect(meet(a, b)).toBe(false);
+    for (const h of hubPts)
+      expect(meet(a, { x0: h.x - HUB_W / 2, x1: h.x + HUB_W / 2, y0: h.y - 11, y1: h.y + 11 })).toBe(
+        false,
+      );
+  });
+});
+
+it("sizes a wait mark from its label", () => {
+  expect(waitMarkWidth("⧖ 3h 10m")).toBeGreaterThanOrEqual("⧖ 3h 10m".length * CHAR_PX);
+  expect(waitMarkWidth("⧖ 7d")).toBeLessThan(waitMarkWidth("⧖ 3h 10m"));
 });
