@@ -929,6 +929,32 @@ describe("ledger pointers", () => {
 });
 
 describe("the wake digest's moved pointers", () => {
+  it("keeps a CI change on a PR the digest lists, which the PR entry does not show", () => {
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [{ kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null }],
+      }),
+      0,
+    );
+    const open = (ci: PullRequestView["ci"]) =>
+      pr(7, { state: "open", mergedAt: null, ci, headSha: "abc" });
+    store.upsertPullRequests("mc", [open("pending")], NOW);
+    const w1 = flightWake(flightState({ config, store, busy: [], now: NOW + 1 }));
+    markPointersShown(
+      store,
+      config,
+      flightState({ config, store, busy: [], now: NOW + 1 }),
+      NOW + 1,
+    );
+    store.upsertPullRequests("mc", [open("passing")], NOW + MIN);
+    const w2 = flightWake(
+      flightState({ config, store, busy: [], now: NOW + 2 * MIN }),
+      w1.snapshot,
+    );
+    expect(w2.digest.moved).toMatchObject([{ target: "mc#7", change: "CI passing" }]);
+  });
+
   it("caps the list, and leaves out a PR the digest's prs already lists, reading both", () => {
     const targets = Array.from({ length: FLIGHT_MOVED_LISTED + 5 }, (_, n) => `mc#${100 + n}`);
     store.putFlightLedgerEntry(
@@ -945,8 +971,8 @@ describe("the wake digest's moved pointers", () => {
       0,
     );
     store.upsertPullRequests("mc", [pr(7, { state: "open", mergedAt: null })], NOW);
-    for (const t of [...targets, "mc#7"])
-      store.markFlightPointers("pr", t, "CI failing", NOW + MIN);
+    for (const t of targets) store.markFlightPointers("pr", t, "CI failing", NOW + MIN);
+    store.markFlightPointers("pr", "mc#7", "new commit", NOW + MIN);
     const state = flightState({ config, store, busy: [], now: NOW + 2 * MIN });
     expect(state.moved).toHaveLength(FLIGHT_MOVED_LISTED);
     expect(state.moved?.some((m) => m.target === "mc#7")).toBe(false);

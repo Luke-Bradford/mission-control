@@ -293,6 +293,18 @@ export type FlightPointerKind = (typeof FLIGHT_POINTER_KINDS)[number];
 export const FLIGHT_POINTERS_MAX = 10;
 /** The kinds a hub event marks today; `track` refuses the rest rather than hold a pointer that never moves. */
 export const FLIGHT_POINTER_FED_KINDS: readonly FlightPointerKind[] = ["pr", "ticket"];
+/**
+ * The changes to a PR that the digest's own `prs` entry shows (it opens, its state, its head). A
+ * PR pointer moved by one of these is covered by `prs`; CI, review and draft changes are not in
+ * that entry, so those stay in `moved`.
+ */
+export const FLIGHT_PR_ENTRY_CHANGES: readonly string[] = [
+  "opened",
+  "open",
+  "merged",
+  "closed",
+  "new commit",
+];
 /** The most moved pointers one digest lists; the rest stay unread for the next wake. */
 export const FLIGHT_MOVED_LISTED = 20;
 export const FLIGHT_POINTER_TARGET_MAX = 100;

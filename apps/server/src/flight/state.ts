@@ -38,6 +38,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OPERATOR_UNREAD_MS,
+  FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -1324,9 +1325,11 @@ export function flightState(i: {
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
-  // a PR the digest lists already shows its change; the pointer is read with the wake, not repeated
+  // a PR the digest lists already shows a change to its state or head; the pointer is read with the wake, not repeated
   const listedPrs = new Set(prs.map((p) => `${session.repoId}#${p.pr}`));
-  const covered = movedAll.filter((m) => m.kind === "pr" && listedPrs.has(m.target));
+  const covered = movedAll.filter(
+    (m) => m.kind === "pr" && listedPrs.has(m.target) && FLIGHT_PR_ENTRY_CHANGES.includes(m.change),
+  );
   const moved = movedAll.filter((m) => !covered.includes(m)).slice(0, FLIGHT_MOVED_LISTED);
   return {
     prFlow: flow,

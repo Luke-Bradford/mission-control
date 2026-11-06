@@ -9433,6 +9433,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
       expect(moveCalls).toHaveLength(1);
     });
+    it("stamps the status decision set_fields writes with the wake FLIGHT is in", async () => {
+      board(card(7));
+      store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
+      expect(decisions().find((d) => d.kind === "status")?.wakeId).toBe("r-flight:1");
+    });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
       liveLabels = ["lane:home"];
       board(card(7));
