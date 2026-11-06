@@ -135,7 +135,7 @@ Every message records a sender kind: `operator`, `controller`, `flight`, `seat` 
 - The controller keeps what it can do today: read, reply, pin, and mark a message done.
 - A controller message wakes FLIGHT as an operator message does today.
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
-- The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`. Examples:
+- The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`. Examples, where the hub is the sender:
   `apps/server/src/crew-apply.ts:421`, `apps/server/src/engine/engine.ts:1226`,
   `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instruction-notices.ts:44`. Every
   such place changes.
@@ -615,8 +615,8 @@ follow the `hud-design` checklist.
 - Pictures show only from hub storage. Links follow the safe-link rules from PR 1465. A preview
   runs on its own address, as #1458 sets out.
 - A stored message for a stopped FLIGHT goes only to FLIGHT, on its next start.
-- Items 1, 2, 5 and 8 change hard-rule files: the seat tools, the engine, FLIGHT's tools and
-  start brief, and the role files. Each needs clearance.
+- Items 1, 2, 4, 5 and 8 change hard-rule files. These are the seat tools, the engine, FLIGHT's
+  tools and start brief, and the role files. Each needs clearance.
 
 ## Left to the developer
 
