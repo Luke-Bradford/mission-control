@@ -170,6 +170,19 @@ describe("external PR review subjects", () => {
     expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(false);
   });
 
+  it("a seeded ask keeps the in-flight review wanted, with no run here", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    const service = createExternalReviews(h.deps);
+    expect(service.wanted(row)).toBe(true);
+    await service.sync();
+    expect(store.review(row.id)?.state).not.toBe("superseded");
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
   it.each([
     ["reported", ["starting", "running", "reported"]],
     ["failed", ["starting", "running", "failed"]],

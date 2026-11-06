@@ -114,7 +114,7 @@ export function externalReviewAsked(
   return ask?.sha === sha && (forReview || ask.by !== SEEDED_BY);
 }
 
-/** Records the ask for `sha`; asking again for the same head changes nothing, a new head replaces it. */
+/** Records the ask for `sha`; asking again for the same head changes nothing, a new head or a real ask over a seeded one replaces it. */
 export function askExternalReview(
   store: Store,
   repo: string,
@@ -123,7 +123,9 @@ export function askExternalReview(
   at: number,
   sha: string,
 ): void {
-  if (externalReviewAsked(store, repo, pr, sha, true)) return;
+  // skip only when the ask adds nothing: an operator or FLIGHT ask replaces Update's seeded one,
+  // and Update never downgrades a real ask
+  if (externalReviewAsked(store, repo, pr, sha, by === SEEDED_BY)) return;
   store.setSetting(askKey(repo, pr), JSON.stringify({ at, by, sha }));
 }
 
