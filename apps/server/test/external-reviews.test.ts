@@ -166,6 +166,12 @@ describe("external PR review subjects", () => {
     expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
   });
 
+  it("Update seeds no ask when no review is in flight", () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+  });
+
   it("an older queued row with no ask is no longer wanted", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
