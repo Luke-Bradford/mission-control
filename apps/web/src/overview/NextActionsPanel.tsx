@@ -34,22 +34,22 @@ export function NextActionsPanel() {
         <p className="pb s muted">Nothing is waiting for your decision.</p>
       )}
       {items.length > 0 && (
-        <ul className="needs-list">
+        <ul className="next-list">
           {items.slice(0, SHOWN).map((item) => (
             <li key={item.key}>
-              <button type="button" className="needs-row" onClick={() => openNeed(item)}>
-                <span className="needs-kind">{ATTENTION_LABEL[item.kind].toLowerCase()}</span>
-                <span className="needs-text" title={item.text}>
+              <button type="button" className="next-row" onClick={() => openNeed(item)}>
+                <span className="next-kind">{ATTENTION_LABEL[item.kind].toLowerCase()}</span>
+                <span className="next-text" title={item.text}>
                   {item.text}
                 </span>
-                <span className="needs-age num">{elapsed(now - item.at)}</span>
+                <span className="next-age num">{elapsed(now - item.at)}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
       {items.length > SHOWN && (
-        <p className="needs-more s">
+        <p className="next-more s">
           <a href={NEEDS_YOU_PATH} onClick={(e) => followLink(e, NEEDS_YOU_PATH)}>
             {items.length - SHOWN} more waiting on you
           </a>
