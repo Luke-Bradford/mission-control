@@ -111,6 +111,52 @@ export function publicHandoff(h: RunHandoff): RunHandoff {
   return { ...h, branch: safe(h.branch), worktree: h.worktree === null ? null : safe(h.worktree) };
 }
 
+/**
+ * Where the next author works. The ended run's open PR is the branch to push to: its head can be
+ * a different ref than the ended run's branch, and the old worktree is only kept on that same ref.
+ */
+export function handoffTarget(
+  store: Store,
+  h: Pick<RunHandoff, "runId" | "repoId" | "ticket" | "branch" | "worktree">,
+): { branch: string; worktree: string | null } {
+  // only the PR the ended run itself opened: another open PR on the ticket stays a refusal
+  const prNumber = store.run(h.runId)?.loop?.prNumber;
+  const pr = store
+    .pullRequestsOnTicket(h.repoId, h.ticket)
+    .find((p) => p.state === "open" && p.number === prNumber && p.branch !== "");
+  if (!pr || pr.branch === h.branch) return { branch: h.branch, worktree: h.worktree };
+  return { branch: pr.branch, worktree: null };
+}
+
+/**
+ * The handoff as the new author reads it: the branch and worktree it actually starts on, and the
+ * open findings of the PR's latest reported review (an external review is recorded after the
+ * handoff was, so the stored list does not have it).
+ */
+export function handoffForBrief(
+  store: Store,
+  h: RunHandoff,
+  checkout: { branch: string; path: string },
+): RunHandoff {
+  const prNumber = store.run(h.runId)?.loop?.prNumber;
+  const review =
+    prNumber == null
+      ? undefined
+      : store.reviewsOfPr(h.repoId, prNumber).findLast((r) => r.state === "reported");
+  const fresh = review
+    ? store
+        .findingsOf(review.id)
+        .filter((f) => f.state === "open" && f.resolution == null)
+        .map((f) => safe(`${f.severity}: ${f.file}:${f.line} — ${f.summary}; ${f.fix}`))
+    : [];
+  return {
+    ...h,
+    branch: checkout.branch,
+    worktree: checkout.path,
+    findings: [...new Set([...fresh, ...h.findings])].slice(0, 50),
+  };
+}
+
 /** Taking over work grants no clearance or acceptance and cannot release an operator's hold. */
 export function inheritedHandoffLoop(
   source: RunLoop | null | undefined,

@@ -52,6 +52,23 @@ service does not risk a second issue. Partial recovery writes count toward the r
 changes still need their existing proposal and approval paths. No recommendation action
 applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
 
+**FLIGHT's own accept.** When `create_ticket` is given a `recommendationId` whose proposal is still
+`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `flight-model.ts`, a hard rule, so widening it needs operator clearance; today
+`repeatedly-changed-large-file`), the hub accepts it for FLIGHT first: owner `FLIGHT (<seat>)`, review
+date 30 days on, the call's `basis` as the reason, recorded in the flight decision audit with the
+seat as actor. Any other rule is left proposed and the call is refused; the operator's token, typed
+owner and date stay the only way to accept it. This is no new GitHub write.
+
+**Unprompted audit work.** Once an hour (and a minute after start) the hub runs `runCodeHealthAudit`.
+It records every merged PR in `code_health_merged_reviews`: how it merged (`crew-run`, `ended-run` or
+`hand`) and the last review the hub reported for it (`reviewId`, null when none exists; a review that
+lands later is linked on the next pass). It also re-measures each accepted proposal whose review date
+has passed, once, against its accepted baseline, and stores the result as `remeasure`
+(`improved`, `unchanged`, `worse` or `unmeasured`, with the baseline, current value and a note).
+Re-measuring never ends the work; `assess` stays a manual, evidence-backed decision.
+The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
+with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
+
 Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
 issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
 read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and
@@ -1404,13 +1421,24 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
-run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
-ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+with `--match-head-commit`; branch protection stays in force. A branch keeps its normal engine path
+while a build run is live or parked on it, while a run is live on the same ticket under another
+branch, while a seat has claimed the ticket's handoff and has no run row yet, and for every run of a
+configured (observed) loop. Once that run has ended (a controller pushed the head and FLIGHT ended the
+run to free the seat), the PR is reviewed and merged like one with no crew author; a
 hard-rule PR then needs the same head-bound `merge-floor` approval below on a standard repo; on a
 superuser repo FLIGHT's own logged decision is enough. A merge hold on the branch's
 latest build run still refuses the merge after that run ends, until the hold is released. An operator's
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+This is decided, not an oversight: a hold that outlived the run could be cleared only by starting a
+seat. A clean review reads only the pushed head, so uncommitted work the ended run left in its
+worktree is not seen by the review or by `merge_pr`; the ticket's open handoff lists it.
+
+An ended run's PR with review findings goes back to a seat with `reassign_ticket`. The seat works on
+the PR's own head: when the run opened a PR whose head ref differs from the run's branch, the seat
+starts on that ref, and a handed-over branch behind origin's is moved to origin's tip (a diverged one
+is refused, and nothing is changed). A stuck run whose newest commit is the PR's head, pushed by hand
+after the push gate refused it, is recorded as pushed when FLIGHT lifts the park, so it reaches review.
 No build run is invented and no board card is marked Done by this path.
 
 When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an

@@ -5986,6 +5986,19 @@ describe("the engine runs reviews", () => {
       expect(loopOf().phase).not.toBe("parked");
     });
 
+    it("lift records a push that origin holds when the PR head is the newest commit", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "stuck", reason: "stuck", ended: false } });
+      clock += 1000;
+      commit(SHA_B);
+      // the controller pushed the commit the gate had refused: the PR head is now the newest commit
+      setPr({ headSha: SHA_B });
+      expect(await operate(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe(true);
+      expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    });
+
     describe("names the check that refused", () => {
       const refusal = async (
         by: "CAPCOM" | "FLIGHT",

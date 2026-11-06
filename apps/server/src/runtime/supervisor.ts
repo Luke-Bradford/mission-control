@@ -176,6 +176,8 @@ import {
 import type { ReviewPreviews } from "../review-preview.ts";
 import {
   enrichHandoff,
+  handoffForBrief,
+  handoffTarget,
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
@@ -3505,9 +3507,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
-                ...(handoff
-                  ? { handoff: { branch: handoff.branch, worktree: handoff.worktree } }
-                  : {}),
+                ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
                   markPending: (path) => store.markCheckoutPending(path, now()),
@@ -3720,7 +3720,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
-      if (handoff) brief += `\n\n${wrapExternalText(handoffText(publicHandoff(handoff)))}`;
+      if (handoff)
+        brief += `\n\n${wrapExternalText(
+          handoffText(publicHandoff(handoffForBrief(store, handoff, checkout))),
+        )}`;
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       const briefPieces = [

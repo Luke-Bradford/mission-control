@@ -35,6 +35,23 @@ export function checksRun(command: string, checks: readonly string[]): string[] 
   return checks.filter((c) => segments.includes(c));
 }
 
+/** A leading `cd <path>` joined to the rest by `&&` or `;`; the path is bare, or in single or double quotes. */
+const LEADING_CD = /^\s*cd\s+(?:"([^"$`\\]*)"|'([^']*)'|([^\s"'$`\\&;|<>()*?[\]{}~]+))\s*(?:&&|;)/;
+
+/**
+ * The command with a leading `cd` into the seat's own worktree taken off. The seat's shell starts in
+ * its worktree, so that `cd` changes nothing the check sees (and with `;` the status is still the
+ * check's own). A `cd` anywhere else, or into any other path, is left in place and so counts for nothing.
+ */
+export function withoutOwnCd(command: string, worktree: string | null): string {
+  const m = worktree === null ? null : LEADING_CD.exec(command);
+  if (m === null || worktree === null) return command;
+  const path = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\/+$/, "");
+  return path !== "" && path === worktree.replace(/\/+$/, "")
+    ? command.slice(m[0].length)
+    : command;
+}
+
 /**
  * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
@@ -100,6 +117,8 @@ export interface CheckRecorderDeps {
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
   state: (runId: string) => Promise<CloneState | null>;
+  /** The run's seat worktree, or null when unknown (a leading `cd` then counts for nothing). */
+  worktree?: (runId: string) => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -157,7 +176,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
-        const matched = checksRun(command, checks);
+        const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
+        const matched = checksRun(withoutOwnCd(command, own), checks);
         if (matched.length === 0) {
           // a configured check inside a chain, a pipe or a list is not counted: say so
           const inside = lockedCheck(command, checks);
@@ -283,6 +303,16 @@ export function cloneState(
       ...COMMIT_ADD_PATHSPEC,
     ]);
     return { head, clean: dirty.trim() === "" };
+  };
+}
+
+/** A run's seat worktree, or null when it has none. */
+export function seatWorktree(
+  store: Pick<Store, "run" | "seatSession">,
+): (runId: string) => Promise<string | null> {
+  return async (runId) => {
+    const run = store.run(runId);
+    return run === null ? null : (store.seatSession(run.agentId)?.worktree ?? null);
   };
 }
 

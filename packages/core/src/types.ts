@@ -448,6 +448,17 @@ export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt"
  * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
  * null; the web offers "Start preview" when `previewable && preview === null`.
  */
+/** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
+export interface DesignPreviewView {
+  ticket: number;
+  branch: string;
+  sha: string;
+  publishedAt: number;
+  pr: number | null;
+  running: boolean;
+  url: string;
+}
+
 export interface PullRequestPreviewFacts {
   previewable: boolean;
   preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
