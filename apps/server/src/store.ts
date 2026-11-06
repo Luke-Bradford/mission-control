@@ -216,6 +216,8 @@ export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
 export const OPERATIONAL_RETENTION_DAYS = 90;
 export const AUDIT_RETENTION_DAYS = 365;
 /** FLIGHT's answers to seats' questions, and the questions it passed on, outlive the 90-day log. */
+const COMMS_QUESTION_THREAD_SQL =
+  "COALESCE(label, '') = 'question' OR COALESCE(reply_to, -1) IN (SELECT q.id FROM comms q WHERE q.label = 'question')";
 const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 
 const SCHEMA = `
@@ -912,6 +914,10 @@ export interface NewCommsRow {
   ref?: string | null;
   replyTo?: string | null;
   targetRunId?: string | null;
+  /** The sending seat's run, stamped by the hub; not typed by the agent. */
+  fromRunId?: string | null;
+  /** The number of the sender's newest open PR, stamped by the hub. */
+  pr?: number | null;
   mentions?: readonly string[];
 }
 
@@ -1951,6 +1957,9 @@ export class Store {
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
     this.addColumn("comms", "target_run_id", "TEXT");
+    // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
+    this.addColumn("comms", "from_run_id", "TEXT");
+    this.addColumn("comms", "pr", "INTEGER");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -3005,6 +3014,8 @@ export class Store {
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
       ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
       ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      // a question message and the replies to it outlive the 90-day message log
+      ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
@@ -3042,6 +3053,18 @@ export class Store {
         .all(now - retentionDays * day, HISTORY_BATCH_ROWS) as { id: number }[];
       if (ids.length > 0) {
         this.transaction(() => {
+          if (table === "comms") {
+            const marks = ids.map(() => "?").join(",");
+            for (const child of [
+              "comms_mentions",
+              "comms_reactions",
+              "comms_settlements",
+              "comms_pins",
+            ])
+              this.db
+                .prepare(`DELETE FROM ${child} WHERE message_id IN (${marks})`)
+                .run(...ids.map(({ id }) => id));
+          }
           if (table === "reviews") {
             const marks = ids.map(() => "?").join(",");
             this.db
@@ -3114,7 +3137,7 @@ export class Store {
       const findings = table === "review_findings";
       const condition =
         table === "comms"
-          ? "at < ?"
+          ? `at < ? AND NOT (${COMMS_QUESTION_THREAD_SQL})`
           : table === "flight_decisions"
             ? `at < ? AND kind NOT IN (${DECISION_KINDS_KEPT_SQL})`
             : findings
@@ -5780,7 +5803,7 @@ export class Store {
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -5792,6 +5815,8 @@ export class Store {
         row.ref ?? null,
         replyTo,
         row.targetRunId ?? null,
+        row.fromRunId ?? null,
+        row.pr ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -5818,6 +5843,21 @@ export class Store {
       ref: r.ref as string | null,
       replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
       mentions,
+    };
+  }
+
+  /** The run and PR the hub stamped on a message; nulls for a message it did not stamp. */
+  commsStamp(id: string): { runId: string | null; pr: number | null } {
+    const n = commsMessageNumber(id);
+    const r =
+      n === null
+        ? undefined
+        : (this.db.prepare("SELECT from_run_id, pr FROM comms WHERE id = ?").get(n) as
+            | Row
+            | undefined);
+    return {
+      runId: (r?.from_run_id as string | null | undefined) ?? null,
+      pr: (r?.pr as number | null | undefined) ?? null,
     };
   }
 

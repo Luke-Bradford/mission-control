@@ -1860,6 +1860,39 @@ describe("Comms seat tools", () => {
     ]);
   });
 
+  it("stamps a seat message with the sending run and its newest open PR", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1523,
+          headSha: "a",
+          title: "x",
+          url: "https://github.com/o/mc/pull/1523",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: NOW - 1000,
+          updatedAt: NOW - 1000,
+          mergedAt: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    const sent = await send({ to: "guido-2", text: "stamped" });
+    const id = /comms:\d+/.exec(sent.text)?.[0] ?? "";
+    expect(store.commsStamp(id)).toEqual({ runId: RUN, pr: 1523 });
+    // an agent types neither: the full read shows what the hub stamped
+    const full = JSON.parse((await read({ id })).text) as { runId: string; pr: number };
+    expect([full.runId, full.pr]).toEqual([RUN, 1523]);
+  });
+
   it("stores an identical message sent twice within a minute once and answers already sent", async () => {
     liveSeat("guido-2", "guido-2:live");
     const first = await send({ to: "guido-2", text: "same", label: "handoff" });

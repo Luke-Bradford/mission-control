@@ -2604,10 +2604,14 @@ keep their permission checks.
 - **One ticket form.** A seat's message is stored under `repo#n`: the ticket in its ref, else the
   ticket of the message it replies to, else its run's ticket. Older rows stored `#n`; reads treat
   both as one ticket.
-- **Start brief.** A run's first message lists the ticket's answered questions (FLIGHT's recorded
+- **Start brief.** A run's first message (a build run's, and a review run's) lists the ticket's answered questions (FLIGHT's recorded
   answer), one line each, ten at most, under "Already decided on this ticket".
-- **Exact repeats.** The same sender, recipient, text, ticket and label within 60 seconds is stored
+- **Exact repeats.** From any sender, the same sender, recipient, text, ticket and label within 60 seconds is stored
   once. The sender is told "Already sent comms:N." (a success), nobody is woken again, and a row in
   `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days.
-- **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions, and
-  FLIGHT's `answer` and `pass` decisions, keep 365.
+- **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
+  that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
+  The kind of a message is not stamped yet.
+- **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
+  FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
+  them keep 365.

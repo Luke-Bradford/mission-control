@@ -6641,6 +6641,14 @@ describe("crew routes", () => {
     expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toHaveLength(1);
   });
 
+  it("stores two identical operator messages within a minute once, wakes the seat once and answers ok both times", async () => {
+    const first = await post5("message", { text: "stop now", interrupt: true });
+    const again = await post5("message", { text: "stop now", interrupt: true });
+    expect([first.statusCode, again.statusCode]).toEqual([200, 200]);
+    expect(store.comms(0).filter((c) => c.text === "stop now")).toHaveLength(1);
+    expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(1);
+  });
+
   it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
@@ -8453,7 +8461,8 @@ describe("the first loop's engine", () => {
     expect(store.comms(0).map((c) => c.ticket)).toEqual([null]);
     supervisorFail = new SupervisorError(409, "GUIDO-1 has no live session");
     expect((await message(none.a)).statusCode).toBe(200);
-    expect(store.comms(0)).toHaveLength(2);
+    // the same words again within a minute are one message, and still answer ok
+    expect(store.comms(0)).toHaveLength(1);
     await none.a.close();
   });
 

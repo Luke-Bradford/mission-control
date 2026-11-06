@@ -3345,6 +3345,40 @@ describe("comms", () => {
   });
 });
 
+describe("answeredQuestionsOn", () => {
+  const mkRun = (id: string, ticket: string) =>
+    store.upsertRun(run({ id, ticket, agentId: "a", endedAt: 2 }));
+  const ask = (runId: string, text: string, answered: boolean, at: number) => {
+    const q = store.addQuestion({ agentId: "a", runId, text, at });
+    if (answered) {
+      store.answerQuestion(q, at + 1);
+      store.addFlightDecision({
+        at: at + 1,
+        kind: "answer",
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId: q,
+        about: text,
+        decision: `answer to ${text}`,
+        basis: "b",
+      });
+    }
+  };
+
+  it("returns the ticket's answered questions only, newest first, up to the limit", () => {
+    mkRun("r42", "mc#42");
+    mkRun("r7", "mc#7");
+    ask("r42", "old", true, 10);
+    ask("r42", "unanswered", false, 20);
+    ask("r7", "elsewhere", true, 30);
+    ask("r42", "new", true, 40);
+    expect(store.answeredQuestionsOn("mc#42", 10).map((d) => d.question)).toEqual(["new", "old"]);
+    expect(store.answeredQuestionsOn("mc#42", 1).map((d) => d.question)).toEqual(["new"]);
+    expect(store.answeredQuestionsOn("mc#42", 10)[0]?.answer).toBe("answer to new");
+  });
+});
+
 describe("question and answer retention", () => {
   it("keeps an answered seat question and FLIGHT's answer for 365 days, other decisions and messages for 90", async () => {
     const day = 86_400_000;
@@ -3376,6 +3410,27 @@ describe("question and answer retention", () => {
     expect(store.flightDecisionsAbout("answer", "x")).toEqual([]);
     for (let i = 0; i < 20; i++) await store.pruneHistory(367 * day);
     expect([count("seat_questions"), count("flight_decisions")]).toEqual([0, 0]);
+  });
+});
+
+describe("Comms question retention", () => {
+  it("keeps a question message and its reply for 365 days, a plain message for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addComms({
+      at: 0,
+      from: "a",
+      to: "b",
+      ticket: null,
+      text: "q",
+      label: "question",
+    });
+    if (q === null) throw new Error("not stored");
+    store.addComms({ at: 1, from: "b", to: "a", ticket: null, text: "reply", replyTo: q.id });
+    store.addComms({ at: 2, from: "a", to: "b", ticket: null, text: "plain" });
+    for (let i = 0; i < 25; i++) await store.pruneHistory(100 * day);
+    expect(store.comms(0).map((m) => m.text)).toEqual(["q", "reply"]);
+    for (let i = 0; i < 25; i++) await store.pruneHistory(367 * day);
+    expect(store.comms(0)).toEqual([]);
   });
 });
 
@@ -3759,7 +3814,7 @@ describe("hub retention", () => {
         INSERT INTO briefs (key,context,recommendation,options,basis,at) VALUES
         ('brief:open','context','recommendation','[]','basis',0),
         ('brief:cleared','context','recommendation','[]','basis',0);`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM briefs ORDER BY key").all()).toEqual([
         { key: "brief:open" },
       ]);

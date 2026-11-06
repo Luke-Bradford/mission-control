@@ -90,6 +90,19 @@ export const BRIEF_DECISIONS_MAX = 10;
 /** The longest a decision line is, in characters. */
 export const BRIEF_DECISION_LINE_MAX = 300;
 
+/** The "Already decided" section of a brief; empty when the ticket has no answered question. */
+export function decisionsSection(
+  decisions: readonly { question: string; answer: string }[] | undefined,
+): string[] {
+  if (decisions === undefined || decisions.length === 0) return [];
+  return [
+    "## Already decided on this ticket",
+    "These questions were answered. Do not ask them again.",
+    ...decisions.slice(0, BRIEF_DECISIONS_MAX).map(decisionLine),
+    "",
+  ];
+}
+
 /** One line for an answered question: what was asked and the choice made, cut to one short line. */
 export function decisionLine(d: { question: string; answer: string }): string {
   const flat = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -193,14 +206,7 @@ export function ticketBrief(i: BriefInput): string {
     i.body,
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
-    ...((i.decisions?.length ?? 0) > 0
-      ? [
-          "## Already decided on this ticket",
-          "These questions were answered. Do not ask them again.",
-          ...(i.decisions ?? []).slice(0, BRIEF_DECISIONS_MAX).map(decisionLine),
-          "",
-        ]
-      : []),
+    ...decisionsSection(i.decisions),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     last,
@@ -248,6 +254,8 @@ export interface ReviewBriefInput {
   bodyLength: number;
   /** The author's report notes, oldest first. */
   notes: readonly string[];
+  /** The ticket's answered questions, newest first; the brief lists ten at most. */
+  decisions?: readonly { question: string; answer: string }[];
   /** The author's latest answer to each of the ticket's Done-when lines; empty when it gave none. */
   doneWhen?: readonly DoneWhenEntry[];
   prevSha: string | null;
@@ -364,6 +372,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
     ...(note === null ? [] : [note, ""]),
     i.body,
     "",
+    ...decisionsSection(i.decisions),
     ...(table.length > 0
       ? [
           "## The author's Done-when table",

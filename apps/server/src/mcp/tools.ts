@@ -1634,6 +1634,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           operator: row.from === COMMS_CAPCOM,
           pinned: pinned.has(row.id),
           reactions: store.commsReactions(row.id),
+          ...store.commsStamp(row.id),
         }),
       };
     }
@@ -1707,6 +1708,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const sending = liveRun(ctx);
     if (sending === null) return ENDED;
     const senderTicket = sending.run.ticket;
+    const senderPr = senderTicket
+      ? store.pullRequestsOnTicket(sending.run.repoId, senderTicket).find((p) => p.state === "open")
+          ?.number
+      : undefined;
     const flightCall = isFlight(ctx.seatId);
     if (flightCall) {
       const tripped = runawayTrip(store);
@@ -1731,6 +1736,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           notify: deps.onComms,
           seatSender: true,
           ...(senderTicket ? { senderTicket } : {}),
+          senderRunId: ctx.runId,
+          ...(senderPr === undefined ? {} : { senderPr }),
         },
         ctx.seatId,
         parsed.data,

@@ -36,6 +36,9 @@ export interface CommsServiceDeps {
   seatSender?: boolean;
   /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
   senderTicket?: string;
+  /** The sender's run and its newest open PR, which the hub stamps on the stored message. */
+  senderRunId?: string;
+  senderPr?: number;
 }
 
 /** An exact repeat within this long is not stored again. */
@@ -124,13 +127,15 @@ export async function sendComms(
         ref: input.ref,
         replyTo: input.replyTo,
         targetRunId: input.targetRunId,
+        fromRunId: deps.senderRunId ?? null,
+        pr: deps.senderPr ?? null,
         mentions: [...mentions],
       },
       deps.seatSender
         ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
         : undefined,
-      // only a seat's repeat is turned away: the operator may send the same words again on purpose
-      deps.seatSender ? now - COMMS_REPEAT_WINDOW_MS : undefined,
+      // an exact repeat is stored once, whoever sends it
+      now - COMMS_REPEAT_WINDOW_MS,
     );
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
