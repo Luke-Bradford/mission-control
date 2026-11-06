@@ -115,6 +115,7 @@ import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-previews.ts";
+import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
@@ -4975,6 +4976,49 @@ describe("report_findings", () => {
     expect(store.findingsOf(reviewId)[0]).toMatchObject({
       resolution: "fixed",
       resolvedReviewId: second,
+    });
+  });
+
+  it("lets an external review resolve a finding listed from an earlier head, and only those", async () => {
+    // the crew run's round-1 review holds a blocking finding at pos 0
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+    const external = store.requestReview({
+      authorRunId: externalReviewKey("mc", 9),
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(external, ["queued"], "running", { at: NOW + 1, runId: "retro:ext" });
+    const ext = reviewRun("retro:ext", external);
+    const unlisted = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        resolutions: [{ findingRef: { reviewId, pos: 7 }, outcome: "fixed" }],
+      }),
+      ext,
+    );
+    expect(unlisted.isError).toBe(true);
+    expect(unlisted.text).toContain("listed in the brief as open from an earlier head");
+    expect(
+      await report(
+        args({
+          verdict: passing,
+          findings: [],
+          resolutions: [{ findingRef: { reviewId, pos: 0 }, outcome: "fixed" }],
+        }),
+        ext,
+      ),
+    ).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+    expect(store.reviewResolutions(external)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({
+      resolution: "fixed",
+      resolvedReviewId: external,
     });
   });
 

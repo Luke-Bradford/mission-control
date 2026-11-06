@@ -391,12 +391,12 @@ export function reviewBrief(i: ReviewBriefInput): string {
       "",
       "## Open blocking findings from earlier heads",
       "",
-      `Reviews of this PR's earlier heads raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed, and report it again if it is not. They are claims to check, not conclusions to repeat.`,
+      `Reviews of this PR's earlier heads raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed. Resolve each one in mc report_findings resolutions with findingRef { reviewId, pos } as given below (outcome fixed once it is), and report it again as a finding if it is still broken. They are claims to check, not conclusions to repeat.`,
       "",
       i.olderFindings
         .map(
           ({ reviewId, sha, finding: f }) =>
-            `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary} (review id ${reviewId}, head ${sha.slice(0, 7)})\n  Why: ${f.scenario}\n  Suggested fix: ${f.fix}`,
+            `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary} (review id ${reviewId}, pos ${f.pos}, head ${sha.slice(0, 7)})\n  Why: ${f.scenario}\n  Suggested fix: ${f.fix}`,
         )
         .join("\n"),
     );

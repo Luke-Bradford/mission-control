@@ -204,6 +204,7 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
+import { externalReviewKey } from "./external-review-key.ts";
 import { qaNativeIdentity } from "./qa-history-key.ts";
 import { StandingInstructions } from "./standing-instructions.ts";
 
@@ -5280,9 +5281,13 @@ export class Store {
         );
       if (res.changes !== 1) return;
       const row = this.db
-        .prepare("SELECT author_run_id, round, changed_since FROM reviews WHERE id = ?")
+        .prepare(
+          "SELECT author_run_id, repo_id, pr_number, round, changed_since FROM reviews WHERE id = ?",
+        )
         .get(reviewId) as Row;
       const author = row.author_run_id as string;
+      const repoId = row.repo_id as string;
+      const prNumber = row.pr_number as number;
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null
@@ -5362,17 +5367,20 @@ export class Store {
         );
       }
       // A round that reports nothing to fix accepts the author's work: the blocking findings of the
-      // earlier rounds that RETRO did not name were fixed.
+      // earlier rounds that RETRO did not name were fixed. An external review's subject is the PR,
+      // so the crew run's earlier reviews of it count too.
       if (blocking === 0) {
+        const external = externalReviewKey(repoId, prNumber);
         this.db
           .prepare(
             `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
              WHERE state = 'open' AND resolution IS NULL AND review_id IN (
                SELECT p.id FROM reviews p, reviews c
-               WHERE c.id = ? AND p.author_run_id = c.author_run_id AND p.epoch = c.epoch
-                 AND p.round < c.round)`,
+               WHERE c.id = ? AND p.round < c.round
+                 AND ((p.author_run_id = c.author_run_id AND p.epoch = c.epoch)
+                   OR (c.author_run_id = ? AND p.repo_id = c.repo_id AND p.pr_number = c.pr_number)))`,
           )
-          .run(reviewId, reviewId);
+          .run(reviewId, reviewId, external);
       }
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),

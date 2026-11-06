@@ -162,6 +162,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { openOlderFindings } from "../older-findings.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
@@ -4163,26 +4164,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? null
           : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
       // An ended run's PR: its earlier heads' reviews belong to the crew run, so the findings still
-      // open there are not in `prev`. A clean review since then accepted the work before it.
-      const earlier = external
-        ? store
-            .reviewsOfPr(info.repo.id, review.prNumber)
-            .filter((r) => r.state === "reported" && r.id < reviewId && r.id !== prev?.id)
-        : [];
-      const olderFindings = earlier
-        .slice(earlier.findLastIndex((r) => r.blocking === 0) + 1)
-        .filter((r) => r.sha !== review.sha)
-        .flatMap((r) =>
-          store
-            .findingsOf(r.id)
-            .filter(
-              (f) =>
-                BLOCKING_SEVERITIES.includes(f.severity) &&
-                f.state === "open" &&
-                f.resolution === undefined,
-            )
-            .map((finding) => ({ reviewId: r.id, sha: r.sha, finding })),
-        );
+      // open there are not in `prev`.
+      const olderFindings = external ? openOlderFindings(store, review, prev?.id ?? null) : [];
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,

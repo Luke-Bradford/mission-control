@@ -205,9 +205,11 @@ import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
+import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { openOlderFindings } from "../older-findings.ts";
 import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
@@ -2687,18 +2689,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           isError: true,
         };
       }
+      // An external review also resolves the findings its brief listed from the PR's earlier heads.
+      const older = isExternalReview(review)
+        ? openOlderFindings(store, review, previous?.id ?? null)
+        : [];
       if (
-        previous === undefined ||
         resolved.some(
           (resolution) =>
-            resolution.findingRef.reviewId !== previous.id ||
-            !store
-              .findingsOf(previous.id)
-              .some((finding) => finding.pos === resolution.findingRef.pos),
+            !(
+              resolution.findingRef.reviewId === previous?.id &&
+              store
+                .findingsOf(previous.id)
+                .some((finding) => finding.pos === resolution.findingRef.pos)
+            ) &&
+            !older.some(
+              (o) =>
+                o.reviewId === resolution.findingRef.reviewId &&
+                o.finding.pos === resolution.findingRef.pos,
+            ),
         )
       ) {
         return {
-          text: `${MC_BAD_ARGS}resolutions: findings must be from the previous round`,
+          text: `${MC_BAD_ARGS}resolutions: findings must be from the previous round${isExternalReview(review) ? " or listed in the brief as open from an earlier head" : ""}`,
           isError: true,
         };
       }
