@@ -31,13 +31,15 @@ const overview = (base: OverviewSummary): OverviewSummary => ({
   ...base,
   pipeline: [
     lane("ready", [card(11, { who: null, rework: { ...facts, blockers: 2 } })]),
-    lane("building", [
-      card(12, {}),
-      card(13, { rework: { ...facts, seatBusy: true } }),
-      card(14, { rework: { ...facts, seat: "retro-1", round: 3, blockers: 12 } }),
-    ]),
+    lane("building", [card(12, {}), card(13, { rework: { ...facts, seatBusy: true } })]),
     { stage: "checks", count: 0, oldestAt: null, cards: [] },
-    { stage: "review", count: 0, oldestAt: null, cards: [] },
+    // Its own lane, so the Board's fit-to-the-lane trim cannot drop it in a short window.
+    {
+      stage: "review",
+      count: 1,
+      oldestAt: NOW - 20 * 60_000,
+      cards: [card(14, { rework: { ...facts, seat: "retro-1", round: 3, blockers: 12 } })],
+    },
     { stage: "merging", count: 0, oldestAt: null, cards: [] },
     { stage: "merged", count: 0, oldestAt: null, cards: [] },
   ],

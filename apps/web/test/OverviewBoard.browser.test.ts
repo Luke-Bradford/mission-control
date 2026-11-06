@@ -25,7 +25,10 @@ async function open(width: number, height: number, dark = true) {
   return page;
 }
 
-/** Every card or row whose box is not inside its container's box (a part of it is cut off). */
+/**
+ * Every card or row that shows but is cut by its container's foot: it starts inside the box and ends
+ * past it. A row wholly below the box in a list that scrolls is out of view, not cut.
+ */
 const cut = (page: RenderedPage, container: string, item: string) =>
   page.evaluate(
     ({ container, item }) =>
@@ -34,7 +37,11 @@ const cut = (page: RenderedPage, container: string, item: string) =>
         return [...box.querySelectorAll(item)]
           .filter((child) => {
             const r = child.getBoundingClientRect();
-            return r.height > 0 && (r.bottom > outer.bottom + 1 || r.top < outer.top - 1);
+            return (
+              r.height > 0 &&
+              r.top < outer.bottom &&
+              (r.bottom > outer.bottom + 1 || r.top < outer.top - 1)
+            );
           })
           .map((child) => child.textContent?.slice(0, 40) ?? "");
       }),

@@ -2207,8 +2207,8 @@ button.quota-details {
   --table-row: 40px;
 }
 #agentsList {
-  /* Room for the crew's normal rows; a far larger crew scrolls and leaves the Board its space. */
-  max-height: calc(60 * var(--dvh));
+  /* Under half the window, so the Board keeps at least three cards a stage; a longer crew scrolls. */
+  max-height: calc(45 * var(--dvh));
   overflow-x: hidden;
   scrollbar-gutter: auto;
 }
@@ -2375,7 +2375,7 @@ button.quota-details {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 .board-ticket {
   color: var(--accent);
