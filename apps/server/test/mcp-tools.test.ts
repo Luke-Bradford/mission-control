@@ -5023,13 +5023,13 @@ describe("report_findings", () => {
   });
 
   describe("a clean external review", () => {
-    const externalOf = (pr: number) => {
+    const externalOf = (pr: number, sha = "b".repeat(40)) => {
       const id = store.requestReview({
         authorRunId: externalReviewKey("mc", pr),
         repoId: "mc",
         seatId: "retro",
         prNumber: pr,
-        sha: "b".repeat(40),
+        sha,
         epoch: 0,
         attempt: 1,
         round: 2,
@@ -5049,6 +5049,15 @@ describe("report_findings", () => {
         resolution: "fixed",
         resolvedReviewId: id,
       });
+    });
+
+    it("leaves a finding on its own head alone: the brief never listed it", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { ext } = externalOf(9, AUTHOR_SHA);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]?.resolution).toBeUndefined();
     });
 
     it("leaves another PR's findings alone", async () => {

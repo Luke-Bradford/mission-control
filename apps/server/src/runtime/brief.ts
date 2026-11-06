@@ -19,6 +19,7 @@ import {
   type LoopKind,
   MC_LINE_PREFIX,
   MC_TOOL_NAMES,
+  OLDER_FINDINGS_MAX,
   profileRouteText,
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
@@ -394,11 +395,18 @@ export function reviewBrief(i: ReviewBriefInput): string {
       `Reviews of this PR's earlier heads raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed. Resolve each one in mc report_findings resolutions with findingRef { reviewId, pos } as given below (outcome fixed once it is), and report it again as a finding if it is still broken. They are claims to check, not conclusions to repeat.`,
       "",
       i.olderFindings
+        .slice(0, OLDER_FINDINGS_MAX)
         .map(
           ({ reviewId, sha, finding: f }) =>
             `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary} (review id ${reviewId}, pos ${f.pos}, head ${sha.slice(0, 7)})\n  Why: ${f.scenario}\n  Suggested fix: ${f.fix}`,
         )
         .join("\n"),
+      ...(i.olderFindings.length > OLDER_FINDINGS_MAX
+        ? [
+            "",
+            `(${i.olderFindings.length - OLDER_FINDINGS_MAX} more open findings from earlier heads are not listed; they stay open and are listed once these are resolved.)`,
+          ]
+        : []),
     );
   }
   if (i.prevFindings.length > 0) {

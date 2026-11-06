@@ -97,6 +97,7 @@ import {
   type MachineSample,
   type MergedPrFacts,
   memoryTopicKey,
+  OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
   PROMPT_SECTIONS,
@@ -205,6 +206,7 @@ import {
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
 import { externalReviewKey } from "./external-review-key.ts";
+import { openOlderFindings } from "./older-findings.ts";
 import { qaNativeIdentity } from "./qa-history-key.ts";
 import { StandingInstructions } from "./standing-instructions.ts";
 
@@ -5282,7 +5284,7 @@ export class Store {
       if (res.changes !== 1) return;
       const row = this.db
         .prepare(
-          "SELECT author_run_id, repo_id, pr_number, round, changed_since FROM reviews WHERE id = ?",
+          "SELECT author_run_id, repo_id, pr_number, sha, epoch, round, changed_since FROM reviews WHERE id = ?",
         )
         .get(reviewId) as Row;
       const author = row.author_run_id as string;
@@ -5367,20 +5369,36 @@ export class Store {
         );
       }
       // A round that reports nothing to fix accepts the author's work: the blocking findings of the
-      // earlier rounds that RETRO did not name were fixed. An external review's subject is the PR,
-      // so the crew run's earlier reviews of it count too.
+      // earlier rounds that RETRO did not name were fixed.
       if (blocking === 0) {
-        const external = externalReviewKey(repoId, prNumber);
         this.db
           .prepare(
             `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
              WHERE state = 'open' AND resolution IS NULL AND review_id IN (
                SELECT p.id FROM reviews p, reviews c
-               WHERE c.id = ? AND p.round < c.round
-                 AND ((p.author_run_id = c.author_run_id AND p.epoch = c.epoch)
-                   OR (c.author_run_id = ? AND p.repo_id = c.repo_id AND p.pr_number = c.pr_number)))`,
+               WHERE c.id = ? AND p.author_run_id = c.author_run_id AND p.epoch = c.epoch
+                 AND p.round < c.round)`,
           )
-          .run(reviewId, reviewId, external);
+          .run(reviewId, reviewId);
+        // An external review's subject is the PR, so it also accepts the crew run's findings on
+        // earlier heads, but only those its brief listed: a review does not accept what it never saw.
+        if (author === externalReviewKey(repoId, prNumber)) {
+          const previous = this.reviewsOfRun(author)
+            .filter(
+              (x) => x.id < reviewId && x.epoch === Number(row.epoch) && x.state === "reported",
+            )
+            .at(-1);
+          const resolveListed = this.db.prepare(
+            `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
+             WHERE review_id = ? AND pos = ? AND resolution IS NULL`,
+          );
+          for (const o of openOlderFindings(
+            this,
+            { id: reviewId, repoId, prNumber, sha: row.sha as string },
+            previous?.id ?? null,
+          ).slice(0, OLDER_FINDINGS_MAX))
+            resolveListed.run(reviewId, o.reviewId, o.finding.pos);
+        }
       }
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),
