@@ -129,7 +129,8 @@ export async function sendComms(
       deps.seatSender
         ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
         : undefined,
-      now - COMMS_REPEAT_WINDOW_MS,
+      // only a seat's repeat is turned away: the operator may send the same words again on purpose
+      deps.seatSender ? now - COMMS_REPEAT_WINDOW_MS : undefined,
     );
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
