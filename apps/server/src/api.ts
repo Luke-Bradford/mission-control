@@ -199,6 +199,9 @@ import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
+  COMMS_FEED_DEFAULT,
+  COMMS_FEED_MAX,
+  COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
   pinComms,
   reactComms,
@@ -1657,22 +1660,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/pages/Comms.tsx#Comms (unanswered questions and blockers)
       api.get("/comms/open", () => {
         const at = now();
-        return {
-          items: store.openCommsItems().map((item) => {
-            const flightAt = item.at + COMMS_FLIGHT_ESCALATION_MS;
-            const atFlight = at >= flightAt;
-            return {
-              id: item.id,
-              label: item.label,
-              from: item.from,
-              to: item.to,
-              ticket: item.ticket,
-              waitedMs: Math.max(0, at - item.at),
-              nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
-              nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
-            };
-          }),
+        const step = (askedAt: number) => {
+          const flightAt = askedAt + COMMS_FLIGHT_ESCALATION_MS;
+          const atFlight = at >= flightAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+          };
         };
+        const asked = store.openCommsItems().map((item) => ({
+          id: item.id,
+          label: item.label,
+          from: item.from,
+          to: item.to,
+          ticket: item.ticket,
+          text: item.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: item.at,
+          ...step(item.at),
+        }));
+        const flightId = flightSeat(config)?.seat.id ?? COMMS_CAPCOM;
+        const seatQuestions = store.openQuestions().map((q) => ({
+          id: `ask:${q.id}`,
+          label: "question" as const,
+          from: q.agentId,
+          to: flightId,
+          ticket: store.run(q.runId)?.ticket ?? null,
+          text: q.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: q.at,
+          ...step(q.at),
+        }));
+        return {
+          items: [...asked, ...seatQuestions]
+            .sort((a, b) => a.at - b.at)
+            .map(({ at: _at, ...item }) => item),
+        };
+      });
+      // Reader: apps/web/src/pages/Comms.tsx#Comms (the chart's travelling messages)
+      api.get("/comms/feed", (req, reply) => {
+        const query = z
+          .strictObject({
+            since: z.string().optional(),
+            limit: z.coerce.number().int().min(1).max(COMMS_FEED_MAX).optional(),
+          })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
+        const sinceId = query.data.since === undefined ? 0 : commsMessageNumber(query.data.since);
+        if (sinceId === null) return reply.code(400).send({ error: "invalid Comms message id" });
+        return { messages: store.commsFeed(sinceId, query.data.limit ?? COMMS_FEED_DEFAULT) };
       });
       // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
       api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {

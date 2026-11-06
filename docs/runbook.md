@@ -550,6 +550,11 @@ What each seat's process starts with:
   closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
   Messages from before the feature's rollout boundary do not enter the escalation, preventing a
   rollout backlog.
+  `GET /api/comms/open` lists these items with their text (first 280 characters) and also lists
+  each seat's open `ask_flight` question as a question to FLIGHT (id `ask:<n>`). A `seen` reaction
+  from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
+  `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref; no text) newest
+  first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
