@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { rolePrompt } from "../src/runtime/brief.ts";
 import { directionKey, instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const stores: Store[] = [];
 const open = (path = ":memory:") => {
@@ -140,7 +141,7 @@ describe("durable instructions", () => {
     );
     const upper = instructions.active(seat.id).find((e) => e.by === "operator");
     expect(upper).toBeTruthy();
-    instructions.revoke(upper!.id, seat.id, "operator", 6);
+    instructions.revoke(defined(upper).id, seat.id, "operator", 6);
     expect(instructions.focus(seat.id)).toMatchObject({
       effectiveFocus: "lane:work",
       focusInstructionId: lower.id,

@@ -1,3 +1,5 @@
+import { defined } from "./defined.ts";
+
 const codexProbe = vi.hoisted(() => ({
   checks: 0,
   gate: null as Promise<void> | null,
@@ -24,7 +26,6 @@ import {
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
-  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -499,7 +500,7 @@ describe("startWatch", () => {
     for (const flag of ["--tools", "--disallowedTools", "--restricted", "--permission-mode"])
       expect(argv).not.toContain(flag);
     expect(argv).toContain("mcp__mc__*");
-    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
+    const settings = JSON.parse(defined(argv[argv.indexOf("--settings") + 1]));
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     await until(() =>
@@ -751,17 +752,19 @@ describe("startReview", () => {
   it("reviews a trusted controller PR without a crew author run", async () => {
     const seed = reviewOfPush();
     const identity = externalReviewKey("mc", 10);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: "mc",
-      seatId: "retro",
-      prNumber: 10,
-      sha: seed.sha,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seed.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "starting", { at: 4 });
     const subject = vi.fn(async () => ({ sha: seed.sha, branch: "pr", ticket: TICKET }));
     const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
@@ -784,17 +787,19 @@ describe("startReview", () => {
     "removes a controller scratch copy when fresh PR metadata is %s",
     async (failure) => {
       const seed = reviewOfPush();
-      const id = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: seed.sha,
-        epoch: 0,
-        attempt: 1,
-        round: 1,
-        at: 3,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: seed.sha,
+          epoch: 0,
+          attempt: 1,
+          round: 1,
+          at: 3,
+        }),
+      );
       store.setReviewState(id, ["queued"], "starting", { at: 4 });
       const subject = vi
         .fn()

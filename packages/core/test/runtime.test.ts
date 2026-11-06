@@ -110,7 +110,9 @@ describe("crewCliArgs", () => {
       args.indexOf("--append-system-prompt-file"),
     );
     expect(allowed).toEqual([...FLIGHT_FULL_BUILTINS, "mcp__mc__*"]);
-    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+    const settingsArg = args[args.indexOf("--settings") + 1];
+    if (settingsArg === undefined) throw new Error("no --settings argument");
+    const settings = JSON.parse(settingsArg);
     expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PostToolUse).toHaveLength(1);

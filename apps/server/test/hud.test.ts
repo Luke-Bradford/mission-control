@@ -44,6 +44,7 @@ import {
 } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
+import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -1387,7 +1388,7 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toContain("stop threshold");
     store.upsertPullRequests(
       "shop-app",
-      [{ ...store.pullRequests("shop-app")[0]!, headSha: "d".repeat(40) }],
+      [{ ...defined(store.pullRequests("shop-app")[0]), headSha: "d".repeat(40) }],
       NOW + 1,
     );
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
