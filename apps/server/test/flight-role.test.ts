@@ -32,6 +32,8 @@ describe("roles/FLIGHT.md", () => {
     expect(role).toContain("Keep a hold the operator set in force");
     expect(role).toContain("- change branch protection or rulesets on GitHub;");
     expect(role).not.toMatch(/loosen a gate/i);
+    expect(role).not.toContain("The hub tells the operator");
+    expect(role).toContain("logged as a merge decision on the FLIGHT page");
     expect(role).toContain("On a standard repo, a PR that changes what confines seats");
     expect(role).toContain("`git push origin <name>:<branch>`");
   });
