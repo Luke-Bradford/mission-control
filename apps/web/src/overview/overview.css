@@ -2446,12 +2446,12 @@ button.quota-details {
 }
 
 /* Needs you: a row per item. */
-.needs-list {
+.next-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.needs-row {
+.next-row {
   display: grid;
   width: 100%;
   min-height: var(--sp-5);
@@ -2467,23 +2467,23 @@ button.quota-details {
   font: inherit;
   text-align: left;
 }
-.needs-row:hover {
+.next-row:hover {
   background: var(--surface-2);
 }
-.needs-kind {
+.next-kind {
   font: 500 var(--fs-micro) / var(--lh) var(--mono);
   color: var(--warn);
 }
-.needs-text {
+.next-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.needs-age {
+.next-age {
   font-size: var(--fs-s);
   color: var(--muted);
 }
-.needs-more {
+.next-more {
   margin: 0;
   padding: var(--sp-1) var(--sp-3);
   border-top: 1px solid var(--line);
@@ -2743,7 +2743,7 @@ button.quota-details {
   align-items: center;
   min-height: var(--sp-5);
 }
-.needs-more a {
+.next-more a {
   display: inline-flex;
   align-items: center;
   min-height: var(--sp-5);
