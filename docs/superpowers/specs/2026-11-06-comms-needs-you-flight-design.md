@@ -135,20 +135,26 @@ Every message records a sender kind: `operator`, `controller`, `flight`, `seat` 
 - The controller keeps what it can do today: read, reply, pin, and mark a message done.
 - A controller message wakes FLIGHT as an operator message does today.
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
-- The hub's own messages get kind `hub`. Today they are sent as `MC`.
+- The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`
+  (`apps/server/src/crew-apply.ts:419`, `apps/server/src/engine/engine.ts:1233`). Every such place
+  changes.
 - Messages stored before this change keep their old sender.
 - Rooms will add a sixth kind, for an agent on another hub.
 
-Today FLIGHT treats any line without the hub's prefix as the operator's
-(`packages/core/src/flight.ts:24`). With this rule, FLIGHT is told which lines are the
-controller's. That file and FLIGHT's role file are hard-rule files, so the change needs clearance.
+Today FLIGHT is told that any line without the hub's prefix is the operator's. That is in its
+start brief (`apps/server/src/runtime/brief.ts`). With this rule, FLIGHT is told which lines are
+the controller's. That file and FLIGHT's role file are hard-rule files, so the change needs
+clearance.
 
 ### 2. A message about a piece of work carries its ticket
 
 - The hub fills the ticket from the sender's run when the sender gives none.
 - A fly-out line carries the ticket the operator has open, when there is one.
 - New messages store one format: `repo#n`. Older rows stay as they are.
-- A seat's question to FLIGHT is stored with its full text and its ticket. The pointer line goes.
+- A sender with no ticket of its own (FLIGHT, the operator, the controller) can still give one,
+  as today. The hub also takes it from the message being replied to. A team message may have none.
+- A seat's question to FLIGHT keeps its own record, with its full text, and gains the ticket. The
+  Ticket page shows it from that record. The pointer line in Comms goes.
 
 ### 3. Needs you counts only what waits on the operator
 
@@ -221,8 +227,9 @@ If the run that wrote the message has ended, the page says so before sending. Th
 to the seat now on that ticket, or to FLIGHT when there is none. This applies to replies only,
 never to an answer (rule 6).
 
-The hub stores an exact repeat once. A second copy to the same recipient on the same ticket
-within a minute gets the answer "already sent", with the first copy's state. On 6 November one
+The hub stores an exact repeat once, for every sender. A second copy with the same sender,
+recipient, ticket and text within a minute is not stored. The sender gets "already sent" and the
+first copy's state, as a success. The hub counts each one for Audit. On 6 November one
 message to a seat was stored three times in three seconds.
 
 ### 8. Hub messages are notices
@@ -243,7 +250,7 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 - the same message sent more than once;
 - the same notice repeated on one PR;
 - a request for the controller that waited longer than a set time;
-- a ticket whose messages cost far more tokens than usual.
+- a ticket with far more message text than usual.
 
 ## Where today's items go
 
@@ -259,6 +266,8 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 | A request "for the controller" | Comms, addressed to the controller. If none answers in a set time, FLIGHT writes it as a question |
 | A seat that stalled or failed, a stray process, a blocked test lock, a PR nobody is moving | FLIGHT's queue, shown on the FLIGHT page. FLIGHT fixes it or writes a question |
 | A question from a loop Mission Control only watches | FLIGHT's queue until FLIGHT writes a complete question |
+| Something that needs the operator's yes: a hard-rule merge check, a queue change, a floor approval, an acceptance, a budget | Stays, written as a complete question. The hub writes it where the hub raises it, as #1389 lists |
+| Something that reports state: in review, ready, set aside, a tool error, a seat's message nobody answered | FLIGHT's queue |
 | FLIGHT's own lines that mention the operator | The FLIGHT conversation, marked unread |
 
 **Alerts (controller's call).** A header chip on every page, shown only when there is an alert. It
@@ -285,21 +294,23 @@ filter, so most of what a seat reads is about other tickets. RETRO-1 (a reviewer
 12 times, once a review.
 
 **Pins are mostly there, in two forms.** In the same 24 hours no seat message lacked a ticket.
-But 38 of 219 messages stored the short form (`#1458`) and the rest the long form
+But 38 of 219 messages (counted an hour after the 210 above) stored the short form (`#1458`) and the rest the long form
 (`mission-control#1458`), so one ticket's messages sit under two keys. 23 of the 26 messages sent
 as the operator had no ticket at all.
 
-### The hub stamps every message; the agent types two things
+### The hub stamps every message; the agent types the recipient and the text
 
 A seat's token is tied to one run, so the hub already knows everything below when a tool is
-called. The agent gives the recipient and the text.
+called. The agent gives the recipient and the text. It adds one word, the label, when the
+message must wake someone.
 
 | Field | Set by | From |
 |---|---|---|
 | Sender and sender kind | Hub | The seat's token, or the app session (rule 1) |
 | Run | Hub | The token |
 | Ticket and PR | Hub | The run's ticket and its open PR (rule 2) |
-| Kind | Hub | The tool that was called: `ask_flight` is a question, `report_findings` is findings, the engine is a notice |
+| Kind, for rows the hub writes | Hub | The tool that was called: `ask_flight` is a question, `answer_question` is an answer, a report tool is a pointer, the engine is a notice |
+| Label: question, handoff or blocker | Agent | Only when the message must wake the other seat. Unchanged from today: a label wakes an idle seat and starts the clock that passes an unanswered question up |
 | Commit | Hub | The run's newest commit, when the hub knows it **(controller's call)** |
 | Delivered, answered | Hub | When it put the message in a prompt; when a reply or answer closed it |
 | Reply-to | Agent | One id, only when replying. The id is on the row being answered |
@@ -328,14 +339,18 @@ people, and are not sent to agents.
 
 ### Reading is by ticket, short first
 
-- **The hub pushes.** An agent gets what is addressed to it, once, at its next turn. That exists
-  today, capped at 40 messages and 8,000 characters.
-- **A run starts with its ticket's decisions.** The handoff already gives the goal, what is done,
-  what is left and the last six messages. It gains the ticket's answered questions: one line each
-  with the choice, ten at most **(controller's call)**. A decision is then not asked twice.
+- **The hub pushes each message once.** Today the hub attaches the newest 40 inbox messages, read
+  or not, to a run's start and to every line it delivers, up to 8,000 characters
+  (`apps/server/src/comms.ts:123`). It changes to send only what the seat has not yet been sent.
+- **A run starts with its ticket's decisions.** Every run on a ticket gets the ticket's answered
+  questions in its start brief: one line each with the choice, ten at most **(controller's
+  call)**. A decision is then not asked twice. A run that takes over unfinished work also gets the
+  handoff, as today: the goal, what is done, what is left and the last six messages.
 - **`comms_read` reads one ticket.** It defaults to the seat's own ticket and can filter by kind.
   Each message comes back as one line of at most 200 characters **(controller's call)**. The agent
-  asks for a full text by id when it needs one.
+  asks for a full text by id when it needs one. A seat can still ask for the team channel or
+  another ticket by name. FLIGHT has no ticket, so its default is the short form across tickets.
+  The pushed inbox keeps full text.
 - The role files tell seats to read by ticket. Role files are hard-rule files, so that change
   needs clearance.
 
@@ -346,23 +361,17 @@ Four smaller points:
 - Delivering an answer to a seat does not wake FLIGHT. FLIGHT sees one line at its next wake.
 - A refused question names the missing part, so FLIGHT fixes it in one try.
 
-The Comms graph already totals tokens per link. Audit uses that figure per ticket (rule 9).
-
 ### No model reads messages to sort them
 
-The operator asked whether a small model such as Haiku should check each seat's messages. For
-seats the answer is no **(controller's call)**:
+The operator asked whether a small model such as Haiku should check each seat's messages. The
+answer is no **(controller's call)**:
 
 - After item 1, hub code picks a seat's messages by address, ticket and kind. That costs no tokens.
 - A model in that path adds a call, and a summary can lose an exact id or error text.
 - What is left is small. A seat's inbox averaged 3,750 characters a read.
-
-A small model might pay off in front of FLIGHT, and that needs proof first. FLIGHT woke 249 times
-in the 24 hours to 6 November. On the latest day the hub reports, FLIGHT cost 137 of the crew's
-354 dollars. The hub
-records why FLIGHT woke, not whether it then did anything. Item 10 adds that record. If many wakes
-for one reason end with no action, a hub rule or a small model can take that reason. The operator
-decides after seeing the figures.
+- In front of FLIGHT it would not pay either. The hub already counts wakes that led to no
+  decision: 14 of 251 in a day. FLIGHT's cost is in how its sessions start. The token audit in
+  `docs/reviews/2026-11-06/token-audit.md` covers that.
 
 ### Also measured, and passed to Audit
 
@@ -382,8 +391,9 @@ them as Audit rows with the figures. Each is for the same 24 hours.
   what it needs from the hub.
 - Today the hub deletes messages, FLIGHT's decisions, old briefs and answered seat questions
   after 90 days. It keeps runs, reviews and merged PRs for 365 days.
-- Questions, their answers and the conversation on each are kept for 365 days, like runs
-  **(controller's call)**. Messages stay at 90 days.
+- Questions, their answers, seats' questions to FLIGHT and the conversation on each are kept for
+  365 days, like runs **(controller's call)**. Messages and FLIGHT's own decision log stay at
+  90 days.
 - Nothing new is written to GitHub. A copy of each decision on the GitHub ticket is left out.
 
 ## The simple path for a person
@@ -394,7 +404,7 @@ A person does two things here, and each has one way in.
 - **See what was discussed:** click a ticket or PR number, on any page. It opens the Ticket page,
   with the whole history in time order. An answered question links to the same page.
 
-The Tickets list in Comms has a search box, for when the number is not known.
+The Tickets list in Comms gets a search box, for when the number is not known.
 
 ## How the pages get designed
 
@@ -537,6 +547,10 @@ Each of these is a change, stated so nobody finds it by surprise.
 | #765 (FLIGHT's missing powers made visible): requests "for the controller" | Still gaps to close. Until then they follow the table above and can reach the operator |
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
 
+| The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions. Held items, timed defaults and alerts are shown but not counted |
+| The roadmap, plan item 7: notices only for briefed asks and "FLIGHT is down" | Two more alerts send a notice: an Update the operator must run, and an account at its limit |
+| The role files: use `comms_read` for missed crew context | Read by ticket |
+
 #1389 is in rework now. This design adds nothing to it. The extra checks in rule 4 are a new
 ticket that follows it.
 
@@ -559,7 +573,8 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 
 1. Tracking that costs nothing: the hub stamps run, ticket, PR and kind; one ticket format;
    `comms_read` by ticket, short first; a run gets its ticket's decisions at the start; decisions
-   kept for 365 days. First because it saves tokens now and the rest reads from it.
+   kept for 365 days; each inbox message pushed once; the exact-repeat guard. First because it
+   saves tokens now and the rest reads from it.
 2. Senders named for what they are, with a tag on every message (rule 1).
 3. Needs you counts only questions; the Alerts chip; filters and order (rule 3, the list).
 4. Title, priority, ticket and picture checks, and the image store. Follows #1389 (rules 4, 5).
@@ -569,10 +584,10 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
    the Ticket page gains the missing kinds.
 8. Notices in plain words (rule 8).
 9. Audit rows for message problems (rule 9), and for the four tools under "Also measured".
-10. The hub records whether each FLIGHT wake led to an action, by reason. Hub code, no model.
 
-Items 3, 6 and 7 change what a page looks like. Each follows "How the pages get designed"
-before its build ticket starts.
+Item 4 needs #1389 merged. Item 5 needs #1474. Items 3, 6 and 7 change a page's layout, and each
+follows "How the pages get designed" before its build ticket starts. Items 2, 5 and 8 add small
+visible parts (a tag, a state line, a switch) and follow the `hud-design` checklist.
 
 ## How we know it worked
 
@@ -596,8 +611,8 @@ before its build ticket starts.
 - Pictures show only from hub storage. Links follow the safe-link rules from PR 1465. A preview
   runs on its own address, as #1458 sets out.
 - A stored message for a stopped FLIGHT goes only to FLIGHT, on its next start.
-- Telling FLIGHT which lines are the controller's (rule 1) touches hard-rule files and needs
-  clearance.
+- Several items change hard-rule files and need clearance: the seat tools, the engine, FLIGHT's
+  tools and start brief, and the role files.
 
 ## Left to the developer
 
@@ -607,3 +622,6 @@ before its build ticket starts.
 - The image store's route and size limit.
 - How the Ticket page is reached in the nav.
 - The exact form of `comms_read`: its filters, the one-line form, and the read by id.
+- Who marks a question as being about how something looks.
+- Which notification category an alert uses, and whether quiet hours hold it.
+- What a reply does when its seat has no live run or the crew is paused.
