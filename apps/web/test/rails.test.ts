@@ -157,3 +157,23 @@ it("sizes a wait mark from its label", () => {
   expect(waitMarkWidth("⧖ 3h 10m")).toBeGreaterThanOrEqual("⧖ 3h 10m".length * CHAR_PX);
   expect(waitMarkWidth("⧖ 7d")).toBeLessThan(waitMarkWidth("⧖ 3h 10m"));
 });
+
+it("keeps a wait mark off the asking seat's dot on a short seat-to-hub link", () => {
+  // Rails about 190 px apart: a quarter of the way along is only a few px from the seat.
+  // s1 is the top seat of twelve, well clear of the hub pills' rows.
+  const layout = railLayout(crew(12), { w: 330, h: 420 }, HUBS, 8);
+  const seat = layout.seats.get("s1") as Point;
+  const hubPoint = layout.hubs.get("flight") as Point;
+  const path = linkPath(seat, { x: hubPoint.x - HUB_W / 2, y: hubPoint.y }, layout.cx);
+  const width = waitMarkWidth("⧖ 3h 10m");
+  const { placed } = placeWaitMarks(
+    [{ key: "s1", at: path.at, askerFirst: true, width }],
+    [...layout.hubs.values()],
+    [...layout.seats.values()],
+  );
+  const p = placed.get("s1") as Point;
+  expect(p).toBeDefined();
+  const box = { x0: p.x - width / 2, x1: p.x + width / 2, y0: p.y - WAIT_H / 2, y1: p.y + WAIT_H / 2 };
+  const dot = { x0: seat.x - 10, x1: seat.x + 10, y0: seat.y - 10, y1: seat.y + 10 };
+  expect(box.x0 < dot.x1 && dot.x0 < box.x1 && box.y0 < dot.y1 && dot.y0 < box.y1).toBe(false);
+});

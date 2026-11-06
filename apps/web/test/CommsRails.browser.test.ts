@@ -131,15 +131,20 @@ const waitMarkProblems = (page: RenderedPage) =>
     );
     const meet = (a: DOMRect, b: DOMRect) =>
       a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const dots = [...document.querySelectorAll(".comms-node:not(.hub) .comms-node-core")].map((e) =>
+      e.getBoundingClientRect(),
+    );
     let overlap = 0;
+    let onSeat = 0;
     let onHub = 0;
     let outside = 0;
     rects.forEach((r, i) => {
       for (const o of rects.slice(i + 1)) if (meet(r.box, o.box)) overlap++;
       for (const h of hubs) if (meet(r.box, h)) onHub++;
+      for (const d of dots) if (meet(r.box, d)) onSeat++;
       if (r.text.left < r.box.left - 0.5 || r.text.right > r.box.right + 0.5) outside++;
     });
-    return { marks: rects.length, overlap, onHub, outside };
+    return { marks: rects.length, overlap, onHub, onSeat, outside };
   }, null);
 
 const overlaps = (names: { x: number; y: number; right: number; bottom: number }[]) =>
@@ -173,7 +178,7 @@ describeRendered("Comms chart, rendered", () => {
         if (n >= 9) {
           const w = await waitMarkProblems(page);
           expect(w.marks).toBeGreaterThan(0);
-          expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
+          expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
         }
         // Past what the panel can hold the rails scroll inside it, never off the page.
         expect(
@@ -210,7 +215,7 @@ describeRendered("Comms chart, rendered", () => {
         expect(m.names.some((name) => name.text.endsWith("…"))).toBe(false);
         expect(overlaps(m.names)).toBe(false);
         const w = await waitMarkProblems(page);
-        expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
+        expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
         expect(m.pane).toBe(focus !== "");
         if (focus) {
           expect(m.chip).toContain("SEAT-2");
@@ -361,7 +366,7 @@ describeRendered("Comms chart, rendered", () => {
       expect(overlaps(m.names)).toBe(false);
       const w = await waitMarkProblems(page);
       expect(w.marks).toBeGreaterThan(0);
-      expect([w.overlap, w.onHub, w.outside]).toEqual([0, 0, 0]);
+      expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

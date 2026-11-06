@@ -165,35 +165,49 @@ const SLIDE = [0.25, 0.35, 0.15, 0.45, 0.55, 0.65, 0.1, 0.75, 0.85];
 
 /**
  * Puts each wait mark near the asker's end of its link and slides it along the link until it clears
- * the marks placed before it and every hub pill. `marks` come in priority order (longest wait first).
+ * the marks placed before it, every hub pill and every seat dot. `marks` come in priority order (longest wait first).
  * A mark that fits nowhere is dropped (`dropped`), for the caller to fold into one count.
  */
 export function placeWaitMarks(
   marks: readonly WaitMarkInput[],
   hubs: readonly Point[],
+  dots: readonly Point[] = [],
 ): { placed: Map<string, Point>; dropped: string[] } {
-  const taken: Rect[] = hubs.map((h) => ({
-    x0: h.x - HUB_W / 2 - 4,
-    x1: h.x + HUB_W / 2 + 4,
-    y0: h.y - 15,
-    y1: h.y + 15,
-  }));
+  const taken: Rect[] = [
+    ...hubs.map((h) => ({
+      x0: h.x - HUB_W / 2 - 4,
+      x1: h.x + HUB_W / 2 + 4,
+      y0: h.y - 15,
+      y1: h.y + 15,
+    })),
+    // A seat's dot, with its focus ring, is drawn over the links: keep marks off it.
+    ...dots.map((d) => ({ x0: d.x - 10, x1: d.x + 10, y0: d.y - 10, y1: d.y + 10 })),
+  ];
   const placed = new Map<string, Point>();
   const dropped: string[] = [];
   for (const mark of marks) {
     let spot: { p: Point; box: Rect } | null = null;
-    for (const d of SLIDE) {
-      const p = mark.at(mark.askerFirst ? d : 1 - d);
-      const box = {
-        x0: p.x - mark.width / 2 - 2,
-        x1: p.x + mark.width / 2 + 2,
-        y0: p.y - WAIT_H / 2 - 2,
-        y1: p.y + WAIT_H / 2 + 2,
-      };
-      if (!taken.some((t) => hit(t, box))) {
-        spot = { p, box };
-        break;
+    // Along the link first; then on the asker's row, just inside its dot; then above or below the
+    // link, a row further each time, where nothing else is. A mark that fits nowhere is dropped.
+    const start = mark.at(mark.askerFirst ? 0 : 1);
+    const inward = Math.sign(mark.at(0.5).x - start.x) || 1;
+    const beside = { x: start.x + inward * (12 + mark.width / 2), y: start.y };
+    for (const dy of [0, -(WAIT_H + 4), WAIT_H + 4, -2 * (WAIT_H + 4), 2 * (WAIT_H + 4), -3 * (WAIT_H + 4), 3 * (WAIT_H + 4)]) {
+      const spots = dy === 0 ? [...SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d)), beside] : SLIDE.map((d) => mark.at(mark.askerFirst ? d : 1 - d));
+      for (const q of spots) {
+        const p = { x: q.x, y: q.y + dy };
+        const box = {
+          x0: p.x - mark.width / 2 - 2,
+          x1: p.x + mark.width / 2 + 2,
+          y0: p.y - WAIT_H / 2 - 2,
+          y1: p.y + WAIT_H / 2 + 2,
+        };
+        if (!taken.some((t) => hit(t, box))) {
+          spot = { p, box };
+          break;
+        }
       }
+      if (spot) break;
     }
     if (spot) {
       taken.push(spot.box);

@@ -233,6 +233,7 @@ export function CommsRails({
         width: waitMarkWidth(waitLabel(edge.waiting as Waiting)),
       })),
       [...layout.hubs.values()],
+      [...layout.seats.values()],
     );
     const left = waiting.filter(({ edge }) => out.dropped.includes(edge.key));
     return {
