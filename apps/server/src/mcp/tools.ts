@@ -2689,7 +2689,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           isError: true,
         };
       }
-      // An external review also resolves the findings its brief listed from the PR's earlier heads.
+      // An external review also resolves the findings its brief listed from the PR's earlier reviews.
       const older = isExternalReview(review)
         ? openOlderFindings(store, review, previous?.id ?? null)
         : [];

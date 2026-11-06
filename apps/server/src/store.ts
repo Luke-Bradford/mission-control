@@ -5394,7 +5394,7 @@ export class Store {
           );
           for (const o of openOlderFindings(
             this,
-            { id: reviewId, repoId, prNumber, sha: row.sha as string },
+            { id: reviewId, repoId, prNumber, sha: row.sha as string, authorRunId: author },
             previous?.id ?? null,
           ).slice(0, OLDER_FINDINGS_MAX))
             resolveListed.run(reviewId, o.reviewId, o.finding.pos);

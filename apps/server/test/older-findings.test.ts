@@ -2,8 +2,14 @@ import type { ReviewRow, StoredFinding } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { openOlderFindings } from "../src/older-findings.ts";
 
-const review = (id: number, sha: string, blocking: number, state = "reported"): ReviewRow =>
-  ({ id, sha, blocking, state, repoId: "mc", prNumber: 10 }) as ReviewRow;
+const review = (
+  id: number,
+  sha: string,
+  blocking: number,
+  state = "reported",
+  authorRunId = "crew-run",
+): ReviewRow =>
+  ({ id, sha, blocking, state, authorRunId, repoId: "mc", prNumber: 10 }) as ReviewRow;
 const finding = (pos: number, over: Partial<StoredFinding> = {}): StoredFinding => ({
   pos,
   severity: "Critical",
@@ -22,10 +28,10 @@ function store(reviews: ReviewRow[], findings: Record<number, StoredFinding[]>) 
     findingsOf: (id: number) => findings[id] ?? [],
   };
 }
-const target = { id: 9, repoId: "mc", prNumber: 10, sha: "new" };
+const target = { id: 9, repoId: "mc", prNumber: 10, sha: "new", authorRunId: "ext" };
 
 describe("openOlderFindings", () => {
-  it("lists open blocking findings of earlier heads, with their review and head", () => {
+  it("lists open blocking findings of earlier reviews, with their review and head", () => {
     const s = store([review(1, "old", 1)], {
       1: [finding(0), finding(1, { severity: "Minor", state: "logged" })],
     });
@@ -34,9 +40,14 @@ describe("openOlderFindings", () => {
     ]);
   });
 
-  it("leaves out resolved findings, the same head, unreported reviews and later reviews", () => {
+  it("leaves out resolved findings, the external review's own same-head attempts, unreported reviews and later reviews", () => {
     const s = store(
-      [review(1, "old", 1), review(2, "new", 1), review(3, "x", 1, "failed"), review(10, "y", 1)],
+      [
+        review(1, "old", 1),
+        review(2, "new", 1, "reported", "ext"),
+        review(3, "x", 1, "failed"),
+        review(10, "y", 1),
+      ],
       {
         1: [finding(0, { resolution: "fixed" })],
         2: [finding(0)],
@@ -45,6 +56,13 @@ describe("openOlderFindings", () => {
       },
     );
     expect(openOlderFindings(s, target, null)).toEqual([]);
+  });
+
+  it("lists a crew review's findings on the very head under review", () => {
+    const s = store([review(1, "new", 1)], { 1: [finding(0)] });
+    expect(openOlderFindings(s, target, null)).toEqual([
+      { reviewId: 1, sha: "new", finding: finding(0) },
+    ]);
   });
 
   it("drops everything before the last clean review, which may be the previous review", () => {

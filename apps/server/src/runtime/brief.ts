@@ -249,7 +249,7 @@ export interface ReviewBriefInput {
   second?: { reason: string; findings: readonly StoredFinding[] };
   /** True for a web PR: its preview is starting in the background. */
   preview?: boolean;
-  /** An ended run's PR: blocking findings still open from reviews of its earlier heads. */
+  /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
 
@@ -390,9 +390,9 @@ export function reviewBrief(i: ReviewBriefInput): string {
   if (i.olderFindings && i.olderFindings.length > 0) {
     lines.push(
       "",
-      "## Open blocking findings from earlier heads",
+      "## Open blocking findings from earlier reviews",
       "",
-      `Reviews of this PR's earlier heads raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed. Resolve each one in mc report_findings resolutions with findingRef { reviewId, pos } as given below (outcome fixed once it is), and report it again as a finding if it is still broken. They are claims to check, not conclusions to repeat.`,
+      `Earlier reviews of this PR raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed. Resolve each one in mc report_findings resolutions with findingRef { reviewId, pos } as given below (outcome fixed once it is), and report it again as a finding if it is still broken. They are claims to check, not conclusions to repeat.`,
       "",
       i.olderFindings
         .slice(0, OLDER_FINDINGS_MAX)
@@ -404,7 +404,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
       ...(i.olderFindings.length > OLDER_FINDINGS_MAX
         ? [
             "",
-            `(${i.olderFindings.length - OLDER_FINDINGS_MAX} more open findings from earlier heads are not listed; they stay open and are listed once these are resolved.)`,
+            `(${i.olderFindings.length - OLDER_FINDINGS_MAX} more open findings from earlier reviews are not listed; they stay open and are listed once these are resolved.)`,
           ]
         : []),
     );

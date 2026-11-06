@@ -556,7 +556,7 @@ describe("reviewBrief", () => {
       },
     });
     const few = reviewBrief({ ...review, olderFindings: [finding(0)] });
-    expect(few).toContain("## Open blocking findings from earlier heads");
+    expect(few).toContain("## Open blocking findings from earlier reviews");
     expect(few).toContain("[Critical] a.ts:3 — older-0 (review id 4, pos 0, head aaaaaaa)");
     expect(few).not.toContain("not listed");
     const many = reviewBrief({
@@ -565,8 +565,8 @@ describe("reviewBrief", () => {
     });
     expect(many).toContain(`older-${OLDER_FINDINGS_MAX - 1} (`);
     expect(many).not.toContain(`older-${OLDER_FINDINGS_MAX} (`);
-    expect(many).toContain("(3 more open findings from earlier heads are not listed");
-    expect(reviewBrief(review)).not.toContain("earlier heads");
+    expect(many).toContain("(3 more open findings from earlier reviews are not listed");
+    expect(reviewBrief(review)).not.toContain("earlier reviews");
   });
 
   it("lists the screenshot pairs", () => {

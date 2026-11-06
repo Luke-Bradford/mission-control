@@ -5051,13 +5051,16 @@ describe("report_findings", () => {
       });
     });
 
-    it("leaves a finding on its own head alone: the brief never listed it", async () => {
+    it("marks a crew finding on the external review's own head fixed: the brief listed it", async () => {
       expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
-      const { ext } = externalOf(9, AUTHOR_SHA);
+      const { id, ext } = externalOf(9, AUTHOR_SHA);
       expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
         text: expect.stringContaining(FINDINGS_RECORDED),
       });
-      expect(store.findingsOf(reviewId)[0]?.resolution).toBeUndefined();
+      expect(store.findingsOf(reviewId)[0]).toMatchObject({
+        resolution: "fixed",
+        resolvedReviewId: id,
+      });
     });
 
     it("leaves another PR's findings alone", async () => {

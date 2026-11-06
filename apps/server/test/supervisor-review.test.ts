@@ -795,16 +795,20 @@ describe("startReview", () => {
       fix: "f",
     });
     /** A reported crew review of PR 10 at OLD_SHA, then the external review of the new head. */
-    function seed(findings: ReturnType<typeof finding>[], between?: (authorRunId: string) => void) {
+    function seed(
+      findings: ReturnType<typeof finding>[],
+      between?: (authorRunId: string) => void,
+      sameHead = false,
+    ) {
       const seeded = reviewOfPush();
       const old = store.requestReview({
         authorRunId: seeded.author.id,
         repoId: "mc",
         seatId: "retro",
         prNumber: 10,
-        sha: OLD_SHA,
+        sha: sameHead ? seeded.sha : OLD_SHA,
         epoch: 0,
-        attempt: 1,
+        attempt: sameHead ? 2 : 1,
         round: 1,
         at: 1,
       })!;
@@ -845,11 +849,19 @@ describe("startReview", () => {
         finding("a nit", "Minor", "src/n.ts"),
       ]);
       const brief = await briefOf(s.id, s.sha);
-      expect(brief).toContain("## Open blocking findings from earlier heads");
+      expect(brief).toContain("## Open blocking findings from earlier reviews");
       expect(brief).toContain(`review id ${s.old}, pos 0, head ${OLD_SHA.slice(0, 7)}`);
       expect(brief).toContain("[Critical] src/q.ts:7 — race on the queue");
       expect(brief).toContain("why race on the queue");
       expect(brief).not.toContain("a nit");
+    });
+
+    it("lists a crew finding on the very head under review, where the run ended", async () => {
+      const s = seed([finding("left unfixed", "Critical", "src/h.ts")], undefined, true);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).toContain("## Open blocking findings from earlier reviews");
+      expect(brief).toContain("[Critical] src/h.ts:7 — left unfixed");
+      expect(brief).toContain(`review id ${s.old}, pos 0, head ${s.sha.slice(0, 7)}`);
     });
 
     it("leaves out a finding fixed or waived at a later head", async () => {
@@ -925,7 +937,7 @@ describe("startReview", () => {
       );
       const brief = await briefOf(s.id, s.sha);
       expect(brief).not.toContain("crew finding");
-      expect(brief).not.toContain("Open blocking findings from earlier heads");
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
     });
 
     it("drops the findings before a clean review by the crew run", async () => {
@@ -933,7 +945,7 @@ describe("startReview", () => {
         reported(author, "b".repeat(40), 2, []),
       );
       const brief = await briefOf(seeded.id, seeded.sha);
-      expect(brief).not.toContain("Open blocking findings from earlier heads");
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
     });
 
     it("shows the previous review's findings once, in the last-review section only", async () => {
@@ -944,13 +956,13 @@ describe("startReview", () => {
       );
       const brief = await briefOf(s.id, s.sha);
       expect(brief.split("— the previous one")).toHaveLength(2);
-      expect(brief).not.toContain("Open blocking findings from earlier heads");
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
     });
 
     it("adds nothing when no earlier head has findings", async () => {
       const s = seed([finding("a nit", "Minor", "src/n.ts")]);
       const brief = await briefOf(s.id, s.sha);
-      expect(brief).not.toContain("Open blocking findings from earlier heads");
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
     });
   });
 
