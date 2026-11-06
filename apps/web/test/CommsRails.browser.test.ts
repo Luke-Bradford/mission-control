@@ -216,6 +216,15 @@ describeRendered("Comms chart, rendered", () => {
         expect(overlaps(m.names)).toBe(false);
         const w = await waitMarkProblems(page);
         expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
+        // Rows grow with the window: the seats span most of the chart's height, not a third of it.
+        const spread = await page.evaluate(() => {
+          const ys = [...document.querySelectorAll(".comms-node:not(.hub)")].map(
+            (e) => e.getBoundingClientRect().top,
+          );
+          const scroll = document.querySelector(".comms-rails-scroll")?.getBoundingClientRect();
+          return { span: Math.max(...ys) - Math.min(...ys), height: scroll?.height ?? 0 };
+        }, null);
+        expect(spread.span).toBeGreaterThan(0.5 * spread.height);
         expect(m.pane).toBe(focus !== "");
         if (focus) {
           expect(m.chip).toContain("SEAT-2");

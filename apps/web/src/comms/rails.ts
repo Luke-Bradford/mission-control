@@ -15,6 +15,8 @@ export type RailGroup = { key: string; ids: string[]; header: boolean };
 /** The smallest row (px): a control's minimum size. Past it the chart grows and scrolls. */
 export const MIN_ROW = 24;
 export const MAX_ROW = 34;
+/** The full-screen view lets rows grow this tall, so the rails fill the window and links fan out. */
+export const FULL_MAX_ROW = 72;
 const PAD = 16;
 /** Width of a mono 11px character with its tracking, as the name boxes count it. */
 export const CHAR_PX = 7.3;
@@ -60,6 +62,7 @@ export function railLayout(
   size: { w: number; h: number },
   hubs: readonly [string, string, string],
   longestName: number,
+  maxRow: number = MAX_ROW,
 ): RailLayout {
   const w = Math.max(240, size.w);
   const sides = sideOfGroups(groups);
@@ -67,7 +70,7 @@ export function railLayout(
   for (const g of groups) rows[sides.get(g.key) ?? "left"] += g.ids.length + (g.header ? 1 : 0);
   const most = Math.max(1, rows.left, rows.right);
   const fit = (size.h - 2 * PAD) / most;
-  const rowH = Math.min(MAX_ROW, Math.max(MIN_ROW, fit));
+  const rowH = Math.min(maxRow, Math.max(MIN_ROW, fit));
   const h = Math.max(size.h, most * rowH + 2 * PAD);
   const wanted = longestName * CHAR_PX + 22;
   const nameRoom = Math.max(56, Math.min(wanted, (w - MIN_GAP) / 2));
@@ -93,7 +96,8 @@ export function railLayout(
     }
   }
   const mid = h / 2;
-  const hubGap = Math.min(64, Math.max(34, h / 6));
+  // The centre line spreads with the rails: taller rows, wider gaps between the three hubs.
+  const hubGap = Math.min(110, Math.max(34, h / 6, rowH * 1.4));
   const hubPoints = new Map<string, Point>(
     hubs.map((id, i) => [id, { x: cx, y: mid + (i - 1) * hubGap }]),
   );

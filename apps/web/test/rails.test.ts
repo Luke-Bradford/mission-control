@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   CHAR_PX,
+  FULL_MAX_ROW,
   fitName,
   HUB_W,
   linkPath,
@@ -182,3 +183,21 @@ it("keeps a wait mark off the asking seat's dot on a short seat-to-hub link", ()
   const dot = { x0: seat.x - 10, x1: seat.x + 10, y0: seat.y - 10, y1: seat.y + 10 };
   expect(box.x0 < dot.x1 && dot.x0 < box.x1 && box.y0 < dot.y1 && dot.y0 < box.y1).toBe(false);
 });
+
+it.each([9, 20])(
+  "lets full-screen rows grow so %i seats fill the window, and keeps the panel's cap",
+  (n) => {
+    const size = { w: 1462, h: 671 };
+    const full = railLayout(crew(n), size, HUBS, 12, FULL_MAX_ROW);
+    const ys = [...full.seats.values()].map((p) => p.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.6 * size.h);
+    const panel = railLayout(crew(n), size, HUBS, 12);
+    expect(panel.rowH).toBeLessThanOrEqual(34);
+    // The same seats on the same sides in the same order, at both sizes.
+    for (const [id, seat] of panel.seats) expect(full.seats.get(id)?.side).toBe(seat.side);
+    // The centre line spreads with the rails: hubs sit further apart when rows are taller.
+    const gap = (l: typeof full) =>
+      (l.hubs.get("flight") as Point).y - (l.hubs.get("capcom") as Point).y;
+    expect(gap(full)).toBeGreaterThanOrEqual(gap(panel));
+  },
+);

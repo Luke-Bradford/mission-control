@@ -19,9 +19,11 @@ import {
 } from "./chartTypes.ts";
 import { type ChartFilter, filterKeeps, filterLabel, pairFilter } from "./commsFilter.ts";
 import {
+  FULL_MAX_ROW,
   fitName,
   HUB_W,
   linkPath,
+  MAX_ROW,
   type Point,
   placeWaitMarks,
   type RailGroup,
@@ -199,6 +201,7 @@ export function CommsRails({
         size,
         hubIds as readonly [string, string, string],
         full ? longest : Math.min(longest, PANEL_NAME_CHARS),
+        full ? FULL_MAX_ROW : MAX_ROW,
       ),
     [groups, size, hubIds, full, longest],
   );

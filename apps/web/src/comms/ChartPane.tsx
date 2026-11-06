@@ -10,6 +10,11 @@ import { type ChartFilter, filterKeeps, filterLabel } from "./commsFilter.ts";
 import { canonicalEndpoint } from "./useChartData.ts";
 
 const SHOWN = 15;
+/** The hub cuts a link's newest message at this many characters (no ellipsis of its own). */
+const LINK_PREVIEW_CHARS = 200;
+/** A link's preview, with an ellipsis where the hub cut it. */
+const previewText = (text: string): string =>
+  text.length >= LINK_PREVIEW_CHARS ? `${text}…` : text;
 
 /** The feed as the hub sends it, kept to rows that have every field (an older hub sends none). */
 function readFeed(body: unknown): FeedMessage[] | undefined {
@@ -57,6 +62,15 @@ export function ChartPane({
   }, [feed, filter, flight]);
   // Without the feed (an older hub), each link's newest message is what there is to show.
   const newest = mine.flatMap((e) => (e.last ? [e.last] : [])).sort((a, b) => b.at - a.at);
+  const loading = messages === undefined && feedResource.error === null;
+  const fallback = messages === undefined && feedResource.error !== null;
+  const shown = newest.map((m, i) => ({
+    id: `last-${i}`,
+    from: m.from,
+    to: m.to,
+    at: m.at,
+    text: m.text,
+  }));
   const href = commsHrefFor(filter, flight);
   const when = (at: number) => (tz ? rel(at, now, tz) : "—");
 
@@ -86,36 +100,27 @@ export function ChartPane({
           </ul>
         </section>
       )}
-      <section aria-label="Recent messages">
-        <h3>Recent messages</h3>
-        {messages === undefined && feedResource.error === null && (
-          <p className="comms-pane-note">Loading messages…</p>
-        )}
-        {messages === undefined && feedResource.error !== null && newest.length === 0 && (
+      <section aria-label={fallback ? "Newest message on each link" : "Recent messages"}>
+        <h3>{fallback ? "Newest message on each link" : "Recent messages"}</h3>
+        {loading && <p className="comms-pane-note">Loading messages…</p>}
+        {fallback && (
           <p className="comms-pane-note" role="status">
-            This hub does not send the message feed yet, so only link counts show here.
+            {newest.length === 0
+              ? "This hub does not send the message feed yet, so only link counts show here."
+              : "This hub does not send the message feed yet, so each link shows only its newest message, cut short. The rest is in Comms."}
           </p>
         )}
-        {(messages ?? []).length === 0 && messages !== undefined && (
+        {messages !== undefined && messages.length === 0 && (
           <p className="comms-pane-note">No messages in this conversation in the last 24h.</p>
         )}
         <ul>
-          {(
-            messages ??
-            newest.map((m, i) => ({
-              id: `last-${i}`,
-              from: m.from,
-              to: m.to,
-              at: m.at,
-              text: m.text,
-            }))
-          ).map((m) => (
+          {(loading ? [] : (messages ?? shown)).map((m) => (
             <li key={m.id} className="comms-pane-msg">
               <span className="comms-pane-meta">
                 {nameOf(canonicalEndpoint(m.from, flight))} →{" "}
                 {nameOf(canonicalEndpoint(m.to, flight))} · {when(m.at)}
               </span>
-              <q>{m.text}</q>
+              <q>{fallback ? previewText(m.text) : m.text}</q>
             </li>
           ))}
         </ul>
