@@ -74,6 +74,8 @@ The controller read the live hub at commit `47c1f5bd`.
 4. Every message says who sent it: the operator, the controller, FLIGHT, a seat or the hub.
 5. Everything said about a ticket or PR can be read on one page.
 6. No text box looks live when it is not.
+7. Keeping the record costs the agents no extra tokens.
+8. The record outlives any one session.
 
 ## Non-goals
 
@@ -236,7 +238,8 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 - two agents past six rounds on one ticket (the hub counts this today);
 - the same message sent more than once;
 - the same notice repeated on one PR;
-- a request for the controller that waited longer than a set time.
+- a request for the controller that waited longer than a set time;
+- a ticket whose messages cost far more tokens than usual.
 
 ## Where today's items go
 
@@ -258,9 +261,81 @@ Each of these becomes a row in Audit's list of things to improve, linked to its 
 opens a short list. Each alert has one link to the place that fixes it, such as Start FLIGHT. An
 alert clears when its cause clears. Alerts send a browser notice, as "FLIGHT is down" does today.
 
+## What it costs the agents
+
+The record must not become a place where agents spend tokens **(operator, 6 November)**.
+
+**1. Agents write nothing extra.** The hub records the sender, ticket, delivery, question and
+answer itself, from the tools agents already call. There is no new tool and no duty to log.
+
+**2. The hub pushes; agents do not scan.** An agent gets only what is addressed to it, once, at
+its next turn. That exists today, capped at 40 messages and 8,000 characters.
+
+**3. A run gets its ticket's decisions at the start.** The handoff already gives a new run the
+goal, what is done, what is left and the last six messages on the ticket. It gains the ticket's
+answered questions: one line each with the choice, ten at most **(controller's call)**. A decision
+is then not asked twice.
+
+**4. A seat that needs more reads by ticket.** Today `comms_read` returns the newest 50 messages
+across the whole crew, up to 20,000 characters, with no filter. It gains a ticket filter and
+defaults to the seat's own ticket. The role files tell seats to read by ticket. Role files are
+hard-rule files, so that change needs clearance.
+
+Four smaller points follow from the rules above:
+
+- The Comms copy of a notice is one line, so a later read does not pay for log text again.
+- Hub code works out the Audit rows. No agent reads messages to find them.
+- Delivering an answer to a seat does not wake FLIGHT. FLIGHT sees one line at its next wake.
+- A refused question names the missing part, so FLIGHT fixes it in one try.
+
+For scale, the crew sent 219 messages in the 24 hours to 6 November, about 83,000 characters.
+The Comms graph already totals tokens per link. Audit uses that figure per ticket (rule 9).
+
+## Kept outside any session
+
+- The record lives in the hub's database, not in an agent's session. A new session or run gets
+  what it needs from the hub.
+- Today the hub deletes messages, FLIGHT's decisions, old briefs and answered seat questions
+  after 90 days. It keeps runs, reviews and merged PRs for 365 days.
+- Questions, their answers and the conversation on each are kept for 365 days, like runs
+  **(controller's call)**. Messages stay at 90 days.
+- Nothing new is written to GitHub. A copy of each decision on the GitHub ticket is left out.
+
+## The simple path for a person
+
+A person does two things here, and each has one way in.
+
+- **Answer a question:** the Needs you tab. Its count shows on every page.
+- **See what was discussed:** click a ticket or PR number, on any page. It opens the Ticket page,
+  with the whole history in time order. An answered question links to the same page.
+
+The Tickets list in Comms has a search box, for when the number is not known.
+
+## How the pages get designed
+
+Every page change goes through the `hud-design` skill and its dashboard reference,
+`.claude/skills/hud-design/references/dashboard-layout.md` **(operator, 6 November)**. This
+document sets what each place is for, what it holds and the reading order. It does not set a
+layout. For each page that changes, the seat:
+
+- names the page's question and reader, lists each panel's fields, and ranks the panels;
+- sizes each panel from its content, at the viewports the reference lists;
+- renders it busy, in the real app on a branch, and shows the operator before the build starts;
+- lists anything dropped or moved.
+
+**Dropped or moved by this design.** The operator agrees to these by approving it.
+
+| Today | Change |
+|---|---|
+| Comms: the Decisions panel | Removed. Questions are on Needs you |
+| Fly-out: the waiting list and summary | One line that opens Needs you |
+| Needs you: alerts and FLIGHT's own items | The Alerts chip, and the FLIGHT page |
+| Comms: unread counts per agent | Labelled as message counts |
+
 ## Needs you page
 
-Builds on the page from PR 1465: a list on the left and the open question on the right.
+Starts from the page PR 1465 added. This section sets what the page holds and in what order.
+The layout is settled through the `hud-design` skill (see "How the pages get designed").
 
 **The list**
 
@@ -284,8 +359,8 @@ Builds on the page from PR 1465: a list on the left and the open question on the
 7. Actions: pick an option, write to FLIGHT, **Hold**.
 8. What FLIGHT checked and who it asked. These stay open, not folded away.
 
-The conversation keeps its own column beside the question. Its box fills the column, which #1478
-(the conversation box ticket) fixes.
+The conversation stays beside the question, wide enough to read. Its box fills its space, which
+#1478 (the conversation box ticket) fixes.
 
 A question always opens on this page. The small item panel stays for items that are FLIGHT's.
 
@@ -400,16 +475,17 @@ The controller files the tickets after approval. FLIGHT or the planning seat can
 1. Senders named for what they are, with a tag on every message (rule 1).
 2. Needs you counts only questions; the Alerts chip; filters and order (rule 3, the list).
 3. Title, priority, ticket and picture checks, and the image store. Follows #1389 (rules 4, 5).
-4. Answers and replies are delivered, with their state shown (rules 6, 7).
-5. The fly-out on every page, one FLIGHT conversation, a box that always takes text.
-6. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation; the Ticket page
-   gains the missing kinds.
-7. Notices in plain words (rule 8).
-8. Audit rows for message problems (rule 9).
+4. Answers and messages are delivered, with their state shown (rules 6, 7).
+5. A run gets its ticket's decisions at the start; seats read Comms by ticket; decisions are kept
+   for 365 days ("What it costs the agents", "Kept outside any session").
+6. The fly-out on every page, one FLIGHT conversation, a box that always takes text.
+7. Comms: sender tags, no Decisions panel, the unread rule, the hub conversation, ticket search;
+   the Ticket page gains the missing kinds.
+8. Notices in plain words (rule 8).
+9. Audit rows for message problems (rule 9).
 
-Items 2, 5 and 6 change what a page looks like. Each gets a mockup in the real app, on a branch,
-before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920 wide, at
-1600x700, and at the operator's own 1920x940 and 2560x1145.
+Items 2, 6 and 7 change what a page looks like. Each follows "How the pages get designed"
+before its build ticket starts.
 
 ## How we know it worked
 
@@ -418,6 +494,7 @@ before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920
 - The share of questions answered with no clarifying message rises. Audit shows it.
 - Audit shows the time from an answer to its delivery.
 - A browser test covers each text box: it takes text, or it says why not.
+- Comms tokens per merged ticket do not rise. Audit shows the figure.
 
 ## Security
 
@@ -440,3 +517,4 @@ before its build ticket starts. A seat checks each mockup at 1280, 1600 and 1920
 - The limits behind "a set time", as config with stated defaults.
 - The image store's route and size limit.
 - How the Ticket page is reached in the nav.
+- The exact form of the ticket filter on `comms_read`.
