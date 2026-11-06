@@ -1493,7 +1493,7 @@ status) are limited to work it owns, so a hub with no runs writes nothing:
   hub's store made, ended or not, needs no ask for its QA review.
 - On Update, the hub records an ask once for each external review already in flight, so a review
   that was running is finished and its pending `mc/review` status is not left behind.
-- A preview never moves a card: it polls GitHub and shows it.
+- A preview never moves a card: it polls GitHub and shows it (`boardWrites` is off for a preview).
 - Hubs still read and show every PR, including another hub's.
 
 ### FLIGHT approvals
