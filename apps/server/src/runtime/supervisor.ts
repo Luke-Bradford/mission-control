@@ -50,6 +50,7 @@ import {
   CREW_DISABLED,
   CREW_GIT_ENV,
   CREW_PNPM_ENV,
+  type CrewVendor,
   carriedFrom,
   clockHm,
   compactUtc,
@@ -235,6 +236,13 @@ import {
   syncReusedWorktree,
   writeReviewInputs,
 } from "./checkouts.ts";
+import {
+  CLI_CHECK_TIMEOUT_MS,
+  type CliCheckResult,
+  cliCheckCheckoutName,
+  judgeCliCheck,
+  writeCliCheckTask,
+} from "./cli-check.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
@@ -499,6 +507,8 @@ export interface SupervisorDeps {
   cliVersion?: () => Promise<string | null>;
   /** Default RESUME_WINDOW_MS. */
   resumeWindowMs?: number;
+  /** Default CLI_CHECK_TIMEOUT_MS; tests shorten it. */
+  cliCheckTimeoutMs?: number;
   /** Tests shorten the session's timeouts. */
   controlTimeoutMs?: number;
   stopGraceMs?: number;
@@ -656,6 +666,15 @@ export interface Supervisor {
     seatId: string,
     opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
   ): Promise<{ runId: string }>;
+  /**
+   * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
+   * run, through the same start path a real run takes (its account binding, seat config, sandbox
+   * and, for Codex, the app-server), in a throwaway worktree, with one harmless task (read a file
+   * that holds a random nonce and say what is in it). The CLI hold does not stop it. The run and
+   * the worktree are gone when it returns, and the seat is left as it was (idle). Never starts on
+   * a seat that has a run, a start under way or a pause; it never throws.
+   */
+  checkCli(vendor: CrewVendor): Promise<CliCheckResult>;
   /**
    * Starts a review run on a scratch seat: a detached worktree at the review's sha with the diff
    * files in `.mc-review/`, the CLI in scratch mode (its session-mates' worktrees, the author's
@@ -908,6 +927,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
+  const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
   const handoffWorktrees = new Map<string, string>();
   const deferredRecoveries = new Set<string>();
@@ -1014,16 +1035,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return info.seat.model;
   };
 
-  async function startedOn(info: SeatInfo): Promise<{ cliVersion?: string }> {
+  async function startedOn(info: SeatInfo, ignoreHold = false): Promise<{ cliVersion?: string }> {
     if (isCodex(info)) return {};
-    refuseWhileHeld();
+    if (!ignoreHold) refuseWhileHeld();
     let v: string | null = null;
     try {
       v = await (deps.cliVersion ?? probeClaudeVersion)();
     } catch {
       // the run starts without a recorded version
     }
-    refuseWhileHeld();
+    if (!ignoreHold) refuseWhileHeld();
     return v === null ? {} : { cliVersion: v };
   }
 
@@ -1166,7 +1187,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const parked = fresh?.loop?.parked?.kind;
     const failedReview =
       fresh?.reviewId != null && store.review(fresh.reviewId)?.state === "failed";
-    if (l.endedBy === null || parked === "silent" || parked === "budget" || failedReview)
+    const isCheck = checkRuns.has(l.run.id);
+    if (
+      !isCheck &&
+      (l.endedBy === null || parked === "silent" || parked === "budget" || failedReview)
+    )
       noteMissingReport(
         l.info,
         l.run,
@@ -1188,6 +1213,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (l.run.reviewId != null) void dropScratch(l.info, l.run.id, l.run.seq, worktree);
     if (l.ending !== null) {
       setSeat(seatId, { state: l.hold ? "stopped" : "idle", reason: null, runId: null });
+    } else if (isCheck) {
+      // a check that died is the check's answer, not an error on the seat
+      setSeat(seatId, { state: "idle", reason: null, runId: null });
     } else {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
@@ -1331,11 +1359,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "output":
         foldSoon(l);
         break;
-      case "stderr":
+      case "stderr": {
         l.lastStderr = e.text;
         l.lastStderrAt = now();
+        const checkRun = checkRuns.get(l.run.id);
+        if (checkRun !== undefined) checkRun.stderr = e.text;
         log(`${l.info.seat.id}: ${e.text}`);
         break;
+      }
       case "exit":
         onExit(l, e);
         break;
@@ -3819,12 +3850,32 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seatId: string,
     opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
   ): Promise<{ runId: string }> {
+    const { runId } = await startDetached(seatId, opts ?? {});
+    return { runId };
+  }
+
+  /**
+   * A run in a detached checkout of the default branch, started through `checkedLaunch`. The watch
+   * seat's start, and (`opts.check`, which gets the checkout's path and returns the one line to
+   * send) the live check of a CLI update on a build seat: that one is not stopped by the CLI hold
+   * and is not given the watch brief, an inbox or a prompt version. A check start that fails takes
+   * its worktree with it and leaves the seat idle.
+   */
+  async function startDetached(
+    seatId: string,
+    opts: {
+      first?: string;
+      firstPieces?: readonly PromptPiece[];
+      check?: (checkout: string) => string;
+    },
+  ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
     const def = seatDef(info.seat);
+    const check = opts.check;
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
-    refuseWhileHeld();
-    if (def.loop !== "watch") {
+    if (check === undefined) refuseWhileHeld();
+    if (check === undefined && def.loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
@@ -3833,6 +3884,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
     starting.add(seatId);
+    let prepared: string | null = null;
     try {
       // No ticket and no branch: a detached checkout of the default branch, for reading only.
       const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
@@ -3840,7 +3892,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
           sessionId: info.session.id,
-          name: watchCheckoutName(seatId),
+          name: check === undefined ? watchCheckoutName(seatId) : cliCheckCheckoutName(seatId),
           peers: clonePeers(deps.config, deps.hubRoot),
         });
         return {
@@ -3849,9 +3901,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
+      prepared = checkout.path;
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
-      const on = await startedOn(info);
+      const on = await startedOn(info, check !== undefined);
       const startedAt = now();
       const last = store.runs(seatId, 1)[0];
       const seq = (last?.seq ?? 0) + 1;
@@ -3880,21 +3933,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prs: [],
         summary: null,
       };
+      if (check !== undefined) checkRuns.set(runId, { stderr: null });
       store.upsertRun(run);
-      const first = opts?.first;
-      const brief = watchBrief({
-        call: call(info),
-        repo: info.repo.github,
-        seats: info.session.seats
-          .filter((s) => seatDef(s).mode === "writer")
-          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
-        fullSuite: info.repo.fullSuite ?? [],
-      });
-      const inbox = withInbox(
-        seatId,
-        runId,
-        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief,
-      );
+      const first = opts.first;
+      const brief =
+        check !== undefined
+          ? check(checkout.path)
+          : watchBrief({
+              call: call(info),
+              repo: info.repo.github,
+              seats: info.session.seats
+                .filter((s) => seatDef(s).mode === "writer")
+                .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+              fullSuite: info.repo.fullSuite ?? [],
+            });
+      const inbox =
+        check !== undefined
+          ? { text: brief, messageIds: [] as readonly string[] }
+          : withInbox(
+              seatId,
+              runId,
+              first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief,
+            );
       const firstBrief = inbox.text;
       let l: Live;
       try {
@@ -3908,8 +3968,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           references,
           false,
           undefined,
-          (system) =>
-            recordPromptVersion(run, def.prompt, firstBrief, opts?.firstPieces ?? [], system),
+          check !== undefined
+            ? undefined
+            : (system) =>
+                recordPromptVersion(run, def.prompt, firstBrief, opts.firstPieces ?? [], system),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3921,12 +3983,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           runId,
           cliSessionId,
           vendor: run.vendor,
-          state: "error",
+          state: check === undefined ? "error" : "idle",
           reason:
-            e instanceof SeatGitError || e instanceof DirectionContextError
+            check === undefined && (e instanceof SeatGitError || e instanceof DirectionContextError)
               ? `${CANNOT_START}: ${e.message}`
-              : CANNOT_START,
-          worktree: checkout.path,
+              : check === undefined
+                ? CANNOT_START
+                : null,
+          worktree: check === undefined ? checkout.path : null,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         if (e instanceof SupervisorError && e.status === 409) {
@@ -3941,8 +4005,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         throw new SupervisorError(
           500,
-          e instanceof SeatGitError || e instanceof DirectionContextError
-            ? `${CANNOT_START}: ${e.message}`
+          e instanceof SeatGitError || e instanceof DirectionContextError || check !== undefined
+            ? `${CANNOT_START}: ${errText(e)}`
             : CANNOT_START,
           { cause: e },
         );
@@ -3959,13 +4023,146 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await session.ready;
       if (!session.alive) {
         await session.close();
-        throw new SupervisorError(500, CANNOT_START);
+        throw new SupervisorError(
+          500,
+          check !== undefined && l.lastStderr !== null
+            ? `${CANNOT_START}: ${l.lastStderr}`
+            : CANNOT_START,
+        );
       }
       await deliverFirstLine(l, firstBrief, () => markInboxRead(seatId, inbox));
-      return { runId };
+      return { runId, worktree: checkout.path };
+    } catch (e) {
+      // a check leaves nothing behind: its worktree goes with a start that failed
+      if (check !== undefined && prepared !== null) await dropCheckWorktree(info, prepared);
+      throw e;
     } finally {
       starting.delete(seatId);
     }
+  }
+
+  /** Removes a check's throwaway worktree (force: nothing in it matters). A failure is logged. */
+  async function dropCheckWorktree(info: SeatInfo, path: string): Promise<void> {
+    try {
+      await inClone(info.session.checkout, () =>
+        removeCheckout(info.session.checkout, path, { force: true }),
+      );
+    } catch (e) {
+      log(`${info.seat.id}: could not remove ${path}: ${errText(e)}`);
+    }
+  }
+
+  /** The build seats of `vendor`, in config order, that a check may use now: nothing on them at all. */
+  function freeCheckSeats(vendor: CrewVendor): { configured: number; free: SeatInfo[] } {
+    let configured = 0;
+    const free: SeatInfo[] = [];
+    for (const session of crew?.sessions ?? []) {
+      for (const seat of session.seats) {
+        const info = findSeat(seat.id);
+        if (info === undefined || seatDef(seat).loop !== "build" || seat.retiring) continue;
+        if (config.accounts.find((a) => a.id === seat.accountId)?.vendor !== vendor) continue;
+        configured++;
+        if (starting.has(seat.id) || live.has(seat.id) || isActive(store.seatSession(seat.id)))
+          continue;
+        if (pausedSeat(store, seat.id) || seatUnavailable(seat)) continue;
+        free.push(info);
+      }
+    }
+    return { configured, free };
+  }
+
+  async function checkCli(vendor: CrewVendor): Promise<CliCheckResult> {
+    if (!mayAct() || stopping) return { kind: "no-seat" };
+    // a check that failed to start left its mark behind: the exit it caused is long handled
+    for (const id of [...checkRuns.keys()]) {
+      if (store.run(id)?.endedAt != null) checkRuns.delete(id);
+    }
+    const { configured, free } = freeCheckSeats(vendor);
+    if (configured === 0) return { kind: "no-seat" };
+    for (const info of free) {
+      const seatId = info.seat.id;
+      let nonce = "";
+      let seen: SupervisorEvent[] = [];
+      let wake: () => void = () => {};
+      const heard = (e: SupervisorEvent) => {
+        if (e.seatId !== seatId) return;
+        seen.push(e);
+        wake();
+      };
+      listeners.add(heard);
+      const off = () => listeners.delete(heard);
+      let started: { runId: string; worktree: string };
+      try {
+        started = await startDetached(seatId, {
+          check: (dir) => {
+            const task = writeCliCheckTask(dir);
+            nonce = task.nonce;
+            return task.prompt;
+          },
+        });
+      } catch (e) {
+        off();
+        // another start took the seat first: try the next
+        if (e instanceof SupervisorError && e.status === 409) continue;
+        return { kind: "ran", ok: false, detail: errText(e) };
+      }
+      const { runId, worktree } = started;
+      try {
+        const deadline = Date.now() + (deps.cliCheckTimeoutMs ?? CLI_CHECK_TIMEOUT_MS);
+        let ended: "idle" | "exit" | null = null;
+        while (ended === null && Date.now() < deadline) {
+          const mine = seen.filter((e) => e.runId === runId);
+          if (mine.some((e) => e.kind === "run-ended")) ended = "exit";
+          else if (mine.some((e) => e.kind === "idle")) ended = "idle";
+          else
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+              setTimeout(resolve, 200).unref();
+            });
+        }
+        const run = store.run(runId);
+        if (ended === null) {
+          return { kind: "ran", ok: false, detail: "the seat did not answer in time" };
+        }
+        const read = () => {
+          try {
+            return readFileSync(run?.transcriptPath ?? "", "utf8");
+          } catch {
+            return "";
+          }
+        };
+        // the keeper writes a line before the hub hears of it, but a late flush is waited for
+        let verdict = judgeCliCheck(read(), nonce);
+        for (let i = 0; !verdict.ok && ended === "idle" && i < 10; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          verdict = judgeCliCheck(read(), nonce);
+        }
+        if (!verdict.ok && ended === "exit") {
+          const said = checkRuns.get(runId)?.stderr;
+          return {
+            kind: "ran",
+            ok: false,
+            detail: `the seat's CLI exited${said ? `: ${said}` : ""}`,
+          };
+        }
+        return { kind: "ran", ...verdict };
+      } finally {
+        off();
+        seen = [];
+        try {
+          await endRunByEngine(runId);
+        } finally {
+          checkRuns.delete(runId);
+        }
+        // a run that ended by itself left its worktree and maybe its seat row behind
+        const row = store.seatSession(seatId);
+        if (row?.runId === runId || row?.worktree === worktree) {
+          setSeat(seatId, { state: "idle", reason: null, runId: null, worktree: null });
+        }
+        if (existsSync(worktree)) await dropCheckWorktree(info, worktree);
+      }
+    }
+    return { kind: "busy" };
   }
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
@@ -4868,6 +5065,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     startRun,
 
     startWatch,
+
+    checkCli,
 
     startReview,
 
